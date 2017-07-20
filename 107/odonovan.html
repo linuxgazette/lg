@@ -1,0 +1,451 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Secure Communication with Stunnel LG #107</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="fleizach.html" >&lt;-- prev</A> | <A HREF="pai.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Secure Communication with Stunnel</h1>
+<p id="by"><b>By <A HREF="../authors/odonovan.html">Barry O'Donovan</A></b></p>
+
+<p>
+<h3>1. Introduction</h3>
+
+<a href="http://stunnel.mirt.net/">Stunnel</a> is an SSL encryption
+wrapper that allows what are normally plain text and insecure
+communications to be encrypted during transmission. Stunnel recently
+went through some major changes and the current version (4.x) has a
+completely different architecture than previous versions. In this
+article I will be dealing exclusively with the new version.
+
+<p>
+One of Stunnel's most common uses is encrypting communications between POP or
+IMAP mail servers and e-mail clients. Both of these protocols require users
+to authenticate themselves with a username and a password. In the majority of
+cases, these usernames and passwords are the same ones as they would use for
+logging into the machine locally or remotely via SSH. Without using Stunnel
+to encrypt this data, anyone intercepting the transmission could now log into
+your server and gain elevated privileges much easier than a local exploit
+would require. 
+
+<h3>2. Getting and Installing Stunnel</h3>
+
+Stunnel is generally included as a precompiled package with most common
+distributions and is possibly already installed on your system. If not,
+locate the package on your distribution's installation CDs or download
+it from the distribution's website.
+
+<p>
+The source code is released under the GNU General Public License and, as
+such, is freely available for download and installation. The current
+version (which at time of going to press was 4.05) can be downloaded
+from <a
+href="ftp://stunnel.mirt.net/stunnel/">ftp://stunnel.mirt.net/stunnel/</a>.
+To compile and install Stunnel, download the source code tarball from here and
+then execute the following commands:
+<pre>
+$ tar zxf stunnel-4.XX.tar.gz
+$ cd stunnel-4.XX
+$ ./configure
+$ make
+$ make install   (as root)
+</pre>
+
+
+<h3>3. Generating a Self-Signed Certificate</h3>
+
+In order to use Stunnel we must first have a certificate-key pair. If you
+compiled from sources then such a pair will have been created for you
+automatically (<code>stunnel.pem</code>). Some pre-built binary packages may
+include a certificate-key pair, some may generate one as part of the
+installation procedure and others may leave it up to the user to generate one.
+
+<p>
+The easiest way of generating a certificate-key pair is by using a script
+provided with Stunnel's source code. If you're compiling from the tarball,
+just issue the following additional commands in the source directory:
+
+<pre>
+$ cd tools
+$ make stunnel.pem
+</pre>
+
+I have decided to put the specific details outside the scope of this article,
+but if you are interested in the actual details then have a look at the
+<code>Makefile</code> in the "tools" directory.
+
+<h3>4. Using Stunnel to Encrypt POP3/IMAP</h3>
+
+<blockquote>
+<em>This method can be used to encrypt any similar service where
+SSL-enabled clients exist and are readily available. Most e-mail clients
+are SSL-enabled for POP3, IMAP and SMTP, most internet clients (web
+browsers) are enabled for HTTPS, etc.</em>
+</blockquote>
+
+<p>
+Once Stunnel is installed and you have generated a certificate-key pair,
+you are only a simple configuration file away from using Stunnel to encrypt
+your communications. A simple one that would encrypt POP3 and IMAP
+communications would be:
+
+<pre class="code">
+# Sample stunnel configuration file for POP3/IMAP
+
+# Provide the full path to your certificate-key pair file
+cert = /usr/local/etc/stunnel/stunnel.pem
+
+# lock the process into a chroot jail
+chroot = /usr/local/var/run/stunnel/
+# and create the PID file in this jail
+pid = /stunnel.pid
+
+# change the UID and GID of the process for security reasons
+setuid = nobody
+setgid = nobody
+
+# Configure our secured POP3 and IMAP services
+
+[pop3s]
+accept  = 995
+connect = 110
+
+[imaps]
+accept  = 993
+connect = 143
+</pre>
+
+<p>
+Using this configuration, any encrypted connection coming in on port 995
+(POP3s) will be decrypted and forwarded to the local service (POP3) on port
+110. When the local POP3 service responds, it will be encrypted by Stunnel
+and transmitted back through port 995. Similarly for IMAPs on port 993.
+
+<p>
+Stunnel operates as a daemon service by default, so to start it off with this
+configuration we can simply execute:
+
+<pre>
+stunnel stunnel-secure-email.conf
+</pre>
+
+where <code>stunnel-secure-email.conf</code> is the text file containing the
+above configuration; ensure you change the paths so that they are correct 
+for your system.
+
+<p>
+We can set up Stunnel to start during boot-up by placing the appropriate
+command in the <code>rc.local</code> file that is usually contained in
+<code>/etc/rc.d/</code>. This file is the last file executed during a system
+boot and it is generally used by system administrators for their own
+initialisation stuff. When placing commands in this script, use fully 
+qualified paths such as:
+
+<pre>
+/path/to/stunnel /path/to/the/configuration-file
+</pre>
+
+<p class="editorial">[ For Debian and similar distros without an 'rc.local',
+the procedure varies slightly: modify a copy of "/etc/init.d/skeleton"
+(named, e.g., "/etc/init.d/stunnel") to run the above and create a link to
+it from the appropriate runlevel (usually /etc/rc2.d/). -- Ben ]
+
+<p>
+Stunnel can also be used with (<code>x</code>)<code>inetd</code> if 
+preferred. You can find further details in Stunnel's man page.
+
+<h3>5. Using Stunnel to Encrypt MySQL Transactions</h3>
+
+<blockquote>
+<em>This method can be used to encrypt any service where neither
+the server nor the client are SSL-enabled. Common examples include CVS, MySQL,
+etc.</em>
+</blockquote>
+
+<p>
+In the example with POP3 and IMAP above, we were only concerned with
+providing the server with SSL encryption as the clients generally have this
+built in. However, neither the standard MySQL server nor client have SSL
+capabilities - but we can still use Stunnel to provide this.
+
+<p>
+It involves using a Stunnel daemon on both the server's machine and the
+client's machine. The configuration for the server side is similar to the one
+we used above for POP3/IMAP. The default MySQL port is 3306, and since no
+port is reserved for secure MySQL connections, I will use 3307:
+
+<pre class="code">
+# Sample stunnel configuration file for securing MySQL (server side)
+
+# Provide the full path to your certificate-key pair file
+cert = /usr/local/etc/stunnel/stunnel.pem
+
+# lock the process into a chroot jail
+chroot = /usr/local/var/run/stunnel/
+# and create the PID file in this jail
+pid = /stunnel.pid
+
+# change the UID and GID of the process for security reasons
+setuid = nobody
+setgid = nobody
+
+# Configure our secured MySQL server
+
+[mysqls]
+accept  = 3307
+connect = 3306
+</pre>
+
+I can now start the Stunnel daemon on the server machine with:
+
+<pre>
+$ stunnel stunnel-mysql-server.conf
+</pre>
+
+where <code>stunnel-mysql-server.conf</code> is a text file containing the
+above configuration. We also need to set up an Stunnel daemon on the client
+machine with the following configuration:
+
+<pre class="code">
+# Sample stunnel configuration file for securing MySQL (client side)
+
+# Provide the full path to your certificate-key pair file
+cert = /usr/local/etc/stunnel/stunnel.pem
+
+# lock the process into a chroot jail
+chroot = /usr/local/var/run/stunnel/
+# and create the PID file in this jail
+pid = /stunnel.pid
+
+# change the UID and GID of the process for security reasons
+setuid = nobody
+setgid = nobody
+
+# enable client mode
+client = yes
+
+# Configure our secured MySQL client
+
+[mysqls]
+accept  = 3306
+connect = 1.2.3.4:3307
+</pre>
+
+You'll notice that I have used a new option: <code>client = yes</code> - this
+enables "client mode" which lets Stunnel know that the remote service uses
+SSL. Our local Stunnel daemon will now listen for connections on the local
+MySQL port (3306), encrypt them and forward them to our MySQL server machine (say
+1.2.3.4) where another Stunnel is listening on port 3307. The remote Stunnel
+will decrypt the transmission and forward it to the MySQL server listening on
+port 3306 of the same machine. All responses will be sent back through the 
+same encrypted channel.
+
+<p>
+Save the client configuration as <code>stunnel-mysql-client.conf</code> and
+start off Stunnel with:
+
+<pre>
+$ stunnel stunnel-mysql-client.conf
+</pre>
+
+and then you can connect to the remote MySQL server through the encrypted
+channel by connecting to the local Stunnel daemon (which is listening on 
+MySQL's 3306 port):
+
+<pre>
+$ mysql -h 127.0.0.1 -u username -p
+</pre>
+
+
+<h3>6. Trouble Shooting</h3>
+
+Stunnel can be a bit tricky about permissions - especially when using a
+chroot jail and reducing your user and group ID to <code>nobody</code> (some
+systems might need <code>nogroup</code> for <code>setgid</code>). Ensure your
+chrooted directory is writable by the <code>nobody</code> user and/or the
+<code>nobody</code> (or <code>nogroup</code>) group.
+
+<p>
+Stunnel runs in the background by default and doesn't show any error
+messages. This means you won't know if it worked or not from the command
+line! You can check that the process is running by searching the output of
+the <code>ps</code> command:
+
+<pre>
+$ ps -ef | grep stunnel
+nobody   21769     1  0 09:12 ?        00:00:00 /usr/local/sbin/stunnel ./stunnel-mysql-server.conf
+</pre>
+
+<p>
+Stunnel can also be instructed to run in the foreground by adding the 
+following command to the configuration file (above the service configuration):
+
+<pre class="code">
+foreground = yes
+</pre>
+
+<p>
+As with all services, the best method of diagnosing problems is through
+the service's log messages. You can enable Stunnel's logging facilities
+by adding the following commands to the configuration file (above the 
+service configuration):
+
+<pre class="code">
+debug = 7
+output = /tmp/stunnel.log
+</pre>
+
+<p>
+If you are running in the foreground for testing/debugging, then you 
+might prefer to send the log messages to standard out:
+
+<pre class="code">
+debug = 7
+output = /dev/stdout
+</pre>
+
+<h3>7. Further Reading/References</h3>
+
+There are many other commands that can be used in the configuration
+files and these are all listed in Stunnel's man page 
+(<code>STUNNEL(8)</code>). 
+
+<p>
+The following websites may also prove useful:
+<ul>
+<li> The official Stunnel homepage: <a href="http://stunnel.mirt.net/">http://stunnel.mirt.net/</a>
+<li> Stunnel.org: <a href="http://www.stunnel.org/">http://www.stunnel.org/</a>
+<li> The OpenSSL project: <a href="http://www.openssl.org/">http://www.openssl.org/</a>
+<li> SSL certificates HOWTO: <a href="http://www.tldp.org/HOWTO/SSL-Certificates-HOWTO/">http://www.tldp.org/HOWTO/SSL-Certificates-HOWTO/</a>
+</ul>
+
+<p>
+As always, I appreciate any feedback on this or previous articles and suggestions/requests for future ones. You'll find my e-mail address by clicking on my name at the beginning of the article.
+
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<p>
+<! -- REPLACE THE FOLLOWING WITH AUTHOR'S ~200x200 PIC. -->
+<img align="left" alt="[BIO]" src="../gx/authors/odonovan.jpg" class="bio">
+<em>
+
+<! -- BIO GOES HERE -->
+
+Barry O'Donovan graduated from the National University of Ireland, Galway
+with a B.Sc. (Hons) in computer science and mathematics. He is currently
+completing a Ph.D. in computer science with the <a
+href="http://www.ihl.ucd.ie/">Information Hiding Laboratory</a>, University
+College Dublin, Ireland in the area of audio watermarking.
+
+<p> Barry has been using Linux since 1997 and his current flavor of choice
+is Fedora Core. He is a member of the <a href="http://www.linux.ie/">Irish
+Linux Users Group</a>. Whenever he's not doing his Ph.D. he can usually be
+found supporting his finances by doing some work for <a 
+href="http://www.openhosting.ie/" title="An Irish based web hosting and web 
+design company">Open Hosting</a>, in the pub with friends or running in the local 
+park.
+</em>
+<br clear="all">
+<!-- *** END bio *** -->
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2004, Barry O'Donovan. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 107 of Linux Gazette, October 2004
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="fleizach.html" >&lt;-- prev</A> | <A HREF="pai.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">October 2004 (#107)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/2003/sit3-shine.7-2.gif" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

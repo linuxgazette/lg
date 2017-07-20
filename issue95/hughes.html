@@ -1,0 +1,240 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>Quick and Dirty Data Extraction in AWK LG #95</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<!-- *** BEGIN navbar *** -->
+<A HREF="ecol.html">&lt;&lt;&nbsp;Prev</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="index.html">TOC</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../index.html">Front Page</A>&nbsp;&nbsp;|&nbsp;&nbsp;Talkback&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../faq/index.html">FAQ</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="millson.html">Next&nbsp;&gt;&gt;</A>
+<!-- *** END navbar *** -->
+
+<!--endcut ============================================================-->
+
+<TABLE BORDER><TR><TD WIDTH="200">
+<A HREF="http://www.linuxgazette.net/">
+<IMG ALT="LINUX GAZETTE" SRC="../gx/2002/lglogo_200x41.png" 
+	WIDTH="200" HEIGHT="41" border="0"></A> 
+<BR CLEAR="all">
+<SMALL>...<I>making Linux just a little more fun!</I></SMALL>
+</TD><TD WIDTH="380">
+
+
+<CENTER>
+<BIG><BIG><STRONG><FONT COLOR="maroon">Quick and Dirty Data Extraction in AWK</FONT></STRONG></BIG></BIG>
+<BR>
+<STRONG>By <A HREF="../authors/hughes.html">Phil Hughes</A></STRONG>
+</CENTER>
+
+</TD></TR>
+</TABLE>
+<P>
+
+<!-- END header -->
+
+
+
+<html>
+<head>
+<title>CC: Quick and Dirty Data Extraction in AWK</title>
+</head>
+<body>
+<p>
+Many years ago, probably close to 20, there was a regular point made on
+the comp Usenet newsgroups about using the minimum tool to get the job
+done.
+That is, someone would ask for a quick and dirty way to do something
+and the followups could include a C solution followed by an AWK
+solution, followed by a sed solution and so on.
+<p>
+Today, I still try to use this philosophy when addressing a problem.
+In this particular case, I picked AWK but if any of you old-timers are
+reading this I expect you will come up with a sed-based solution.
+
+<h2>The Problem: Extracting Data from E-mail Messages</h2>
+<p>
+I signed up for a daily summary of currency exchange rates. It's free
+and you can subscribe too--just go <a
+href="http://www.xe.com/cus" target="_blank">here</a>.
+Most days I take a quick look at how the $ is doing against the Euro
+and then save the e-mail. Some days I just save it.
+I have always thought that, someday, I would write a program to show me
+the trend but it has always been low priority.
+<p>
+Yesterday, as I was looking at a few of the save mail messages, I
+realized that while writing a fancy graphing program was low-priority,
+writing a quick and dirty hack would take less time than the random
+sampling I was doing.
+What I wanted was dates and numbers along with a minimalist graphical
+display of the trend.
+
+<p>First step was to look at the data.
+Here is an extract of part of a message.
+<pre>
+
+>From list@en.ucc.xe.net  Wed Sep 10 12:22:53 2003
+...
+
+XE.com's Currency Update Service writes:
+
+Here is today's Currency Update, a service of XE.com. Please read the
+copyright, terms of use agreement, and information sections at the
+end of this message.  CUS5D0B3D5C16D9
+____________________________________________________________________________
+
+If you find our free currency e-mail updates useful, please forward this
+message to a friend! Subscribe for free at: http://www.xe.com/cus/
+____________________________________________________________________________
+&lt;PRE>
+
+Rates as of 2003.09.09 20:46:35 UTC (GMT). Base currency is EUR.
+
+Currency Unit                          EUR per Unit         Units per EUR
+================================   ===================   ===================
+USD United States Dollars                 0.890585              1.12286     
+EUR Euro                                  1.00000               1.00000     
+GBP United Kingdom Pounds                 1.41659               0.705920    
+CAD Canada Dollars                        0.651411              1.53513     
+...
+
+&lt;/PRE>
+
+For help reading this mailout, refer to: http://www.xe.com/cus/sample.htm
+
+...
+</pre>
+
+The ... lines just indicate that I tossed a lot of uninteresting lines.
+<p>
+There are three things I use to produce the report:
+<ul>
+  <li> The "Rates as of" line to get the date
+  <li> The "USD" line to get the actual conversion rate
+  <li> The &lt;/PRE> line to tell me to print the info and clear my variables.
+       Note that I don't really have to clear them if the data is good
+       but it just seemed like a good way to detect bad data. Quick
+       hack yes, but not disgustingly quick hack.
+</ul>
+
+<h2>The Solution</h2>
+<p>
+The numeric part of the solution is really easy. Just grab the date
+info and the rate info. When I get the &lt;/PRE> line, print it out.
+<p>
+The graphical part is just done by printing a number of plus signs that
+corresponds to the rate. 
+To get decent resolution I would either need a very wide printout or
+some sort of offset. I went for the offset assuming the Euro will not
+drop below $.90 which is pretty safe considering the direction it is
+going.
+<p>
+Finally, I wanted a heading. Using AWK's BEGIN block, I put in a couple
+of print statements. Not liking to count characters, I defined the
+variable <code>over</code> to be the number of spaces that needed to be
+placed before the title info to align everything.
+This just meant that I had to run the program, see how far I was off
+and adjust the variable.
+<p>
+Here is the code.
+
+<pre>
+
+BEGIN		{
+		over = "                 "
+		print over, " Cost of Euros in $ by date"
+		print over, ".9       1.0       1.1       1.2       1.3"
+		print over, "|         |         |         |         |"
+		}
+/Rates as of/	{ date = $4 }
+/^USD/		{ rate = $6 }
+/^&lt;\/PRE>/	{
+		printf "%s %6.3f ", date, rate
+		rc = (rate - .895) * 100
+		for (i=0; i < rc; i++) printf "+"
+		printf "\n"
+		date = "xxx"
+		rate = 0
+		}
+</pre>
+
+<p>
+Just running the program with the mail file as input prints all the
+result lines but the order is that of the data in the mail file.
+The sort program to the rescue. The first field in the output is the
+date and some careful choice of the first character of the title lines
+means everything sorts just right with no options.
+Thus, to run, use:
+<pre>
+    awk -f cc.as messages | sort 
+</pre>
+and you get your fancy report. Pipe the result thru <code>more</code>
+if you have a lot of lines to look at.
+<p>
+Here is a sample of the output:
+<pre>
+
+                   Cost of Euros in $ by date
+                  .9       1.0       1.1       1.2       1.3
+                  |         |         |         |         |
+2003.01.02  1.036 +++++++++++++++
+...
+2003.08.28  1.087 ++++++++++++++++++++
+2003.08.29  1.098 +++++++++++++++++++++
+2003.08.31  1.099 +++++++++++++++++++++
+2003.09.01  1.097 +++++++++++++++++++++
+2003.09.02  1.081 +++++++++++++++++++
+2003.09.04  1.094 ++++++++++++++++++++
+2003.09.05  1.110 ++++++++++++++++++++++
+2003.09.07  1.110 ++++++++++++++++++++++
+2003.09.08  1.107 ++++++++++++++++++++++
+2003.09.09  1.123 +++++++++++++++++++++++
+2003.09.10  1.121 +++++++++++++++++++++++
+2003.09.11  1.120 +++++++++++++++++++++++
+2003.09.12  1.129 ++++++++++++++++++++++++
+2003.09.14  1.127 ++++++++++++++++++++++++
+2003.09.15  1.128 ++++++++++++++++++++++++
+2003.09.16  1.117 +++++++++++++++++++++++
+2003.09.17  1.129 ++++++++++++++++++++++++
+2003.09.18  1.124 +++++++++++++++++++++++
+2003.09.19  1.138 +++++++++++++++++++++++++
+
+</pre>
+
+<p>Ok sed experts, have at it.
+-- 
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+Phil Hughes is the publisher of <I>Linux Journal</I>, and thereby <I>Linux 
+Gazette</I>. He dreams of permanently tele-commuting from his home on the 
+Pacific coast of the Olympic Peninsula.
+As an employer, he is &quot;Vicious, Evil,
+Mean, & Nasty, but kind of mellow&quot; as a boss should be.
+
+
+<!-- *** END author bio *** -->
+
+
+<!-- *** BEGIN copyright *** -->
+<hr>
+<CENTER><SMALL><STRONG>
+Copyright &copy; 2003, Phil Hughes.
+Copying license <A HREF="../copying.html">http://www.linuxgazette.net/copying.html</A><BR> 
+Published in Issue 95 of <i>Linux Gazette</i>, October 2003
+</STRONG></SMALL></CENTER>
+<!-- *** END copyright *** -->
+<HR>
+
+<!--startcut ==========================================================-->
+<CENTER>
+<!-- *** BEGIN navbar *** -->
+<A HREF="ecol.html">&lt;&lt;&nbsp;Prev</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="index.html">TOC</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../index.html">Front Page</A>&nbsp;&nbsp;|&nbsp;&nbsp;Talkback&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../faq/index.html">FAQ</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="millson.html">Next&nbsp;&gt;&gt;</A>
+<!-- *** END navbar *** -->
+</CENTER>
+</BODY></HTML>
+<!--endcut ============================================================-->

@@ -1,0 +1,346 @@
+
+; Digitize LM35's output and send to PC using
+; bit banging serial I/O, no MAX232
+; RB2 is serial Tx 
+
+; XT oscillator at 4MHz
+
+; RA3 is Vin+ and is connected to RC filtered
+; PWM output (PWM output is RB3). Output of LM35
+; is connected to RA0(Vin-). An LED is connected to RB5.
+
+
+	list p=16f628
+
+	include "p16f628.inc"
+	include "xt.inc"
+
+delay_n_msec_tmp equ 0x20
+inputs_crossed_over_n equ 0x21
+inputs_crossed_over_i equ 0x22
+change_period_tmp equ 0x23
+change_period_i equ 0x24
+do_adc_tmp equ 0x25
+
+rs232_xmit_port equ PORTB
+rs232_xmit_pin equ 0x2
+rs232_delay_counter equ 0x26
+data_putchar equ 0x27
+counter_putchar equ 0x28
+main_tmp equ 0x29
+
+
+	goto main
+
+
+;----------------------------------
+; A 1milli second delay routine using
+; TMR0. We set prescaler to 1:4, so that
+; each increment corresponds to 4 instruction
+; cycles, ie, 4microseconds. So, 250 such
+; increments should give us 1ms. The inital
+; value of TMR0 is set to 5, so that it
+; overflows in 250 increments. We write a loop
+; which will keep on waiting for this overflow
+; to happen. We take the precautions specified
+; in the manual when changing prescaler assignment
+; from WDT to TMR0 (the manual says we should do
+; this even when the WDT is disabled)
+
+
+delay_1ms:
+	movlw 0x8 ; Taking into consideration the delay
+	          ; caused by the instructions in this
+			  ; routine, about 12micro seconds.
+	movwf TMR0
+	bcf INTCON, T0IF
+	
+	clrwdt
+	bsf STATUS, RP0
+	movlw b'11010001'
+	movwf OPTION_REG
+	bcf STATUS, RP0
+delay_1ms_L1:
+	btfss INTCON, T0IF
+	goto delay_1ms_L1
+	
+	return
+	
+;-------------------------------------
+;Entry: W contains `n'
+
+delay_n_msec:
+	movwf delay_n_msec_tmp
+delay_n_msec_L1:
+	call delay_1ms
+	decfsz delay_n_msec_tmp, F
+	goto delay_n_msec_L1
+	return
+	
+	
+
+;-----------------------------------
+;Enable Timer2, which is needed for PWM
+
+configure_timer2:
+	bsf T2CON, TMR2ON
+	return
+
+	
+;------------------------------------
+; We configure the comparators in mode
+; b'100' - ie, two independent comparators.
+; We will use only one of these comparators (COMP1).
+; The Vin+ of COMP1 (pin RA3) is connected to
+; the RC filtered PWM output, which is the
+; reference signal. The signal which we wish
+; to compare is fed to RA0.
+
+configure_comparators:
+	movlw b'00000100' ; mode 4, two independent comparators
+	movwf CMCON
+	
+	return
+
+
+;------------------------------------
+
+; Loop till Vin- goes above Vin+. At this
+; point, C1OUT will become 0.
+
+comparator_loop:
+	btfsc CMCON, C1OUT
+	goto comparator_loop
+	return
+
+;-------------------------------------
+configure_ports:
+	bsf STATUS, RP0
+	
+	
+	; Note that for PWM operation,
+	; RB3 MUST be output. RA0 and
+	; RA3 are comparator inputs.
+	
+	movlw 0x0
+	movwf TRISB 
+	movlw 0x9
+	movwf TRISA
+	
+	bcf STATUS, RP0
+	clrf PORTA
+	return
+	
+;-------------------------------------
+
+configure_pwm:
+	bsf STATUS, RP0
+	
+	; set period register of timer2 (ie, set pwm period)
+	; Tpwm = (PR2+1)*4*Tosc*(Timer2 prescale value)
+	; Timer 2 prescale is set to 1
+	; (Note: Tosc is the period of the external oscillator. We
+	; are using a 4MHz oscillator here).
+	
+	
+	movlw 0xff
+	movwf PR2 
+	
+	;Now set PWM duty cycle
+	;Duty cycle = CCPR1L:CCP1CON<5:4>*Tosc*(Timer2 prescale)
+	;Note that LSB 2 bits are taken from CCP1CON<5:4>
+	;Each increment of CCPR1L:CCP1CON<5:4> represents
+	;0.25 microseconds. 16 microseconds on and 256 microseconds
+	;off should give us a DC Low pass filtered voltage of around
+	;5*(16/256.0) = 0.3125 volts.
+	
+	
+	bcf STATUS, RP0
+
+	movlw 0x10
+	movwf CCPR1L 
+	movlw b'00001100'
+	movwf CCP1CON
+
+	return
+
+;------------------------------------------------------
+; Check whether Vin+ is below Vin- 100 times. If 95 
+; times out of 100, we see that Vin+ is below, function
+; returns 1 in W, otherwise returns 0
+
+inputs_crossed_over:
+	clrf inputs_crossed_over_n
+	movlw D'100'
+	movwf inputs_crossed_over_i
+
+inputs_crossed_over_L1:
+	btfss CMCON, C1OUT
+	incf inputs_crossed_over_n, F
+	decfsz inputs_crossed_over_i, F
+	goto inputs_crossed_over_L1
+
+	movf inputs_crossed_over_n, W
+	sublw D'84'
+	btfss STATUS, C ; If C = 0, result is negative
+	                ; which means W > 94. So return 1 (in W itself)
+	retlw 0x1
+	retlw 0x0 ; W <= 94, so return 0 (in W itself)
+	
+	
+;----------------------------------------------------------------------	
+; Change PWM period. We use only eight bits here
+; W contain new period. Split it up and store it in
+; 2 bits of CCP1CON<5:4> and 6 bits of CCPR1L
+
+change_period:
+	
+	movwf change_period_tmp
+	andlw b'00000011' ; Mask off MSB 6 bits
+	movwf change_period_i
+	bcf STATUS, C ; Dont forget this!
+	rlf change_period_i, F
+	rlf change_period_i, F
+	rlf change_period_i, F
+	rlf change_period_i, F ; Now, D0 and D1 are in D4'th and D5'th places
+	movlw b'00001100'
+	iorwf change_period_i, W
+	movwf CCP1CON ; CCP1CON properly configured
+
+	; Now put the other 6 bits of change_period_tmp in CCPR1L
+
+	bcf STATUS, C
+	rrf change_period_tmp, F
+	rrf change_period_tmp, F
+	movf change_period_tmp, W
+	movwf CCPR1L
+
+	return
+
+	
+	
+;------------------------------------------------------
+
+; Total PWM duration is 256 micro seconds. If we have
+; 23micro on time, we get 5*(23.0/256) = 0.449V. The LM35
+; sensor outputs this voltage if the current temperature
+; is about 45 degree celsius, which is above the maximum we
+; are going to get, here in Trichur. If we have 10micro
+; on time, we get 5*(10.0/256) = 0.195V, which means about
+; 20 degree celsius, the least we are going to have! 
+
+; We start outputting PWM pulses with on time equal to 23micro
+; second - we keep coming down stopping at the point 
+; were we discover that the LM35's output has gone above 
+; our reference PWM RC filtered voltage. We stop at 10 micro
+; second. 
+
+; For getting 23micro, we have to write a CCPR1L:CCP1CON value
+; of 23*4 = 92 (decimal). A 0.5 micro difference in duty
+; cycle generates about 10mv change in output. For getting
+; this 0.5 micro change, we have to change the count value
+; by 2. So we start with a count value of 92, keep on decrementing
+; by 2 until we have reached 40 (10*4). 
+
+
+	
+
+do_adc:
+	movlw D'92'
+	movwf do_adc_tmp
+	
+do_adc_L1:
+	movf do_adc_tmp, W
+	call change_period
+
+	movlw D'240'
+	call delay_n_msec ; Wait till filtered value settles
+
+	call inputs_crossed_over
+	addlw 0x0 ; Check whether W is 0. If W is 0, it means inputs
+	          ; have not crossed over
+	btfss STATUS, Z ; Skip if W is Zero
+	goto do_adc_L2
+	decf do_adc_tmp, F
+	decf do_adc_tmp, F
+	movf do_adc_tmp, W
+	sublw D'38'
+	btfsc STATUS, C ; C is 0 if negative, ie W > 38
+	retlw 0xff ; We return 0xff when we are unable to determine
+	           ; the proper digital value of the signal
+			   
+	goto do_adc_L1
+
+do_adc_L2:
+	movf do_adc_tmp, W ; Put duty cycle value in W
+	return ; And go back!
+
+	
+;--------------------------------------
+;     A delay routine. We are transmitting
+;     at 9600bps. So we should get about
+;     1/9600.0 seconds here. Our clock is
+;     4MHz.
+
+rs232_delay
+	movlw D'30'
+	movwf rs232_delay_counter
+doit30
+	decfsz rs232_delay_counter, F
+	goto doit30
+	return
+
+;--------------------------------------
+;     Implements a bit-banging `putchar'.
+;     Expects `W' to contain byte to be
+;     transmitted at entry.
+
+putchar
+	movwf data_putchar
+	movlw D'9'
+	movwf counter_putchar
+	bsf rs232_xmit_port, rs232_xmit_pin ; start bit
+	nop
+	nop
+terminate
+	call rs232_delay
+	decfsz counter_putchar, F
+	goto check_bit ; Not yet ready to go back :-)
+	bcf rs232_xmit_port, rs232_xmit_pin ; Stop bit
+	call rs232_delay
+	return ; GO BACK!
+check_bit
+	rrf data_putchar, F
+	btfss STATUS, C ; Is it a `ONE' ?
+	goto its_a_zero ; No, It is a `ZERO'.
+	bcf rs232_xmit_port, rs232_xmit_pin ; Send a `ONE'.
+	goto terminate ; Shall We Stop?
+its_a_zero
+	bsf rs232_xmit_port, rs232_xmit_pin ; Send a `ZERO'.
+	goto terminate ; Shall We Stop?
+
+;-------------------------------------------------------------
+; The main routine
+
+main:
+	call configure_ports
+	call configure_timer2
+	call configure_comparators
+	call configure_pwm
+
+	bcf PORTB, 2 ; Line idle
+	movlw D'20'
+	movwf main_tmp
+	
+main_L1:
+	call rs232_delay
+	decfsz main_tmp, F
+	goto main_L1
+
+main_L2:
+	call do_adc
+	call putchar
+	goto main_L2
+
+	end
+

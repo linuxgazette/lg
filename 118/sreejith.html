@@ -1,0 +1,800 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Digital Speed Controller using RTAI/Linux LG #118</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="senryu.html" >&lt;-- prev</A> | <A HREF="weatherwax.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Digital Speed Controller using RTAI/Linux</h1>
+<p id="by"><b>By <A HREF="../authors/sreejith.html">Sreejith N</A></b></p>
+
+<p>
+
+<p>
+Speed control of an Industrial motor may sound complicated, but it's not as
+complex an affair as it sounds. What's interesting is that a PC powered
+with a Linux based RTOS can be used to control anything from a small motor
+to a complex industrial drive with the utmost reliability.  This article
+presents the implementation of a Digital PI (Proportional+Integral)
+Controller on a PC running RTAI (Real Time Application Interface).
+</p>
+ 
+<h3>Control Systems</h3>
+<p>
+Control Systems can be broadly divided into two categories: open loop
+systems and closed loop systems. Systems which do not automatically correct
+the variations in their output are open loop systems. This means that the
+output is not fed back to the input for correction. For instance, consider a
+traffic control system where the traffic signals are operated on a time
+basis. The system will not measure the density of the traffic before giving
+the signals, thereby making it an open loop system.</p>
+
+<p>Consider now a temperature control system, say an air conditioner. Output 
+of this system is the desired room temperature. Obviously this 
+depends on the time for which the supply to heater/cooler remains ON.
+Depending on the actual temperature sensed by sensors and the desired 
+temperature, corrective measures are taken by the controller. Thus 
+the system automatically corrects any changes in output by monitoring 
+the input, hence making it a closed loop system.</p>
+
+<p>An open loop system can be modified into a closed loop system by providing
+feedback. The provision for feedback automatically corrects the changes 
+in the output due to disturbances. Hence, the closed loop system is also called
+an automatic control system. The general block diagram of an automatic 
+control system is shown below.</p>
+
+<p><IMG alt=[csblockdiagram]
+src="misc/sreejith/system.png"
+> </p>
+
+<h3>Automatic controller</h3>
+<p>A controller is a device introduced into the system to sense the error 
+signal and to produce the required control signal. An automatic controller compares 
+the actual value of the plant output with the desired value, determines 
+the deviation, and produces a control signal which will reduce the 
+deviation to zero or to a smaller value. According to the manner in which 
+the controller produces the control signal (called control action) 
+controllers are classified as proportional(P), integral(I), derivative(D) 
+and their combinations( PI, PD and PID).</p>
+
+<p>
+The proportional controller is a device that produces a control signal
+<em>u(t)</em>, which is proportional to the input error signal, <em>e(t)</em> (error signal,
+the difference between actual value and desired value), i.e.:
+<pre>
+u(t) = Kp * e(t)
+</pre>
+where 
+<em>Kp</em> = proportional gain or constant; a proportional controller amplifies 
+the error signal by an amount <em>Kp</em>. 
+The drawback of the P-controller is that it leads to a constant steady 
+state error. Integral control is used to reduce the steady state error 
+to zero. This device produces a control signal <em>u(t)</em> which is proportional 
+to the integral of the input error signal:
+
+<pre>
+u(t) = Ki * integral { e(t)*dt }
+</pre>
+
+where <em>Ki</em> = integral gain or constant.
+Integral control means considering the sum of all errors
+over an interval, so this always gives us a measure of variation  
+over a constant interval. The other choice is derivative control where the 
+control signal <em>(u(t))</em> is proportional to the derivative of the input error 
+signal <em>(e(t))</em>. We consider the derivative of <em>e(t)</em> at a given instant as 
+the difference between present and previous errors. A large positive 
+derivative value indicates a rapid change in output variable (here, the 
+speed of the motor). In other words, the rate of change of speed is greater. 
+The drawback of the integral controller is that it may lead to oscillatory 
+response. For these reasons combination of P, I and D are used. Most 
+(75-90%) of controllers in current use are  PID. In this article,
+we shall look at the design of a PI controller.
+</p>
+
+<p>
+The PI controller looks at:
+<ol>
+<li> The current value of the error,
+<li> The integral of the error over a recent time interval.
+</ol>
+
+<p>This not only determines how much correction to apply, but for how long. 
+Each of the above two quantities are multiplied by a `tuning constant'( <em>Kp</em> and 
+<em>Ki</em> respectively) and added together. Depending on the application, one may want a 
+faster convergence speed or a lower overshoot. By adjusting the weighting 
+constants, <em>Kp</em> and <em>Ki</em>, the PI can be set to give the most desired performance. The 
+implementation of software PI controller is discussed later in this article.
+</p>
+
+<p><IMG alt=[DigitalPIController]
+src="misc/sreejith/digitalpi.png"
+> </p>
+
+<p>Today, digital controllers are being used in many large and small-scale 
+control systems, replacing analog controllers. It is now common 
+practice to implement PI controllers in its digital avatar, which means 
+the controller algorithm is implemented in software rather than in 
+hardware. The trend toward digital control is mainly due to the 
+availability of low-cost digital computers. Moreover, as the complexity 
+of a control system increases, demands for flexibility, adaptability 
+and optimality increases. Digital computers used as compensators
+are a better option in such cases. A general purpose computer, if used,
+lends itself to time-shared use of other control functions in the 
+plant.</p>
+
+<h3>Why real time</h3>
+<p>Using general purpose computers puts us at a disadvantage, if the operating 
+system (OS) employs various tasks to be 
+executed on a time shared basis. An example of such an OS is the standard
+version of GNU/Linux,
+where the time constraints required by the control system are not met.
+</p>
+
+<p>The systems that ensure timing requirements are termed Real-Time (RT)
+systems. An appropriate OS should be used to satisfy time constraints.</p>
+
+<h3>Real-Time Systems</h3>
+<p>A real time system can be defined as a "system capable of guaranteeing 
+timing requirements of the processes under its control". It must be fast 
+and predictable. Fast means that it has a low latency, ie it responds 
+to external, asynchronous events in a short time. The lower the latency, 
+the better the system will respond to events which require immediate 
+attention. Predictable means that it is able to determine a task's 
+completion time with certainty. It is desirable that time-critical 
+and non time-critical activities coexist in a real time system. Both 
+are called tasks and a task with a hard timing requirement is called 
+a real time task. 
+ 
+<h3>What is RTAI?</h3>
+<p>RTAI stands for Real Time Application Interface. Strictly speaking, it is 
+not a real time operating system, such as VXworks or QNX. It is based on 
+the Linux kernel, providing it with the ability to make itself fully 
+pre-emptable. RTAI offers the  services of the Linux kernel core, 
+adding the features of an industrial real time operating system. It lets you 
+write applications with strict timing constraints for your favourite 
+operating system. Like Linux itself, this software is a community effort. 
+You can follow <a href="http://pramode.net">this link</a>
+to get more articles on experiments with RTAI.
+	
+<h3>PC parallel port as analog I/O interface</h3>
+<p>The PI Controller described in this article uses the PC parallel port 
+as an analog I/O interface. Just two bits are used as analog interfaces 
+through a technique called Pulse Width Modulation (PWM). This technique 
+allows an analog interface to be built without the use of A/D or D/A 
+converters, and analog voltages and currents can be used to control 
+processes directly. As intuitive and simple as analog control may seem, 
+it is not always economically attractive or practical. Analog circuits 
+tend to drift over time and can, therefore, be very difficult to tune. 
+By controlling analog circuits digitally, system costs and power 
+consumption can be drastically reduced. Pulse Width Modulation (PWM) 
+is a powerful technique for controlling analog circuits with digital 
+signals. PWM is a way of digitally encoding analog signal levels. 
+The duty cycle of a square wave is modulated to encode a specific 
+analog signal level, as shown in this figure:</p>  
+                                            			
+<p><IMG alt=[PWMwave]
+src="misc/sreejith/pwm1.png"
+> </p>
+
+<p>The PWM signal is still digital because, at any instant, it is either 
+on or off. The relation between the on time and the off time varies 
+according to the analog level to be represented. Given a sufficient 
+bandwidth, any analog value may be encoded with PWM.</p>                                        		
+<p><img alt=[PWMGenerationWaveForm]
+src="misc/sreejith/pwm.png"
+> </p>
+
+<p>In this work, PWM technique is used to generate the gating signals for 
+the chopper circuit. The speed of a DC motor can be controlled by varying 
+its input voltage. A DC chopper circuit can do this job.</p>
+
+<h3>DC Chopper</h3>
+<img src="misc/sreejith/chopper_ckt.png">
+<p>A chopper is a static device that converts a fixed DC input voltage 
+to a variable DC output voltage. A chopper may be thought of as 
+a DC equivalent of an AC transformer since they behave in an identical 
+manner. Chopper systems offer smooth control, high efficiency, and fast 
+response.</p>
+
+<p>Power semi-conductor devices used for a chopper circuit can be 
+power BJT and/or power MOSFET. Like a transformer, a chopper can be used to 
+step up or step down the fixed DC input voltage. Here, for motor speed 
+control, a step-down chopper circuit with a power MOSFET is used. It is 
+basically a high speed semiconductor switch. It connects source to load 
+and disconnects the load from source at a high speed according to the 
+gating signal. The average load voltage is given by</p> 
+
+<p><img alt=[Chopperequation]
+src="misc/sreejith/choppereqn.png"
+> </p>
+
+<p>where <em>Vs</em> is the source voltage, <em>Ton</em> is the on-time,
+<em>Toff</em> is the off-time, T (the sum of <em>Ton</em> and
+<em>Toff</em>) is the chopping period, and <em>Ton/T</em> is the duty
+cycle.</p>
+
+<h3>Preparing The Parallel Port</h3>
+
+<p>Although the parallel interface is simple, it can trigger interrupts. 
+This capability is used by the printer to notify the lp driver that 
+it is ready to accept the next character in the buffer. 
+A simple <strong>outb()</strong> call to a control register 
+makes the port ready to generate interrupts; the parallel interface 
+generates an interrupt whenever the electrical signal at pin 10 (the 
+so-called ACK bit) changes from low to high. The simplest way to force 
+the interface to generate interrupts is to connect pins 9 and 
+10 of the parallel connector. A short length of wire inserted 
+into the appropriate holes in the parallel port connector 
+on the back of the system will create this connection. Pin 9 is 
+the most significant bit of the parallel data byte. 
+
+<h3>Real time speed controller</h3>
+
+<p>The figure below represents the 
+closed loop speed control of a 6V DC motor controlled by a chopper 
+circuit. The duty cycle of the chopper is controlled using gating 
+signals (PWM) from the PC parallel port. The PC is running the speed 
+sensing (shaft encoder) module to read the current speed measured by 
+the encoder. This device works by generating a square wave pulse produced 
+when a perforated disc (keyed onto the shaft of the motor) cuts an IR beam. 
+This square wave pulse train is fed back to the 10th pin of the parallel 
+port. The controller program is running as a hard real time user program.
+</p>
+
+<p><IMG alt=[RealTimeSpeedController]
+src="misc/sreejith/real_time_speed_controller.png"
+></p>
+
+<p>The well-implemented PI controllers are usually hard real time 
+systems. I have implemented a Digital PI Controller in a standard 
+PC running Linux/RTAI (Linux-2.4.24 kernel 
+patched with the RTAI-3.1). The I/O was done by PWM through two pins 
+of the parallel port: one for input and the other for output, dispensing 
+with the need for an A/D converter which is the most expensive component 
+in a data-acquisition system. The PWM coding/decoding is handled
+by software routines implemented in Linux threads with LXRT RTAI hard 
+real time constraints. The main routine, which is responsible for the 
+actual PI calculation has also been implemented in a thread with hard 
+real time constraints. The communication between threads was made through 
+global variables. The controller program produces the necessary actuating 
+signal (in terms of a PWM pulse), which in turn depends on an error 
+signal produced by the difference of the set speed (a constant in the 
+program) and the present speed. The chopper varies the average DC output 
+voltage, used to control the speed of the DC motor. The motor used here 
+is a small 6/12 V motor commonly found in most tape recorders. The 
+following sections present the speed sensing (shaft encoder) module 
+and the controller program followed by a brief description of the same.
+</p>
+
+<h3>Speed sensing (shaft encoder) module</h3>
+<p>Once interrupts are enabled, the parallel port generates an interrupt 
+whenever there is low to high transition at pin 10 (ACK bit). This module 
+includes the operations that should be performed when the interrupt occurs. 
+The <em>'init_module'</em> function registers a handler for interrupt 
+number 7 (IRQ number). In the first execution of function 
+<em>'lpt_irq_handler (void)'</em> the count is zero; the control 
+enters the if statementi, and the 64-bit time stamp counter (tsc) value is obtained 
+by rdtsc macro function defined in 'msr.h'. By getting two tsc values at 
+consecutive interrupts, the number of CPU clock cycles in between these 
+interrupts can be calculated and hence the frequency. Frequency thus 
+measured is communicated with a userspace program via a FIFO. Thus the 
+userspace program can calculate the real-time speed. Here is the <a href="misc/sreejith/1.c.txt">code</a>
+which implements this idea:</p> 
+
+<p>
+<pre>
+#define MODULE
+#include &lt;linux/kernel.h&gt;
+#include &lt;linux/module.h&gt;
+#include &lt;rtai.h&gt;
+#include &lt;rtai_sched.h&gt;
+#include &lt;rtai_fifos.h&gt;
+#include &lt;asm/io.h&gt;
+#define rdtsc(low,high) \	/*define rdtsc(low,high)*/
+__asm__ __volatile__("rdtsc" : "=a" (low), "=d" (high))
+#define TICK_PERIOD 1000000     /*1ms*/
+#define TASK_PRIORITY 5
+#define STACK_SIZE 4096
+#define FIFO 0
+#define LPT_IRQ 7
+#define LPT_BASE 0x378
+static unsigned int cpu_clock_count;
+static RT_TASK rt_task;
+static RTIME tick_period;
+static void fun(int t) {
+        int count=0;
+        while(1) {
+                rtf_put(FIFO, &amp;cpu_clock_count, sizeof(cpu_clock_count));
+                if(count==450) {
+                        rtf_reset(FIFO);
+                        count=0;
+	        }
+        	rt_task_wait_period();
+        }
+}
+static void lpt_irq_handler(void) {
+        static unsigned int low1,high1,low2,high2,count=0;
+        if(count==0)
+       	        rdtsc(low1,high1);
+	else {
+                rdtsc(low2,high2);
+                if(count==100)
+                        count=1;
+                cpu_clock_count=low2-low1;
+                low1=low2;
+               	high1=high2;
+       	}
+       	count ++;
+       	rt_ack_irq(7);
+}
+int init_module(void) {
+        RTIME now;
+        int result;
+        outb(0x0,LPT_BASE);
+        result = rt_request_global_irq(LPT_IRQ, lpt_irq_handler);
+        if(result) {
+                rt_printk("rt_request_global_irq [7]......[failed]\n");
+                        return result;
+        }
+        rt_enable_irq(LPT_IRQ);
+        outb(inb(0x37a)|0x10, 0x37a);
+        rt_printk("rt_request_global_irq [7].....    [ OK ]\n");
+        rt_set_periodic_mode();
+       	rtf_create(FIFO, 4000);
+        rt_task_init(&amp;rt_task, fun, 0, STACK_SIZE, TASK_PRIORITY, 0, 0);
+        tick_period = start_rt_timer(nano2count(TICK_PERIOD));
+        now = rt_get_time();
+        rt_task_make_periodic(&amp;rt_task, now + tick_period, tick_period);
+        return 0;
+}
+void cleanup_module(void) {	
+        outb(inb(0x37a)&amp;~0x10, 0x37a);
+        rt_printk("rt_free_global_irq [7]....    [ OK ]\n",
+	rt_free_global_irq(LPT_IRQ));
+        stop_rt_timer();
+        rt_printk("stop_rt_timer .....     [ OK ]\n");
+        rtf_destroy(FIFO);
+        rt_busy_sleep(10000000);
+        rt_task_delete(&amp;rt_task);
+}
+</pre>
+</p>
+
+<p>The rt_request_global_irq and rt_enable_irq functions together instruct
+the RTAI kernel to service IRQ 7 (which is the parallel port interrupt).
+After compiling this module, insert it into the kernel address space using
+the "insmod" or the "modprobe" command, and check "/proc/modules" to ensure
+that it loaded successfully.</p>
+
+
+<h3>Controller program</h3>
+<p>
+The controller program is responsible for three things:
+<ol>
+<li> Reading the current cpu_clock_count from the speed sensing module,
+     ie from the FIFO, which is stored in an array for future reference;
+<li> The PI task, and,
+<li> Encoding the PI digital output, which is stored in a variable, 
+     into an external PWM wave signal which is the gating signal for 
+     chopper circuit.
+</ol>
+
+<p>The algorithm used for implementing the PI controller can be summarized as 
+follows:
+<ol>
+<li>      Create a periodic task with period <em>Tc</em> 
+<li>      Read the state of the parallel input pins
+<li>      Compute the control signal and update PWM signal
+<li>      Update the output-write thread
+<li>      Wait for the next task period <em>Tc</em>.
+</ol>
+
+<p>The main function creates five hard real-time threads which are shown in 
+listings 1-4. An LXRT task starts out as an ordinary POSIX thread. It gets 
+transformed to a hard, real-time thread by calling a function available as 
+part of the LXRT library. The effect of this transition is that the thread 
+is no longer managed by the normal Linux Scheduler - it comes under the 
+supervision of the RTAI Scheduler, which guarantees that its timings do not 
+get disturbed by activities taking place within the Linux kernel or in other 
+user-space threads. The main() thread runs as a low priority task.</p>
+
+<pre>
+#include &lt;linux/module.h&gt;
+#include &lt;rtai.h&gt;
+#include &lt;rtai_sched.h&gt;
+#include &lt;rtai_fifos.h&gt;
+#include &lt;asm/io.h&gt;
+#innclude &lt;rtai_lxrt.h&gt;
+#include &lt;pthread.h&gt;
+#include &lt;stdio.h&gt;
+#include &lt;math.h&gt;
+#define FIFO 0
+#define BASE 0x378
+#define CPU_CLOCK 1675888202.0 /* Enter your Cpu clock frequency*/
+#define Kp 3
+#define Ki 0.01
+#define set_point_speed 0 /* Enter set point speed*/
+#define TIMERTICKS 5000000      	/*5ms*/
+
+volatile int stop = 0;
+
+static float cofk,Vm_sin=5,Vm_tri=10;/*Vm_=Vmax*//*n, no.of samples taken=400*/
+sataic int eof[100],n=400,rt_speed;
+
+static RTIME tick_period,now;
+
+unsigned int cpu_clock_count;
+static float Vsin_k [100], Vtri_k [100];
+static float Mag_level_Var_sin=64.0, 
+             Mag_level_Var_tri=256.0;/*Magnitude levels*/
+
+int main ()
+{
+        RT_TASK *task;
+        pthread_t th0,th1,th2,th3,th4;
+
+        task = rt_task_init(nam2num("main"), 10, 4096, 0);
+        if(task == 0) exit(1);
+        rt_set_periodic_mode();
+        tick_period = start_rt_timer(nano2count(TIMERTICKS));
+       	now = rt_get_time();
+
+        pthread_create(&amp;th0, 0, rt_task_pid, 0);
+        pthread_create(&amp;th1, 0, rt_task_in_put, 0);
+        pthread_create(&amp;th2, 0, rt_task_out_put, 0);
+	pthread_create(&amp;th3, 0, rt_task_sin, 0);
+	pthread_create(&amp;th4, 0, rt_task_tri, 0);
+
+        getchar();
+        stop = 1;
+
+       	pthread_join(th0, 0);
+        pthread_join(th1, 0);
+        pthread_join(th2, 0);
+	pthread_join(th3, 0);
+	pthread_join(th4, 0);
+        stop_rt_timer();
+        rt_busy_sleep(10000000);
+        rt_task_delete(task);
+        return 0;
+}
+</pre>
+ 
+Follow this <a href="misc/sreejith/3.c.txt">link</a> to download the code.
+
+<h3>The PI task</h3>
+<p>The PI task is the core of the application, where the controller 
+calculation is actually made. The PI controller receives as input the 
+error, given by <em>e(t) = r(t) - y(t)</em> and computes the control variable <em>c(t)</em> 
+which is its output. The control signal <em>c(t)</em> is calculated from the 
+discrete PI equation given below:</p>
+
+<p><IMG alt=[piequation]
+src="misc/sreejith/pieqn.png"
+> </p>
+
+The PI thread looks at
+
+<ol>
+<li> The current value of the error;
+<li> The integral of the error over a recent time interval;
+<li> Compute control signal and update PWM signal;
+<li> Update output-write thread
+</ol>
+
+<p>This thread has been assigned the fifth highest priority among the 
+five hard real time tasks.
+
+<p>The code is given in <a href="misc/sreejith/4.c.txt">Listing 1</a>.
+
+<pre>
+void* rt_task_pid(void *arg) {
+        RT_TASK *task;
+        static int n=0,k=0,sum=0;
+        task = rt_task_init(nam2num("rtl0"), 4, 4096, 0);
+        rt_task_make_periodic(task, now + tick_period, tick_period);
+        rt_make_hard_real_time();
+        while(!stop) {
+                eof[k]=set_point_speed - rt_speed;
+                while(n&lt;=k) {
+                        sum=sum + eof[n];
+                        n++;
+                }
+               cofk=Kp*(eof[k]+(Ki/Kp)*sum);
+               if(cofk&gt;0) Vm_sin=Vm_sin+0.5;
+               else if(cofk&lt;0) Vm_sin=Vm_sin-0.5;
+	       n=0;
+       	       k++; sum=0;
+               if (k==99) k=0;
+       	       rt_task_wait_period(); /*5ms*/
+        }
+	rt_make_soft_real_time();
+     	rt_task_delete(task);
+}
+</pre>
+
+<h3>Task `rt_task_out_put'</h3>
+
+<p><a href="misc/sreejith/5.c.txt">Listing 2</a> shows a hard Real-time LXRT program 
+generating a PWM running at a frequency of 50Hz on a parallel port pin to feed the motor 
+drive (DC chopper). The PWM is generated by comparing the instantaneous values 
+of a sine wave and a triangular wave of required frequency. The instantaneous 
+values of the sine wave and the triangular wave are generated in the threads 
+given in Listing 3. These instantaneous values are compared in the thread 
+rt_task_out_put to generate the PWM. This thread has been assigned the third
+highest priority.
+
+
+<pre>
+void* rt_task_out_put(void *arg) {
+        RT_TASK *task;
+       	static int i;
+        task = rt_task_init(nam2num("rtl1"), 2, 4096, 0);
+        iopl(3);
+        rt_make_hard_real_time();
+        while(!stop) {
+		if(Vtri_k [i]&gt;=Vsin_k [i]) {
+	               outb(0x1,0x378);
+                       rt_sleep(nano2count(50000)); /*50us*/
+                }
+                else if(Vtri_k [i]&lt;Vsin_k [i]) {
+               	       outb(0x0,0x378);
+                       rt_sleep(nano2count(50000)); /*50us*/
+                       }
+		i++; 
+		if(i==99) i=0;
+       	}
+        rt_make_soft_real_time();
+        rt_task_delete(task);
+}
+</pre>
+
+<p>
+<a href="misc/sreejith/6.c.txt">Listing 3</a>, below, shows the code 
+for generation of sinusoidal and triangular function values used in the 
+output thread for generating the PWM gating signals.
+
+<pre>
+/*To Generate Sine Wave*/
+void *rt_task_sin (void *arg) {              
+       	RT_TASK *task;
+       	static float f = 50, td, t, Vsin_t, s; /*frequency =50Hz*/  /*s = 
+	Step size*/  /* td = Time delay between two samples*/
+        static float Auto_correction;
+        static int i,j;
+        task = rt_task_init(nam2num("rtl1"), 1, 4096, 0);
+        s = 2*Vm_sin/Mag_level_Var_sin;
+        td = 1/(f*n);
+        Auto_correction = (Mag_level_Var_tri - Mag_level_Var_sin)/2;
+        rt_make_hard_real_time();
+        while (!stop) {
+       	        t = i*td;
+               	Vsin_t = Vm_sin*sin(2*M_PI*f*t);
+                Vsin_k [j] = (Vsin_t+Vm_sin)/s + Auto_correction;
+       	        rt_sleep(nano2count(50000));    /*50us*/
+                i++; j++
+                if(i == (n-1)) i=0; if(j==99) j=0;
+	}
+       	rt_make_soft_real_time();
+        rt_task_delete(task);
+}
+/*To Generate Triangular Wave*/
+void *rt_task_tri (void *arg)
+{
+       	RT_TASK *task;
+        static float f=100, td, Vtri_t, s, t;/*frequency =100Hz*/  /*s = Step 
+	size*/  /* td = Time delay between two samples*/
+        static float SLOPE;
+        static int i,j;
+        task = rt_task_init(nam2num("rtl2"), 0, 4096, 0);
+        SLOPE = 4*Vm_tri*f;
+        td=1/(f*n);
+        s=2*Vm_tri/Mag_Control_Var_tri;
+        rt_make_hard_real_time();
+        while (!stop) {
+                t=i*td;
+                if (Vtri_k [j] = Mag_Control_Var_tri) {
+       	                Vtri_t = 1 * SLOPE * t;
+               	        Vtri_k [j] = (Vtri_t+Vm_tri)/s - Mag_Control_Var_tri/2;
+                       	rt_sleep(nano2count(25000));        /*25us*/
+                        i++; 
+                }
+                else {
+                        Vtri_k [j]= 0.0;
+                        i=1;
+                }
+		j++;
+		if(j==99) j=0;
+        }
+        rt_make_soft_real_time();
+        rt_task_delete (task);
+}
+</pre>
+
+<h3>Task `rt_task_in_put'</h3>
+
+<p>
+This task continuously reads values from the FIFO (note that the
+shaft encoder writes real-time speed to the FIFO) and stores it in the
+`cpu_clock_count' variable. The value of cpu_clock_count is 
+converted to speed in RPM and is stored  in `rt_speed'. This 
+thread has been assigned the second highest priority. The code for this
+process is shown in <a href="misc/sreejith/7.c.txt">Listing 4</a>:
+
+<pre>
+/*The Feed back Task*/
+void* rt_task_in_put (void *arg)
+{
+	RT_TASK *task;
+        task = rt_task_init(nam2num("rtl3"), 3, 4096, 0);
+        iopl(3);
+        rt_task_make_periodic(task, now + tick_period, tick_period);
+        rt_make_hard_real_time();
+        while(!stop) {
+                rt_speed=CPU_CLOCK*60/(float)cpu_clock_count;
+               	rtf_get(FIFO, &amp;cpu_clock_count, sizeof(cpu_clock_count));
+                rt_task_wait_period(); /*Tc =5ms*/
+       	}
+        rt_make_soft_real_time();
+        rt_task_delete(task);
+}
+</pre>
+<p>
+The real-time speed of the motor can be displayed either by running 
+the code below as a thread, or by running main() as a GUI application by 
+using FLTK/GTK.
+
+<pre>
+/*Print Real Time Speed*/
+void* task_show_report(void *arg)
+{
+        while(!stop) {
+		printf("%d\n",rt_speed);
+       	}
+}
+</pre>
+
+The complete controller code can be seen
+<a href="misc/sreejith/2.c.txt">here</a>.
+
+<h3>Conclusion</h3>
+
+<p>The above experiment illustrates the use of a PI controller 
+for closed loop speed control of a small DC motor. The performance of this
+PI controller was found to be acceptable for such a motor. However, in
+attempting to model a converter along similar lines for a real large-scale
+industrial drive, I found that the large number of control parameters
+required a more in-depth and detailed controller design using the concepts
+of Control System theory. 
+</p>
+
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<p>
+
+<img align="left" alt="[BIO]" src="../gx/authors/sreejith.jpg" class="bio">
+
+<em>
+<p>
+I am a Linux enthusiast living in India. I enjoy the freedom and power that
+Linux offers. I must thank my mentor Mr. Pramode C. E. for introducing me to
+the wonderful world of Linux.
+</p>
+
+<p>
+I completed my B-Tech in Electrical and Electronics Engineering from Govt.
+Engineering College, Thrissur (Kerala, India) (2001 - 2005). Presently I am
+working in inDSP Audio Technologies Pvt. Ltd, Trivandrum, India as an
+Embedded Systems Engineer.
+</p>
+
+<p>
+I spend my free time reading books on Linux and exploring the same. My
+other areas of interest include device drivers, embedded
+systems, robotics and process control.
+</p>
+</em>
+
+<br clear="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2005, Sreejith N. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 118 of Linux Gazette, September 2005
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="senryu.html" >&lt;-- prev</A> | <A HREF="weatherwax.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">September 2005 (#118)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

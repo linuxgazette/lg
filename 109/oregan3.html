@@ -1,0 +1,556 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Accessing a Bluetooth phone LG #109</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="oregan2.html" >&lt;-- prev</A> | <A HREF="park.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Accessing a Bluetooth phone</h1>
+<p id="by"><b>By <A HREF="../authors/oregan.html">Jimmy O'Regan</A></b></p>
+
+<p>
+<p>I recently bought a <a href=
+"http://www.nokia.com/nokia/0,,47814,00.html">Nokia 6820</a>. After
+years of using a 5110, I wanted to get a phone with all the bells
+and whistles: Bluetooth, Infrared, Java, Camera, etc. The 6820 not
+only does these things, but it also has a video camera, so I was
+sold on it. (Plus, my brother has had one for a few months without
+having any problems and I got Blackberry email on it).</p>
+
+<p>As it happens, there was a story in the news about <a href=
+"http://news.bbc.co.uk/1/4033231.stm">Nokia malware</a>, but this
+doesn't affect my phone, and it seems you have to be incredibly
+gullible to be affected.</p>
+
+<p>The first thing you'll need to do is install <a href=
+"http://www.bluez.org">Bluez</a>. You may need to patch your
+kernel, but I didn't, so I'm not going to go into that. As well as
+whatever 'libbluez' packages your distro has, you'll also need the
+'bluez-utils', 'bluez-bluefw', and 'bluez-pin' packages (though the
+'bluez-pin' package will probably not be necessary if you're using
+KDE).</p>
+
+<p>To transfer files to and from your phone, you'll also need
+<a href="http://openobex.sourceforge.net/">OpenOBEX</a>. Even if
+you never use the command line, the libraries supplied by this
+project are used by both GNOME and KDE.</p>
+
+<p><a href="http://triq.net/obex/">ObexFTP</a> is really useful
+from the command line, and from scripts. I have a short script that
+grabs what my phone is seeing using Gammu and ObexFTP.</p>
+
+<h3>Setting up</h3>
+
+<p>At first, my Bluetooth adaptor refused point blank to be
+recognized, giving me this output:</p>
+
+<pre>
+# hciconfig
+hci0:   Type: USB
+        BD Address: 00:00:00:00:00:00 ACL MTU: 0:0  SCO MTU: 0:0
+        DOWN
+        RX bytes:0 acl:0 sco:0 events:0 errors:0
+        TX bytes:0 acl:0 sco:0 commands:0 errors:0
+</pre>
+
+<p>Eventually, Google lead me to <a href=
+"http://kotinetti.suomi.net/mcfrisk/linux_gprs.html#id2490745">this
+page</a>, which has this note:</p>
+
+<blockquote>For some reason the USB dongle does not work right
+after loading modules the hciconfig outputs a 00:00:00:00:00:00
+address to the card. The dongle did wake up after I did a
+<tt>hciconfig hci0 down &amp;&amp; hciconfig hci0
+up</tt>.</blockquote>
+
+<p>This was the tip I needed. <tt>hcitool</tt> gave me some real
+output:</p>
+
+<pre>
+# hciconfig
+hci0:   Type: USB
+        BD Address: 00:0F:3D:3D:43:36 ACL MTU: 192:8  SCO MTU: 64:8
+        UP RUNNING PSCAN ISCAN
+        RX bytes:77 acl:0 sco:0 events:9 errors:0
+        TX bytes:31 acl:0 sco:0 commands:8 errors:0
+</pre>
+I can now search for my phone using <tt>hcitool</tt>. Once I've
+found it, hcitool can then give me more information, or I can use
+<tt>l2ping</tt> to check the connection:
+
+<pre>
+$ hcitool inq
+Inquiring ...
+        00:0E:ED:80:7B:38       clock offset: 0x433d    class: 0x520204
+
+$ hcitool scan
+Scanning ...
+        00:0E:ED:80:7B:38       Jimmy O'Regan
+
+# hcitool info 00:0E:ED:80:7B:38
+Requesting information ...
+        BD Address:  00:0E:ED:80:7B:38
+        Device Name: Jimmy O'Regan
+        LMP Version: 1.1 (0x1) LMP Subversion: 0x380
+        Manufacturer: Cambridge Silicon Radio (10)
+        Features: 0xbf 0xee 0x0f 0x00 0x00 0x00 0x00 0x00
+                &lt;3-slot packets&gt; &lt;5-slot packets&gt; &lt;encryption&gt; &lt;slot offset&gt;
+                &lt;timing accuracy&gt; &lt;role switch&gt; &lt;sniff mode&gt; &lt;RSSI&gt;
+                &lt;channel quality&gt; &lt;SCO link&gt; &lt;HV3 packets&gt; &lt;u-law log&gt;
+                &lt;A-law log&gt; &lt;CVSD&gt; &lt;paging scheme&gt; &lt;power control&gt;
+                &lt;transparent SCO&gt;
+
+# l2ping 00:0E:ED:80:7B:38
+Ping: 00:0E:ED:80:7B:38 from 00:0F:3D:3D:43:36 (data size 20) ...
+0 bytes from 00:0E:ED:80:7B:38 id 200 time 48.85ms
+0 bytes from 00:0E:ED:80:7B:38 id 201 time 32.08ms
+2 sent, 2 received, 0% loss
+</pre>
+
+<p><tt>hcid</tt>, the daemon that provides the above, requires D-Bus to be
+running; <tt>dbus-daemon-1 --system</tt> works for me. You also need to
+have <tt>sdpd</tt> running: this lets other devices know which services
+your computer provides.</p>
+
+<p>Once you're able to see the phone, you'll need to configure
+<tt>hcid</tt>. I had a problem at this stage, because one of the
+many pieces of software I installed kept adding a second PIN helper
+program.</p>
+
+<p>To use most of the services on a mobile (or most Bluetooth devices, as
+far as I can tell), the mobile and the computer must first be paired.
+Basically, this involves both having the same PIN code entered -- just
+imagine how horrible it would be if anyone could browse around the files on
+your phone, or use your computer as an Internet gateway.</p>
+
+<p>This is what my <tt>hcid.conf</tt> file looks like:</p>
+
+<pre>
+options {
+        autoinit yes;
+
+        security user;
+
+        pairing multi;
+
+        pin_helper /usr/lib/kdebluetooth/kbluepin;
+}
+
+# Default settings for HCI devices
+device {
+        # Local device name
+        #   %d - device id
+        #   %h - host name
+        name "jimmy";
+
+        # Local device class
+        class 0xff0100;
+
+        # Default packet type
+        #pkt_type DH1,DM1,HV1;
+
+        # Inquiry and Page scan
+        iscan enable; pscan enable;
+
+        # Default link mode
+        #   none   - no specific policy 
+        #   accept - always accept incoming connections
+        #   master - become master on incoming connections,
+        #            deny role switch on outgoing connections
+        #
+        lm accept,master;
+
+        # Default link policy
+        #   none    - no specific policy
+        #   rswitch - allow role switch
+        #   hold    - allow hold mode
+        #   sniff   - allow sniff mode
+        #   park    - allow park mode
+        #
+        lp hold,sniff,park;
+
+        # Authentication and Encryption
+        #auth enable;
+        #encrypt enable;
+}
+</pre>
+
+<p>The most important part is the <tt>class</tt> line, which
+describes the capabilities of the PC to any Bluetooth device that
+comes in range. It also seems to be important to disable the
+<tt>auth</tt> and <tt>encrypt</tt> lines when you're talking to a
+mobile phone.</p>
+
+<p>The <tt>pin_helper</tt> line is probably the least important
+detail: it's necessary, don't get me wrong, but most of the
+software available for accessing bluetooth devices seem to come
+with its own PIN helper, and I don't really see why: the PIN
+helper does little more than return 'PIN:xxxx' (where 'xxxx' is the
+PIN).</p>
+
+<h3>ObexFTP</h3>
+
+<p>ObexFTP is really intended to be a backend command, but it's
+still usable as a command line application.</p>
+
+<p>To list a path: <tt>obexftp -b [phone address] -l
+[path]</tt></p>
+
+<p>To get a file: <tt>obexftp -b [phone address] -g [path]</tt></p>
+
+<h3>Phone Video</h3>
+
+<p>Nokia phones save their video as '.3gp' files. These are
+quicktime files with audio that uses the samr codec, and video that
+uses the H.263 codec (called s263 in the files).</p>
+
+<p>To play the video, just find this section of your
+<tt>.mplayer/codecs.conf</tt>:</p>
+
+<pre>
+videocodec ffh263
+  info "FFmpeg H263+ decoder"
+  status working
+  fourcc H263,U263,h263,X263
+  fourcc viv1 h263
+  driver ffmpeg
+  dll h263
+  out YV12,I420,IYUV
+</pre>
+and change the first 'fourcc' line to
+
+<pre>
+  fourcc H263,U263,h263,X263,s263
+</pre>
+
+<p>The audio is a little more awkward: you have to download two zip
+files and unzip them as subdirectories of the <tt>avcodecs</tt>
+directory of ffmpeg (or mplayer): <a href=
+"http://www.3gpp.org/ftp/Specs/2004-03/Rel-5/26_series/26073-530.zip">
+amr</a> and <a href=
+"http://www.3gpp.org/ftp/Specs/2004-03/Rel-5/26_series/26104-540.zip">
+amr_float</a>.</p>
+
+<p>This is required because there is no explicit copyright on the
+code - if it was properly open source, it'd be part of ffmpeg, but
+as it is, things are vague -- and as <a href=
+"lg_laundrette.html#laundrette.vague">Thomas said</a>, "Vagueness
+makes baby Jesus cry".</p>
+
+<p>I've included a <a href="misc/oregan/Video015.3gp">sample
+video</a> anyway, though, of my friend Marion (yes, she loves the
+camera, but it's mutual).</p>
+
+<h3>Desktop integration</h3>
+
+<p>Both GNOME and KDE have Bluetooth integration available. (On
+Mandrake, the packages are 'gnome-bluetooth' and 'kdebluetooth',
+respectively).</p>
+
+<p><a href="http://usefulinc.com/software/gnome-bluetooth/">GNOME
+Bluetooth</a>
+<!-- Link Broken, even from usefulinc site itself 20:45 EST 28 November 2004 -->
+<!-- Seems to have become un-broken now - Wed Dec  1 10:28:39 EST 2004 -->
+ comes with a desktop daemon that listens for incoming
+OBEX transfers, and integrates with Nautilus to allow you to send
+files from the file manager.</p>
+<img src="misc/oregan/gnome-bt.png" alt=
+"GNOME scanning for Bluetooth devices">
+<p>KDE's Bluetooth support is part of KDE. Its support is a lot
+more extensive than GNOME's: it allows you to use your computer's
+audio equipment as a hands-free kit, for example. It also allows
+scripts to be run whenever a certain device comes within range, so
+you can have your files backup without intervention.</p>
+<img src="misc/oregan/bt-kde.png" alt=
+"Viewing Bluetooth services in KDE">
+<p>KDE's ioslaves provide a convenient set of URI types to allow
+you to use Bluetooth. <tt>bluetooth:/</tt> allows you to see which
+devices are in range, <tt>sdp://[00:0E:ED:80:7B:38]/</tt> shows the
+services available on the specified device, and
+<tt>obex://[00:0e:ed:80:7b:38]:10/</tt> allows you to treat your
+phone as if it were a regular filesystem.</p>
+
+<h3>Gnokii</h3>
+
+<p><a href="http://www.gnokii.org">Gnokii</a> is a program that
+gives access to many of the features of Nokia phones. It's been
+around for years, and though it doesn't support many of the
+features of newer phones, it's still useful to have around.</p>
+
+<p>First of all, edit your <tt>.gnokiirc</tt>. To use bluetooth,
+you need to set <tt>connection = bluetooth</tt> and <tt>port</tt>
+to the address of your phone. If your phone isn't supported, it
+shouldn't be too hard to find a similar model that is.</p>
+
+<pre>
+[global]
+port = 00:0E:ED:80:7B:38
+#Gnokii doesn't know about my phone yet.
+model = 6310i
+initlength = default
+connection = bluetooth
+#It's recommended to set this to 'yes', but it doesn't work for me
+use_locking = no
+serial_baudrate = 19200
+rfcomm_channel = 1
+smsc_timeout = 10
+</pre>
+
+<p>The first step is to make sure that gnokii can see the
+phone:</p>
+
+<pre>
+$ gnokii --identify
+GNOKII Version 0.6.3
+IMEI         : xxxxxxxxxxxxxxx
+Manufacturer : Nokia
+Model        : NHL-9
+Revision     : V 4.25
+</pre>
+
+<p>You can check the results by typing *#0000# on the phone, which
+gives a result like this:</p>
+
+<pre>
+V 4.25
+27-05-04
+NHL-9
+(c) Nokia
+</pre>
+
+<p>The most useful feature that Gnokii has (and that Gammu lacks)
+is the ability to grab the contacts list from your phone and
+convert it into a useful format. This command takes the contacts
+from the phone's memory (ME), starting at 1 and continuing to the
+end, saving it as a VCard (<tt>-v</tt>).</p>
+
+<pre>
+gnokii --getphonebook ME 1 end -v &gt; phone.vcs
+</pre>
+
+<p>Another feature I like is 'getnetworkinfo', because it tells you
+which cell you're currently in. There are a number of programs
+available for Series 60 phones that work like a mini-GPS, and can
+trigger actions on the phone based on where you are, but I haven't
+found any that will work on mine. At least I can console myself
+with the knowledge that the information is there.</p>
+
+<pre>
+$ gnokii --getnetworkinfo
+GNOKII Version 0.6.3
+Network      : O2 Communications (Ireland) Ltd (Ireland)
+Network code : 272 02
+LAC          : 4a56
+Cell id      : 20b1
+</pre>
+
+<h3>Gammu</h3>
+
+<p><a href="http://www.mwiacek.com/gsm/soft/gammu.html">Gammu</a>
+started as a fork of Gnokii, but has much better support for newer
+phones. (It does lack some of Gnokii's features, though, so both
+are worth using).</p>
+
+<p>Like Gnokii, you need to set up your <tt>.gammurc</tt> file
+first.</p>
+
+<pre>
+[gammu]
+
+device = 00:0e:ed:80:7b:38
+#Gammu doesn't support the 6820 either
+model = 6800
+connection = bluephonet
+synchronizetime = no
+logfile = gammulog
+logformat = textall
+#same problem as gnokii
+use_locking = no
+gammuloc = locfile
+startinfo = yes
+gammucoding = utf8
+</pre>
+
+<p>Unlike Gnokii, Gammu doesn't provide common output formats for
+contacts etc. Also unlike Gnokii, Gammu <em>has</em> got a Python
+interface available, so I'll see if I can manage to get something
+useful done for next month.</p>
+
+<p>I mentioned earlier that I have a script that lets me see what
+my phone currently sees. This would be a lot more useful if the
+camera wasn't on the bottom of the phone, but it's a great way to
+amuse my<strike>self</strike> son.</p>
+
+<pre class="code">
+#!/bin/bash
+
+gammu --nokiamakecamerashoot
+obexftp -b 00:0E:ED:80:7B:38 -g Gallery/GammuShot
+display GammuShot
+</pre>
+
+<h3>Open Source software for the Phone</h3>
+
+<p>The first hurdle in using most software on a mobile phones is
+that most providers have two sets of internet access settings: one
+for WAP, the other for full access. Fortunately, there's a
+Linux-friendly site that provides details about most European
+providers: <a href=
+"http://www.easyconnect.linuxuser.hu/modules.php?name=index">Easy
+Connect</a>.</p>
+
+<p>You can use Gammu to install software to your phone by using
+this command:</p>
+
+<pre>
+gammu --nokiaaddfile Application Virca
+</pre>
+
+<p>This looks for two files, <tt>Virca.jar</tt> and
+<tt>Virca.jad</tt>, which it then sends to the phone. To install a
+game, change 'Application' to 'Game'.</p>
+
+<p>The first piece of software I installed was <a href=
+"http://phoenix.inf.upol.cz/~polakr/">Telnet midlet</a>. (There's
+also an SSH midlet available from the same site). I managed to
+connect to a server without fuss, but quickly became frustrated
+with the input method it uses -- any input has to be done through a
+separate screen, which is the perfect method for most phones, but
+painful on mine, which has a fold-out keyboard. <a href=
+"http://www.xk72.com/midpssh/">MidpSSH</a> is a SSH client, based
+on Telnet midlet, that supports Telnet, SSH1 and SSH2. It looks to
+have a much better interface, but unfortunately none of the many
+versions provided would work on my phone.</p>
+
+<p><a href="http://www.vidarholen.net/contents/virca">Virca</a> is
+an open source IRC client for MIDP 1.0 compliant devices. It
+doesn't support things like DCC, but it's quite impressive for such
+a small package. I can imagine it being useful on long
+journeys.</p>
+
+<p>Looking at the things that are possible with the phone, I'm
+tempted to learn Java (despite <a href=
+"../authors/adam.html">Thomas's</a> warnings).</p>
+
+<p>If anyone knows of any good MIDP 1.0 programs, please <a href=
+"mailto:jimregan@o2.ie">let me know!</a> I want to see how much my
+phone can do!</p>
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<P>
+<img ALIGN="LEFT" ALT="[BIO]" SRC="../gx/2004/authors/oregan.jpg" class="bio">
+<em>
+<!-- ../110/lg_laundrette.html#nottag.15 :) -->
+Jimmy is a single father of one, who enjoys long walks... Oh, right.
+
+<p> Jimmy has been using computers from the tender age of seven, when his father 
+inherited an Amstrad PCW8256. After a few brief flirtations with an Atari ST
+and numerous versions of DOS and Windows, Jimmy was introduced to Linux in 1998
+and hasn't looked back.
+
+<p> In his spare time, Jimmy likes to play guitar and read: not at the same time, 
+but the picks make handy bookmarks.
+</em>
+<br CLEAR="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2004, Jimmy O'Regan. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 109 of Linux Gazette, December 2004
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="oregan2.html" >&lt;-- prev</A> | <A HREF="park.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">December 2004 (#109)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/2003/sit3-shine.7-2.gif" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

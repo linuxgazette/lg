@@ -1,0 +1,342 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Audiobooks Galore LG #117</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="lg_bytes.html" >&lt;-- prev</A> | <A HREF="dyckoff.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Audiobooks Galore</h1>
+<p id="by"><b>By <A HREF="../authors/anonymous.html">Anonymous</A></b></p>
+
+<p>
+
+<p> This article is a follow-up to <a href="../114/john.html">Maxin B.
+John's article</a>, which introduced us to the <a
+href="http://www.cstr.ed.ac.uk/downloads/festival/">Festival</a>
+text-to-speech synthesizer and some possible applications. Here, we will
+push it a bit further and see how we can convert ebooks from the most
+common formats like HTML, CHM, PS and PDF into audiobooks ready to send to
+your portable player.</p>
+
+<h3>The Why</h3>
+<p> With the high availability of cheap and small portable MP3 players
+these days, it has become very convenient to listen to books and
+articles just anywhere when you would not necessarily have the time
+to read them. Audiobooks usually require very small bit-rates, and hence
+very small sizes - and as a consequence they are the most suitable content
+for the cheap/small capacity MP3 players (128 MB or less).</p>
+
+<p> There are lots of websites out there catering for audiobooks
+needs with a wide range of choices. However, it might happen that you
+really want to read that article or book that you found on the
+web as a PDF or as HTML, and there is probably no audio version of it
+available (yet). I will provide you with some scripts that will
+enable you to convert all your favorite texts into compressed audio
+files ready to upload and enjoy on your portable player. Here we go!</p>
+
+<h3>The Tools</h3>
+<dl>
+	<dd><a href="http://archmage.sourceforge.net/">archmage</a> (CHM)
+	requires also <a href="http://www.python.org">python</a></dd>
+	<dd>ps2ascii (PS and PDF) from the <a href="http://www.cs.wisc.edu/~ghost/">ghostscript</a>-library
+	package</dd>
+	<dd><a href="http://lynx.browser.org/">Lynx</a></dd>
+	<dd>text2wave from <a href="http://www.cstr.ed.ac.uk/downloads/festival/">Festival</a>
+	</dd>
+	<dd>the <a href="http://www.mp3dev.org/">lame</a> MP3 encoder
+	(we'll encode to MP3 since this is the most widely-supported format
+	in hardware players)</dd>
+</dl>
+
+<p>
+Most of these tools are packaged in the main Linux distributions. Once you
+have all of the above installed, we can start the fun. We will begin with
+one of the most common format for ebooks: Adobe PDF.</p>
+
+
+<h3>Postcript / Adobe PDF to MP3</h3>
+<pre class="code">
+#!/bin/sh -
+
+chunks=200
+
+if [ "$#" == 0 ]; then
+        echo "Usage:  $0 [-a author] [-t title] [-l lines] &lt;ps or pdf file&gt;"
+        exit 1
+fi
+
+while getopts "a:t:l:" option
+do
+case "$option" in
+        a)author="$OPTARG";;
+        t)title="$OPTARG";;
+        l)chunks="$OPTARG";;
+esac
+done
+shift $((OPTIND-1))
+
+ps2ascii $@ | split -l $chunks - tmpsplit
+count=1
+for i in `ls tmpsplit*`
+do
+        text2wave $i | lame --ta "${author:-psmp3}" --tt "$count ${title:-psmp3}" \
+		--tl "${title:-psmp3}" --tn "$count" --tg Speech --preset mw-us   \
+		- abook${count}.mp3
+        count=`expr $count + 1`
+done
+rm tmpsplit*
+</pre>
+
+<h4>How it works</h4>
+<p> First 'ps2ascii' converts the PDF file or Postscript file to simple
+text.  That text is then split into chunks of <i>$chunks</i> lines; you
+might have to tweak that value, since splitting the book into more than 255
+files might cause troubles in some players (the id3v1 track number tag can
+only go up to 255.) After that, each chunk is processed by text2wave and
+the resulting audio stream is sent directly to 'lame' through a pipe. The
+encoding is performed with the <code>mw-us</code> preset, which is mono ABR
+40 kbps average at 16 kHz. That should be enough, since Festival outputs a
+voice sampled at 16 kHz by default. You can leave it as it is, unless you
+are using a voice synthesizer with a different sampling rate. Refer to
+<i>lame --preset help</i> for optimum settings for different sampling
+rates.</p>
+
+<p> When you input the artist or title, do not forget to quote the string
+if it includes spaces; for example:</p>
+
+<pre>
+ps2mp3 -a "This is the author" -t "This is the title" my.pdf
+</pre>
+
+<p> Next, we are going to see how to convert to an audio file from the most
+common format: HTML.</p>
+
+<h3>HTML to MP3</h3>
+<pre class="code">
+#!/bin/sh -
+#requires lynx, festival and lame
+
+if [ "$#" == 0 ]; then
+        echo "Usage: echo $0 [-a author] [-t title] &lt;html file1&gt; &lt;html file2&gt; ..."
+        exit 1
+fi
+
+while getopts "a:t:" option
+do
+case "$option" in
+        a)author="$OPTARG";;
+        t)title="$OPTARG";;
+esac
+done
+shift $((OPTIND-1))
+
+count=1
+for htmlfile in $@
+do
+        section=`expr match "${htmlfile##*/}" '\(.*\)\.htm'`
+        lynx -dump -nolist $htmlfile | text2wave - | lame --ta "${author:-html2mp3}" \
+		--tt "$count. ${section:-html2mp3}" --tl "${title:-html2mp3}"        \
+		--tn "$count" --tg Speech --preset mw-us - ${section}.mp3
+        #rm /tmp/est_*
+        count=`expr $count + 1`
+done
+</pre>
+
+<h4>How it works</h4>
+<p> The first part of the script, up to line 16, is about extracting the
+optional parameters from the command line.  From line 19 we are going to
+perform a loop on the list of all HTML files, the remaining arguments given
+at the command line. On line 21, "${htmlfile##*/}" strips out everything
+up to and including the last "/" character - useful if we are dealing with URLs or
+a directory path - so only the filename remains. Then the '\(.*\)\.htm'`
+regular expression takes care of the extension of the file so the variable
+<i>section</i> holds only the stem of the file. It will be used to tag and
+name the resulting MP3 files.</p>
+
+<p> Line 22 is really the heart of the script: first, 'lynx' takes an HTML
+file as input and dumps its text to stdout. That output is piped to
+'text2wave' and converted into a WAV-encoded stream, which is then piped to
+'lame' to be encoded with the <code>mw-us</code> preset and id3-tagged with
+the artist/title/speech genre.</p>
+
+<p> Note that the script can also take URLs as arguments, since they are
+directly sent to lynx.</p>
+
+<p> This <code>html2mp3</code> script is going to be
+very useful for our next step, which is converting from CHM to MP3.
+</p>
+
+<p> CHM files are a proprietary format developed by Microsoft, but
+basically they are just compiled HTML files with an index and a table of
+contents in one file. Their use as an ebook format is certainly not as
+widespread as HTML or PDF, but as you will see, it is pretty
+straightforward to convert them to audio files once you have the right
+tools.  </p>
+
+<h3>CHM to MP3</h3>
+<pre class="code">
+#!/bin/sh -
+#requires archmage and html2mp3
+
+if [ "$#" == 0 ]; then
+echo "Usage:"
+echo "        $0 &lt;chm file&gt; [-a author] [-t title] &lt;html file1&gt; &lt;html file2&gt; ..."
+exit 1
+fi
+
+while getopts "a:t:" o
+do
+case "$o" in
+        a)author="$OPTARG";;
+        t)title="$OPTARG";;
+esac
+done
+shift $((OPTIND-1))
+
+archmage $1 tmpchm
+find tmpchm -name "*.htm*" -exec html2mp3 -a "$author" -t "$title" {} \;
+
+rm -fr tmpchm
+</pre>
+
+<h4>How it works</h4>
+<p> <code>archmage</code> is a Python-based script that extracts HTML files from
+CHM. You will need to have Python installed to get it to run.</p>
+
+<p> Unlike 'ps2mp3', 'chm2mp3' does not require an arbitrary decision on
+where to split the book: every page compiled into the CHM file becomes its
+own audio file. All we need to do is extract these pages with 'archmage'
+and convert them with 'html2mp3'.</p>
+
+<p> We are using the <i>find</i> command to recursively search for HTML
+files in the CHM book that we extracted, since sometimes the HTML files are
+stored in subdirectories inside the CHM. Then, for each HTML file found, we
+call 'html2mp3'.</p>
+
+<h3>Timing</h3>
+<p> Remember that it can take a while to encode several dozen
+pages of text to speech and then to MP3. But you do not need to encode a
+full book to start uploading and enjoying it on your portable player.</p>
+
+<h3>Further Reading</h3>
+<p> <a href="http://software.newsforge.com/article.pl?sid=05/06/14/192226">Another
+recent article on Festival and TTS synthesis software</a></p>
+
+
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- ============================================================= -->
+<!-- *** BEGIN bio *** -->
+<hr>
+
+<!--
+<p>
+<img ALIGN="LEFT" ALT="[BIO]" SRC="../gx/2002/note.png" class="bio">
+<em>
+</em>
+<br CLEAR="all">
+
+-->
+<!-- *** END bio *** -->
+
+<!-- ============================================================= -->
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2005, Anonymous. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 117 of Linux Gazette, August 2005
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="lg_bytes.html" >&lt;-- prev</A> | <A HREF="dyckoff.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">August 2005 (#117)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

@@ -1,0 +1,1351 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>The Monthly Troubleshooter: The USB Subsystem LG #133</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+<a href="../">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="saha.html" >&lt;-- prev</A> | <A HREF="collinge.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>The Monthly Troubleshooter: The USB Subsystem</h1>
+<p id="by"><b>By <A HREF="../authors/tag.html">The Answer Gang</A></b></p>
+
+<p class="editorial">
+<strong>From the Editor's Desk</strong><br>
+Once again, it is time for The Answer Gang's free-for-all - The Monthly
+Troubleshooter. Just as a reminder (and perhaps as a bit of stimulation for
+future topics), The Troubleshooter begins as a post sent to <a
+href="mailto:tag@lists.linuxgazette.net">The Answer Gang</a> in order to create
+discussion on a specific topic - one that will hopefully be interesting and
+educational to our readers - and consists of a "brain dump" (i.e., a
+summary of the author's knowledge) on that topic. As is usually the case,
+other Gangsters jump in and contribute their own comments, clarifications,
+and corrections - and the result is eventually published here, with the TAG
+byline.
+</p>
+
+<p class="editorial">
+The important thing to note here is that the Troubleshooter
+<strong>requires</strong> that initial brain dump: without it, there's no
+discussion, no conversation, no new perspectives on what may be somewhat
+outdated knowledge. Without it, there's no Monthly - or any -
+Troubleshooter. Dear readers... if you are well-versed in some facet of
+Linux and believe that a discussion of it would benefit others,
+<strong>please</strong> do write it up and send it to <a
+href="mailto:tag@lists.linuxgazette.net">TAG</a> with "Monthly Troubleshooter:
+&lt;topic&gt;" as the subject. You'd be helping your community, educating
+other Linux users, and perhaps learning a few things yourself. I look
+forward to hearing from you.<br>
+ -- Ben Okopnik, Editor-in-Chief
+</p>
+
+<hr>
+
+<h2>The Basics of USB</h2>
+<p>
+USB generally tends to be a trouble-free area of Linux: most modern distros
+handle it very well, and the degree to which it's become automated is very
+impressive (kudos to all the people involved - especially from those of us
+who remember the early days!) However, when it does break, troubleshooting
+can be rather difficult: there are a number of pieces that all have to work
+together. Even more problematic, <strong>which</strong> pieces have to work
+in <strong>what</strong> situation varies...  and not all of these have
+'usb' in the name.
+</p>
+
+<p>
+With that in mind, let's take a look at what happens in some USB-related
+situations - including how the individual pieces break, and what can be
+done about them in the rare case when they do.
+</p>
+
+
+<h3>Inserting a USB pen-drive</h3>
+<p>
+So, what actually happens when we grab one of those ubiquitous pen-drive
+gadgets and insert it into a USB port? Let's watch the log (by running
+'tail -f /var/log/messages') as we plug in and find out.
+</p>
+
+<pre class="code">
+Sep 17 19:58:47 Fenrir kernel: usb 4-1: new high speed USB device using ehci_hcd and address 3
+Sep 17 19:58:47 Fenrir kernel: usb 4-1: Product: Geek Squad
+Sep 17 19:58:47 Fenrir kernel: usb 4-1: Manufacturer: SanDisk Corporation
+Sep 17 19:58:47 Fenrir kernel: usb 4-1: SerialNumber: SNDK14050503CBF08502
+Sep 17 19:58:47 Fenrir kernel: usb 4-1: configuration #1 chosen from 1 choice
+Sep 17 19:58:47 Fenrir kernel: scsi1 : SCSI emulation for USB Mass Storage devices
+Sep 17 19:58:47 Fenrir usb.agent[4021]:      usb-storage: already loaded
+Sep 17 19:58:52 Fenrir kernel:   Vendor:           Model: Geek Squad        Rev: 0.2 
+Sep 17 19:58:52 Fenrir kernel:   Type:   Direct-Access                      ANSI SCSI revision: 02
+Sep 17 19:58:52 Fenrir kernel: SCSI device sda: 2001888 512-byte hdwr sectors (1025 MB)
+Sep 17 19:58:52 Fenrir kernel: sda: Write Protect is off
+Sep 17 19:58:52 Fenrir kernel: SCSI device sda: 2001888 512-byte hdwr sectors (1025 MB)
+Sep 17 19:58:52 Fenrir kernel: sda: Write Protect is off
+Sep 17 19:58:52 Fenrir kernel:  sda:&lt;7&gt;usb-storage: queuecommand called
+Sep 17 19:58:52 Fenrir kernel:  sda1
+Sep 17 19:58:52 Fenrir kernel: sd 1:0:0:0: Attached scsi removable disk sda
+Sep 17 19:58:53 Fenrir scsi.agent[4058]:      sd_mod: loaded successfully (for disk)
+</pre>
+
+<p>
+That's a lot of info... fortunately, it's mostly self-explanatory.
+</p>
+
+<p>
+The fact may not be all that clearly visible here, since it's all lumped
+under "kernel:" messages, but - the 'hotplug' system detected a change on
+one of the ports that it was watching. After the initial handshake, which
+gave it a bunch of data, it assigned address '3' to the device (these
+device numbers are sequential: the last USB device I used, which just
+happened to be the same pen-drive, got a '2'.) It then logged a bunch of
+human-readable data telling me what the device reported itself to be,
+loaded any required modules that had not yet been loaded, and attached the
+device via the appropriate driver (i.e., created an access point for it in
+the file system) to a "special" file in the "/dev" directory, at
+"/dev/sda1". This, in turn, allows us to mount the device on a directory
+in our file system in the usual way.
+</p>
+
+
+<h3>Famous Last Words ("What Could Possibly Go Wrong?")</h3>
+<p>
+If the "hotplug" system doesn't work, the game is over before it even
+starts: no detection means no device identification means no module
+loading means no driver installation means no mounting. End of game, thank
+you for playing. So, what can we do if there are no messages whatsoever in
+the log no matter how frantically we fiddle and frob the USB dongle?
+</p>
+
+<p>
+First, check to see that "hotplug" is installed on your system. In
+Debian, for example, the package system is easily queried:
+</p>
+
+<pre class="code">
+ben@Fenrir:~$ dpkg -l hotplug
+Desired=Unknown/Install/Remove/Purge/Hold
+| Status=Not/Installed/Config-files/Unpacked/Failed-config/Half-installed
+|/ Err?=(none)/Hold/Reinst-required/X=both-problems (Status,Err: uppercase=bad)
+||/ Name                       Version                    Description
++++-==========================-==========================-=====================
+ii  hotplug                    0.0.20040329-25            Linux Hotplug Scripts
+</pre>
+
+<p>
+In this case, "hotplug" is fully installed. The next question is, has
+hotplug support been compiled into the kernel?
+</p>
+
+<pre class="code">
+ben@Fenrir:~$ ls -l /proc/sys/kernel/hotplug
+-rw-r--r-- 1 root root 0 2006-09-17 20:32 /proc/sys/kernel/hotplug
+</pre>
+
+<p>
+Yep, the entry for it exists in "/proc". Next, is it running? Well...
+the problem is that 'hotplug' doesn't really have a daemon in the
+classic sense - it's integrated into the driver core in the kernel - so
+there's nothing to check for in the process table. What to do, what to
+do... oh, it's simple - we'll just start the system manually, no harm in
+that.
+</p>
+
+<pre class="code">
+ben@Fenrir:~$ su -c '/etc/init.d/hotplug start'
+Password: 
+Starting hotplug subsystem:
+   pci     
+     intel-agp: already loaded
+     uhci-hcd: loaded successfully
+     uhci-hcd: already loaded
+     uhci-hcd: already loaded
+     ehci-hcd: loaded successfully
+     snd-intel8x0: already loaded
+     ignoring pci display device 01:00.0
+     b44: already loaded
+     ipw2200: already loaded
+     yenta_socket: already loaded
+     ohci-hcd: loaded successfully
+     ohci-hcd: already loaded
+   pci      [success]
+   usb     
+     usb-storage: already loaded
+     cdc-acm: already loaded
+   usb      [success]
+   isapnp  
+   isapnp   [success]
+   ide     
+   ide      [success]
+   input   
+   input    [success]
+   scsi    
+     sd_mod: loaded successfully (for disk)
+   scsi     [success]
+done.
+</pre>
+Your list of modules will almost certainly be different; the important
+thing is that you see a list of modules loading under the 'pci', 'usb',
+and [possibly, depending on what you've compiled in your kernel] 'scsi'
+subheadings.
+</p>
+
+<p>
+At this point, your basic hotplug system should be OK.
+</p>
+
+
+<h3>USBFS</h3>
+<p>
+Something that comes in very useful when troubleshooting USB is the 'usbfs'
+virtual file system. To get access to it, compile this option into the
+kernel (CONFIG_USB_DEVICEFS=y) and list it in '/etc/fstab' (the relevant
+line reads "none /proc/bus/usb usbfs noauto 0 0", and it is loaded by the
+kernel when the USB subsystem is detected.) The result is a series of
+entries (directories) in "/proc/bus/usb", one for each detected device plus
+a "devices" file containing human-readable descriptions. With this, it's
+very easy to tell if your system recognizes a given USB device or not - and
+if you end up with some truly strange USB device that isn't listed in the
+hotplug system's device database, you can even create your own usermap for
+it in "/etc/hotplug/usb/" (the necessary 'match_flags', 'idVendor', and
+'idProduct' information is shown in the "devices" file.) What more could
+you possibly want?
+</p>
+
+
+<h3>Modules</h3>
+<p>
+So, we've detected the device and identified it... but let's say that
+there's <em>still</em> no joy in Mudville. In the most common scenario, the
+log would look something like this:
+</p>
+
+<pre>
+Sep 17 19:43:08 Fenrir kernel: usb 4-1: new high speed USB device using ehci_hcd and address 2
+Sep 17 19:43:08 Fenrir kernel: usb 4-1: Product: Geek Squad
+Sep 17 19:43:08 Fenrir kernel: usb 4-1: Manufacturer: SanDisk Corporation
+Sep 17 19:43:08 Fenrir kernel: usb 4-1: SerialNumber: SNDK14050503CBF08502
+Sep 17 19:43:08 Fenrir kernel: usb 4-1: configuration #1 chosen from 1 choice
+Sep 17 19:43:08 Fenrir kernel: scsi0 : SCSI emulation for USB Mass Storage devices
+Sep 17 19:43:09 Fenrir usb.agent[3687]:      usb-storage: already loaded
+Sep 17 19:43:13 Fenrir kernel:   Vendor:           Model: Geek Squad        Rev: 0.2
+Sep 17 19:43:13 Fenrir kernel:   Type:   Direct-Access                      ANSI SCSI revision: 02
+Sep 17 19:43:13 Fenrir scsi.agent[3730]:      sd_mod: can't be loaded (for disk)
+</pre>
+
+<p>
+<em><strong>Whoops!</strong></em> What do you mean, "can't be loaded"? Oh,
+right, right... there's still the small matter of having the appropriate
+module. USB is only the interface method; at the end of all that
+connecting, the important bit is what device we're connecting <strong>TO</strong>.
+In the case of the pen-drive, it's fairly common to have it show up as
+"/dev/sda1" or "/dev/sdb1" (or, less commonly, "/dev/sda") - in any case,
+it looks like a SCSI device, which means that we need to have SCSI support
+(and specifically SCSI disk support) in the kernel. It's preferable to have
+the latter compiled as a module, so the relevant kernel options look like
+this:
+</p>
+
+<pre class="code">
+# SCSI device support
+#
+CONFIG_SCSI=y
+
+...
+
+# SCSI support type (disk, tape, CD-ROM)
+#
+CONFIG_BLK_DEV_SD=m
+</pre>
+
+<p>
+The above is, of course, highly variable and dependent on the device
+you're inserting.
+</p>
+
+
+<h3>And Then What?</h3>
+<p>
+Assuming that you have your "/etc/fstab" properly configured - i.e., you
+have entries that look something like this:
+</p>
+
+<pre class="code">
+ben@Fenrir:~$ grep sd /etc/fstab
+/dev/sda   /mnt/sda   vfat  user,noauto,gid=103,rw,fmask=113   0   0
+/dev/sda1  /mnt/sda1  vfat  user,noauto,gid=103,rw,fmask=113   0   0
+/dev/sdb   /mnt/sdb   vfat  user,noauto,gid=103,rw,fmask=113   0   0
+/dev/sdb1  /mnt/sdb1  vfat  user,noauto,gid=103,rw,fmask=113   0   0
+/dev/sdc   /mnt/sdc   vfat  user,noauto,gid=103,rw,fmask=113   0   0
+</pre>
+
+<p>
+ - the rest is very simple:
+</p>
+
+<pre>
+ben@Fenrir:~$ mount /mnt/sda1
+ben@Fenrir:~$ mount|grep sda1
+/dev/sda1 on /mnt/sda1 type vfat (rw,noexec,nosuid,nodev,gid=103,fmask=113,user=ben)
+</pre>
+
+<h3>Wrap-up</h3>
+<p>
+As I mentioned originally, the USB subsystem in Linux is well-configured
+and as automatic as anything related to computers can hope to be;
+usually, it's no trouble at all. However, for those few times when it
+doesn't behave quite right, I hope I've given you some good tools for
+getting it back in shape. Good luck!
+</p>
+
+<p>
+-- <br>
+<strong>* Ben Okopnik * Editor-in-Chief, Linux Gazette * http://LinuxGazette.NET *</strong>
+</p>
+<hr>
+
+<p>
+[Kapil Hari Paranjape] Hello,
+</p>
+
+<pre>
+On Sun, 17 Sep 2006, Benjamin A. Okopnik wrote:
+&gt;
+&gt; The Monthly Troubleshooter: The USB Subsystem
+</pre>
+
+<p>
+In this context you might find the following post interesting.<br>
+<a href="http://www.infodrom.org/~joey/log/?200609102259">http://www.infodrom.org/~joey/log/?200609102259</a><br>
+The rest is out-of-band for the USB subsystem.
+</p>
+
+<p>
+Of course, the question does arise: How will people learn about
+GNU and Linux once everything starts working smoothly? I can
+certainly vouch for the fact that many of the things I learnt about
+computers, I learnt <strong>because</strong> the computer was not doing things the
+way I wanted it to.
+</p>
+
+<pre>
+From Personal Experience:
+
+	There are two types of mathematics books.
+
+        There are those where the author has taken great pains to
+        construct the most illuminating exercises for the student
+        to solve at the end of each chapter.
+
+	... And then there are the books where there are mistakes
+	<strong>in</strong> the text.
+</pre>
+
+<p>
+[Thomas Adam]
+</p>
+
+<pre>
+Kapil Hari Paranjape &lt;kapil at imsc.res.in&gt; wrote:
+&gt; 
+&gt; Of course, the question does arise: How will people learn about
+&gt; GNU and Linux once everything starts working smoothly? I can
+&gt; certainly vouch for the fact that many of the things I learnt about
+&gt; computers, I learnt <strong>because</strong> the computer was not doing things the
+&gt; way I wanted it to.
+</pre>
+
+<p>
+They don't need to worry about that anymore.  With the use of GNOME and
+KDE, all of those worries are hidden behind flashy buttons and dialogue
+windows.
+</p>
+
+<p>
+[Ben Okopnik]
+<p>
+
+<pre>
+Kapil Hari Paranjape wrote:
+&gt; 
+&gt; Of course, the question does arise: How will people learn about
+&gt; GNU and Linux once everything starts working smoothly?
+</pre>
+
+<p>
+Well... as reliable and tough as Linux software tends to be (after it's
+had all the bugs beaten out of it by insane^Whyper-focused^Wdetermined
+users, it doesn't <strong>dare</strong> do anything else), there are still hardware
+failures, new or odd peripherals [1], strange USB configurations, and
+experimentation. The thing that I appreciate about the 'hotplug' system
+in this regard is how <em>open</em> (whodathunk it?) the system is to hacking
+in new bits - that's a <strong>good</strong> piece of design, especially considering
+how byzantine the ins and outs of that system used to be. A kernel-based
+driver with a shell-script "interface" is a very cool idea.
+</p>
+
+<p>
+[1] The first portable MP3 player I had was a Samsung Yepp - an odd
+gadget that looked like a flattened egg and could store something like
+32MB. Someone had written a piece of software that would perform the
+necessary functions for it, but getting it connected to my machine so
+that the software could read it was quite the fraught process. I ended
+up studying the 'hotplug' system (mostly by reading the scripts in
+'/etc/hotplug'), and writing a usermap and a connector script for it,
+both of which went into '/etc/hotplug/usb':
+</p>
+
+<p>
+(yepp.usermap)
+</p>
+
+<pre class="code">
+# usb module         match_flags idVendor idProduct bcdDevice_lo bcdDevice_hi bDeviceClass bDeviceSubClass bDeviceProtocol bInterfaceClass bInterfaceSubClass bInterfaceProtocol driver_info
+yepp                 0x0003      0x04e8   0x5a03    0x0000       0x0000       0x00         0x00            0x00            0x00            0x00               0x00               0x00000000
+</pre>
+
+<p>
+(yepp)
+</p>
+
+<pre class="code">
+#!/bin/sh
+. /etc/hotplug/hotplug.functions
+mesg setting permissions of $DEVICE
+chgrp staff $DEVICE
+chmod g+w $DEVICE
+</pre>
+The info for the usermap came from the USBFS device descriptions, as I
+mentioned in the article. From then on, all I ever had to do was plug
+the Yepp's cable into a USB port and fire up the software.
+</p>
+
+<pre>
+&gt; I can
+&gt; certainly vouch for the fact that many of the things I learnt about
+&gt; computers, I learnt <strong>because</strong> the computer was not doing things the
+&gt; way I wanted it to.
+</pre>
+
+<p>
+[nod] That's exactly what I'm trying to replicate in the Monthly
+Troubleshooter series - the (fortunately) rare bits of experience that I
+hope our readers will never run into, but will now have some clues on
+handling if they ever do.
+</p>
+
+<p>
+I'm also hoping that our readers who <em>have</em> successfully dealt with
+problems in the various Linux subsystems, especially if it's happened more
+than once (I am, of course, including everyone on this list) will write us
+at <a
+href="mailto:tag@lists.linuxgazette.net">tag@lists.linuxgazette.net</a> and
+tell us about their solutions - preferably including the words "Monthly
+Troubleshooter:" in the subject.  I really liked the discussion that
+happened around the printer topic because other people had included their
+experiences; as a result, I think that a lot of people will benefit from
+that one.
+</p>
+
+
+<p>
+<pre>
+&gt; From Personal Experience:
+&gt; 
+&gt; 	There are two types of mathematics books.
+&gt; 
+&gt;         There are those where the author has taken great pains to
+&gt;         construct the most illuminating exercises for the student
+&gt;         to solve at the end of each chapter.
+&gt; 
+&gt; 	... And then there are the books where there are mistakes
+&gt; 	<strong>in</strong> the text.
+</pre>
+</p>
+
+<p>
+[chuckle] Both types can be very educational, although in somewhat
+different ways; the second type may require a brick wall and a strong
+forehead. On the other hand, it does have the benefit (which the first
+type lacks) of instilling the idea of checking <em>everything</em> - and that
+even the reference material could be wrong, which is a lesson that can
+come at a high cost if not learned early on.
+<br>
+<a href="http://www.readbookonline.net/readOnLine/2437/">http://www.readbookonline.net/readOnLine/2437/</a>
+</p>
+
+
+<p>
+[Martin Hooper]
+</p>
+
+<pre>
+On 20/09/2006 Benjamin A. Okopnik wrote:
+&gt; 
+&gt; <a href="http://www.readbookonline.net/readOnLine/2437/">http://www.readbookonline.net/readOnLine/2437/</a>
+</pre>
+
+<p>
+I don't know if anyone else is using Firefox to view that page 
+but it doesn't work.
+</p>
+
+<p>
+I'm guessing that if I use IE then it would...
+</p>
+
+
+<p>
+[Ben Okopnik]
+</p>
+
+<pre>
+Martin Hooper wrote:
+&gt; On 20/09/2006 Benjamin A. Okopnik wrote:
+&gt; 
+&gt; &gt; <a href="http://www.readbookonline.net/readOnLine/2437/">http://www.readbookonline.net/readOnLine/2437/</a>
+&gt; 
+&gt; I don't know if anyone else is using Firefox to view that page 
+&gt; but it doesn't work.
+</pre>
+
+<p>
+Works fine in Mozilla, Firefox, dillo, w3m, and Lynx.
+</p>
+
+<pre>
+ben@Fenrir:~$ mozilla-suite -v
+Mozilla 1.7.13, Copyright (c) 2003-2004 mozilla.org, build 2006080919
+ben@Fenrir:~$ firefox -v
+Mozilla Firefox 1.5.0.6, Copyright (c) 1998 - 2006 mozilla.org
+ben@Fenrir:~$ dillo -v
+Dillo 0.8.5-i18n-misc
+</pre>
+
+<pre>
+&gt; I'm guessing that if I use IE then it would...
+</pre>
+
+<p>
+Have you tried scrolling down? The text doesn't start until well down
+the page.
+</p>
+
+<p>
+[Martin Hooper]
+</p>
+
+<pre>
+Benjamin A. Okopnik wrote:
+&gt; Have you tried scrolling down? The text doesn't start until well down
+&gt; the page.
+</pre>
+
+<p>
+Ah yes - Got there now!! Just that there's a lot of white space 
+between the top of the page and the content.. ;)
+</p>
+
+
+
+<p>
+[Ben Okopnik]
+</p>
+
+<pre>
+On Wed, Sep 20, 2006 at 01:41:27PM +0100, Thomas Adam wrote:
+&gt; Kapil Hari Paranjape &lt;kapil at imsc.res.in&gt; wrote:
+&gt; &gt; 
+&gt; &gt; Of course, the question does arise: How will people learn about
+&gt; &gt; GNU and Linux once everything starts working smoothly? I can
+&gt; &gt; certainly vouch for the fact that many of the things I learnt about
+&gt; &gt; computers, I learnt <strong>because</strong> the computer was not doing things the
+&gt; &gt; way I wanted it to.
+&gt; 
+&gt; They don't need to worry about that anymore.  With the use of GNOME and
+&gt; KDE, all of those worries are hidden behind flashy buttons and dialogue
+&gt; windows.
+</pre>
+
+<p>
+Wind0ws? Did somebody just mention Wind0ws? <img src="../gx/smile.png" alt=":)">
+</p>
+
+<p>
+In my opinion, KDE and Gnome are very nice tools... but the intended use
+for those tools has nothing to do with administering or maintaining
+Linux. It has to do with easing people from the Wind0ws world past the
+oh-so-terrifying idea that another OS will slit their throats, rape
+their Chihuahuas, and run away to Monaco with their money - and into
+using the same applications in pretty much the same way as they always
+have, marketing hype to the contrary notwithstanding.
+</p>
+
+<p>
+It's possible to debate the long-term usefulness of this approach. I,
+for example, have strong reservations about it maintaining the
+irresponsible mindset that is trained into many Wind0ws users by the
+shiny, glitzy interface ("just put gas into it, and leave Complicated
+Stuff like checking the oil to the professional mechanics!") - this is
+what allows viruses, etc. to propagate - but there are many people whose
+only reason for switching to Linux was the ability to "keep doing the
+same thing as before". Perhaps the question is, would it be better to
+have a huge slew of ignorant users on vulnerability-riddled platforms,
+or to have them using an OS which is well-designed and stable? The
+concerns and the answers regarding the uses of KDE, etc. are not
+mutually exclusive, but rather orthogonal.
+</p>
+
+<p>
+[Thomas Adam]
+</p>
+
+<pre>
+"Benjamin A. Okopnik" &lt;ben at linuxgazette.net&gt; wrote:
+&gt; In my opinion, KDE and Gnome are very nice tools... but the intended
+&gt; use for those tools has nothing to do with administering or
+&gt; maintaining Linux. It has to do with easing people from the Wind0ws
+&gt; world past the oh-so-terrifying idea that another OS will slit their
+&gt; throats, rape their Chihuahuas, and run away to Monaco with their
+&gt; money - and into using the same applications in pretty much the same
+&gt; way as they always have, marketing hype to the contrary
+&gt; notwithstanding.
+</pre>
+
+<p>
+That is as maybe -- and whether or not KDE and GNOME <strong>are</strong> out on a
+mission to wean people using Windows to Linux, the fact remains that
+with GNOME (especially in Ubuntu, for example), the de facto
+functionality <strong>is</strong> to automount and run Nautilus for any device that
+you can shove into one of the many orifices your computer comes with
+nowadays; USB included. :P
+</p>
+
+<p>
+Whilst that could be deemed appropriate for someone new to Linux, it
+could also be considered one of convenience for the more experienced
+user.  Of course, what it doesn't do is allow you to easily see what is
+happening behind the scenes.  Maybe in some instances this is a good
+thing; I am not sure whether it is or not at the moment.  
+</p>
+
+<p>
+But the whole USB subsystem is getting much better than it used to be.
+By that, I really mean hotplug.  It used to be an abomination a few
+years ago; using some form of black magic (tm) to somehow select the
+devices, etc.  But it is by no means perfect.  I think one of the
+biggest issues that throws people is the lack of consistency between
+the device mappings between unplugging and replugging the devices --
+especially if it is a mass-storage device (c.f. /dev/sda1, /dev/sda2,
+etc.)  This gets slightly better if you're one of these people who
+subscribes to the whole "udev" experience.  But as I am known for
+making my views all too clear about why I hate udev, I do not use
+it.  :P
+</p>
+
+<pre>
+&gt; It's possible to debate the long-term usefulness of this approach. I,
+&gt; for example, have strong reservations about it maintaining the
+&gt; irresponsible mindset that is trained into many Wind0ws users by the
+&gt; shiny, glitzy interface ("just put gas into it, and leave Complicated
+&gt; Stuff like checking the oil to the professional mechanics!") - this is
+&gt; what allows viruses, etc. to propagate - but there are many people
+&gt; whose only reason for switching to Linux was the ability to "keep
+&gt; doing the same thing as before". Perhaps the question is, would it be
+</pre>
+
+<p>
+I'm not going to rehash this one -- around issue #96 onwards I
+published several exchanges like the one here for 'Windows Defectors'.
+So I'll point any readers to those.  Plus it saves me typing.  <img src="../gx/smile.png" alt=":)">
+</p>
+
+<p>
+[Pedro Fraile P&eacute;rez] I am running Ubuntu Dapper here, and the USB subsystem
+works as is to be expected, only the package 'hotplug' does not exist any
+more. In fact, it is not to be found among the repositories. I remember I
+was confused for quite some time when I upgraded from Breezy, and found out
+that most of my /etc/hotplug* was gone, there was no /sbin/hotplug, and
+some things were not working any more ... until I (correctly) installed
+udev. Your message has finally impulsed me to try to find out for sure what
+happened, and the answer seems to lie withing these threads (please correct
+me if I am wrong)
+</p>
+
+<p>
+<a href="http://lists.debian.org/debian-devel/2005/08/msg01454.html">http://lists.debian.org/debian-devel/2005/08/msg01454.html</a><br>
+<a href="http://lists.debian.org/debian-devel/2005/09/msg00732.html">http://lists.debian.org/debian-devel/2005/09/msg00732.html</a>
+</p>
+
+<p>
+One thing I am still missing is the knowledge on how to troubleshoot
+the combination udev / hal / sysfs (Does hal has something to do with
+the other two?). I have minor glitches with a couple of things: an USB
+stick that is automounted on a back slot of a Dell box, but not on a
+front one - and no hardware problem here, for sure -, or a DVD writer
+that takes all the /dev/{cdr*,dvd*} symlinks, instead of leaving
+the /dev/cdrom to the other CD reader. In the all days, I would have
+modified some script under /etc/hotplug.d/ to log some information on a
+temporary file, but I do not know of a similar strategy with udev. I
+have to admit that I have not invested tons of time on it though ...
+</p>
+
+<pre>
+&gt; Something that comes in very useful when troubleshooting USB is the
+&gt; 'usbfs' virtual file system. To get access to it, compile this option
+&gt; into the kernel (CONFIG_USB_DEVICEFS=y) and list it in
+&gt; '/etc/fstab' (the relevant line reads "none /proc/bus/usb usbfs
+&gt; noauto 0 0", and it is loaded by the kernel when the USB subsystem is
+&gt; detected.) 
+</pre>
+
+<p>
+No usbfs entry in my /etc/fstab either, but procbususb
+gets mounted on /proc/bus/usb at boot anyway ...
+</p>
+
+<pre>
+&gt; Assuming that you have your "/etc/fstab" properly configured - i.e.,
+&gt; you have entries that look something like this:
+&gt; 
+&gt; ``
+&gt; ben@Fenrir:~$ grep sd /etc/fstab
+&gt; /dev/sda   /mnt/sda   vfat  user,noauto,gid=103,rw,fmask=113   0   0
+&gt; /dev/sda1  /mnt/sda1  vfat  user,noauto,gid=103,rw,fmask=113   0   0
+&gt; /dev/sdb   /mnt/sdb   vfat  user,noauto,gid=103,rw,fmask=113   0   0
+&gt; /dev/sdb1  /mnt/sdb1  vfat  user,noauto,gid=103,rw,fmask=113   0   0
+&gt; /dev/sdc   /mnt/sdc   vfat  user,noauto,gid=103,rw,fmask=113   0   0
+</pre>
+
+<p>
+Another difference here is the use of 'pmount'. From 'aptitude show
+pmount':
+</p>
+
+<pre>
+	Description: mount removable devices as normal user
+</pre>
+
+<p>
+The net result being that (under gnome, at least) any removable media
+gets mounted on an ad-hoc created /media/whatever with the right
+user permissions, without any entry in fstab. Cannot say I dislike
+it ...
+</p>
+
+
+<p>
+[Ben Okopnik]
+</p>
+
+<pre>
+On Thu, Sep 21, 2006 at 08:58:33AM +0100, Thomas Adam wrote:
+&gt; "Benjamin A. Okopnik" &lt;ben at linuxgazette.net&gt; wrote:
+&gt; &gt; In my opinion, KDE and Gnome are very nice tools... but the intended
+&gt; &gt; use for those tools has nothing to do with administering or
+&gt; &gt; maintaining Linux. It has to do with easing people from the Wind0ws
+&gt; &gt; world past the oh-so-terrifying idea that another OS will slit their
+&gt; &gt; throats, rape their Chihuahuas, and run away to Monaco with their
+&gt; &gt; money - and into using the same applications in pretty much the same
+&gt; &gt; way as they always have, marketing hype to the contrary
+&gt; &gt; notwithstanding.
+&gt; 
+&gt; That is as maybe -- and whether or not KDE and GNOME <strong>are</strong> out on a
+&gt; mission to wean people using Windows to Linux, the fact remains that
+&gt; with GNOME (especially in Ubuntu, for example), the de facto
+&gt; functionality <strong>is</strong> to automount and run Nautilus for any device that
+&gt; you can shove into one of the many orifices your computer comes with
+&gt; nowadays; USB included.  :P
+</pre>
+
+<p>
+I'll have to install Gnome and try shoving a screwdriver into the fan
+vent. The mounting procedure ought to be interesting, to say the least.
+<img src="../gx/smile.png" alt=":)">
+</p>
+
+<pre>
+&gt; I think one of the
+&gt; biggest issues that throws people is the lack of consistency between
+&gt; the device mappings between unplugging and replugging the devices --
+&gt; especially if it is a mass-storage device (c.f. /dev/sda1, /dev/sda2,
+&gt; etc.)
+</pre>
+
+<p>
+Really? I actually have symlinks in my '/mnt' that are hard-wired to
+specific devices:
+</p>
+
+<pre class="code">
+r!ls -FAlS /mnt
+total 36
+drwxrwxr-x 2 root staff 4096 2005-11-22 16:19 hda1/
+drwxr-xr-x 2 root root  4096 2005-11-22 16:09 hdc/
+drwxr-xr-x 2 root root  4096 2005-11-22 16:09 sda/
+drwxr-xr-x 2 root root  4096 2005-11-22 16:09 sda1/
+drwxr-xr-x 2 root root  4096 2005-11-22 16:09 sdb/
+drwxr-xr-x 2 root root  4096 2005-11-22 16:09 sdb1/
+drwxr-xr-x 2 root root  4096 2006-04-26 13:28 sdc/
+drwxr-xr-x 2 root root  4096 2005-11-22 16:09 sr0/
+drwxr-xr-x 2 root root  4096 2004-05-10 20:26 test/
+lrwxrwxrwx 1 root root     4 2005-11-22 16:10 olympus -&gt; sda1/
+lrwxrwxrwx 1 root root     4 2005-11-22 16:19 puppy -&gt; hda1/
+lrwxrwxrwx 1 root root     4 2005-11-22 16:12 sdcard -&gt; sdb1/
+lrwxr-xr-x 1 root root     3 2005-12-08 12:31 dvd -&gt; sr0/
+lrwxrwxrwx 1 root root     3 2005-11-22 16:11 dvd-scsi -&gt; sr0/
+lrwxrwxrwx 1 root root     3 2005-11-22 16:11 flash -&gt; sdb/
+</pre>
+
+<p>
+'olympus' (my digital camera), 'sdcard' (the SD card from my Palm
+Pilot), and 'flash' (my USB thumb drive) are absolutely consistent in
+the device names that they get assigned to.
+</p>
+
+<pre>
+&gt; This gets slightly better if you're one of these people who
+&gt; subscribes to the whole "udev" experience.  But as I am known for
+&gt; making my views all too clear about why I hate udev, I do not use
+&gt; it.  :P
+</pre>
+
+<p>
+I've tried 'udev' at one point, and gave up on it - I don't recall why.
+Perhaps I caught something from you via email. <img src="../gx/smile.png" alt=":)">
+</p>
+
+<p>
+[Kapil Hari Paranjape]
+</p>
+
+<pre>
+On Thu, 21 Sep 2006, Pedro Fraile P&eacute;rez wrote:
+&gt; El Sun, 17 Sep 2006 21:47:54 -0400
+&gt; "Benjamin A. Okopnik" &lt;ben at linuxgazette.net&gt; wrote:
+&gt; &gt; 
+&gt; &gt; The Monthly Troubleshooter: The USB Subsystem
+&gt; &gt; =============================================
+&gt; &gt; 
+&gt; ... until I (correctly)
+&gt; installed udev. Your message has finally impulsed me to try to find out
+&gt; for sure what happened, and the answer seems to lie withing these
+&gt; threads (please correct me if I am wrong)
+&gt; 
+&gt; <a href="http://lists.debian.org/debian-devel/2005/08/msg01454.html">http://lists.debian.org/debian-devel/2005/08/msg01454.html</a>
+&gt; <a href="http://lists.debian.org/debian-devel/2005/09/msg00732.html">http://lists.debian.org/debian-devel/2005/09/msg00732.html</a>
+</pre>
+
+<p>
+Indeed. This is a problem for all those udev-haters out there <img src="../gx/smile.png" alt=":)">
+The udev and hotplug systems have been merged in Debian sid/etch and
+also in Ubuntu (thank or revile Marco D'Itri as per your preference). 
+</p>
+
+<pre>
+&gt; One thing I am still missing is the knowledge on how to troubleshoot
+&gt; the combination udev / hal / sysfs (Does hal has something to do with
+&gt; the other two?).
+</pre>
+
+<p>
+Absolutely. HAL is the AI in the system <img src="../gx/smile.png" alt=":)">. To quote from the udev FAQ:
+</p>
+
+<pre>
+Q: Can I use udev to automount a USB device when I connect it?
+A: Technically, yes, but udev is not intended for this. All major distributions
+   use HAL (<a href="http://freedesktop.org/wiki/Software_2fhal">http://freedesktop.org/wiki/Software_2fhal</a>) for this, which also
+   watches devices with removable media and integrates the Desktop environment.
+</pre>
+
+<p>
+   Alternatively, it is easy to add the following to fstab:<br>
+     /dev/disk/by-label/PENDRIVE /media/PENDRIVE  vfat user,noauto 0 0
+</p>
+
+<p>
+   This means that users can access the device with:<br>
+     $mount /media/PENDRIVE<br>
+   and doen't have to be root, but will get full permissions on the device.
+   Using the persistent disk links (label, uuid) will always catch the
+   same device regardless of the actual kernel name.
+</p>
+
+<pre>
+&gt; I have minor glitches with a couple of things: an USB
+&gt; stick that is automounted on a back slot of a Dell box, but not on a
+&gt; front one - and no hardware problem here, for sure -,
+</pre>
+
+<p>
+Actually this <strong>is</strong> probably a hardware problem as I discovered.
+</p>
+
+<p>
+The problem is that there are two types of USB ports. Those that
+supply suficient power and those that do not. If you have a device
+which requires power to be supplied through the USB socket and you
+connect to a USB port that does not supply power (or does not supply
+enough of it) then the device will not work.
+</p>
+
+<p>
+I found this out when I was trying to connect an external USB disk to
+a Mac PowerBook (inappropriately named!). It turns out that the
+PowerBook only has low/no power USB sockets and so the disk needs
+external power in order to work (the disk happily had a socket for
+such an adapter). In the process I also discovered why this disk had
+ben behaving exactly as you described with another Intel-based
+machine that had Front and Back USB ports.
+</p>
+
+<pre>
+&gt; In the all days, I would have
+&gt; modified some script under /etc/hotplug.d/ to log some information on a
+&gt; temporary file, but I do not know of a similar strategy with udev. I
+&gt; have to admit that I have not invested tons of time on it though ...
+</pre>
+
+<p>
+Again quoting from the udev NEWS.Debian:
+</p>
+
+<pre>
+  Scripts in /etc/dev.d/ and /etc/hotplug.d/ are not supported
+  anymore unless the hotplugd.rules rules file is manually enabled.
+     -- Marco d'Itri &lt;md at linux.it&gt;  Thu, 17 Aug 2006 14:40:34 +0200
+</pre>
+
+<p>
+So if you have a recent sid/etch then you <strong>can</strong> enable the scripts
+but its going to take some work.
+</p>
+
+<pre>
+&gt; The net result being that (under gnome, at least) any removable media
+&gt; gets mounted on an ad-hoc created /media/whatever with the right
+&gt; user permissions, without any entry in fstab. Cannot say I dislike
+&gt; it ...
+</pre>
+
+<p>
+I think the problem is what-if. What if there is a device that I do
+not want automounted? There is perhaps not an easy way to prevent
+that from happening.
+</p>
+
+
+<p>
+[Rick Moen]
+</p>
+
+<pre>
+Quoting Kapil Hari Paranjape (kapil at imsc.res.in):
+&gt; Absolutely. HAL is the AI in the system <img src="../gx/smile.png" alt=":)">. To quote from the udev FAQ:
+&gt; 
+&gt; Q: Can I use udev to automount a USB device when I connect it?
+&gt; A: Technically, yes, but udev is not intended for this. All major
+&gt; distributions use HAL (<a href="http://freedesktop.org/wiki/Software_2fhal">http://freedesktop.org/wiki/Software_2fhal</a>) for
+&gt; this, which also watches devices with removable media and integrates
+&gt; the Desktop environment.
+</pre>
+
+<p>
+Ugh.  That's repulsive -- if only because of the dependency on glib 
+(about which it's said "this dep will be dropped soon").  Something with
+the smell of GNOME about it has no business getting anywhere near my
+kernels.
+</p>
+
+
+<p>
+[Kapil Hari Paranjape]
+</p>
+
+<pre>
+On Thu, 21 Sep 2006, Rick Moen wrote:
+&gt; 
+&gt; Ugh.  That's repulsive -- if only because of the dependency on glib 
+&gt; (about which it's said "this dep will be dropped soon").  Something with
+&gt; the smell of GNOME about it has no business getting anywhere near my
+&gt; kernels.
+</pre>
+</p>
+
+<p>
+One alternative is "usbmount" which specifically indicates:
+</p>
+
+<pre>
+	USBmount is intended as a lightweight solution which is
+	independent of a desktop environment. Users which would
+	like an icon to appear when an USB device is plugged in
+	should use the pmount and hal packages instead.
+</pre>
+
+<p>
+There is also the more general purpose "am-utils" but using this when
+one only wants to mounts USB sticks is perhaps excessive.
+</p>
+
+
+<p>
+[Pedro Fraile P&eacute;rez]
+</p>
+
+<pre>
+Kapil Hari Paranjape &lt;kapil at imsc.res.in&gt; escribi?:
+&gt; 
+&gt; On Thu, 21 Sep 2006, Pedro Fraile P?rez wrote:
+&gt; 
+&gt; &gt; I have minor glitches with a couple of things: an USB
+&gt; &gt; stick that is automounted on a back slot of a Dell box, but not on a
+&gt; &gt; front one - and no hardware problem here, for sure -,
+&gt; 
+&gt; Actually this <strong>is</strong> probably a hardware problem as I discovered.
+&gt; 
+&gt; The problem is that there are two types of USB ports. Those that
+&gt; supply suficient power and those that do not. If you have a device
+&gt; which requires power to be supplied through the USB socket and you
+&gt; connect to a USB port that does not supply power (or does not supply
+&gt; enough of it) then the device will not work.
+</pre>
+
+<p>
+Hello Kapil,
+</p>
+
+<p>
+That's a good piece of info, but I am afraid it is not my case. Under
+several versions of Windows, the memory stick is mounted both in the
+front and back slots, so there must be some kind of driver issue here.
+</p>
+
+<pre>
+&gt; &gt; The net result being that (under gnome, at least) any removable
+&gt; &gt; media gets mounted on an ad-hoc created /media/whatever with the
+&gt; &gt; right user permissions, without any entry in fstab. Cannot say I
+&gt; &gt; dislike it ...
+&gt; 
+&gt; I think the problem is what-if. What if there is a device that I do
+&gt; not want automounted? There is perhaps not an easy way to prevent
+&gt; that from happening.
+</pre>
+
+<p>
+Yes, I agree. You can disable the automounting process for all
+removable devices, but I have not yet found out how you can do it on a
+per-device basis.
+</p>
+
+
+<p>
+[Kapil Hari Paranjape]
+</p>
+
+<pre>
+On Fri, 22 Sep 2006, Kapil Hari Paranjape wrote: (quoting from the udev FAQ)
+&gt;    Alternatively, it is easy to add the following to fstab:
+&gt;      /dev/disk/by-label/PENDRIVE /media/PENDRIVE  vfat user,noauto 0 0
+&gt; 
+&gt;    This means that users can access the device with:
+&gt;      $mount /media/PENDRIVE
+&gt;    and doen't have to be root, but will get full permissions on the device.
+&gt;    Using the persistent disk links (label, uuid) will always catch the
+&gt;    same device regardless of the actual kernel name.
+</pre>
+
+<p>
+These instructions seem to work ...
+	but you don't need udev to make this work!
+</p>
+
+<p>
+When you make the file system give it a "label". Most filesystem
+types (even DOS and Windows types like FAT and VFAT) allow you to
+set a label. You can then mount the system by
+</p>
+
+<pre>
+   	mount -L &lt;your label&gt; &lt;mount point&gt;
+</pre>
+
+<p>
+Alternatively your fstab could contain entries like:
+</p>
+<pre>
+	LABEL=DOST  /media/DOST  vfat  rw,user,noauto  0  0
+	LABEL=LEAN  /media/LEAN  ext2  rw,user,noauto  0  0
+</pre>
+
+<p>
+You can then mount the disks (as a user) with a command like:<br>
+	mount /media/DOST
+</p>
+
+<p>
+This doesn't work for those cameras that appear as USB memory devices
+to your computer unless the manufacturer is kind enough to give the
+device a label when it is formatted.
+</p>
+
+</p>
+
+<p>
+[Martin Hooper]
+</p>
+
+<pre>
+On 29/09/2006 Kapil Hari Paranjape wrote:
+&gt;        mount -L &lt;your label&gt; &lt;mount point&gt;
+&gt; 
+&gt; Alternatively your fstab could contain entries like:
+&gt;     LABEL=DOST  /media/DOST  vfat  rw,user,noauto  0  0
+&gt;     LABEL=LEAN  /media/LEAN  ext2  rw,user,noauto  0  0
+</pre>
+
+<p>
+How do you create labels then??  I guess its an option to mkfs...
+</p>
+
+<p>
+[Ben Okopnik]
+</p>
+
+<pre>
+On Thu, Sep 21, 2006 at 09:16:57PM +0200, Pedro Fraile P?rez wrote:
+&gt; 
+&gt; One thing I am still missing is the knowledge on how to troubleshoot
+&gt; the combination udev / hal / sysfs (Does hal has something to do with
+&gt; the other two?).
+</pre>
+
+<p>
+Hmmm, you've got me; I'm still using hotplug. Anybody else care to comment?
+</p>
+
+<pre>
+&gt; &gt; Something that comes in very useful when troubleshooting USB is the
+&gt; &gt; 'usbfs' virtual file system. To get access to it, compile this option
+&gt; &gt; into the kernel (CONFIG_USB_DEVICEFS=y) and list it in
+&gt; &gt; '/etc/fstab' (the relevant line reads "none /proc/bus/usb usbfs
+&gt; &gt; noauto 0 0", and it is loaded by the kernel when the USB subsystem is
+&gt; &gt; detected.) 
+&gt; 
+&gt; No usbfs entry in my /etc/fstab either, but procbususb
+&gt; gets mounted on /proc/bus/usb at boot anyway ...
+</pre>
+
+<p>
+Actually, given that the entry in my '/etc/fstab' says "noauto", I was
+wondering about that. I used to mount it manually, but looking at it
+now, it's clearly being mounted by the kernel - perhaps when USB support
+gets loaded? It would have made sense to automate it, since it's such a
+useful gadget. Looking at 'dmesg' output, there's nothing noting it... I
+suspect that '/etc/fstab' line is no longer necessary.
+</p>
+
+<p>
+[Thomas Adam]
+</p>
+
+<pre>
+Benjamin A. Okopnik &lt;ben at linuxgazette.net&gt; wrote:
+&gt; On Thu, Sep 21, 2006 at 09:16:57PM +0200, Pedro Fraile P?rez wrote:
+&gt; &gt; 
+&gt; &gt; One thing I am still missing is the knowledge on how to troubleshoot
+&gt; &gt; the combination udev / hal / sysfs (Does hal has something to do
+&gt; &gt; with the other two?).
+&gt; 
+&gt; Hmmm, you've got me; I'm still using hotplug. Anybody else care to
+&gt; comment?
+</pre>
+
+<p>
+HAL works by abstraction.  Essentially by the time HAL kicks in, it
+will have already realised what the interface is that $DEVICE is
+using.  So of course before that can happen, hotplug must have been
+working to recognise the device.  It has to load the driver, manage
+what's in /dev, and provide some mechanism of accessing it.
+</p>
+
+<p>
+It's mounted, which of course means that applications such as GNOME can
+then shunt a nice icon on its desktop for users to use.
+</p>
+
+
+<p>
+[Kapil Hari Paranjape]
+</p>
+
+<pre>
+On Fri, 29 Sep 2006, Martin Hooper wrote:
+&gt; On Fri, 29 Sep 2006, Kapil Hari Paranjape wrote:
+&gt; &gt; When you make the file system give it a "label". Most filesystem
+&gt; &gt; types (even DOS and Windows types like FAT and VFAT) allow you to
+&gt; &gt; set a label.
+&gt; How do you create labels then??  I guess its an option to mkfs...
+</pre>
+</p>
+
+<p>
+To make this more clear:
+</p>
+<pre>
+	mkdosfs -n &lt;your label&gt; &lt;other options&gt;
+	mke2fs -L &lt;your label&gt; &lt;other options&gt;
+</pre>
+<p>
+Perhaps those who use other file systems can pitch in with
+what is required for xfs, jfs, reiserfs, ...
+</p>
+
+<p>
+[John Karns]
+</p>
+
+<pre>
+On Sat, 30 Sep 2006, Kapil Hari Paranjape wrote:
+&gt; On Fri, 29 Sep 2006, Kapil Hari Paranjape wrote:
+&gt;&gt; When you make the file system give it a "label". Most filesystem
+&gt;&gt; types (even DOS and Windows types like FAT and VFAT) allow you to
+&gt;&gt; set a label.
+&gt;
+&gt; To make this more clear:
+&gt; 	mkdosfs -n &lt;your label&gt; &lt;other options&gt;
+&gt; 	mke2fs -L &lt;your label&gt; &lt;other options&gt;
+&gt; Perhaps those who use other file systems can pitch in with
+&gt; what is required for xfs, jfs, reiserfs, ...
+</pre>
+
+<p>
+A quick check of the man pages for the filesystems mentioned above shows
+that the convention is mkfs.&lt;type&gt; "-L &lt;label&gt;" (for xfs, jfs and
+reiserfs4).  The older reiserfs (pre-version 4) is an exception and calls
+for the flag as lowercase "-l &lt;label&gt;".
+</p>
+
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:133/tag.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<hr>
+<p>
+<img align="left" alt="Bio picture" src="../gx/2002/note.png" class="bio">
+</p>
+
+<em>
+<p>
+<a href="http://linuxgazette.net/tag/ask-the-gang.html">The Answer Gang</a>
+consists of a group of volunteers at the Linux Gazette. It is the source of
+the Gazette's tech support columns (The Mailbag, 2-Cent Tips, Talkback,
+Followups, etc.) as well as the major contributor to our <a
+href="http://linuxgazette.net/tag/kb.html">KnowledgeBase</a>. To gather
+relevant questions to respond to, we run an open mailing list where anyone
+is welcome to ask their Linux-related questions; we also have a standing
+invitation for people knowledgeable in Linux to join us.
+</p>
+</em>
+
+<br clear="all">
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2006, The Answer Gang. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 133 of Linux Gazette, December 2006
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="saha.html" >&lt;-- prev</A> | <A HREF="collinge.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/mailman/listinfo/">Mailing Lists</a>
+<a href="../jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">December 2006 (#133)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

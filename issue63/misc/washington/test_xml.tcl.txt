@@ -1,0 +1,168 @@
+# return 1 (true) if strings are equal
+proc string_equal_p {str1 str2} {
+    if {[string compare $str1 $str2] == 0} {
+	return 1
+    }
+    return 0
+}
+
+# return 1 (true) if the string empty
+proc empty_string_p {str} {
+    if { [string length $str] == 0 } {
+	return 1
+    } else {
+	return 0
+    }
+}
+
+# stolen from ACS 3x
+# return HTML text that can be inserted into HTML (by
+# qutoing special HTML chars)
+proc ad_quotehtml { arg } {
+    # we have to do & first or we'll hose ourselves with the ones lower down
+    regsub -all & $arg \\&amp\; arg
+    regsub -all \" $arg \\&quot\; arg
+    regsub -all < $arg \\&lt\; arg
+    regsub -all > $arg \\&gt\; arg
+    return $arg
+}
+
+# dump a node of an XML doc
+proc dump_node {node_id level} {
+    set name [ns_xml node name $node_id]
+    set type [ns_xml node type $node_id]
+    set content [ns_xml node getcontent $node_id]
+    if { $level > 0 } {
+	ns_write "<li> "
+    }
+    if { $level == 0 } {
+	ns_write "root node id=$node_id <b>name</b>=<font color=blue>$name</font> "
+    } else {
+	ns_write "node id=$node_id <b>name</b>=<font color=blue>$name</font> "
+    }
+    ns_write "<b>type</b>=<font color=red>$type</font> "
+    # if a node is an ATTRIBUTE I would like to get the names and values of
+    # attributes but it isn't possible. You need to know the name of the
+    # attribute up-front
+    if { ![string_equal_p $type "attribute"] && ![string_equal_p $type "element"] } {
+	ns_write "<b>content</b>=$content\n"
+    }
+}
+
+# recursively dump the tree of an XML doc
+proc dump_tree_rec {children level} {
+    if { $level > 0 } {
+	ns_write "<ul>\n"
+    }
+    foreach child_id $children {
+	dump_node $child_id $level
+	set new_children [ns_xml node children $child_id]
+	if { [llength $new_children] > 0 } {
+	    dump_tree_rec $new_children [expr $level + 1]
+	}
+    }
+    if { $level > 0 } {
+	ns_write "</ul>\n"
+    }
+}
+
+# dump XML document
+proc dump_doc {doc_id} {
+    ns_write "doc id=$doc_id<br>\n"
+    set root_id [ns_xml doc root $doc_id]
+    dump_tree_rec [list $root_id] 0
+}
+
+# return HTML code for the textarea for submitting
+# XML documents
+proc get_form_html_code {} {
+    return "
+<FORM method=POST action=\"test_xml.tcl\">
+Type your XML document here:<p>
+<textarea name=xml_doc cols=80 rows=25>
+</textarea>
+<p>
+<input type=submit>
+</form>
+"
+}
+
+# beginning of the real stuff
+
+set form_data [ns_getform]
+
+# what we'll show if nothing has been provided
+set default_xml_doc "<test version=\"1.0\">this is a <blind>test</blind> of xml <blopper rura=\"hej\">and blopper</blopper>hello<test>and another test</test></test>"
+
+# an example of XML file from linuxtoday.com headlines
+set linuxtoday_xml_doc "<linuxtoday>
+ <story>
+    <title>Kernel Cousin Debian Hurd #73 By Paul Emsley And Zack Brown</title>
+    <url>http://linuxtoday.com/news_story.php3?ltsn=2000-12-28-001-04-OS-DB</url>
+    <time>Dec 28, 2000, 00:23:12</time>
+    <author>marty</author>
+    <topic>Open Source,Debian</topic>
+    <comments>0</comments>
+  </story>
+ <story>
+    <title>Zope 2.2.5 b1 released</title>
+    <url>http://linuxtoday.com/news_story.php3?ltsn=2000-12-27-006-04-OS-SW</url>
+    <time>Dec 27, 2000, 23:45:22</time>
+    <author>marty</author>
+    <topic>Open Source,Software</topic>
+    <comments>0</comments>
+  </story>
+</linuxtoday>
+"
+
+
+# parse either submitted data or default simple example
+# or example of linuxtoday.com XML headlines file
+if { $form_data != "" } {
+    set xml_doc [ns_set get $form_data "xml_doc"]
+    if { $xml_doc == "" } {
+	if { [ns_set get $form_data "show_linuxtoday_p"] == "1" } {
+	    set xml_doc $linuxtoday_xml_doc
+	} else {
+	    set xml_doc $default_xml_doc
+	}
+    }
+} else {
+    set xml_doc $default_xml_doc
+}
+
+# generate HTTP headers
+ns_write "HTTP/1.0 200 OK
+ MIME-Version: 1.0
+ Content-Type: text/html\n\n"
+
+# now generate HTML text of the document
+ns_write "<html>
+<head>
+<title>Test of xml</title>
+</head>
+<body bgcolor=\#ffffff text=\#000000>
+<h2>Testing XML parsing in AOLserver</h2>\n"
+
+if { [catch {set doc_id [ns_xml parse $xml_doc]} err] } {
+    ns_write "There was an error parsing the following XML document: <PRE>\n"
+    ns_write [ad_quotehtml $xml_doc]
+    ns_write "\n</PRE> Error message is: <B> <PRE>\n"
+    ns_write [ad_quotehtml $err]
+    ns_write "\n</PRE></b>"
+    ns_write "</body></html>\n"
+    return
+}
+
+ns_write "The following XML document: <font color=blue><PRE>\n"
+ns_write [ad_quotehtml $xml_doc]
+ns_write "\n</PRE> </font> is represented by the following tree: <p>\n"
+
+dump_doc $doc_id    
+
+ns_write [get_form_html_code]
+
+ns_write "
+</body>
+</html>
+"

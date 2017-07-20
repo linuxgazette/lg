@@ -1,0 +1,258 @@
+#!/bin/bash
+
+# Quick-n-dirty, convert .gz to .bz2 for better compression and recoverability
+#
+# Example:
+#
+# find /mnt/bkps -name \*.gz > ~/rezipp-files.txt && rezip
+# ( Will sort by smallest filesize and automatically skip <50MB .gz files )
+
+# Files:
+#   Uses ~/rezipp-files.txt as input
+#   Creates ~/rezip.log, ~/rezip-files-sorted.txt
+#
+# Depends on external programs:
+#   bzip2, cut, du, grep, gzip, mount, sort, tee
+
+# The PROPER way to kill this exec when it is running, is to press
+#   Ctrl-Z, then ' kill %jobnumber ' -- Example:
+#
+# ^Z
+#[1]+  Stopped                 rezip
+# kill %1
+# [1]+  Terminated              rezip
+# 
+# If you DON'T do it that way, trust me - wacky things can happen.
+#  i.e. it will skip to the next file, and gzip/bzip2 will still be
+#  running in the BG.  Don't use ^C.
+
+# WARNING: If .gz files get deleted that were listed in rezipp-files.txt,
+#  you MUST re-do the "find"; before re-running.
+#  Otherwise, unexpected results may occur.
+
+
+# Time this run started
+estime=`date`
+
+
+# =================
+# User-defined vars
+# =================
+
+# External drive to use -- needs entry in /etc/fstab,
+#  and you must have proper read/write permissions.
+# Sample /etc/fstab entry:
+#
+# /dev/sdb8  /mnt/wdvast  ext3 defaults,noauto,noatime,rw 0 0
+#
+extdrv="/mnt/wdvast"
+mount $extdrv
+
+# Anything less than this size (KB) gets dropped from the to-process list
+skipsize=50000
+
+# Don't overwrite existing .bz2 files in case we had to re-run
+# (Feature put in from hard experience :-/ after several hours of work lost)
+protwork=1
+
+infile=~/rezipp-files.txt
+logfile=~/rezip.log
+sortfile=~/rezip-files-sorted.txt
+
+# ========================
+# End of User-defined vars
+# ========================
+
+
+# Def function(s)
+function rezipp () {
+  f2rz=$1
+  f2rzns=`basename $f2rz .gz`
+# Strip extension and keep basename
+
+# "dirname" is the opposite of basename
+  srcdir=`dirname $f2rz`
+  srcdir2=`echo $srcdir |cut -b 2-`
+# Strip leading slash so we can recreate dir structure on external drv
+
+  logecho "--- Srcdir: $srcdir"
+  logecho "--- Desdir: $extdrv/$srcdir2"
+  logecho "o Converting file "$pfile"/"$tr": "$f2rzns 
+
+  cd $extdrv
+  mkdir -pv $srcdir2
+  cd $srcdir2
+
+  stime=`date`
+  
+  [ "$protwork" -eq "1" ] && if [ -e $f2rzns.bz2 ]; then
+   logecho ' ! Destination .bz2 exists - skipping'
+   return;
+  fi
+  
+# The Main Idea (TM)
+  time gzip -cd $f2rz 2>>$logfile \
+      |bzip2 > $f2rzns.bz2 2>>$logfile
+#  rc=$?
+  [ $? -ne 0 ] && logecho "!!! Job failed."
+# XXX Currently this error checking does not work, if anyone can fix it
+# please email me. :-\
+
+  ntime=`date`
+
+  logecho '+ Start time: '$stime
+  logecho '+ Finishtime: '$ntime
+  logecho '============='
+}
+
+# Echo something to current console AND log
+# Can also handle piped input ( cmd |logecho )
+# Warning: Has trouble echoing '*' even when quoted.
+function logecho () {
+  args=$@
+
+  if [ -z "$args" ]; then 
+    args='tmp'
+
+    while [ 1 ]; do
+      read -e -t2 args
+
+      if [ -n "$args" ]; then
+	 echo $args |tee -a $logfile;
+      else
+  	break;
+      fi
+    done
+
+  else
+    echo $args |tee -a $logfile;
+  fi
+}
+
+
+#=======================================
+# Main code
+#=======================================
+
+# Supply EOF if we don't have it
+chkeof=`grep "EOF" $infile`
+[ -n "$chkeof" ] || echo "EOF" >> $infile
+# If string length >0, continue; otherwise append EOF
+
+logecho '----- '$0' Run started at: '$estime
+
+# ThisRecord; these are the ones we want to keep
+let tr=1
+let thisline=0
+
+echo 'o Reading array...'
+{
+ while read elemt; do
+   let thisline=$thisline+1
+   
+   # Skip comments
+   commentmp=`(echo $elemt |grep -c -e "\#")`
+   test4blank=${elemt//" "/""}
+# Replaces spaces with nulls
+         
+   if [ $commentmp -gt 0 ]; then
+     echo "Found a comment in line "$thisline".  Skipping."
+   elif [ ${#test4blank} -eq 0 ]; then
+     echo "Blank line at "$thisline".  Skipping."
+   elif [ "$elemt" = "EOF" ]; then
+     echo "EOF found in line "$thisline"."
+     break
+   else
+     riptrack[$tr]=$elemt
+     let tr=$tr+1
+   fi
+done
+} < $infile
+# Use file as input to unnamed function
+
+let tr=$tr-1
+logecho '--- '$tr' Files in original Find results.'
+
+
+# Sort by smallest filesize
+> $sortfile
+# (Blank the file)
+
+logecho '--- Sorting files by size...'
+for i in "${riptrack[@]}"; do
+  echo `du $i` >> $sortfile
+done
+
+# Overwrite in-situ
+sort -g $sortfile -o $sortfile
+echo "EOF" >> $sortfile
+
+
+logecho '--- Discarding files that are less than '$skipsize'KB...'
+
+let tr=1
+let drpfls=0
+let thisline=0
+
+# Have to destroy array so we can re-use it
+#riptrack=("reinit")
+unset riptrack[@]
+
+#echo 'o Reading sorted array...'
+{
+ while read elemt; do
+   let thisline=$thisline+1
+   
+   if [ "$elemt" = "EOF" ]; then
+     echo "EOF found in line "$thisline"."
+     break
+   fi
+   
+   field1=`echo $elemt| cut -d' ' -f1`
+   field2=`echo $elemt| cut -d' ' -f2`
+#echo $field1'..'$field2
+   if [ $field1 -lt $skipsize ]; then
+     logecho ' ! Dropped '$field2 
+     let drpfls=$drpfls+1
+   else
+     riptrack[$tr]=$field2
+     let tr=$tr+1
+   fi
+done
+} < $sortfile
+let tr=$tr-1
+
+logecho '--- Total files dropped: '$drpfls
+logecho '--- About to process: '$tr' files. You might want to take a break. :)'
+
+
+# Do it! :)
+pfile=0
+for i in "${riptrack[@]}"; do
+  let pfile=$pfile+1
+# logecho $pfile'..'$i
+  rezipp $i
+done                                            
+
+entime=`date`
+logecho '------- '$0' Run finished at: '$estime' -- '$pfile' files processed.'
+
+exit;
+
+Copyright (C) 2005 and beyond David J Bechtel
+
+This program is free software; you can redistribute it and/or
+modify it under the terms of the GNU General Public License
+as published by the Free Software Foundation; either version 2
+of the License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, write to the Free Software
+Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+
+<a href="http://www.gnu.org/copyleft/gpl.html"> The GNU Copyleft </a><br>

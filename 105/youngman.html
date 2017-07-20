@@ -1,0 +1,615 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Fine-tuning SpamAssassin LG #105</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="seymour.html" >&lt;-- prev</A> | <A HREF="ecol.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Fine-tuning SpamAssassin</h1>
+<p id="by"><b>By <A HREF="../authors/youngman.html">Neil Youngman</A></b></p>
+
+<p>
+<p>
+SpamAssassin, as most of our readers will know, is a popular spam
+classifier on Linux. This article assumes that you already have
+SpamAssassin installed and working. If you are interested in running
+SpamAssassin, but do not yet have it set up, there is a useful introduction at
+<a href="http://linux.org.mt/article/killspam">http://linux.org.mt/article/killspam</a>.
+
+<p>
+When I set up SpamAssassin in Mandrake 9.2, it came very close to picking
+up 100% of my spam. Over time, however, many of the spammers have figured
+out how to fine tune their spam and bypass the default ruleset. I find the
+default setup still picks up at least half the spam, maybe two thirds on a
+good day, but too much leaks through.  If the spammers are tuning their
+messages, I guess the only thing to do is to tune my scoring. There are at
+least 8 possible ways of improving SpamAssassin's hit rate.
+
+<ol>
+  <li>Blacklisting known offenders</li>
+  <li>DNS Blocklists</li>
+  <li>Enable Bayesian filtering</li>
+  <li>Reduce the point threshold for spam</li>
+  <li>Increase the scores on existing rulesets</li>
+  <li>Upgrade SpamAssassin to the latest version</li>
+  <li>Install more rulesets</li>
+  <li>Write your own rulesets</li>
+</ol>
+
+<h3>Configuring SpamAssassin</h3>
+Fine-tuning SpamAssassin is, of course, done by editing the appropriate
+configuration file. If the changes are just for your account, then you edit
+~/.spamassassin/user_prefs. If you are making global changes, they go in
+/etc/mail/spamassassin/local.cf (and require root access.) I strongly
+recommend testing changes in your local configuration before changing the global
+configuration.
+
+<p>
+The options available in your configuration file are listed in <a
+ href="http://spamassassin.org/doc/Mail_SpamAssassin_Conf.html">
+http://spamassassin.org/doc/Mail_SpamAssassin_Conf.html</a>, as well as in
+the relevant manpage (see "man Mail::SpamAssassin::Conf".)
+
+<h3>SpamAssassin's Scoring Mechanism</h3>
+In principle, SpamAssassin's scoring mechanism is simple. There are a
+set of rules for identifying spam, scores associated with those rules,
+and an overall threshold score. If the total score for all the rules
+triggered by a message reaches the threshold, that message is marked as
+spam.
+
+<p>
+Most of the complexity is in the rules, but it's rarely necessary to
+roll your own SpamAssassin rules. Adjusting the threshold and the
+scores associated with existing rules is much simpler and can be very
+effective. If that's not enough, there are also additional
+rulesets available to download. Of course, if you think writing you
+own rulesets sounds like a fun thing to do, I've included a pointer
+<a href="#rules">below</a> to get you started.
+
+<p>
+Most of the rules are listed in <a
+href="http://spamassassin.org/tests.html">http://spamassassin.org/tests.html</a> 
+along with their associated scores, but the scores listed did not match those in
+my configuration files. They were probably from a newer release. You
+will probably find the default scores for your configuration in
+/usr/share/spamassassin/50_scores.cf, where there are 4 scores
+associated with each rule. The rule chosen depends on whether Bayesian
+analysis (see below) and network tests are enabled. Where only one
+score is supplied, that score is always used. Other options, such as
+relative scores, are described in the aforementioned documentation.
+
+<h3>False positives, whitelisting, and blacklisting</h3>
+No spam filter gets it right all the time, and there are 2 types of
+errors. False negatives are bad, because that means a spam was missed
+and allowed to slip through the net. False positives, however, are worse,
+because you may miss something you should have seen, which has been
+tagged as spam. No spam filter should ever be configured to automatically
+delete email without human review. Spam should always be dropped into a
+quarantine area, which should be reviewed at frequent intervals to ensure
+that genuine emails aren't missed.
+
+<p>
+Regular reviews are even more important as you tune your settings. No
+matter how careful you are, there is no guarantee that any change to the
+settings won't cause some collateral damage.  Even with the default setup,
+you will see some false positives, e.g. newsletters from <a
+href="http://www.nationaltrust.org.uk/">The National Trust</a> and <a
+href="http://www.roh.org.uk">The Royal Opera House</a> get marked as spam,
+so a key part of managing your spam - especially in the beginning -
+involves reviewing the hits and determine which senders you need to
+"whitelist".
+
+<p>
+Whitelisting is usually done with the settings <code>whitelist_from</code> and
+<code>whitelist_to</code>. These can be repeated as many times as you like. Simple
+<em>globbing</em> patterns (see "man bash" and search for "Pattern
+Matching" for a description) are used to specify wildcard matches. E.g.,
+'?' matches a single character and '*' matches any number of characters
+(including zero.) <code>whitelist_from</code> and <code>whitelist_to</code>
+subtract 100 points from the score, making it very rare for matching emails
+to reach the spam threshold.
+
+<pre>
+whitelist_from nice.but_clueless@example.net
+whitelist_from *@importantclient.example.com
+</pre>
+
+Also available are options <code>more_spam_to</code>,
+<code>all_spam_to</code>. According to the documentation, &quot;There are
+three levels of To-whitelisting, <code>whitelist_to, more_spam_to and
+all_spam_to</code>. Users in the first level may still get some spammish
+mails blocked, but users in<code>all_spam_to</code> should never get mail
+blocked.&quot;
+
+<p>
+You should consider using <code>all_spam_to</code> for postmaster
+addresses. It's very annoying if someone tries to report a spam and has
+their report blocked or rejected as spam.
+
+<p>
+You may sometimes see a large number of emails slipping through from a
+particular sender. Usually sender IDs are forged and chosen
+randomly. There is little point blacklisting most senders, but sometimes it
+can be worthwhile. A more useful option is blacklisting based on
+recipients. If your email address is a.white@example.com you may see a
+lot of spam with nearby addresses, such as a.wharton@example.com and
+a.winter@example.com in the cc list and these recipients can be
+blacklisted. 
+
+<p>
+According to the documentation blacklisting is done with the settings
+<code>blacklist_from</code> and <code>blacklist_to</code>, but you may find
+that<code>blacklist_to</code> doesn't work on versions of SpamAssassin
+older than 2.6.0.
+
+<pre>
+blacklist_from *@evilspammers.example.org
+blacklist_to a.wharton@example.com
+blacklist_to *.wi*@example.com
+</pre>
+
+There are a number of other settings for blacklisting and whitelisting.
+Global settings can be overridden locally by <code>unwhitelist_from,
+unwhitelist_to, unblacklist_from</code> and <code>unblacklist_to</code>.
+Please read the documentation to find out more about these and other
+available settings.
+
+<h3>DNS Blocklists</h3>
+DNS Blocklists are another form of blacklisting. They are externally
+maintained lists of mail servers which have been identified as sources
+of spam or open relays. These are sometimes referred to as RBLs
+(Realtime Blackhole Lists).
+
+<p>
+SpamAssassin checks the headers to see if the email has been relayed
+through any hosts with matches in certain blocklists. This is known
+not to work with a number of configurations because it only checks the
+first DNS entry in resolv.conf; if this does not point to a working
+DNS server, it will not work. This is a known problem under Mandrake
+9.2.
+
+<p>
+DNS Blocklists can be disabled with the option skip_rbl_checks.
+
+
+<h3>Enable Bayesian filtering</h3>
+Bayesian analysis is a statistical technique in which the frequency of
+words in emails are analysed, according to how often they appear in
+spam and how often they appear in other emails. The content of
+incoming emails is then analysed to assign a probability of the email
+being spam.
+
+<p>
+Bayesian analysis is a feature of recent versions of SpamAssassin and
+I find it very effective. Some work is required to build and maintain
+the database, but it is well worth the small effort involved.
+
+<p>
+To configure SpamAssassin to use Bayesian analysis you add the line
+
+<pre>
+use_bayes	1
+</pre>
+to your user_prefs file.
+
+<p>
+You won't see any matches for Bayesian analysis yet. The algorithm
+requires at least 200 spam emails in it's database before it will
+assign any probability to your emails. To get to this point collect
+your spam emails in a separate mailbox and run
+
+<pre>
+sa-learn --spam --mbox ~/Mail/spamtrap 
+</pre>
+
+Often you will see that the number of emails it has learned from
+(analysed) is less than the number that appear to be in the mailbox it
+is learning from. This is because it has detected that some emails are
+duplicates of emails it has seen before.
+
+<p>
+You should also give it your "ham" emails to learn from using the command
+
+<pre> 
+ $ sa-learn --ham --mbox ~/Mail/inbox
+</pre>
+
+Once it has learned from more than 200 spam emails you should start
+seeing matches in the headers like
+
+<pre>
+BAYES_90           (4.5 points)  BODY: Bayesian classifier says spam probability is 90 to 99%
+</pre>
+
+Don't stop feeding it data when it starts to work. The more data it
+has, the more accurate it should be. If you are short of disk space,
+you should bear in mind that the database can get quite large. Mine is
+about 10MB.
+
+<p>
+If at any time you accidentally classify a message incorrectly this
+can be corrected. Move the message to a temporary folder, then use the
+command
+
+<pre>
+sa-learn --forget --mbox ~/Mail/temp 
+</pre>
+
+then move it back to the correct folder and classify it as usual.
+
+
+<h3>Reduce the points threshold for spam</h3>
+The simplest approach to catching more spam is just to reduce the
+points threshold. This can be quite effective. The default is to mark
+a message as spam when it scores 5 points or more. Reducing this will
+catch a lot more spam, but it will also increase the risk of false
+positives.
+
+<p>
+In my experience a threshold of 3.0 or 3.5 will increase the amount of
+spam caught dramatically, but won't produce significantly more false
+positives. This is achieved very simply by changing or adding the
+required_hits setting, e.g.
+
+<pre>
+required_hits	3.5
+</pre>
+
+If you have been using SpamAssassin for a while you can use grep to
+assess the level at which you are likely to see a significant increase
+in false positives. This is done by searching your mail folders for
+X-Spam-Status header lines with different scores.
+
+<pre>
+$ grep 'X-Spam-Status: .* hits=[5-9]\.' ~/Mail/inbox | wc -l
+      1
+$ grep 'X-Spam-Status: .* hits=[34]\.' ~/Mail/inbox | wc -l
+      4
+$ grep 'X-Spam-Status: .* hits=2\.' ~/Mail/inbox | wc -l
+     10
+$
+</pre>
+
+The first command shows that there is only 1 mail in my inbox that has
+scored between 5.0 and 9.9 points. The second that there are 4 mails
+that scored between 3.0 and 4.9 points and the third that 10 mails
+scored between 2.0 and 2.9 points. It should be borne in mind that
+this ignores all emails from before setting up SpamAssassin and all
+emails that you have deleted since that time.
+
+<h3>Increase the scores on existing rulesets</h3>
+After you've got Bayesian analysis working and you've decided on the
+threshold that's appropriate for you, there will no doubt still be
+some spam getting through. It's time to delve into the headers and
+find out what rules need higher scores.
+
+<p>
+Before we start, I should say that the default scores have been tuned
+using a <a href="http://wiki.apache.org/spamassassin/GeneticAlgorithm">genetic
+algorithm</a>. Should you trust your judgment against that algorithm?
+My opinion is that spam is evolving. Many of them are tested
+against the default SpamAssassin rules and fine tuned until they
+pass. Also everyone's spam problem is different. Statistically, what
+works for a large database of spam, possibly going back years, isn't
+necessarily the best for your current spam problem. If you find that
+your tuning efforts make the problem worse, you can always go back to
+the defaults.
+
+<p>
+Incoming messages should have some headers that indicate which rules
+were triggered. These look like:
+
+<pre>
+X-Spam-Status: No, hits=3.0 required=3.5
+	tests=BAYES_50,USER_AGENT
+	version=2.55
+</pre>
+
+These headers will not normally be displayed, but any decent mail
+client will have an option to display all headers. In kmail this
+option is View-&gt;Headers-&gt;All.
+
+<p>
+If you do not see these headers when you have all headers displayed,
+take a look at the section "Other Options" at the end of this article
+for the option controlling headers.
+
+<p>
+Looking at the matches given above, Bayesian analysis has given the
+mail a 50-60% probability of being spam. I have sufficient confidence in
+the Bayesian analysis to make anything with a probability of 50% or
+more spam, so I set the scores for those rules to my current
+threshold of 3.5.   
+
+<p>
+Here's another one that sneaked in under the radar.
+
+<pre>
+X-Spam-Status: No, hits=1.6 required=3.5
+        tests=HTML_20_30,MIME_HTML_ONLY,USER_AGENT
+        version=2.55
+</pre>
+
+The USER_AGENT rule isn't very interesting. Most mail has a user-agent
+header and this scores 0.001. We'll leave that alone. The other tests
+seem to contradict each other, one apparently saying that that the
+message is all HTML and the other that it's 20-30% HTML. I would guess
+that the 20-30% is the ratio of HTML tags to text, so it can be all
+HTML, but not all tags.
+
+<p>
+So, how should we adjust the scoring? HTML_20_30 matches 6 times in 8
+months of legitimate email, but it matches a third of the mail
+currently in my spam folder, so it should be scored highly, but not
+highly enough to be conclusive on it's own. It seems to be scored at
+1.47, which may be a bit low, but it's not far wrong. MIME_HTML_ONLY
+matched 1 legitimate email, but matches 95% of my spam. Strangely this
+only scores 0.1. I'm going to treat it as almost conclusive and score
+it at 3.0, requiring only another 0.5 points to trigger a match on my
+threshold of 3.5.
+
+<p>
+Another email got through with these matches:
+
+<pre>
+X-Spam-Status: No, hits=1.5 required=3.5
+        tests=GET_IT_NOW,HTML_10_20
+        version=2.55
+</pre>
+
+Looking at my email, I find that HTML_10_20 matches a lot of legitimate
+email, as well as spam and GET_IT_NOW only matches 1 spam.
+
+<pre>
+$ grep HTML_10_20 ~/Mail/spamtrap | wc -l
+     19
+$ grep HTML_10_20 ~/Mail/inbox ~/Mail/mailing-lists | wc -l
+      8
+$ grep GET_IT_NOW ~/Mail/inbox ~/Mail/mailing-lists | wc -l
+      0
+$ grep GET_IT_NOW ~/Mail/spamtrap  | wc -l
+      1
+$
+</pre>
+
+In this case I can't justify changing the scoring for either rule.
+
+
+<h3>Upgrade SpamAssassin to the latest version</h3>
+
+<p>
+If, like me, you aren't running the very latest distribution you may
+find that you are a little behind the curve. The standard rulesets are
+always evolving and just running a more recent version should help to
+catch more Spam.
+
+<p>
+As I write the latest stable version of SpamAssassin is 2.63 and 3.00
+is under development. The latest versions can be downloaded from <a
+href="http://spamassassin.apache.org/downloads.html">
+http://spamassassin.apache.org/downloads.html</a>.
+
+
+<h3>Install more rulesets</h3>
+There are <a href="http://wiki.apache.org/spamassassin/CustomRulesets"> custom
+rulesets</a> available on <a
+href="http://wiki.apache.org/spamassassin/"> the 
+SpamAssassin Wiki</a>, <A HREF="http://www.rulesemporium.com" > the SpamAssassin
+Rules Emporium (SARE) </A>
+and elsewhere.
+
+<p>
+I have not installed any of these rulesets and I am not recommending
+any of them. You should read the documentation and evaluate their
+suitability carefully before installing any new rulesets and monitor
+the results once they are installed.
+
+
+<a name="rules"></a><h3>Write your own rulesets</h3>
+
+<p>
+Rolling your own SpamAssassin rules is likely to be a minority
+interest, but I guess it will appeal to some of our readers. If you
+spot a pattern in your spam that there doesn't seem to be a rule for,
+or you are just terminally curious then read <a href="http://mywebpages.comcast.net/mkettler/sa/SA-rules-howto.txt">
+"A straightforward guide to writing your own add-on rules for
+SpamAssassin"</a>, by Matt Kettler.
+
+<h3>Other Options</h3>
+As well as adjusting the scoring, there a a range of options with
+which you can modify various aspects of SpamAssassin's behaviour. Here
+are descriptions from the documentation for some that I consider
+useful.
+
+<pre>
+    rewrite_subject { 0 | 1 } (default: 0)
+        By default, the subject lines of suspected spam will not be tagged.
+        This can be enabled here.
+
+    always_add_headers { 0 | 1 } (default: 1)
+        By default, X-Spam-Status, X-Spam-Checker-Version, (and optionally
+        X-Spam-Level) will be added to all messages scanned by SpamAssassin.
+        If you don't want to add the headers to non-spam, set this value to
+        0. See also always_add_report.
+
+    always_add_report { 0 | 1 } (default: 0)
+        By default, mail tagged as spam includes a report, either in the
+        headers or in an attachment (report_safe). If you set this to option
+        to 1, the report will be included in the X-Spam-Report header, even
+        if the message is not tagged as spam. Note that the report text
+        always states that the mail is spam, since normally the report is
+        only added if the mail is spam.
+
+        This can be useful if you want to know what rules the mail
+        triggered, and why it was not tagged as spam. See also
+        always_add_headers.
+
+    spam_level_stars { 0 | 1 } (default: 1)
+        By default, a header field called "X-Spam-Level" will be added to
+        the message, with its value set to a number of asterisks equal to
+        the score of the message. In other words, for a message scoring 7.2
+        points:
+
+        X-Spam-Level: *******
+
+        This can be useful for MUA rule creation.
+
+    spam_level_char { x (some character, unquoted) } (default: *)
+        By default, the "X-Spam-Level" header will use a '*' character with
+        its length equal to the score of the message. Some people don't like
+        escaping *s though, so you can set the character to anything with
+        this option.
+
+        In other words, for a message scoring 7.2 points with this option
+        set to .
+
+        X-Spam-Level: .......
+</pre>
+
+<h3>Further Information</h3>
+To find out more about SpamAssassin check out <a
+href="http://spamassassin.apache.org/"> the SpamAssassin web site</a> and
+<a href="http://wiki.apache.org/spamassassin/FrequentlyAskedQuestions">
+FAQ</a>.
+
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/authors/youngman.jpg" class="bio">
+
+<em>
+
+<p> Neil is a programmer, specialising in C++ on Unix and Linux. He has degrees
+in Computer science and Next Generation Computing.
+
+<p> Neil has worked on a wide range of systems from the control system for the
+British Gas national grid to video servers for the Home Choice video on
+demand service. He first programmed computers in 1980 with his school
+General Studies class, which was allowed access to a mainframe at The
+National Institute of Oceanography, programmed in Fortran on punch cards.
+
+<p> A computer science degree followed at Queen Mary College, London, then Neil
+worked for Logica for 3 years before taking an MSc in New Generation
+Computing at Exeter University.
+
+<p> The next 5 years saw Neil researching parallel simulation algorithms at the
+Royal Signals and Radar Establishment, initially on transputers and
+subsequently on SPARC based parallel systems. Since leaving RSRE, Neil has
+mostly worked freelance and has worked on financial data feeds, video
+servers and virus scanning proxies.
+
+<p> Neil first used Unix at college in 1982 and started working on Linux in
+1996.
+
+<p> As of May 2004, Neil is working for Wirefast a global messaging company.
+
+<p> Outside of computing, Neil is into motor sport, particularly Formula 1, the
+World Rally Championship and the British Touring Car Championship. He
+doesn't race himself. If you've seen Neil's driving, you'll understand why.
+
+</em>
+<br clear="all">
+<!-- *** END bio *** -->
+
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2004, Neil Youngman. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 105 of Linux Gazette, August 2004
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="seymour.html" >&lt;-- prev</A> | <A HREF="ecol.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">August 2004 (#105)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

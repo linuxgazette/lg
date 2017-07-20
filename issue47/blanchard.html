@@ -1,0 +1,335 @@
+<!--startcut BEGIN header ==============================================-->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>Linux on Token Ring LG #47</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!--endcut ============================================================-->
+
+<H4>
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H1><font color="maroon">Linux on Token Ring</font></H1>
+<H4>By <a href="mailto:blanchas@cadvision.com">Eugene Blanchard</a></H4>
+</center>
+<P> <HR> <P>  
+
+<!-- END header -->
+
+
+
+<P> I decided to implement Token Ring on one of my Linux servers because I
+had some time on my hands, a few MSAUs and a box of 3Com 3C619B Token Ring
+network cards. Not to mention a burning desire to run a Token Ring network
+for the past few years.
+<p>This article will deal with:<P>
+
+<li>
+installing and configuring a 3C619B Token Ring network card in Linux</li>
+
+<li>
+simple routing from Token Ring LAN to an Ethernet LAN through a Linux server.</li>
+</blockquote>
+
+<hr WIDTH="100%">
+<h2>
+Installing the NIC</h2>
+The first step was installing the NIC. This required opening the computer
+and finding a spare 16 bit ISA slot. No problem. In it went and I was one step
+closer to completion.
+<p>The next step required testing the card. Unfortunately, most diagnostic
+programs that come with PC hardware run in DOS, so as a rule, I always
+allocate one 20 MB partition to DOS for storing them. Reboot to DOS and
+run the 3C619B configuration program called 3tokdiag.exe.
+<p>At this point the card&nbsp; should be connected to a MSAU (multistation
+access unit - sometimes referred to as a MAU) for proper testing. The MSAU
+can have either the original IBM hermaphroditic connectors, RJ45 or RJ11
+connectors (click here for a good review of&nbsp; <a href="http://www.cadvision.com/blanchas/linux">Token
+Ring</a>).&nbsp; I used an IBM 8228 with hermaphroditic connectors. I connected
+my RJ45 cable to it using a Token Ring balun (small impedance matching
+transformer) which matches the 150 ohm impedance of STP to the 100 ohm
+impedance of UTP.
+<p>I ran the diagnostic tests and bang, the MMIO test failed with an error
+about a memory conflict. So much for right out of the box luck. This meant
+that I would have to set the card's IRQs, base address and memory address
+(which I should normally have to do anyway).&nbsp; A quick check of the
+Token Ring HOWTO and voil&agrave;, it says that the cards with the Tropic chipset
+(IC has Tropic written right on it) uses the ibmtr driver. The card's chipset
+was indeed the Tropic and away I went. Now for the configuration parameters....
+here was were the problems started.
+<p>The 3C619B card could be run in either 3Com mode or 100% IBM compatibility
+mode. To make a long story short, use the 100% IBM compatibility mode.
+Even though the settings are not clear, in my case the choices were for
+"primary or secondary" card which actually means which base address to
+use. The configuration parameters that Linux is looking for are:<P>
+
+<PRE>	Config mode:			IBM
+	I/O Base Address:		Primary	(means using 0xA20)
+	Int Req:			2 (9)		(16 bit cards use IRQ 9)
+	Ring Speed:			16 Mbps
+	Bios/MMIO Base Add:		D4000h	
+	shared RAM Address range:	D0000h	
+	Mem mode:			16 bit
+	I/O mode:			16 bit
+	IRQ Driver type:		Edge triggered
+	Auto Switch:			Enabled
+</PRE><P>
+
+I am not sure what the MMIO address does but I know that with these values,
+the card passed all diagnostic tests fine. The big problem I had was in
+confusion between MMIO and Memory address. I had set MMIO address to 0xD0000
+and this failed miserably.
+<p>The first few tests check the internals of the NIC and the last test
+checks the lobe connection (between NIC and MSAU). The last test takes
+quite a long time to perform so be patient.
+<p><i>NOTE: Now as far as I can tell, the ibmtr.c source code only allows the above settings (someone correct me if I'm wrong!). Unfortunately, the comment header of ibmtr.c doesn't indicate any configuration settings (oversight?). From what I can tell from ibmtr.c and testing that was performed over a period of 3 weeks (yes that is right - I was on the verge of giving
+up), these are the <b>only</b> values that will work.</i>
+<p>
+<hr WIDTH="100%">
+<h2>
+The Kernel and Token Ring</h2>
+
+<p>The Linux kernel must be recompiled for Token Ring support. You
+can compile it in directly or as a module both methods work admirably.
+To compile the kernel, you change directories to /usr/src/linux and run
+either:
+<ul>
+<li>
+"make config" - for command line text based line by line prompt</li>
+
+<li>
+"make menuconfig" - for a command line configuration menu</li>
+
+<li>
+"make xconfig" - for an X windows configuration menu</li>
+</ul>
+I suggest that you use either menuconfig or xconfig. The "make config"
+method can be extremely unforgiving if you should make a mistake - you
+have to start all over again.
+<p>The assumption at this point is that you have a working <i>recompiled</i>
+kernel and are only adding support for a Token Ring card. This means that
+the only change should be to add Token Ring support to the kernel. Go to
+Network Device Support section and select Token Ring Driver Support as
+either as compiled as part of the kernel (Y) or as a&nbsp; module (M).
+I selected compiled as part of the kernel. Next select "IBM Tropic chipset
+based adapter support" (again Y or M - your choice). Save and exit and
+you're now ready to recompile the kernel.
+<p>
+<PRE>	make clean ; make dep ; make zImage
+	make modules
+	make modules_install
+</PRE><P>
+I copied the zImage file to the root directory (I'm using slackware
+- you may need to copy it to /boot directory for other distributions):
+<p>
+<PRE>cp /usr/src/linux/arch/i386/boot/zImage /token-ring</PRE><P>
+Now the new kernel was in place, it's time to add a new lilo entry.
+<p>
+<hr WIDTH="100%">
+<h2>
+LILO and T.R. Kernel</h2>
+
+<p>Since I wasn't sure how Linux would work with the new Token Ring
+card, I wanted to be able to boot to the old working kernel (non Token
+Ring). I added another entry into /etc/lilo.conf that would address the
+new kernel. At the lilo boot prompt I would have a new choice of which
+kernel to boot to. I modified /etc/lilo.conf with a simple text editor
+for the new kernel:
+<p>
+<PRE>	# LILO configuration file
+	#
+	# Start LILO global section
+	# location of boot device
+	boot = /dev/hda
+	# how long (1/10 of seconds) will the LILO prompt appear before booting to the first listed kernel
+	delay = 50
+	vga = normal
+	# End LILO global section
+	# Linux bootable partition configuration begins
+	# Original kernel config starts here
+	image = /vmlinuz	# name and path to kernel to boot to
+	  root = /dev/hda2	# which partition does it reside on
+	  label = linux		# the name that the LILO prompt will display
+	  read-only		# let fsck check the drive before doing anything with it - mandatory
+	# End of original kernel
+	# Token Ring kernel starts here
+	image = /token-ring
+	  root = /dev/hda2	# which partition does it reside on
+	  label = token-ring	# the name that the LILO prompt will display
+	  read-only		# let fsck check the drive before doing anything with it - mandatory
+	# End of Token Ring kernel
+	# DOS partition starts here
+	other = /dev/hda1	# which partition does it reside on
+	  label = dos		# the name that the LILO prompt will display
+	  table = /dev/hda
+	# End of DOS partition
+</PRE><P>
+My DOS partition is on /dev/hda1 and Linux on /dev/hda2 with a swap
+partition on /dev/hda3 which is not mentionned in the lilo.conf file.
+<p>After saving and exiting the /etc/lilo.conf. You must run lilo to enter
+the setttings. All that is required is to type "lilo" at the command prompt
+with root privilege. If everything was entered properly, you should see:
+<p>
+<PRE>	ashley:~# lilo
+
+	  Added	linux *
+	  Added	token-ring
+	  Added	dos
+
+	ashley:~#
+</PRE><P>This indicates that everything went okay (ashley is the name of my server). The asterick indicates that linux is the default boot selection (first entry in lilo.conf).
+<p>
+<hr WIDTH="100%">
+
+<h2>
+Token Ring Kernel and Boot Messages</h2>
+
+<p>Since I compiled Token Ring support directly into the kernel, I
+didn't have to modify (usually just uncomment) or add support for the ibmtr
+driver in the /etc/conf.modules file. When I rebooted the machine, I closely
+watched for the following messages to scroll across the screen:<P>
+
+<PRE>
+	<snip>
+	tr0: ISA 16/4 Adapter| 16/4 Adapter /A (long) found
+	tr0: using IRQ 9, PIO Addr a20, 16 k Shared RAM
+	tr0: Hardware address: 00:20:AF:0E:C7:2E
+	tr0: Maximum MTU 16 Mbps: 4056, 4 Mbps: 4568
+	<snip>
+	tr0: Initial interrupt: 16 Mbps, Shared Ram base 000d0000
+	 <snip>
+	tr0: New Ring Status: 20
+	tr0: New Ring Status: 20
+	tr0: New Ring Status: 20
+	tr0: New Ring Status: 20
+	<snip>
+</PRE><P>
+And its up..  It's quite stable and if you have a passive msau, you shoud be able to  hear the relay click in for the ring insertion phase .<P>
+
+If you see either of these <B>error messages</B>:<P>
+
+<PRE>	arrgh! Transmitter busy
+	Unknown command 08h in arb
+</PRE><P>
+
+Then you have the wrong Shared Ram Address range configured on your card. Set it to 0xD0000h.<P>
+<hr WIDTH="100%">
+<h2>
+Configuring the Interface</h2>
+
+<p>Now that there was support for the Token Ring card in the kernel,
+the interface had to be configured. This means that the IP address, mask,
+broadcast address and default route must be set. In Slackware, the /etc/rc.d/rc.inet1
+file is modified to add the following parameters. If you are just testing,
+you can type in the following parameters at the command prompt:
+<p>
+<PRE>	/sbin/ifconfig tr0 192.168.2.1 broadcast 192.168.2.255 netmask 255.255.255.0
+</PRE><P>where:
+<p>
+<PRE>	tr0 is the first Token Ring adapter found
+	192.168.2.1 is the IP address of the interface
+	192.168.2.255 is the broadcast address of the interface
+	255.255.255.0 is the subnet mask
+</PRE><P>
+At this point, you should type "ifconfig" by itself on the command line
+interface and you should see something like this:
+<p>
+<PRE>eth0      Link encap:Ethernet  HWaddr 00:A0:24:CC:12:6F
+          inet addr:192.168.1.3 Bcast:192.168.1.255  Mask:255.255.255
+          UP BROADCAST RUNNING MULTICAST  MTU:1500  Metric:
+          RX packets:53775 errors:0 dropped:0 overruns:0 frame:
+          TX packets:7489 errors:0 dropped:0 overruns:0 carrier:
+          collisions:0 txqueuelen:100
+          Interrupt:10 Base address:0xe800
+
+tr0       Link encap:Token Ring  HWaddr 00:20:AF:0E:C7:2E
+          inet addr:192.168.2.1 Bcast:192.168.2.255  Mask:255.255.255.0
+          UP BROADCAST RUNNING MULTICAST  MTU:4500  Metric:1
+          RX packets:0 errors:0 dropped:0 overruns:0 frame:0
+          TX packets:0 errors:0 dropped:0 overruns:0 carrier:0
+          collisions:0 txqueuelen:100 
+          Interrupt:9 Base address:0xa20
+
+lo        Link encap:Local Loopback
+          inet addr:127.0.0.1 Mask:255.0.0.0
+          UP LOOPBACK RUNNING MTU:3924  Metric:1
+          RX packets:235 errors:0 dropped:0 overruns:0 frame:0
+          TX packets:235 errors:0 dropped:0 overruns:0 carrier:0
+          collisions:0 txqueuelen:0
+</PRE><P>
+Notice that both the ethernet, loopback and token ring interfaces are
+listed. It is very important to make sure that the Ethernet and Token Ring
+adpaters are on <B>separate IP networks</B>. In this example, eth0 is on subnet
+192.168.1.0 and tr0 is on subnet 192.168.2.0.
+<p>
+At this point you should be able to ping your linux box from the token ring network. 
+Symptoms of a wrong NIC configuration is if you can ping localhost and the linux network card address (like 192.168.2.1) from within the Linux server fine but when you ping anything outside of the linux server (such as other LAN hosts) you get the error messages listed above.<P>
+<hr WIDTH="100%">
+<h2>
+Routing from Token Ring to Ethernet</h2>
+
+There are two methods that can be used to connect Ethernet networks to Token Ring networks. The first method uses the Data Link layer of the OSI model and is called a translation bridge. There are several major differences between the two MAC frames, one of the most significant is the tranmission of most significant bits (MSB) of a byte. Token Ring transmits the least significant bit (LSB) first while ethernet transmits it in reverse order with the MSB first (or vice versa depending on if you are a Token Ring guy or Ethernet guy). Unfortunately, Linux doesn't support translation bridging for a very good reason (see next paragraph).<P>
+
+The second method uses the Network layer (IP layer) and is called routing. Both Ethernet and Token Ring protocol stacks already deliver their data to the Network layer in the proper order and in a common format - IP datagram. This means that all that needs to be done to connect the two LAN arbitration methods is to add a route to our routing table (too easy!).<P>
+
+Since our ethernet routing is already working including default gateway. I only had to add the following line to /etc/inet1. To test type at the command line:<P>
+
+<PRE>	/sbin/route  add - net  192.168.2.0 netmask 255.255.255.0
+</PRE><p>
+Any packet not addressed to the Token Ring network 192.168.2.0 is forwarded to the Ethernet network. I used a similar route on the Ethernet side and everything not addressed to the Ethernet network 192.168.1.0 was sent to the Token Ring network. <P>
+
+To verify that everything still works from the Linux box: <P>
+<UL>
+	<LI> ping an Ethernet host
+	<LI> ping a Token Ring host
+</UL><P>
+To verify that routing is working, try to ping <I>across</I> the Linux server from an Ethernet host to a Token Ring host and vice versa.<P>
+<I>NOTE: This is a very simple routing example. Only two LANs are being used: 192.168.1.0 and 192.168.2.0. Your situation will most likely be more complicated. Please see the man pages on routed for further information.
+</I><P>
+<hr WIDTH="100%">
+<h2>
+Token Ring Problems</h2>
+While Linux ran beautifully with Token Ring, I can't say the same about Win95. The biggest problem that I ran into was the fact that Win95 performs a software reboot whenever its configuration is changed or when most new software is installed. While this isn't a problem with Ethernet, it is a problem with Token Ring. Token Ring has many maintenance and administration duties implemented in the network card itself. The network card requires a hard boot to reset not a soft boot. <P>
+
+The results were that the Win95 clients would lose their network connections (specifically the network stack to the NIC) and hang during soft boots - very frustrating. Add any new software especially if it is a network install and bam, down goes Win95 - hung again. I would have to shut off the PC and reboot. I never realized how often you have to reboot Win95 until I implemented Token Ring on it. I would not want to administrate a Token Ring network on Win95 for a living.<P>
+
+ This is not a Token Ring fault but a Win95 fault as far as I can tell. I was using Win95a so perhaps later versions have addressed this problem and corrected it. Linux did not have any problems of this nature.<P>
+
+</body>
+</html>
+
+
+
+<!-- BEGIN copyright ==================================================-->
+<P> <hr> <P> 
+<H5 ALIGN=center>
+
+Copyright &copy; 1999, Eugene Blanchard<BR> 
+Published in Issue 47 of <i>Linux Gazette</i>, November 1999</H5>
+<!-- END copyright ===================================================-->
+
+
+
+
+
+<!--startcut footer ===================================================-->
+<P> <hr> <P> 
+<A HREF="index.html"><IMG ALIGN=BOTTOM SRC="../gx/indexnew.gif" 
+ALT="[ TABLE OF CONTENTS ]"></A>
+<A HREF="../index.html"><IMG ALIGN=BOTTOM SRC="../gx/homenew.gif"
+ALT="[ FRONT PAGE ]"></A>
+<A HREF="ayers.html"><IMG SRC="../gx/back2.gif"
+ALT=" Back "></A>
+<A HREF="../faq/index.html"
+	><IMG SRC="./../gx/dennis/faq.gif"
+              ALT="[ Linux Gazette FAQ ]"></A>
+<A HREF="bueno.html"><IMG SRC="../gx/fwd.gif" ALT=" Next "></A>
+<P> <hr> <P> 
+</BODY></HTML>
+<!--endcut ============================================================-->

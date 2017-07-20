@@ -1,0 +1,73 @@
+#! /usr/bin/env python
+
+# Here's an example of how you can use the Python rfc822 and
+# mailbox modules to make extracting data from mail _easy_.
+
+# How likely are you to get an immediate answer back from that email
+# you send now?  Find out by checking how active your recipient has
+# been over the history of your correspondence.
+
+# First argument: recipient's email address.
+# Remaining arguments: mailbox files you want to check.
+
+import sys, time
+import mailbox, rfc822
+
+HOUR = 60 * 60.0
+WEEK = HOUR * 24 * 7.0
+
+total = 0
+hit = 0
+
+victim = sys.argv[1]
+
+# "now" is in seconds since the beginning of the week; displace into
+# negative if necessary to make comparisons work.
+now = time.time() % WEEK
+if now + HOUR > WEEK:
+    now = now - WEEK
+
+for filename in sys.argv[2:]:
+    try:
+        box = mailbox.UnixMailbox(open(filename))
+    except IOError:
+        print "Error opening %s." % filename
+        sys.exit()
+
+    while (1):
+        # keep reading messages from the mailbox as long as
+        # any remain.
+        message = box.next()
+        if not message:
+            break
+
+        # Here's the fun part. "message" is now an rfc822 object
+        # that you can just ask for its sender, date and so on.
+
+        # skip this mail if it's not from the person we're interested
+        # in.
+        email = message.getaddrlist('From')[0][1]
+        if email != victim:
+            continue
+
+        tt = time.mktime(message.getdate('Date')) % WEEK
+        total = total + 1
+
+        if (now < tt) and (now + HOUR > tt):
+            hit = hit +1
+
+# How many messages you can expect to receive from this person in
+# the next hour if they were evenly distributed around the week:
+baseline = (HOUR * total) / WEEK
+
+# How active, relative to baseline, this person really is at this
+# hour of the week:
+activity = hit / baseline
+
+print "%d total messages from %s, %d in this hour of the week." % \
+    (total, victim, hit)
+
+print "Predicted activity level in the next hour: %f" % (activity)
+
+# For bonus points, calculate a 95% confidence interval and integrate
+# into your contact manager or mail client.

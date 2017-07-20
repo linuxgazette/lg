@@ -1,0 +1,46 @@
+#!/bin/sh
+
+# Cycle logs
+if [ -x /usr/bin/savelog ]; then
+  for i in rsync-backup-log; do
+    if [ -s /var/log/backup/$i ]; then
+      savelog -p -c 10 /var/log/backup/$i >/dev/null
+    fi
+  done
+fi
+
+
+# This creates some list of packages so that we could rebuild her machine
+# if needed.  In theory her system could be restored by the
+# following steps:
+# 1. Install Debian on another disk
+# 2. run "cat /etc/dpkg--get-selection | dpkg --set-selections" to sync
+# the list of packages.
+# 3. Install all the packages "apt-get update ; apt-get dselect-upgrade"
+# 4. Use tar or whatever to copy /etc. ie get all the settings.
+# 5. Recover other directories mentioned below, ie /home.
+
+dpkg -l > /etc/dpkg-l
+dpkg --get-selections > /etc/dpkg--get-selections
+
+# Make a date entry in our backup log
+date > /var/log/backup/rsync-backup-log
+
+# Backup data to second disk with logging, selected directories only.
+rsync -av --exclude "lost+found/" --delete /etc/ /disk2/backup/daily/disk1/etc 2>&1 | tee -a /var/log/backup/rsync-backup-log > /dev/null
+
+rsync -av --exclude "lost+found/" --delete /home/ /disk2/backup/daily/disk1/home 2>&1 | tee -a /var/log/backup/rsync-backup-log > /dev/null
+
+rsync -av --exclude "lost+found/" --delete /usr/local/ /disk2/backup/daily/disk1/local 2>&1 | tee -a /var/log/backup/rsync-backup-log > /dev/null
+
+rsync -av --exclude "lost+found/" --delete /usr/local/lib/webcheck-1.0/ /disk2/backup/daily/disk1/webcheck 2>&1 | tee -a /var/log/backup/rsync-backup-log > /dev/null
+
+date >> /var/log/backup/rsync-backup-log
+
+# Send an email to let us know it's done, primarily a reminder to check the
+# logs and occasionally make sure the backups are working properly.
+echo "IO Backup done, the log can be viewed by entering:" >/tmp/backup-note-mail
+echo "less /var/log/backup/rsync-backup-log" >>/tmp/backup-note-mail
+
+cat /tmp/backup-note-mail | mail -s "Kmiles machine backup" kmiles@...,cp@...
+rm /tmp/backup-note-mail

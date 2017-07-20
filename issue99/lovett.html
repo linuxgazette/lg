@@ -1,0 +1,279 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>XMLTV LG #99</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="ingles.html" >&lt;-- prev</A> | <A HREF="pramode.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>XMLTV</h1>
+<p id="by"><b>By <A HREF="../authors/lovett.html">Bill Lovett</A></b></p>
+
+<p>
+<p>Where do you go to find out what's on TV? The usual suspects might include
+a newspaper, a recent issue of <i>TV Guide</i> magazine, a favorite Web site, or your nearest
+TiVo, ReplayTV, or other PVR. But don't forget to add Linux to the top of that
+list. You can let the machine do the dirty work and bring the listings to you. XMLTV, a
+short bash script, and a cron job are all you need to get started.</p>
+
+
+<h2>Installation</h2>
+
+<p>First things first: getting the program installed. XMLTV is a suite of Perl
+scripts and can be downloaded from 
+<a href="http://membled.com/work/apps/xmltv/">membled.com/work/apps/xmltv</a>.
+There are releases for Unix-like and Windows environments, but, for obvious reasons,
+we'll focus on the former. If you're installing from source, it's the usual
+routine:</p>
+
+<pre>
+% perl Makefile.PL
+% make
+% make test
+% make install 
+</pre>
+
+<p>If you're on Debian, it's all just an apt-get away
+(<code>apt-cache search xmltv</code>). Links to packages for OS X, Red Hat 8, and Red Hat 9 are 
+available from the project's homepage.</p>  
+
+<h2>Configuration</h2> <p>Before XMLTV can be useful, it needs to know where in
+the world you are. XMLTV is international&#151; it can fetch TV listings for
+Canada and the United States, the United Kingdom, Austria and Germany, New
+Zealand, Finland, Italy, Spain, the Netherlands, Denmark, and Hungary.  (Belgium
+and France are in the works.) The scripts that collect listings for a
+particular country are referred to as grabbers, and you'll find them on the
+command line under <code>tv_grab_*</code>. We'll use the U.S. grabber,
+<code>tv_grab_na</code>. 
+
+<p>When you first run the grabber, do so with the <code>--configure</code> option. This
+starts a question-and-answer session in which you and the grabber get a little
+bit better acquainted, as far as your Zip code, TV service provider, and 
+channels you want to ignore are concerned. The results of the script are written to
+<code>~/.xmltv/tv_grab_na.conf</code>, and can be easily edited by hand.
+
+<p>At this point, XMLTV is ready to do your bidding. Do a <code>man tv_grab_na</code> to learn
+about all the available options. For now, just two will suffice:
+
+<pre>
+% tv_grab_na --days 1 --output /tmp/tv.xml
+</pre>
+
+This  tells the grabber to get one day's worth of listings, and save them out to <code>/tmp/tv.xml</code>.</p>
+
+<p>XMLTV's file format doesn't quite make for friendly reading, unless you
+enjoy reading raw markup.  A few more scripts from the suite can fix that. <code>tv_sort</code>
+sorts the contents of an xmltv file date.
+<code>tv_grep</code> lets you weed out some of the obvious cruft in the
+listings.  Here's how I run it:
+
+<pre>
+% tv_sort --output /tmp/tv_sorted.xml /tmp/tv.xml
+% tv_grep --output /tmp/tv_grepped.xml --ignore-case --not --category Children \
+          --not --category Sports --not --title "Paid Programming" \
+          --not --title "Local Origination" \
+          --on-after now /tmp/tv_sorted.xml
+</pre>
+
+The commands above sort the original file and then discard anything
+categorized as "Children" or "Sports", and anything with "Paid Programming"
+(infomercials) or "Local Origination" (public access) in the title. Also,
+we're discarding everything that aired before the script ran.</p>
+
+<p>At this point, we've still got an XML file. Converters to the rescue!
+<code>tv_to_text</code> is one of the tools that can help us go from XML to something else.
+(Other possibilities include LaTeX, HTML and PDF. Check the readme to see what's
+currently available.) After running something like this:
+
+<pre>
+% tv_to_text --output /tmp/tv.txt /tmp/tv_grepped.xml
+</pre>
+
+We get output like this:
+
+<pre>
+21:00--21:30    Spy School      38
+21:00--21:30    Designing for the Sexes // European Kitchen     64
+21:00--21:30    Chappelle's Show        67
+21:00--21:30    The Real World // Las Vegas     71
+21:00--22:00    Law &amp; Order: Special Victims Unit // Guilt      44
+21:00--22:00    Wild Card // Auntie Venom       45
+21:00--22:00    Cold Case Files // The Accidental Killer; Little Sister Lost    57
+21:00--22:00    America's Most Wanted: America Fights Back // Top Ten Most Wanted Fugitives     5
+21:00--22:00    The FBI Files // The Price of Greed     60
+21:00--22:00    Trading Spaces // Nashville: Murphywood Crossing        61
+21:00--22:00    Great Chowder Cook-Off  63
+21:00--22:00    Ends of the Earth // Secrets of the Holy Land   65
+21:00--22:00    The E! True Hollywood Story // The Hilton Sisters       68
+...
+</pre>
+
+Simple and no frills. Just what we need for the final step: e-mail delivery.</p>
+
+<h2>Delivery</h2>
+
+<p>If we stopped at this point we'd have used several of XMLTV's abilities but
+hardly anything else.  We'd also be running low on convenience and automation.
+Fortunately, we can wrap all the commands we've seen so far into a shell
+script, and have it e-mail us the final results. <code>mail</code> can take care
+of, well, the mailing:
+
+<pre>
+% mail -s "Today's TV listings from XMLTV" user@localhost < /tmp/tv.txt
+</pre>
+
+Here's what the full script looks like (<A HREF="misc/lovett/xmltv_daily.sh.txt">text version of this listing</a>):
+
+<pre>
+#!/bin/sh
+
+# Grab today's listings:
+tv_grab_na --days 1 --output /tmp/tv.xml
+
+# Sort
+tv_sort --output /tmp/tv_sorted.xml /tmp/tv.xml
+
+# Grep
+tv_grep --output /tmp/tv_grepped.xml --ignore-case --not --category Children \
+--not --category Sports --not --title "Paid Programming" \
+--not --title "Local Origination" \
+--on-after now /tmp/tv_sorted.xml
+
+# Convert To Text
+tv_to_text --output /tmp/tv.txt /tmp/tv_grepped.xml
+
+# Email
+mail -s "Today's TV listings from XMLTV" user@localhost < /tmp/tv.txt
+
+</pre>
+
+Put that in a cron job that runs once per day, and you've got TV listings with no outside advertising,
+and no channels or shows you know you aren't interested in.</p>
+
+<p>More importantly, you've got a foundation to build on. What we've
+covered is just the beginning&#151; beyond the command-line scripts, a
+GUI client is also available. Of course, there are plenty more things you could do from the
+command line, such as:
+
+<ol>
+  <li>Pull in data from imdb.com via <code>tv_imdb</code></li>
+  <li>Split the listings into separate files for each day and channel via <code>tv_split</code></li>
+  <li>Transform the XML with your own XSLT stylesheet.</li>
+  <li>Only send e-mail if certain keywords are found</li>
+</ol>
+
+It all depends on how you want to consume the information, and how cleverly you can chain all the scripts
+together.</p>
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<P>
+<img ALIGN="LEFT" ALT="[BIO]" SRC="../gx/2002/note.png" class="bio">
+<em>
+Bill Lovett is a Web developer in New York City. He's one of those PHP/MySQL
+types. And he has this weird thing about running Linux on old machines that by
+all rights should have been trashed years ago. Read more about Bill and his
+Open Source projects at <a
+href="http://www.ilovett.com">www.ilovett.com</a></i></p>
+</em>
+<br CLEAR="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2004, Bill Lovett. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 99 of Linux Gazette, February 2004
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="ingles.html" >&lt;-- prev</A> | <A HREF="pramode.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">February 2004 (#99)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/2003/sit3-shine.7-2.gif" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

@@ -1,0 +1,570 @@
+<!--startcut ==========================================================-->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML>
+<HEAD>
+<title>DiskHog Issue 18</title>
+</HEAD>
+<BODY BGCOLOR="#EEE1CC" TEXT="#000000" LINK="#0000FF" VLINK="#0020F0"
+ALINK="#FF0000">
+<!--endcut ============================================================-->
+
+<H4>
+&quot;Linux Gazette...<I>making Linux just a little more fun!</I>&quot;
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H2>DiskHog: Using Perl and the WWW to Track System Disk Usage</H2>
+<H4>By Ivan Griffin,
+<a href="mailto:Ivan.Griffin@ul.ie">Ivan.Griffin@ul.ie</a></H4>
+</center>
+<P><HR><P>
+
+<p>
+An irksome job that most system administrators have to perform at some stage
+or other is the implementation of a disk quota policy.  Being a maintainer of
+quite a few machines (mostly Linux and Solaris, but also including AIX)
+without system enforced quotas, I needed an automatic way of tracking disk
+quotas.  To this end, I created a Perl script to regularly check users disk 
+usage, and compile a list of the largest hoggers of disk space.  Hopefully,
+in this way, I can politely intimidate people into reducing the size of their
+home directories when they get ridiculously large.
+</p>
+
+<p>
+The <tt>du</tt> command summarises disk usage for a given directory hierarchy.
+When run in each users home directory, it can report how much disk space
+the user is occupying.  At first, I had written a shell script to run
+<tt>du</tt> on a number of user directories, with an awk back-end to provide
+nice formatting of the output.  This proved difficult to maintain if new users
+were added to the system.  Users home directories were unfortunately located
+in different places on each operating system.
+</p>
+
+<p>
+Perl provided a convenient method of rewriting the shell / awk scripts into
+a single executable, which not only provided more power and flexibility but
+also ran faster!  Perl's integration of standard Unix system calls and C
+library functions (such as <tt>getpwnam()</tt> and <tt>getgrname()</tt>) makes
+it perfectly suited to tasks like this.  Rather than provide a tutorial on
+the Perl language, in this article I will describe how I used Perl as a
+solution to my particular need.  The complete source code to the Perl
+script is shown in listing 1.
+</p>
+
+<p>
+The first thing I did was to make a list of the locations in which users
+home directories resided, and isolate this into a Perl array.  For each
+sub-directory in the directories listed in this array, a disk usage
+summary was required.  This was implemented by using the Perl system
+command to spawn off a process running <tt>du</tt>.
+</p>
+
+<p>
+The <tt>du</tt> output was redirected to a temporary file.  The temporary file
+was named using the common $$ syntax, which is replaced at run time by the
+PID of the executing process.  This guaranteed that multiple invocations
+of my disk usage script (while unlikely) would not clobber each others
+temporary working data.
+</p>
+
+<p>
+All the sub-directories were named after the user who owned the account.  This
+assumption made life a bit easier in writing the Perl script, because I could
+skip users such as <tt>root</tt>, <tt>bin</tt>, etc.
+</p>
+
+<p>
+I now had, in my temporary file,  a listing of a disk usage and username, one
+pair per line of the file.  I wanted to split these up into an associated hash
+of users and disk usage, with users as the index key.  I also wanted to
+keep a running total of the entire disk usage, and also the number of
+users.  Once Perl had parsed all this information from the temporary file,
+I could delete it.
+</p>
+
+<p>
+I decided the Perl script would dump its output as an HTML formatted page.
+This allowed me great flexibility in presentation, and also permitted the
+information to be available over the local intranet - quite useful when 
+dealing with multiple heterogeneous environments.
+</p>
+
+<p>
+Next I had to work out what information I needed to present.  Obviously the
+date when the script had run was important, and a sorted table listing
+disk usage from largest to smallest was essential.   Printing the <i>GCOS</i>
+information field from the password file allowed me to view both
+real names, and usernames.  I also decided it might be nice to provide a
+hypertext link to the users homepage, if one existed.  So extracting their
+official home directory from the password file, and adding on to it the
+standard user directory extensions to it (typically <tt>public_html</tt> or
+<tt>WWW</tt>) allowed this. 
+</p>
+
+<p>
+Sorting in Perl usually involves the use of the spaceship operator (
+<tt><=></tt>).  The sort function sorts a list and returns the sorted list
+value.  It comes in many forms, but the form used in the code is:
+</p>
+
+<pre>
+
+sort sub_name list
+
+</pre>
+
+<p>
+where <tt>sub_name</tt> is a Perl subroutine.  <tt>sub_name</tt> is call
+during element comparisons, and it must return an integer less than, equal to,
+or greater than zero, depending on the desired order of the list elements.
+<tt>sub_name</tt> may also be replaced with an inline block of Perl code.
+</p>
+
+<p>
+Typically sorting numerically ascending takes the form:
+</p>
+
+<pre>
+
+@NewList = sort { $a &lt;=&gt; $b } @List;
+
+</pre>
+
+<p>
+whereas sorting numerically descending takes the form:
+</p>
+
+<pre>
+
+@NewList = sort { $b &lt;=&gt; $a } @List;
+
+</pre>
+
+<p>
+I decided to make the page a bit flashier by adding a few of those omnipresent
+coloured ball GIFs.  Green indicates that the user is within allowed limits.
+Orange indicates that the user is in a danger buffer zone -  no man's land,
+from which they are dangerously close to the red zone.  The red ball indicate
+a user is over quota, and depending on the severity multiple red balls may be
+awarded to really greedy, anti-social users.
+</p>
+
+<p>
+Finally, I plagued all the web search engines until I found a suitable
+GIF image of a pigglet, which I included on the top of the page.
+</p>
+
+<p>
+The only job left was to include the script to run nightly as a cron job.
+It needed to be run as root in order to accurately assess the disk usage
+of each user - otherwise directory permissions could give false results.
+To edit roots cron entries (called a <tt>crontab</tt>), first ensure you have
+the environment variable <tt>VISUAL</tt> (or <tt>EDITOR</tt>) set to your
+favourite editor.  Then type
+</p>
+
+<pre>
+
+crontab -e
+
+</pre>
+
+<p>
+Add the line from listing 2 to any existing crontab entries.  The format of
+crontab entries is straightforward.  The first five fields are integers,
+specifying the minute (0-59), hour (0-23), day of the month (1-31), month of
+the year (1-12) and day of the week(0-6, 0=Sunday).  The use of an asterix as a
+wild-card to match all values is permitted, as is specifying a list of
+elements separated by commas, or a range specified by start and end (separated
+by a minus).  The sixth field is the actual program to being scheduled.
+</p>
+
+<p>
+A script of this size (which multiple invocations of <tt>du</tt>) takes some
+time to process.  As a result, it is perfectly suited for scheduling under
+cron - I have it set to run once a day on most machines (generally during the
+night, which user activity is low).   I believe this script shows the
+potential of using Perl, Cron and the WWW to report system statistics.
+Another variant of it I have coded performs an analysis of web server log
+files.  This script has served me well for many months, and I am confident it
+will serve other sysadmins too.
+</p>
+
+<hr size=4>
+<pre>
+
+#!/usr/local/bin/perl -Tw
+
+# $Id: disk_hog.html,v 1.2 2002/10/09 22:24:18 lg Exp $
+#
+# Listing 1:
+# SCRIPT:       diskHog
+# AUTHOR:       Ivan Griffin (ivan.griffin@ul.ie)
+# DATE:         14 April 1996
+#
+# REVISION HISTORY:
+#   06 Mar 1996 Original version (written using Bourne shell and Awk)
+#   14 Apr 1996 Perl rewrite
+#   01 Aug 1996 Found piggie image on the web, added second red ball
+#   02 Aug 1996 Added third red ball
+#   20 Feb 1997 Moved piggie image :-)
+
+#
+# outlaw barewords and set up the paranoid stuff
+#
+use strict 'subs';
+use English;
+
+$ENV{'PATH'} = '/bin:/usr/bin:/usr/ucb'; # ucb for Solaris dudes
+$ENV{'IFS'} = '';
+
+#
+# some initial values and script defines
+#
+$NumUsers = 0; 
+$Total = 0; 
+$Position = 0; 
+
+$RED_ZONE3 = 300000;
+$RED_ZONE2 = 200000;
+$RED_ZONE = 100000;
+$ORANGE_ZONE = 50000;
+
+$CRITICAL = 2500000;
+$DANGER   = 2200000;
+
+$TmpFile = &quot;/var/tmp/foo$$&quot;;
+$HtmlFile = '&gt;/home/sysadm/ivan/public_html/diskHog.html';
+$PerlWebHome = &quot;diskHog.pl&quot;;
+
+$HtmlDir = &quot;WWW&quot;;
+$HtmlIndexFile = &quot;$HtmlDir/index.html&quot;;
+$Login = &quot; &quot;;
+$HomeDir=&quot; &quot;;
+$Gcos = &quot;A user&quot;;
+
+@AccountDirs = ( &quot;/home/users&quot;, &quot;/home/sysadm&quot; );
+@KeyList = (); 
+@TmpList = ();
+
+chop ($Machine = `/bin/hostname`);
+# chop ($Machine = `/usr/ucb/hostname`); # for Solaris
+
+
+#
+# Explicit sort subroutine
+#
+sub by_disk_usage
+{
+    $Foo{$b} &lt;=&gt; $Foo{$a};  # sort integers in numerically descending order
+}
+
+
+#
+# get disk usage for each user and total usage
+#
+sub get_disk_usage 
+{
+    foreach $Directory (@AccountDirs)
+    {
+        chdir $Directory or die &quot;Could not cd to $Directory\n&quot;;
+        # system &quot;du -k -s * &gt;&gt; $TmpFile&quot;; # for Solaris 
+        system &quot;du -s * &gt;&gt; $TmpFile&quot;;
+    }
+
+    open(FILEIN, &quot;&lt;$TmpFile&quot;) or die &quot;Could not open $TmpFile\n&quot;;
+
+    while (&lt;FILEIN&gt;)
+    {
+        chop;
+        ($DiskUsage, $Key) = split(' ', $_);
+
+        if (defined($Foo{$Key}))
+        {
+            $Foo{Key} += $DiskUsage;
+        }
+        else
+        {
+            $Foo{$Key} = $DiskUsage;
+
+            @TmpList = (@KeyList, $Key);
+            @KeyList = @TmpList;
+        };
+
+        $NumUsers ++;
+        $Total += $DiskUsage;
+    };
+
+    close(FILEIN);
+    unlink $TmpFile;
+}
+
+
+#
+# for each user with a public_html directory, ensure that it is
+# executable (and a directory) and that the index.html file is readable
+#
+sub user_and_homepage 
+{
+    $User = $_[0];
+
+    ($Login, $_, $_, $_, $_, $_, $Gcos, $HomeDir, $_) = getpwnam($User)
+        or return &quot;$User&lt;/td&gt;&quot;;
+
+    if ( -r &quot;$HomeDir/$HtmlIndexFile&quot; )
+    {
+        return &quot;$Gcos &lt;a href=\&quot;/~$Login\&quot;&gt;($User)&lt;/a&gt;&quot;;
+    }
+    else
+    {
+        return &quot;$Gcos ($User)&lt;/td&gt;&quot;;
+    };
+}
+
+#
+# generate HTML code for the disk usage file
+#
+sub html_preamble
+{
+    $CurrentDate = localtime;
+
+    open(HTMLOUT, $HtmlFile) or die &quot;Could not open $HtmlFile\n&quot;;
+    printf HTMLOUT &lt;&lt;&quot;EOF&quot;;
+&lt;!DOCTYPE HTML PUBLIC &quot;-//IETF//DTD HTML 3.0//EN&quot;&gt;
+
+&lt;!--
+  -- Automatically generated HTML
+  -- from $PROGRAM_NAME script
+  --
+  -- Last run: $CurrentDate
+  --&gt;
+
+&lt;html&gt;
+&lt;head&gt;
+&lt;title&gt;
+Disk Hog Top $NumUsers on $Machine
+&lt;/title&gt;
+&lt;/head&gt;
+
+&lt;body bgcolor=&quot;#e0e0e0&quot;&gt;
+&lt;h1 align=center&gt;Disk Hog Top $NumUsers on $Machine&lt;/h1&gt;
+
+&lt;div align=center&gt;
+&lt;table&gt;
+&lt;tr&gt;
+    &lt;td valign=middle&gt;&lt;img src=&quot;images/piggie.gif&quot; alt=&quot;[PIGGIE!]&quot;&gt;&lt;/td&gt;
+    &lt;td valign=middle&gt;&lt;em&gt;This is a &lt;a href=$PerlWebHome&gt;Perl&lt;/a&gt;
+        script which runs&lt;br&gt;
+        automatically every night&lt;/em&gt;&lt;br&gt;&lt;/td&gt;
+&lt;/tr&gt;
+&lt;/table&gt;
+
+&lt;p&gt;
+&lt;b&gt;Last run started&lt;/b&gt;: $StartDate&lt;br&gt;
+&lt;b&gt;Last run finished&lt;/b&gt;: $CurrentDate
+&lt;/p&gt;
+
+&lt;p&gt;
+&lt;table border=2&gt;
+&lt;tr&gt;
+&lt;th&gt;Status&lt;/th&gt;
+&lt;td&gt;
+EOF
+
+    if ($Total &gt; $CRITICAL) 
+    {
+        print HTMLOUT &quot;CRITICAL!!! - Reduce Disk Usage NOW!&quot;;
+    }
+    elsif (($Total &lt;= $CRITICAL) && ($Total &gt; $DANGER))
+    {
+        print HTMLOUT &quot;Danger - Delete unnecessary Files&quot;;
+    }
+    else
+    {
+        print HTMLOUT &quot;Safe&quot;;
+    }
+
+
+    printf HTMLOUT &lt;&lt;&quot;EOF&quot;;
+&lt;/td&gt;
+&lt;/tr&gt;
+&lt;/table&gt;
+&lt;/P&gt;
+
+&lt;hr size=4&gt;
+
+&lt;table border=2 width=70%%&gt;
+    &lt;tr&gt;
+        &lt;th colspan=2&gt;Chart Posn.&lt;/th&gt;
+        &lt;th&gt;Username&lt;/th&gt;
+        &lt;th&gt;Disk Usage&lt;/th&gt;
+    &lt;/tr&gt;
+
+EOF
+}
+
+#
+#
+#
+sub html_note_time
+{
+    $StartDate = localtime;
+}
+
+
+
+#
+# for each user, categorize and display their usage statistics
+#
+sub dump_user_stats
+{
+    foreach $Key (sort by_disk_usage @KeyList)
+    {
+        $Position ++;
+
+        print HTMLOUT &lt;&lt;&quot;EOF&quot;;
+    &lt;tr&gt;\n
+        &lt;td align=center&gt;
+EOF
+
+        #
+        # colour code disk usage
+        #
+        if ($Foo{$Key} &gt; $RED_ZONE) 
+        {
+            if ($Foo{$Key} &gt; $RED_ZONE3)
+            {
+                print HTMLOUT &quot;        &lt;img src=images/ball.red.gif&gt;\n&quot;;
+            }
+
+            if ($Foo{$Key} &gt; $RED_ZONE2)
+            {
+                print HTMLOUT &quot;        &lt;img src=images/ball.red.gif&gt;\n&quot;;
+            }
+
+            print HTMLOUT &quot;        &lt;img src=images/ball.red.gif&gt;&lt;/td&gt;\n&quot;;
+        }
+        elsif (($Foo{$Key} &lt;= $RED_ZONE) && ($Foo{$Key} &gt; $ORANGE_ZONE))
+        {
+            print HTMLOUT &quot;        &lt;img src=images/ball.orange.gif&gt;&lt;/td&gt;\n&quot;;
+        }
+        else
+        {
+            print HTMLOUT &quot;        &lt;img src=images/ball.green.gif&gt;&lt;/td&gt;\n&quot;;
+        }
+
+        print HTMLOUT &lt;&lt;&quot;EOF&quot;;
+
+        &lt;td align=center&gt;$Position&lt;/td&gt;
+EOF
+
+        print HTMLOUT &quot;        &lt;td align=center&gt;&quot;;
+        print HTMLOUT &user_and_homepage($Key);
+        print HTMLOUT &quot;&lt;/td&gt;\n&quot;;
+
+        print HTMLOUT &lt;&lt;&quot;EOF&quot;;
+        &lt;td align=center&gt;$Foo{$Key} KB&lt;/td&gt;
+    &lt;/tr&gt;
+
+EOF
+    };
+}
+
+#
+# end HTML code
+#
+sub html_postamble
+{
+    print HTMLOUT &lt;&lt;&quot;EOF&quot;;
+    &lt;tr&gt;
+        &lt;th&gt;&lt;/th&gt;
+        &lt;th align=left colspan=2&gt;Total:&lt;/th&gt;
+        &lt;th&gt;$Total&lt;/th&gt;
+    &lt;/tr&gt;
+&lt;/table&gt;
+
+&lt;/div&gt;
+
+&lt;hr size=4&gt;
+&lt;a href=&quot;/&quot;&gt;[$Machine Home Page]&lt;/a&gt;
+
+&lt;/body&gt;
+&lt;/html&gt;
+EOF
+
+
+    close HTMLOUT ;
+
+#
+# ownership hack
+#
+    $Uid = getpwnam(&quot;ivan&quot;);
+    $Gid = getgrnam(&quot;users&quot;);
+
+    chown $Uid, $Gid, $HtmlFile;
+}
+
+
+#
+# main()
+#
+
+&html_note_time;
+&get_disk_usage;
+&html_preamble;
+&dump_user_stats;
+&html_postamble;
+
+# all done!
+</pre>
+
+<div align=center>
+<b>Listing 1. diskHog.pl script source.</b>
+<hr size=4 width=30%>
+</div>
+
+
+<pre>
+
+0 0 * * * /home/sysadm/ivan/public_html/diskHog.pl
+
+</pre>
+<div align=center>
+<b>Listing 2. root's crontab entry.</b>
+<hr size=4 width=30%>
+</div>
+
+<div align=center>
+<img src="./gx/diskHog.small.gif"><br>
+<b>Figure 1. diskHog output.</b>
+<hr size=4 width=30%>
+</div>
+
+</td>
+</tr>
+</table>
+
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<center><H5>Copyright &copy; 1997, Ivan Griffin<BR> 
+Published in Issue 18 of the Linux Gazette, June 1997</H5></center>
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<A HREF="./index.html"><IMG ALIGN=BOTTOM SRC="../gx/indexnew.gif" 
+ALT="[ TABLE OF CONTENTS ]"></A>
+<A HREF="../index.html"><IMG ALIGN=BOTTOM SRC="../gx/homenew.gif"
+ALT="[ FRONT PAGE ]"></A>
+<A HREF="./clueless.html"><IMG SRC="../gx/back2.gif"
+ALT=" Back "></A>
+<A HREF="./dosemu.html"><IMG SRC="../gx/fwd.gif" ALT=" Next "></A>
+<P> <hr> <P> 
+<!--startcut ==========================================================-->
+</BODY>
+</HTML>
+<!--endcut ============================================================-->
+

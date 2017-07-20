@@ -1,0 +1,182 @@
+<!--startcut ==========================================================-->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML>
+<HEAD>
+<title>Syslog-ng LG #43</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!--endcut ============================================================-->
+
+<H4>
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H1><font color="maroon">Syslog-ng</font></H1>
+<H4>By <a href="mailto:bazsi@balabit.hu">Balazs Scheidler</a></H4>
+</center>
+<P> <HR> <P>  
+
+
+<H2>1. Introduction</H2>
+
+<P> One of the most neglected area of Unix is handling system events. Daily 
+checks for system messages is crucial for the security and health conditions
+of a computer system.
+
+<P> System logs contain much "noise" - messages which have no importance - and
+on the contrary important events, which should not be lost in the load of
+messages. With current tools it's difficult to select which messages we are 
+interested in.
+
+<P> A message is sent to different destinations based on the assigned 
+facility/priority pair. There are 12+8 (12 real and 8 local) predefined 
+facilities (mail, news, auth etc.), and 8 different priorities (ranging from 
+alert to debug).
+
+<P> One problem is that there are facilities which are too general (daemon), 
+and these facilities are used by many programs, even if they do not relate
+each other. It is difficult to find the interesting bits from the enourmous 
+amount of messages. 
+
+<P> A second problem is that there are very few programs which allow setting 
+their "facility code" to log under. It's at best a compile time parameter. 
+
+<P> So using facilities as a means of filtering is not the best way. For it 
+to be a good solution would require runtime option for all applications, which 
+specifies the log facility to log under, and the ability to create new 
+facilities in syslogd. Neither of these are available, and the first is neither
+feasible.
+
+<P> One of the design principles of syslog-ng was to make message filtering
+much more fine-grained. syslog-ng is able to filter messages based on the
+contents of messages in addition to the priority/facility pair. This way only
+the messages we are really interested in get to a specific destination. Another
+design principle was to make logforwarding between firewalled segments easier:
+long hostname format, which makes it easy to find the originating and chain of
+forwarding hosts even if a log message traverses several computers. And last
+principle was a clean and powerful configuration file format.
+
+<P> This article tries to give you an overview on syslog-ng's internals, for
+more detailed information see 
+<A HREF=http://www.balabit.hu/products/syslog-ng>
+http://www.balabit.hu/products/syslog-ng</A>
+and select the documentation link.
+
+<H2>2. Message paths</H2>
+
+<P> In syslog-ng a message path (or message route) consist of one or more
+sources, one or more filtering rules and one or more destinations (sinks). 
+A message is entered to syslog-ng in one of its sources, if that message
+matches the filtering rules it goes out using one of the destinations.
+
+<H2>2.1. Sources</H2>
+
+<P> A source is a collection of source drivers, which collect messages using a
+given method. For instance there's a source driver for AF_UNIX, SOCK_STREAM
+style sockets, which is used by the Linux syslog() call. 
+
+<P> Different platforms use different means of sending log messages to the 
+logging daemon, and to be useful on all operating systems, syslog-ng has 
+support for the most common methods. Tested support exists for Linux, BSDi,
+experimental support exists for Solaris (as of version 1.1.22)
+
+<H2>2.2. Destinations</H2>
+
+<P> A destination is a message sink, where log is sent if filtering rules match.
+Similarly to sources, destinations may include several drivers which define
+how messages are dispatched.
+
+<P> For instance there's a file driver, which writes messages to the given file,
+but support exists to send messages to unix, udp and tcp sockets as well.
+
+<H2>2.3. Filters</H2>
+
+<P> Filters perform log routing inside syslog-ng. You can write a boolean 
+expression using internal functions, which has to evaluate to true for the
+message to pass.
+
+<P> An expression may contain the operators "and", "or" and "not", and the
+following functions:
+
+<UL>
+	<LI> facility()
+	<LI> level()
+	<LI> program()
+	<LI> host()
+	<LI> match()
+</UL>
+
+<P> Each of the above functions check the corresponding field of a log message
+for matching (e.g. program() checks whether the given program sent the message,
+or not). You can use extended regular expressions for matching.
+
+<H2>2.4. Log statements</H2>
+
+<P> Now you have sources, destinations and filters. To connect these together
+you need the log statement:
+
+<PRE>
+log { source s1; source s2; ... 
+      filter f1; filter f2; ... 
+      destination d1; destination d2; ... };
+</PRE>
+
+<P> Messages coming from any of the listed sources, and matching against all
+the listed filters (which effectively ANDs them) are sent to all of the listed
+destinations.
+
+<H2>3. Example configuration</H2>
+
+<P> This configuration file shows the possibilities and features of syslog-ng.
+It receives messages from the network, and also handles local messages. Three
+distinct output files are used: one for the messages from sendmail, a second
+for messages coming from host1, and a third for messages coming from host2.
+
+<PRE>
+options { long_hostnames(on); sync(0); };
+
+source src { udp 0.0.0.0,514; unix-stream /dev/log; internal; };
+
+filter f_sendmail { program("sendmail"); };
+filter f_host1 { host("host1"); };
+filter f_host2 { host("host2"); };
+
+destination sendmail { file /var/log/sendmail; };
+destination host1 { file /var/log/host1; };
+destination host2 { file /var/log/host2; };
+
+log { source src; filter f_sendmail; destination sendmail; };
+log { source src; filter f_host1; destination host1; };
+log { source src; filter f_host2; destination host2; };
+</PRE>
+
+<H2>4. References</H2>
+
+<P> Syslog-ng is a product of BalaBit Computing, and is distributed under the
+GPL.  If you are interested, please visit 
+<A HREF=http://www.balabit.hu>http://www.balabit.hu</A>.
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<center><H5>Copyright &copy; 1999, Balazs Scheidler <BR> 
+Published in Issue 43 of <i>Linux Gazette</i>, July 1999</H5></center>
+
+<!--===================================================================-->
+<!--startcut ==========================================================-->
+<P> <hr> <P> 
+<A HREF="index.html"><IMG ALIGN=BOTTOM SRC="../gx/indexnew.gif" 
+ALT="[ TABLE OF CONTENTS ]"></A>
+<A HREF="../index.html"><IMG ALIGN=BOTTOM SRC="../gx/homenew.gif"
+ALT="[ FRONT PAGE ]"></A>
+<A HREF="nielsen.xdm.html"><IMG SRC="../gx/back2.gif"
+ALT=" Back "></A>
+<A HREF="silva.ai.html"><IMG SRC="../gx/fwd.gif" ALT=" Next "></A>
+<P> <hr> <P> 
+</BODY>
+</HTML>
+<!--endcut ============================================================-->

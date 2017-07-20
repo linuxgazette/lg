@@ -1,0 +1,283 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>Easily Porting MS-DOS Diagnostics to Linux LG #58</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<CENTER>
+<A HREF="http://www.linuxgazette.net/">
+<H1><IMG ALT="LINUX GAZETTE" SRC="../gx/lglogo.jpg" 
+	WIDTH="600" HEIGHT="124" border="0"></H1></A> 
+
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="sharma.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../faq/index.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="ward.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+<P>
+</CENTER>
+
+<!--endcut ============================================================-->
+
+<H4 ALIGN="center">
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H1><font color="maroon">Easily Porting MS-DOS Diagnostics to Linux</font></H1>
+<H4>By <a href="mailto:g14978@email.mot.com">Mark Taylor</a></H4>
+</center>
+<P> <HR> <P>  
+
+<!-- END header -->
+
+
+
+
+<h3>
+Abstract</h3>
+With a code few modifications and one powerful Linux module, you can compile
+and run your favorite MS-DOS diagnostics code on Linux on an X86 machine.
+Here's how!
+<h3>
+Introduction</h3>
+Diagnostic applications do their job by reading and writing the hardware
+registers of the devices on the mainboard. This is easy to program in MS-DOS
+since the processor is running in real-address mode and there are no protection
+mechanisms.
+<p>Writing code to access the hardware under Linux is quite a bit more
+difficult since (in most cases) a separate device driver must be coded
+and installed into the kernel. The protection mechanisms that prevent harm
+to the system by misbehaving user processes stymie the diagnostic developer.
+This article explains the porting 16-bit MS-DOS Diagnostics source code
+developed using Visual C++ 1.52 to the GNU C++ compiler and Linux OS environment.
+<h3>
+DOS diagnostics resource usage</h3>
+Start by compiling the MS-DOS code on Linux. The only code that won't compile
+contains non-standard system calls and inline assembly code. These fall
+into the following categories of system resources:
+<ul>
+<li>
+Read and write of I/O ports</li>
+
+<li>
+PCI configuration space</li>
+
+<li>
+Time delays</li>
+
+<li>
+Linear memory</li>
+
+<li>
+Interrupt handlers</li>
+
+<li>
+Inline assembly for CPUID, RDTSC (Read Time Stamp Counter) instructions
+and 64 bit integer math which was implemented with inline assembly instructions</li>
+</ul>
+A new access method in Linux must be found for each of these resources.
+Some system resources can be accessed by a user process running with root
+privilege.
+<p>A user process running with root privilege can access I/O ports and
+memory, but can't disable or handle interrupts. PCI configuration space
+access isn't safe either because consecutive writes to the configuration
+address and data ports are required. Tight control of time delays isn't
+possible either since the user process can be put to sleep at any time.
+See Linux Device Drivers section "Doing it in User Space" in [RUB] Chapter
+2 on page 36.
+<p>The GCC (GNU C Compiler) that comes with the Linux Distribution handles
+inline assembly code and both the CPUID and RDTSC instructions will execute
+correctly in a user context. GCC also offers 64-bit signed and unsigned
+integer math with the long long types. These capabilities cover the last
+bullet above. A single Linux module will handle all of the others except
+the interrupt handlers.
+<h3>
+Introduction to Linux modules</h3>
+A module is a section of code that can be added to the kernel at run time.
+A module is an object file that is compiled with the symbol MODULE defined.
+The module source includes the file linux/module.h and at least the two
+functions init_module and cleanup_module. The functions within a module
+run in kernel mode and have access to all the facilities available to the
+kernel. Modules can export symbols and call functions in other modules.
+Modules may (but are not required to) have an associated device node and
+be accessed from user processes like a device driver. Modules are added
+to the kernel and dynamically linked by running the insmod program.
+<p>Modules may also dynamically register nodes in the /proc filesystem.
+The most common use of a /proc node is to deliver a buffer of data to the
+reader.
+<h3>
+Using modules to satisfy the DOS diagnostics resource access</h3>
+One approach to giving the DOS diagnostics access to the system resources
+is to write a device driver module for each chip and rewrite the low level
+DOS diagnostics routines to open and use the device drivers. This approach
+is undesirable because of the potentially large number of devices used
+and the large number of code changes to the existing DOS diagnostics source
+code.
+<p>The number of modules required can be cut down considerably by creating
+a single module to provide general-purpose access to the kernel for each
+of the resource classes. The Linux Wormhole driver module provides the
+following services:
+<ul>
+<li>
+Read, write, modify of I/O ports</li>
+
+<li>
+Read and write PCI configuration space</li>
+
+<li>
+read and write access to BIOS and PCI memory</li>
+
+<li>
+Microsecond resolution minimum time delays</li>
+
+<li>
+System clock tick resolution minimum time delays</li>
+</ul>
+All services are provided by an ioctl(2) call. The function prototype for
+ioctl is:
+<pre>ioctl (int fd, int request, char *argp);</pre>
+The fd parameter is the file descriptor for the module obtained by a previous
+open(2) call.
+<p>The request parameter identifies the service required of the module.
+A symbol for example WORM_IOP_R is defined for each request. Each request
+also has an associated structure type. The argp parameter points to the
+structure provided by the caller. Data is passed to and from the module
+through this structure. The kernel calls copy_from_user and get_user_ret
+are used by the module to get data from the user. The kernel call put_user_ret
+is used to write data back to user space. See asm/uaccess.h.
+<h4>
+I/O PORTS</h4>
+There are three requests used to access I/O ports. They are:
+<ul>
+<li>
+8, 16, or 32 bit read (WORM_IOP_R)</li>
+
+<li>
+8, 16, or 32 bit write (WORM_IOP_W)</li>
+
+<li>
+8, 16, or 32 bit atomic read/modify/write (WORM_IOP_RMW)</li>
+</ul>
+For each request the user initializes the structure passed via argp with
+the I/O port address, write value(s) (if a write operation), and width
+of the I/O port.
+<p>The Wormhole module source code uses the macros inb, outb, inw, outw,
+inl, outl provided by asm/io.h to implement the I/O port access. See the
+section "Using I/O Ports" in [RUB] Chapter 8 on page 164.
+<h4>
+PCI Configuration Space</h4>
+PCI configuration space is accessed like I/O ports using a read and a write
+request (WORM_PCI_R, WORM_PCI_W). Address information is different and
+consists of the bus number, device number, function number, and byte offset.
+These functions are implemented in Wormhole using PCI BIOS calls defined
+in linux/pci.h. See the section "The PCI Interface" in [RUB] Chapter 15
+on page 341.
+<h4>
+Minimum Time Delays</h4>
+The minimum time delay services returns control to the calling process
+after at least the requested amount of time has elapsed. Due to interrupts
+and task switching, the time delay could be much longer. The DOS diagnostics
+code has two delay functions.
+<p>The first is based on the 18.2 Hz (54.94ms) DOS system clock. Linux
+modules can provide delays in increments of the system timer interrupt,
+which is currently 10ms. The Wormhole ioctl request WORM_DELAY_MS takes
+the number of milliseconds to delay as the argument. The driver determines
+the smallest system timer value that will occur after the delay has expired,
+sets a timeout, and sleeps. The driver will wake up and return to the user
+process when the timeout occurs.
+<p>The second DOS diagnostics code delay function performs microsecond
+resolution delays based on the time it takes to write to a non-decoded
+ISA bus port. This is somewhere in the neighborhood of 700-1000ns. Linux
+offers the kernel function udelay defined in &lt;linux/delay.h&gt;. See the
+section "Short Delays" in [RUB] Chapter 6 on page 137. This function bases
+the delay time on a software loop calibrated at boot time. Experiments
+show the delay time to be accurate with the best accuracy for delays below
+100us. This function is only suitable for small delays (up to around 1ms)
+since it busy waits, preventing other tasks from running. The Wormhole
+ioctl request WORM_DELAY_US passes the number of microseconds to delay
+to the kernel function udelay.
+<h4>
+Read and write access to PCI and BIOS memory</h4>
+DOS diagnostics can access any location in the 4GB address space by switching
+briefly to protected mode. In protected mode a selector that can read or
+write data based at zero with a limit of 4GB is created and used to access
+memory. A single BYTE or DWORD of memory is read or written. The existing
+code accesses PCI device memory which is above DRAM and the System BIOS
+area which is just below 1M.
+<p>In Linux the processor is running in protected mode and the memory management
+unit is enabled. The desired physical memory location must be mapped via
+the page tables and its virtual address must be known. Linux offers the
+kernel function vremap, which will create the virtual to physical mapping
+for a block of memory. The physical address must be above the top of DRAM
+memory. Kernel function ioremap can be used to map in memory-mapped devices
+and PCI memory. The Wormhole requests WORM_PCIMEM_R and WORM_PCIMEM_W will
+map a page, perform one 32-bit or 8-bit read or write access then unmap
+the page. See the section "High PCI Memory" in [RUB] Chapter 8 on page
+175.
+<p>The Wormhole requests WORM_BIOSMEM_R and WORM_BIOSMEM_W access the System
+BIOS area below 1M. They use kernel macros readb, readl, writeb, and writel
+to perform the memory access. See the section "ISA Memory Below 1M" in
+[RUB] Chapter 8 on page 171.
+<h3>
+Limitations of the Wormhole driver</h3>
+The DOS diagnostics check for correct interrupt generation by installing
+an interrupt handler which increments a global variable. Because each interrupting
+device requires a custom interrupt handler, the Wormhole driver cannot
+provide a general-purpose service. A separate module should be created
+for each device that interrupts.
+<p>The Wormhole driver performance is limited by the context switch overhead
+of the ioctl call. If thousands of operations are required the total time
+will be significantly longer than the time consumed by a dedicated module.
+<p>The Wormhole driver only does one access per call. If several accesses
+must be done atomically, with no intervening task switches, the Wormhole
+driver is unsuitable.
+<p>The Wormhole driver and Linux user process cannot offer real time response.
+In the diagnostics environment this problem can be limited by running with
+no users logged in. Otherwise a dedicated module is required.
+<p>The Wormhole driver does not control access to the kernel resources.
+It is the responsibility of the caller to not break anything in the kernel
+or change the state of device registers of devices for which are modules
+are running.
+<h3>
+Source Code</h3>
+<a href="misc/taylor/worm.h.txt">worm.h</a>
+<br><a href="misc/taylor/worm.c.txt">worm.c</a>
+<br><a href="misc/taylor/Makefile.txt">Makefile</a>
+<h3>
+References</h3>
+[RUB] Rubini, Allessandro "Linux Device Drivers" First Edition, 1998, O'Reilly
+&amp; Associates, Inc.
+<h3>
+Linux kernel versions</h3>
+The book Linux Device Drivers [RUB] primarily addresses Linux 2.0 kernels.
+The Wormhole driver runs under Linux 2.2.14. Some of the kernel calls made
+by the Wormhole driver are different than described in the book. A good
+source of information about kernel changes between 2.0 and 2.2 is <a href="http://www.atnf.csiro.au/~rgooch/linux/docs/porting-to-2.2.html">porting-to-2.2.html</a>
+.
+
+
+
+
+<!-- *** BEGIN copyright *** -->
+<P> <hr> <!-- P --> 
+<H5 ALIGN=center>
+
+Copyright &copy; 2000, Mark Taylor<BR> 
+Published in Issue 58 of <i>Linux Gazette</i>, October 2000</H5>
+<!-- *** END copyright *** -->
+
+<!--startcut ==========================================================-->
+<HR><P>
+<CENTER>
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="sharma.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../faq/index.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="ward.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+</CENTER>
+</BODY></HTML>
+<!--endcut ============================================================-->

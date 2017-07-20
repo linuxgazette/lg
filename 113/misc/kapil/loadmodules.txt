@@ -1,0 +1,286 @@
+#!/bin/sh
+# Commands used:
+# modprobe grep rmmod cat
+# Functions from generic Debian /sbin/init used
+# ide_module_to_driver
+# Assumes that /proc is mounted
+# This script loads the modules required
+
+MODPROBE=/sbin/modprobe
+
+# First of all the console modules
+$MODPROBE -k  vesafb > /dev/null 2>&1
+$MODPROBE -k  fbcon 2> /dev/null
+$MODPROBE -k  unix 2> /dev/null
+
+PCIMAP=/lib/modules/2.6.8-2-686/modules.pcimap
+
+mount -nt sysfs sysfs /sys
+
+#Get the values of the module loading type requested
+modules=pci
+for i in $(cat /proc/cmdline); do
+	case $i in
+	modules=*)
+		modules=${i#modules=}
+		;;
+	esac
+done
+
+# IDE Modules 
+# Basically Debian's standard strategy.
+# Load all ide modules and unload unused ones.
+# Debian's generated loadmodules
+unload_unused_ide(){
+	[ "$MODPROBE" = "/sbin/modprobe" ] || return 0
+	for i
+	do
+		ide_module_to_driver $i
+		if [ -z "$ret" ]
+		then
+			continue
+		fi
+
+		IFS=''
+		set -- /sys/bus/pci/drivers/$ret/*:*
+		unset IFS
+		if [ ! -h "$1" ]
+		then
+			rmmod $i
+		fi
+	done
+}
+
+loadmodules_ide() {
+	$MODPROBE -k  pdc202xx_new > /dev/null 2>&1
+	$MODPROBE -k  aec62xx > /dev/null 2>&1
+	$MODPROBE -k  alim15x3 > /dev/null 2>&1
+	$MODPROBE -k  amd74xx > /dev/null 2>&1
+	$MODPROBE -k  atiixp > /dev/null 2>&1
+	$MODPROBE -k  cmd64x > /dev/null 2>&1
+	$MODPROBE -k  cs5520 > /dev/null 2>&1
+	$MODPROBE -k  cs5530 > /dev/null 2>&1
+	$MODPROBE -k  cy82c693 > /dev/null 2>&1
+	$MODPROBE -k  generic > /dev/null 2>&1
+	$MODPROBE -k  hpt34x > /dev/null 2>&1
+	$MODPROBE -k  hpt366 > /dev/null 2>&1
+	$MODPROBE -k  ns87415 > /dev/null 2>&1
+	$MODPROBE -k  opti621 > /dev/null 2>&1
+	$MODPROBE -k  pdc202xx_old > /dev/null 2>&1
+	$MODPROBE -k  piix > /dev/null 2>&1
+	$MODPROBE -k  rz1000 > /dev/null 2>&1
+	$MODPROBE -k  sc1200 > /dev/null 2>&1
+	$MODPROBE -k  serverworks > /dev/null 2>&1
+	$MODPROBE -k  siimage > /dev/null 2>&1
+	$MODPROBE -k  sis5513 > /dev/null 2>&1
+	$MODPROBE -k  slc90e66 > /dev/null 2>&1
+	$MODPROBE -k  triflex > /dev/null 2>&1
+	$MODPROBE -k  trm290 > /dev/null 2>&1
+	$MODPROBE -k  via82cxxx > /dev/null 2>&1
+	/sbin/modprobe -k  ide-generic 2>/dev/null
+	/sbin/modprobe -k  ide-disk 2>/dev/null
+	/sbin/modprobe -k  ide-cd 2>/dev/null
+
+	unload_unused_ide pdc202xx_new aec62xx alim15x3 \
+	amd74xx atiixp cmd64x cs5520 cs5530 cy82c693 generic \
+	hpt34x hpt366 ns87415 opti621 pdc202xx_old piix \
+	rz1000 sc1200 serverworks siimage sis5513 slc90e66 \
+	triflex trm290 via82cxxx
+}
+
+#SCSI Modules
+# Try the Scsi modules in sequence 
+# This is taken from Knopper's General script
+loadmodules_scsi() {
+	# "Safe" SCSI modules in the right order for autoprobe
+	# Warning: The sym53c8xx.o and g_NCR* cause a kernel Oops if no such adapter
+	# is present.
+	#
+	# NB: It looks like that ncr53c8xx.o is more stable than 53c7,8xx.o for
+	# a ncr53c810 controller (at least on my installation box it's more
+	# immune to SCSI timeouts)
+	# Removed 53c7,8xx -> crashes if no device attached.
+	# Removed AM53C974 -> crashes tmscsim if adapter found
+	# Added initio.o on request (untested)
+	SCSI_MODULES="aic7xxx aic7xxx_old BusLogic \
+	ncr53c8xx NCR53c406a \
+	initio mptscsih \
+	advansys aha1740 aha1542 aha152x \
+	atp870u dtc eata fdomain gdth \
+	megaraid pas16 pci2220i pci2000 psi240i \
+	qlogicfas qlogicfc qlogicisp \
+	seagate t128 tmscsim u14-34f ultrastor wd7000 \
+	a100u2w 3w-xxxx"
+	FOUND_SCSI="no"
+
+	# Try to load the given modules
+	for i in $SCSI_MODULES; do
+		if ($MODPROBE -k $i >/dev/null 2>&1)
+		then
+			FOUND_SCSI="yes"
+		else
+			[ "$MODPROBE" = "/sbin/modprobe" ] && \
+				rmmod $i > /dev/null 2>&1
+		fi
+	done
+
+	if [ "$FOUND_SCSI" = "yes" ]
+	then
+		# Generic scsi modules
+		/sbin/modprobe -k scsi_mod 2>/dev/null
+		/sbin/modprobe -k sd_mod 2>/dev/null
+		/sbin/modprobe -k sr_mod 2>/dev/null
+	fi
+}
+
+# USB modules
+# The order of loading these was copied from
+# Linux-Live scripts
+loadmodules_usb(){
+
+	( $MODPROBE -k ehci-hcd > /dev/null 2>&1 ) && FOUND_USB="yes"
+	( $MODPROBE -k ohci-hcd > /dev/null 2>&1 ) && FOUND_USB="yes"
+	( $MODPROBE -k uhci-hcd > /dev/null 2>&1 ) && FOUND_USB="yes"
+
+	# The usb-storage device should appear as a
+	# scsi device
+	if [ "$FOUND_USB" = "yes" ]
+	then
+		/sbin/modprobe -k scsi_mod 2>/dev/null
+		/sbin/modprobe -k sd_mod  2>/dev/null
+		/sbin/modprobe -k sr_mod 2>/dev/null
+		/sbin/modprobe -k usb-storage 2>/dev/null
+	fi
+
+	# USB storage needs time to start up
+	for i in 5 4 3 2 1; do
+	  echo "... waiting for usb $i"
+	  sleep 1
+	done
+}
+
+# Load all possible modules!
+loadmodules_all(){
+	loadmodules_ide
+	loadmodules_scsi
+	loadmodules_usb
+}
+
+# PCIMAP based modprobe replacement
+# This checks whether the module to
+# be loaded matches a registered device
+# before trying to load it.
+loadmodules_pcimap() {
+	MODPROBE=modprobe_pcimap
+
+	loadmodules_all
+
+	MODPROBE=/sbin/modprobe
+}
+
+modprobe_pcimap() {
+	module=$2
+
+	# Some parameters
+	pciany=$((0xffffffff))
+
+	(grep "^$module " $PCIMAP | match_pcimap ) &&  /sbin/modprobe -k $module
+}
+
+match_pcimap(){
+	while read posmod posven posdev possubven possubdev posclass classmask junk
+	do
+		[ "$posmod" != "$module" ] && continue
+
+		posven=$(($posven))
+		posdev=$(($posdev))
+		possubven=$(($possubven))
+		possubdev=$(($possubdev))
+		posclass=$(($posclass))
+		classmask=$(($classmask))
+
+		for pcidev in /sys/bus/pci/devices/*
+		do
+			[ $posven -ne $pciany ] && \
+			 [ $posven -ne $(($(cat $pcidev/vendor))) ] && \
+			 continue
+			[ $posdev -ne $pciany ] && \
+			 [ $posdev -ne $(($(cat $pcidev/device))) ] && \
+			 continue
+			[ $possubven -ne $pciany ] && \
+			 [ $possubven -ne $(($(cat $pcidev/vendor))) ] && \
+			 continue
+			[ $possubdev -ne $pciany ] && \
+			 [ $possubdev -ne $(($(cat $pcidev/device))) ] && \
+			 continue
+			[ $posclass -ne \
+				$(($(cat $pcidev/class) & $classmask)) \
+			] && \
+			 continue
+
+			return 0
+		done
+	done
+	return 1
+}
+
+# Use info from /sys/bus/pci/devices to determine module loading
+loadmodules_pci() {
+	# Load all modules which occur
+	# as pci devices
+	load_pci_modules
+
+	# load generic modules
+	# Generic ide modules
+	/sbin/modprobe -k  ide-generic 2>/dev/null
+	/sbin/modprobe -k  ide-disk 2>/dev/null
+	/sbin/modprobe -k  ide-cd 2>/dev/null
+	# Generic scsi modules
+	/sbin/modprobe -k scsi_mod 2>/dev/null
+	/sbin/modprobe -k sd_mod 2>/dev/null
+	/sbin/modprobe -k sr_mod 2>/dev/null
+	# Generic USB modules
+	/sbin/modprobe -k usbcore 2> /dev/null
+	/sbin/modprobe -k usb-storage 2>/dev/null
+	# USB storage needs time to start up
+	for i in 5 4 3 2 1; do
+	  echo "... waiting for usb $i"
+	  sleep 1
+	done
+}
+
+# Load all modules which occur as pci devices
+load_pci_modules(){
+	any=$((0xffffffff))
+
+	for i in /sys/bus/pci/devices/*/
+	do
+	 vendor=$(cat $i/vendor); vendor=$(($vendor))
+	 device=$(cat $i/device); device=$(($device))
+	 subvendor=$(cat $i/subsystem_vendor); subvendor=$(($subvendor))
+	 subdevice=$(cat $i/subsystem_device); subdevice=$(($subdevice))
+	 class=$(cat $i/class); class=$(($class))
+
+	 grep -f /etc/allmod.list $PCIMAP | (
+		while read posmod posven posdev possubven possubdev posclass classmask junk
+		do
+			posven=$(($posven))
+			test $posven -ne $vendor && test $posven -ne $any && continue
+			posdev=$(($posdev))
+			test $posdev -ne $device && test $posdev -ne $any && continue
+			possubven=$(($possubven))
+			test $possubven -ne $subvendor && test $possubven -ne $any && continue
+			possubdev=$(($possubdev))
+			test $possubdev -ne $subdevice && test $possubdev -ne $any && continue
+			class_temp=$(($class & $classmask))
+			posclass=$(($posclass))
+			test $posclass -ne $class_temp && continue
+			/sbin/modprobe -k $posmod 2>/dev/null
+		done
+		)
+	done
+}
+
+loadmodules_${modules}
+
+umount -n /sys

@@ -1,0 +1,608 @@
+<!DOCTYPE html
+	PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+	 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="utf-8" xml:lang="utf-8">
+<head>
+<title>Monitoring Function Calls LG #151</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link rel="stylesheet" href="../lg.css" type="text/css" media="screen, projection"  />
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<!-- link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" / -->
+<link rel="shortcut icon" href="../favicon.ico" />
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+</head>
+<body>
+
+<a href="../">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+<div id="navigation">
+<table summary="masthead" width="100%">
+<tr>
+<td align="center" colspan="3" style="font-size: 10px; font-weight: bold">
+<a href="../index.html">Home</a>
+<a href="http://linuxgazette.net">Main Site</a>
+<a href="../faq/index.html">FAQ</a>
+
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/mailman/listinfo/">Mailing Lists</a>
+<a href="../jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+<hr width="99%" style="border: 1px inset #000033">
+</td>
+</tr>
+<tr>
+<td width="40%" align="left" style="font-size: 10px; font-weight: bold">
+The Free International Online Linux Monthly
+</td>
+<td width="20%" align="center" style="font-size: 10px; font-weight: bold">
+ISSN: 1934-371X
+</td>
+<td width="40%" align="right" style="font-size: 10px; font-weight: bold">
+Main site: <a href="http://linuxgazette.net">http://linuxgazette.net</a> 
+</td>
+</table>
+</div>
+
+
+<div id="breadcrumbs1">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">June 2008 (#151)</a> &gt; 
+Article
+
+</div>
+
+<div class="articlecontent1">
+<div class="content">
+
+<div id="previousnexttop">
+<A HREF="john.html" >&lt;-- prev</A> | <A HREF="prestia.html" >next --&gt;</A>
+</div>
+
+<h1>Monitoring Function Calls</h1>
+<p id="by"><b>By <a href="../authors/melinte.html">Aurelian Melinte</a></b></p>
+
+ 
+<h3>Overview </h3>
+
+<p>There are tools to monitor the system calls an application makes, but how
+ about monitoring your own written functions - inside the program itself?  
+ What if we want to check when a function is entered, which arguments is the
+ function called with, when the function exits, and what the returned value is?
+ This article presents a proof-of-concept tool to achieve this without 
+ modifying the application's code. </p> 
+
+<p>While the gcc compiler will instrument the code for us, some of the details
+ left to the programmer are both compiler-version dependent and CPU-dependent 
+ - namely retrieving the function arguments and return values. Thus, the
+ discussion here is based on experiments with gcc compiler suites 4.1 
+ and 4.2, Intel processors, and binutils 2.18. </p>
+
+
+<h3>Code instrumentation</h3>
+
+<p>We want to address the following points: </p>
+<ul>
+  <li>when a function/method is entered and exited</li>
+  <li>what the call arguments were when the function is entered</li>
+  <li>what the return code was when the function is exited</li>
+  <li>optionally, where the function was called from</li>
+</ul>
+
+<p>The first one is easy: if requested, the compiler will instrument functions
+ and methods, so that when a function/method is entered, a call to an
+ instrumentation function is made, and when the function is exited, a similar
+ instrumentation call is made: </p>
+
+<pre class="code">
+    void __cyg_profile_func_enter(void *func, void *callsite); 
+    void __cyg_profile_func_exit(void *func, void *callsite); 
+</pre>
+
+<p>This is achieved by compiling the code with the <tt>-finstrument-functions</tt> flag.
+The above two functions can be used, for instance, to collect data for
+coverage or for profiling. We will use them to print a trace of
+function calls.  Furthermore, we can isolate these two functions and the
+supporting code in an interposition library of our own. This library can
+be loaded when and if needed, thus leaving the application code
+basically unchanged. </p>
+
+<p>Now when the function is entered, we get the arguments of the call:</p>
+
+<pre class="code">
+    void __cyg_profile_func_enter( void *func, void *callsite )
+    {
+        char buf_func[CTRACE_BUF_LEN+1] = {0};
+        char buf_file[CTRACE_BUF_LEN+1] = {0}; 
+        char buf_args[ARG_BUF_LEN + 1] = {0}; 
+        pthread_t self = (pthread_t)0;
+        int *frame = NULL;
+        int nargs = 0;
+    
+        self = pthread_self(); 
+        frame = (int *)__builtin_frame_address(1); /*of the 'func'*/
+
+        /*Which function*/
+        libtrace_resolve (func, buf_func, CTRACE_BUF_LEN, NULL, 0);
+        
+        /*From where.  KO with optimizations. */
+        libtrace_resolve (callsite, NULL, 0, buf_file, CTRACE_BUF_LEN);
+        
+        nargs = nchr(buf_func, ',') + 1; /*Last arg has no comma after*/ 
+        nargs += is_cpp(buf_func);       /*'this'*/
+        if (nargs &gt; MAX_ARG_SHOW)
+            nargs = MAX_ARG_SHOW;
+
+        printf("T%p: %p %s %s [from %s]\n", 
+               self, (int*)func, buf_func, 
+               args(buf_args, ARG_BUF_LEN, nargs, frame), 
+               buf_file);
+    }
+</pre>
+
+
+<p>And when the function is is exited, we get the return value:</p>
+
+<pre class="code">
+    void __cyg_profile_func_exit( void *func, void *callsite )
+    {
+        long ret = 0L; 
+        char buf_func[CTRACE_BUF_LEN+1] = {0};
+        char buf_file[CTRACE_BUF_LEN+1] = {0}; 
+        pthread_t self = (pthread_t)0;
+
+        GET_EBX(ret); 
+        self = pthread_self(); 
+
+        /*Which function*/
+        libtrace_resolve (func, buf_func, CTRACE_BUF_LEN, NULL, 0);
+        
+        printf("T%p: %p %s =&gt; %d\n", 
+               self, (int*)func, buf_func, 
+               ret);
+
+        SET_EBX(ret); 
+    }
+</pre>
+
+
+<p>Since these two instrumentation functions are aware of addresses, and we
+ actually want the trace to be readable by humans, we need also a way to 
+ resolve symbol addresses to symbol names: this is what libtrace_resolve() 
+ does. </p>
+
+
+<h3>Binutils and libbfd</h3>
+
+<p>First, we have to have the symbol information handy. To achieve this, 
+ we compile our application with the '-g' flag. Then, we can map addresses 
+ to symbol names. This would normally require writing some code 
+ that is aware of the ELF format. </p>
+
+<p>Luckily, there is the binutils package, which comes with a library that
+ does just that - <tt>libbfd</tt> - and with a tool - <tt>addr2line</tt>. addr2line is a good 
+ example of how to use libbfd, and I have simply used it to wrap around libbfd.
+ The result is the libtrace_resolve() function.  For details, please refer to
+ the README in the code accompanying this article. </p>
+
+<p>Since the instrumentation functions are isolated in a stand-alone module, 
+ we tell this module the name of the instrumented executable through an
+ environment variable (CTRACE_PROGRAM) that we set before running the program.
+ This is needed to properly init libbfd to search for symbols. </p>
+
+<p>Note: binutils is a work in progress. I have used version 2.18. It does
+an amazingly good job, although function inlining affects its precision.</p>
+
+
+<h3>Stack Layout </h3>
+
+<p>To address the first point, the work has been architecture-agnostic.
+(Actually, libbfd is aware of the architecture, but things are hidden
+behind its API.)  However, to retrieve function arguments and return
+values, we have to look at the stack, write a bit of
+architecture-specific code, and exploit some gcc quirks. Again, the
+compilers I have used were gcc 4.1 and 4.2; later or previous versions
+might work differently. In short: </p> 
+
+<ul> 
+<li>x86 dictates that the stack grows down</li> 
+<li>GCC dictates how the stack is used - a "typical"
+    stack is depicted below.</li> 
+<li>each function has a stack frame marked by the ebp (base pointer) 
+    and esp (stack pointer) registers. </li>
+<li>normally, we expect the eax register to contain the return code</li> 
+</ul>
+
+<pre class="code">
+                                \
+               +------------+   |
+               | arg 2      |   \
+               +------------+    &gt;- previous function's stack frame
+               | arg 1      |   /
+               +------------+   |
+               | ret %eip   |   /
+               +============+   
+               | saved %ebp |   \
+        %ebp-&gt; +------------+   |
+               |            |   |
+               |   local    |   \
+               | variables, |    &gt;- current function's stack frame
+               |    etc.    |   /
+               |            |   |
+               |            |   |
+        %esp-&gt; +------------+   /
+</pre>
+
+<p>In an ideal world, the code the compiler generates would make sure that
+upon instrumenting the exit of a function the return value was set and the
+CPU registers were pushed on the stack (to ensure the instrumentation
+function does not affects them). Then, it would call the instrumentation
+function, and finally pop the registers. This sequence of code would ensure
+we always get access to the return value in the instrumentation function.
+The code generated by the compiler is a bit different... </p>
+
+<p>Also, in practice, many of gcc's flags affect the stack layout and 
+ registers usage. The most obvious ones are: </p>
+
+  <ul>
+  <li>-fomit-frame-pointer. This flag affects the stack offset where the
+      arguments are to be found. </li>
+  <li>The optimization flags (e.g., '-Ox'); each of these flags aggregates
+  a number of optimizations. These flags did not affect the stack, and, 
+      quite amazingly, arguments were always passed to functions through 
+      the stack regardless of the optimization level. One would have 
+      expected that some arguments would be passed through registers - in 
+      which case getting these arguments would have proven difficult or
+      even impossible. However, these flags did complicate recovering the 
+      return code. Note that on some architectures, these flags will "suck in" 
+      the -fomit-frame-pointer optimization. </li>
+  </ul>
+
+<p>In any case, be wary: the flags you use to compile your application 
+ may hold hidden surprises. </p>
+
+
+<h3>Function arguments</h3>
+
+<p>In my tests with the compilers, all arguments were invariably passed 
+ through the stack. Hence, this is trivial business, affected to a small 
+ extent by the  -fomit-frame-pointer flag - this flag will change the offset 
+ at which arguments start. </p>
+
+<p>How many arguments does a function have; how many arguments are on the stack? 
+ One way to infer the number of arguments is based on its signature 
+ (for C++, beware of the "this" hidden argument), and this is the technique 
+ used in __cyg_profile_func_enter(). </p>
+
+<p>Once we know the offset where the arguments start on the stack and how many 
+ of them there are, we just walk the stack to retrieve their values: </p>
+
+<pre class="code">
+    char *args(char *buf, int len, int nargs, int *frame)
+    {
+        int i; 
+        int offset;
+
+        memset(buf, 0, len); 
+
+        snprintf(buf, len, "("); 
+        offset = 1; 
+        for (i=0; i&lt;nargs &amp;&amp; offset&lt;len; i++) {
+            offset += snprintf(buf+offset, len-offset, "%d%s", 
+                             *(frame+ARG_OFFET+i), 
+                             i==nargs-1 ? " ...)" : ", ");
+        }
+
+        return buf; 
+    }
+</pre>
+
+
+<h3>Function return values</h3>
+
+<p>Obtaining the return value proved to be possible only when using the 
+ -O0 flag. </p>
+
+<p>Let's look what happens when using this method:</p>
+
+<pre class="code">
+    class B {
+        ...
+        virtual int m1(int i, int j) {printf("B::m1()\n"); f1(i); return 20;}
+        ...
+    }; 
+</pre>
+
+<p>is instrumented with -O0: </p>
+
+<pre class="code">
+    080496a2 &lt;_ZN1B2m1Eii&gt;:
+     80496a2:    55                       push   %ebp
+     80496a3:    89 e5                    mov    %esp,%ebp
+     80496a5:    53                       push   %ebx
+     80496a6:    83 ec 24                 sub    $0x24,%esp
+     80496a9:    8b 45 04                 mov    0x4(%ebp),%eax
+     80496ac:    89 44 24 04              mov    %eax,0x4(%esp)
+     80496b0:    c7 04 24 a2 96 04 08     movl   $0x80496a2,(%esp)
+     80496b7:    e8 b0 f4 ff ff           call   8048b6c &lt;__cyg_profile_func_enter@plt&gt;
+     80496bc:    c7 04 24 35 9c 04 08     movl   $0x8049c35,(%esp)
+     80496c3:    e8 b4 f4 ff ff           call   8048b7c &lt;puts@plt&gt;
+     80496c8:    8b 45 0c                 mov    0xc(%ebp),%eax
+     80496cb:    89 04 24                 mov    %eax,(%esp)
+     80496ce:    e8 9d f8 ff ff           call   8048f70 &lt;_Z2f1i&gt;
+<strong>     80496d3:    bb 14 00 00 00           mov    $0x14,%ebx</strong>
+     80496d8:    8b 45 04                 mov    0x4(%ebp),%eax
+     80496db:    89 44 24 04              mov    %eax,0x4(%esp)
+     80496df:    c7 04 24 a2 96 04 08     movl   $0x80496a2,(%esp)
+<strong>     80496e6:    e8 81 f5 ff ff           call   8048c6c &lt;__cyg_profile_func_exit@plt&gt;</strong>
+     80496eb:    89 5d f8                 mov    %ebx,0xfffffff8(%ebp)
+<strong>     80496ee:    eb 27                    jmp    8049717 &lt;_ZN1B2m1Eii+0x75&gt;</strong>
+     80496f0:    89 45 f4                 mov    %eax,0xfffffff4(%ebp)
+     80496f3:    8b 5d f4                 mov    0xfffffff4(%ebp),%ebx
+     80496f6:    8b 45 04                 mov    0x4(%ebp),%eax
+     80496f9:    89 44 24 04              mov    %eax,0x4(%esp)
+     80496fd:    c7 04 24 a2 96 04 08     movl   $0x80496a2,(%esp)
+     8049704:    e8 63 f5 ff ff           call   8048c6c &lt;__cyg_profile_func_exit@plt&gt;
+     8049709:    89 5d f4                 mov    %ebx,0xfffffff4(%ebp)
+     804970c:    8b 45 f4                 mov    0xfffffff4(%ebp),%eax
+     804970f:    89 04 24                 mov    %eax,(%esp)
+     8049712:    e8 15 f5 ff ff           call   8048c2c &lt;_Unwind_Resume@plt&gt;
+<strong>     8049717:    8b 45 f8                 mov    0xfffffff8(%ebp),%eax</strong>
+     804971a:    83 c4 24                 add    $0x24,%esp
+     804971d:    5b                       pop    %ebx
+     804971e:    5d                       pop    %ebp
+     804971f:    c3                       ret    
+</pre>
+
+<p>Note how the return code is moved into the ebx register - a bit unexpected
+ since, traditionally, the eax register is used for return codes - and then 
+ the instrumentation function is called. Good to retrieve the return value, 
+ but to avoid the ebx register getting clobbered in the instrumentation
+ function, we'll save it upon entering the function, and restore it when we
+exit. </p>
+
+<p>When the compilation is done with some degree of optimization (-O1...3; 
+ shown here is -O2), the code changes: </p>
+
+<pre class="code">
+    080498c0 &lt;_ZN1B2m1Eii&gt;:
+     80498c0:    55                       push   %ebp
+     80498c1:    89 e5                    mov    %esp,%ebp
+     80498c3:    53                       push   %ebx
+     80498c4:    83 ec 14                 sub    $0x14,%esp
+     80498c7:    8b 45 04                 mov    0x4(%ebp),%eax
+     80498ca:    c7 04 24 c0 98 04 08     movl   $0x80498c0,(%esp)
+     80498d1:    89 44 24 04              mov    %eax,0x4(%esp)
+     80498d5:    e8 12 f4 ff ff           call   8048cec &lt;__cyg_profile_func_enter@plt&gt;
+     80498da:    c7 04 24 2d 9c 04 08     movl   $0x8049c2d,(%esp)
+     80498e1:    e8 16 f4 ff ff           call   8048cfc &lt;puts@plt&gt;
+     80498e6:    8b 45 0c                 mov    0xc(%ebp),%eax
+     80498e9:    89 04 24                 mov    %eax,(%esp)
+     80498ec:    e8 af f7 ff ff           call   80490a0 &lt;_Z2f1i&gt;
+     80498f1:    8b 45 04                 mov    0x4(%ebp),%eax
+     80498f4:    c7 04 24 c0 98 04 08     movl   $0x80498c0,(%esp)
+     80498fb:    89 44 24 04              mov    %eax,0x4(%esp)
+<strong>     80498ff:    e8 88 f3 ff ff           call   8048c8c &lt;__cyg_profile_func_exit@plt&gt;</strong>
+     8049904:    83 c4 14                 add    $0x14,%esp
+<strong>     8049907:    b8 14 00 00 00           mov    $0x14,%eax</strong>
+     804990c:    5b                       pop    %ebx
+     804990d:    5d                       pop    %ebp
+<strong>     804990e:    c3                       ret    </strong>
+     804990f:    89 c3                    mov    %eax,%ebx
+     8049911:    8b 45 04                 mov    0x4(%ebp),%eax
+     8049914:    c7 04 24 c0 98 04 08     movl   $0x80498c0,(%esp)
+     804991b:    89 44 24 04              mov    %eax,0x4(%esp)
+     804991f:    e8 68 f3 ff ff           call   8048c8c &lt;__cyg_profile_func_exit@plt&gt;
+     8049924:    89 1c 24                 mov    %ebx,(%esp)
+     8049927:    e8 f0 f3 ff ff           call   8048d1c &lt;_Unwind_Resume@plt&gt;
+     804992c:    90                       nop    
+     804992d:    90                       nop    
+     804992e:    90                       nop    
+     804992f:    90                       nop    
+</pre>
+
+<p>Note how the instrumentation function gets called first, and only then the 
+ eax register is set with the return value. Thus, if we absolutely want 
+ the return code, we are forced to compile with -O0. </p>
+
+
+<h3>Sample output</h3>
+
+<p>Finally, below are the results. At the shell prompt type: </p>
+
+<pre>
+$ export CTRACE_PROGRAM=./cpptraced
+$ LD_PRELOAD=./libctrace.so ./cpptraced
+
+T0xb7c0f6c0: 0x8048d34 main (0 ...) [from ]
+./cpptraced: main(argc=1)
+T0xb7c0ebb0: 0x80492d8 thread1(void*) (1 ...) [from ]
+T0xb7c0ebb0: 0x80498b2 D (134605416 ...) [from cpptraced.cpp:91]
+T0xb7c0ebb0: 0x8049630 B (134605416 ...) [from cpptraced.cpp:66]
+B::B()
+T0xb7c0ebb0: 0x8049630 B =&gt; -1209622540 [from ]
+D::D(int=-1210829552)
+T0xb7c0ebb0: 0x80498b2 D =&gt; -1209622540 [from ]
+Hello World! It's me, thread #1!
+./cpptraced: done.
+T0xb7c0f6c0: 0x8048d34 main =&gt; -1212090144 [from ]
+T0xb740dbb0: 0x8049000 thread2(void*) (2 ...) [from ]
+T0xb740dbb0: 0x80498b2 D (134605432 ...) [from cpptraced.cpp:137]
+T0xb740dbb0: 0x8049630 B (134605432 ...) [from cpptraced.cpp:66]
+B::B()
+T0xb740dbb0: 0x8049630 B =&gt; -1209622540 [from ]
+D::D(int=-1210829568)
+T0xb740dbb0: 0x80498b2 D =&gt; -1209622540 [from ]
+Hello World! It's me, thread #2!
+T#2!
+T0xb6c0cbb0: 0x8049166 thread3(void*) (3 ...) [from ]
+T0xb6c0cbb0: 0x80498b2 D (134613288 ...) [from cpptraced.cpp:157]
+T0xb6c0cbb0: 0x8049630 B (134613288 ...) [from cpptraced.cpp:66]
+B::B()
+T0xb6c0cbb0: 0x8049630 B =&gt; -1209622540 [from ]
+D::D(int=0)
+T0xb6c0cbb0: 0x80498b2 D =&gt; -1209622540 [from ]
+Hello World! It's me, thread #3!
+T#1!
+T0xb7c0ebb0: 0x80490dc wrap_strerror_r (134525680 ...) [from cpptraced.cpp:105]
+T0xb7c0ebb0: 0x80490dc wrap_strerror_r =&gt; -1210887643 [from ]
+T#1+M2 (Success)
+T0xb740dbb0: 0x80495a0 D::m1(int, int) (134605432, 3, 4 ...) [from cpptraced.cpp:141]
+D::m1()
+T0xb740dbb0: 0x8049522 B::m2(int) (134605432, 14 ...) [from cpptraced.cpp:69]
+B::m2()
+T0xb740dbb0: 0x8048f70 f1 (14 ...) [from cpptraced.cpp:55]
+f1 14
+T0xb740dbb0: 0x8048ee0 f2(int) (74 ...) [from cpptraced.cpp:44]
+f2 74
+T0xb740dbb0: 0x8048e5e f3 (144 ...) [from cpptraced.cpp:36]
+f3 144
+T0xb740dbb0: 0x8048e5e f3 =&gt; 80 [from ]
+T0xb740dbb0: 0x8048ee0 f2(int) =&gt; 70 [from ]
+T0xb740dbb0: 0x8048f70 f1 =&gt; 60 [from ]
+T0xb740dbb0: 0x8049522 B::m2(int) =&gt; 21 [from ]
+T0xb740dbb0: 0x80495a0 D::m1(int, int) =&gt; 30 [from ]
+T#2!
+T#3!
+</pre>
+
+<p>Note how libbfd fails to resolve some addresses when the function gets
+ inlined. </p>
+
+<p class="editorial">
+[ The example code in this article is available here:
+</p>
+<ul>
+<li> <a href="misc/melinte/addr2line.c">addr2line.c</a></li>
+<li> <a href="misc/melinte/cpptraced.cpp">cpptraced.cpp</a></li>
+<li> <a href="misc/melinte/ctraced.c">ctraced.c</a></li>
+<li> <a href="misc/melinte/ctrace.sh">ctrace.sh</a></li>
+<li> <a href="misc/melinte/libctrace.c">libctrace.c</a></li>
+<li> <a href="misc/melinte/libctrace.exp">libctrace.exp</a></li>
+<li> <a href="misc/melinte/Makefile">Makefile</a></li>
+<li> <a href="misc/melinte/README">README</a></li>
+<li> <a href="misc/melinte/trace-O2.txt">trace-O2.txt</a></li>
+<li> <a href="misc/melinte/trace-plain.txt">trace-plain.txt</a></li>
+</ul>
+
+<p class="editorial">
+or <a href="misc/melinte/all.tgz">here</a> as a single tarball containing
+all of the above.
+</p>
+
+<p class="editorial">
+Make sure you use binutils 2.18 or you miss some important header files (Debian Etch
+currently only has binutils 2.17). You can try the code without installing binutils 2.18, the
+Makefile already accesses the binutils build directory (just change the path to wherever
+you unpacked the sources).<br>
+Please note that the code was intended to be used on the IA32 32-bit Intel platform.
+We tried to run it on a x86_64 system with some modifications but decided to leave
+it that way. If you port the examples to the AMD x86_64 platform,
+please send patches to the author.
+-- Ren&eacute;
+]
+</p>
+
+<h3>Resources</h3>
+
+  <ul>
+  <li><a href="http://pdos.csail.mit.edu/6.828/2004/lec/l2.html">Overview of GCC on x86 platforms</a></li>
+  <li><a href="http://dsrg.mff.cuni.cz/~ceres/sch/osy/text/ch03s02s02.php">The Intel stack</a></li>
+  </ul>
+
+
+
+<script type='text/javascript'>
+digg_url = 'http://linuxgazette.net/151/melinte.html';
+digg_title = 'Monitoring Function Calls';
+digg_bodytext = '<p>There are tools to monitor the system calls an application makes, but how  about monitoring your own written functions - inside the program itself?    What if we want to check when a function is entered, which arguments is the  function called with, when the function exits, and what the returned value is?  This article presents a proof-of-concept tool to achieve this without   modifying the application\'s code. </p>  ';
+digg_topic = 'linux_unix';
+</script>
+<script src="http://digg.com/tools/diggthis.js" type="text/javascript"></script>
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:151/melinte.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/authors/melinte.jpg" class="bio">
+</p>
+
+<em>
+<p>
+Aurelian is a software programmer by trade. Sometimes he programmed
+ Windows, sometimes Linux and sometimes embedded systems. He discovered
+ Linux in 1998 and enjoys using it ever since. He is currently settled
+ with Debian.
+</p>
+
+
+
+</em>
+
+<br clear="all">
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2008, Aurelian Melinte. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication License</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 151 of Linux Gazette, June 2008
+</p>
+
+</div>
+
+<div id="previousnextbottom">
+<A HREF="john.html" >&lt;-- prev</A> | <A HREF="prestia.html" >next --&gt;</A>
+</div>
+
+</div>
+</div>
+
+<script src="http://www.google-analytics.com/urchin.js"
+type="text/javascript">
+</script>
+<script type="text/javascript">
+_uacct = "UA-1204316-1";
+urchinTracker();
+</script>
+
+
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+</body>
+</html>
+

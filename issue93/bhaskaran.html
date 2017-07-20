@@ -1,0 +1,451 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>Writing a Network device driver - Part 1 LG #93</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<!-- *** BEGIN navbar *** -->
+<A HREF="levkovich.html">&lt;&lt;&nbsp;Prev</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="index.html">TOC</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../index.html">Front Page</A>&nbsp;&nbsp;|&nbsp;&nbsp;Talkback&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../faq/index.html">FAQ</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="ramankutty.html">Next&nbsp;&gt;&gt;</A>
+<!-- *** END navbar *** -->
+
+<!--endcut ============================================================-->
+
+<TABLE BORDER><TR><TD WIDTH="200">
+<A HREF="http://www.linuxgazette.net/">
+<IMG ALT="LINUX GAZETTE" SRC="../gx/2002/lglogo_200x41.png" 
+	WIDTH="200" HEIGHT="41" border="0"></A> 
+<BR CLEAR="all">
+<SMALL>...<I>making Linux just a little more fun!</I></SMALL>
+</TD><TD WIDTH="380">
+
+
+<CENTER>
+<BIG><BIG><STRONG><FONT COLOR="maroon">Writing a Network device driver - Part 1</FONT></STRONG></BIG></BIG>
+<BR>
+<STRONG>By <A HREF="../authors/bhaskaran.html">Bhaskaran</A></STRONG>
+</CENTER>
+
+</TD></TR>
+</TABLE>
+<P>
+
+<!-- END header -->
+
+
+
+
+
+
+
+<p>
+<p align=right>
+<h2><b><u>
+Introduction
+</h2></b></u>
+This article will help the reader to understand and develop a  network driver
+for an ethernet card in Linux. As a note, the driver development was done in C
+and as a module, so I assume its readers to be significantly exposed to C and l
+inux environment. The document intends only to show some essential points 
+in building a driver for a network card. (For better and  professional ones 
+please refer to linux source listing). 
+<p><h2><u>
+Linux Networking and PCI cards
+</h2></u>
+
+<p>
+It is apparent that support for networking is inherent to the Linux kernel. One could also see Linux as one of the most 'safest and secure' Networking Operating system presently available in the market. Internally Linux kernel implements the <b> TCP/IP </b> protocol stack . It is possible to divide the networking code into parts - one which implements the actual protocols  (the /usr/linux/net/ipv4 
+directory) and the other which implements device driver various network hardware.(/usr/src/linux/drivers/net ). 
+<p>
+
+The kernel code for <b>TCP/IP</b> is written in such a way that it is very simple to "slide in" drivers for many kind of real (or virtual) communication channels without bothering too much about the functioning of the network and transport layer code. It just requires a module in a standard manner, connecting the card 
+hardware to actual software interface. The hardware part consists of an Ethernet card in case of LAN or a modem in internet.  
+<p>
+Now a days a lot of Networking cards are available in the market, one of them is RTL8139 PCI ethernet card. RTL8139 cards are plug and play kind of devices, connected to the cpu through PCI bus scheme. PCI stands for Peripheral Component Interconnect, it's a complete set of specifications defining how different parts of computer interact with others. PCI architecture was designed as a replacement to earlier ISA standards because of its promising features like speed of data transfer, independent nature, simplification in adding and removing a device etc.
+
+
+<h2><u>
+	Networking Basics
+</h2></u>
+One could set his/her PC for networking through <b> netconfig</b> command. 
+It configures the communication address (IP address given as four octets), 
+netmask, gateway, primary nameserver etc through a self automated process. 
+Once succeeded, the Linux box listens to messages to the assigned IP address. 
+<p>Another important way is by manually detecting and  configuring a 
+network card, for which <b> ifconfig </b> command is used. A typical output 
+of ifconfig command without any arguments is shown below (it could vary 
+system to system depending upon the configuration).
+<p>
+
+<pre><b>
+eth0      Link encap:Ethernet  HWaddr 00:80:48:12:FE:B2
+	  RX packets:0 errors:0 dropped:0 overruns:0 frame:0
+          TX packets:10 errors:0 dropped:0 overruns:0 carrier:0
+          collisions:0 txqueuelen:100 
+          RX bytes:0 (0.0 b)  TX bytes:600 (600.0 b)
+          Interrupt:11 Base address:0x7000 
+
+lo        Link encap:Local Loopback  
+          inet addr:127.0.0.1  Mask:255.0.0.0
+          UP LOOPBACK RUNNING  MTU:16436  Metric:1
+          RX packets:4 errors:0 dropped:0 overruns:0 frame:0
+          TX packets:4 errors:0 dropped:0 overruns:0 carrier:0
+          collisions:0 txqueuelen:0 
+          RX bytes:336 (336.0 b)  TX bytes:336 (336.0 b)
+
+</b></pre>
+<p>
+
+It shows that I have a running interface for eth0 and lo, which corresponds 
+to ethernet card and loopback interface respectively. The loopback is
+completely software based and used as an dummy interface to the network. 
+The eth0 is the default name given to real hardware interface for realtek 8139 
+network card. The listing also tells about its hardware (HWaddr),  internet 
+(inet addr), Broadcast(Bcast), Mask (Mask) addresses with some other 
+statistical information on data transfer that include Maximum data unit that can be transferred (MTU), no. of received (RX) packets, no. of transmitted packets (TX), collisions etc.
+ 
+The ifconfig command can also be used to bring up the interface if it is
+not detected at boot time. This could also be associated with an IP address as 
+given below.
+
+<pre><b>
+	ifconfig eht0 192.9.200.1 up  
+</b></pre>
+
+This brings up the ethernet card to listen to an IP address 192.9.200.1, a 
+class-C client. At the same time <b>ifoconfig</b> can also be used to bring down 
+an activated interface. This is as given below.
+
+<pre><b>
+	ifconfig eth0 down
+</pre></b> 
+		
+The same is applicable to loopback interface. That is these are quite possible.
+<pre><b>
+	ifconfig lo 192.9.200.1 up
+	ifconfig lo down
+</pre></b>
+'ifconfig' supports plenty of options that may be discovered through reference 
+to man pages.
+<p><p> Another command that needs reference is <b><i>netstat</b></i>, It prints out
+network connections, routing tables, interface statistics, masquerade connections,
+and multicast memberships. An exhaustive list of options may be found in man 
+pages.
+
+<h2><b><u>
+Kernel Interface
+</u></h2></b>
+<p>
+Kernel as usual provides concise but efficient data structures and functions to
+perform elegant programming, even understandable to a moderate programmer, and 
+the interface provided is completely independent of higher protocol suit.
+For an quick overview of the kernel data structures, functions, the interactions
+between driver and upper layer of protocol stack, we first attempt to develop
+a hardware independent driver. Once we get a big picture we can dig into the 
+real platform.
+<p>
+Whenever a module is loaded into kernel memory, it requests the resources 
+needed for its functioning like I/O ports, IRQ etc. Similarly when a network 
+driver registers itself; it inserts a data structure for each newly detected
+interface into a global list of network devices.
+<p>
+Each interface is defined by a <b><i>struct net_device</i></b> item.
+The declaration of device <b>rtl8139</b> could done as follows
+<pre><b><i>
+	struct net_device rtl8139 = {init: rtl8139_init};
+</pre></b></i>
+<p>
+The <i><b>struct net_device</b></i> structure is defined in include file 
+<b>linux/net_device.h </b>.The code above initializes only a single field 'init'
+that carries the initialization functions. Whenever we register a device the 
+kernel calls this init function, which initializes the hardware and fills up 
+<b><i>struct net_device</i></b> item. The <b><i>struct net_device</i></b> is 
+ huge and handles all the functions related to operations of the hardware.
+ Let us look upon some revelent ones.
+
+<p><b> name :</b> The first field that needs explanation is the 'name' field, which holds the name of the interface (the string identifying the interface). Obviously it is the string "rtl8139" in our case. 
+
+<p><b> int (*open) (struct net_device *dev) :</b> This method opens the interface whenever ifconfig activates it. The open method should register any system resource it needs.
+
+<p><b> int (*stop) (struct net_device *dev) :</b> This method closes or stops 
+the interface (like when brought down by ifconfig).
+
+<p><b> int (*hard_start_xmit) (struct sk_buff *skb, struct net_device *dev) :</b> This method initiates the transmission through the device 'dev'. The data is 
+contained in the socket buffer structure skb. The structure skb is defined 
+later.
+
+<p><b>struct net_device * (*get_status) (struct net_device *dev):</b> Whenever a
+application needs to get statistics for the interface, this method is called. This happens, for example, when <b><i>ifconfig</b></i> or <b><i>netstat -i</b></i> is run.
+   
+<p><b>void *priv :</b>The driver writer owns this pointer and can use it at will. The utility of this member will be persuaded at a later stage.
+
+There exist a lot more methods to be explained but before that let us look at 
+some working code demonstration of a dummy driver built upon the discussion above. This code would make the interactions between these elements crystal clear.
+
+<p><p>
+<u><b><i>Code Listing 1</b></i></u>
+
+<pre><b></u>	
+	#define MODULE             
+	#define __KERNEL__	 
+	
+	#include < linux/module.h >  
+	#include < linux/config.h >  
+
+ 	#include < linux/netdevice.h > 
+	
+	int rtl8139_open (struct net_device *dev)
+	{
+		printk("rtl8139_open called\n");
+		netif_start_queue (dev);
+		return 0;
+	}
+
+	int rtl8139_release (struct net_device *dev)
+	{
+		printk ("rtl8139_release called\n");
+		netif_stop_queue(dev);
+		return 0;
+	}
+
+	static int rtl8139_xmit (struct sk_buff *skb, 
+					struct net_device *dev)
+	{
+		printk ("dummy xmit function called....\n");
+		dev_kfree_skb(skb);
+		return 0;
+	}
+
+	int rtl8139_init (struct net_device *dev)
+	{
+		dev->open = rtl8139_open;
+		dev->stop = rtl8139_release;
+		dev->hard_start_xmit = rtl8139_xmit;
+		printk ("8139 device initialized\n");
+		return 0;
+	}
+
+	struct net_device rtl8139 = {init: rtl8139_init};
+
+	int rtl8139_init_module (void)
+	{
+		int result;
+
+		strcpy (rtl8139.name, "rtl8139");
+		if ((result = register_netdev (&rtl8139))) {
+			printk ("rtl8139: Error %d  initializing card rtl8139 card",result);
+			return result;
+		}
+	return 0;
+	}
+	
+ 	void rtl8139_cleanup (void)
+	{
+		printk ("<0> Cleaning Up the Module\n");
+		unregister_netdev (&rtl8139);
+		return;
+	}
+	
+	module_init (rtl8139_init_module);
+	module_exit (rtl8139_cleanup);
+</pre></b>
+	  
+This typical module defines its entry point at <b><i>rtl8139_init_module</i></b>
+function. The method defines a net_device, names it to be "rtl8139" and 
+register this device into kernel. Another important function <b><i>rtl8139_init</b></i> inserts the dummy functions <b><i>rtl8139_open, rtl8139_stop, rtl8139_xmit</b></i> to net_device structure. Although dummy functions, they perform a little task, whenever the rtl8139 interface is activated. When the <b><i>rtl8139_open</b></i> is called - then this routine announces the readiness of the driver to accept data by calling <b><i>netif_start_queue</b></i>. Similarly it gets stopped by calling <b><i>netif_stop_queue.</b></i>
+<p>  
+Let us compile the above program and play with it. A command line invocation of
+'cc' like below is sufficient to compile our file rtl8139.c 
+<p>
+<pre>[root@localhost modules]# cc -I/usr/src/linux-2.4/include/ -Wall -c rtl8139.c
+</pre>
+<p> Let us check our dummy network driver. The following output was obtained on
+my system. We can use <b>lsmod</b> for checking the existing loaded modules. A
+output of lsmod is also shown.
+<p>
+(NB: You should be a super user in order to insert or delete a module.)
+<p><b>
+<pre><b><i>
+[root@localhost modules]# insmod rtl8139.o 
+Warning: loading test.o will taint the kernel: no license
+  See http://www.tux.org/lkml/#export-tainted for information about tainted modules
+Module test loaded, with warnings
+
+[root@localhost modules]# lsmod
+Module                  Size  Used by    Tainted: P  
+rtl8139                 2336   0  (unused)
+mousedev                5492   1  (autoclean)
+input                   5856   0  (autoclean) [mousedev]
+i810                   67300   6 
+agpgart                47776   7  (autoclean)
+autofs                 13268   0  (autoclean) (unused)
+
+[root@localhost modules]# ifconfig rtl8139 192.9.200.1 up
+[root@localhost modules]# ifconfig
+
+lo        Link encap:Local Loopback  
+          inet addr:127.0.0.1  Mask:255.0.0.0
+          UP LOOPBACK RUNNING  MTU:16436  Metric:1
+          RX packets:4 errors:0 dropped:0 overruns:0 frame:0
+          TX packets:4 errors:0 dropped:0 overruns:0 carrier:0
+          collisions:0 txqueuelen:0 
+          RX bytes:336 (336.0 b)  TX bytes:336 (336.0 b)
+
+rtl8139   Link encap:AMPR NET/ROM  HWaddr   
+          inet addr:192.9.200.1  Mask:255.255.255.0
+          UP RUNNING  MTU:0  Metric:1
+          RX packets:0 errors:0 dropped:0 overruns:0 frame:0
+          TX packets:10 errors:0 dropped:0 overruns:0 carrier:0
+          collisions:0 txqueuelen:0 
+          RX bytes:0 (0.0 b)  TX bytes:600 (600.0 b)
+</pre></b></i></b>
+
+
+Now You have been acquainted with writing a dummy driver, Let us move on to 
+a real driver interface for rtl8139.
+
+<p><h2><u><b>
+	PCI card and their initialization
+</h2></u></b>
+<p>
+Though Network interface has been built up, but still it is not possible for 
+us to probe and initialize the card. This is only possible until we check for a
+PCI interface and a PCI device available. Thus it becomes necessary that we have a
+close look upon the PCI and PCI functions available.
+<p>
+As I have described earlier that the PCI hardware is a complete protocol that determines the way each components interaction with the other. Each PCI device 
+is identified by a <i>bus</i> number, a <i>device</i> number and a <i>function</i> number. The PCI specification permits a system to hold upon 256 buses, with each 
+buses having a capacity to hold 32 multiboard devices. <p> The PC firmware initializes PCI hardware at system boot, mapping each devices I/O region to a different address, which is 
+accessible from PCI configuration space,
+which consist of 256 bytes for each device. Three of the PCI registers identify
+a device: <b>vendorID, deviceID, class</b>. Sometimes <b> Subsystem vendorID and 
+Subsystem deviceID</b> are also used. Let us see them in detail. <p>
+
+<li>The vendorID is 16 bit register that identifies a hardware manufacture. For 
+example every Intel device has a vendor ID 0x8086.
+
+<li>The deviceID is another 16-bit register, selected by the manufacturer. This 
+ID is paired with the vendor ID to uniquely identify the device.
+
+<li>Every peripheral device belongs to a class. The class register is 16-bit
+value whose most significant byte defines the group (of devices). e.g. ethernet
+belongs to network class.
+<li>Subsystem vendorID and Subsystem deviceID are fields that can be used for further identification of a device. 
+ 
+<p><p>A complete list of PCI devices on ones linux box could be seen through command
+<b><i>lspci</b></i>. 
+<p>
+Based on the above information we can perform the detection of the rtl8139 could
+done in the rtl8139_init function itself, a modified version will look like
+<p><p>
+<u><b><i>Code Listing 2</b></i></u>
+<pre><b>
+
+#include < linux/pci.h >
+
+static int rtl8139_probe (struct net_device *dev, struct pci_dev *pdev)
+{
+	int ret;
+	unsigned char pci_rev;
+
+	if (! pci_present ()) {
+		printk ("No pci device present\n");
+		return -ENODEV;
+	}
+	else  printk ("<0> pci device were found\n");
+	
+	pdev = pci_find_device (PCI_VENDOR_ID_REALTEK, 
+			PCI_DEVICE_ID_REALTEK_8139, pdev);
+	
+	if (pdev)  printk ("probed for rtl 8139 \n");
+	else       printk ("Rtl8193 card not present\n");
+	
+	pci_read_config_byte (pdev, PCI_REVISION_ID, &pci_rev);
+	
+	if (ret = pci_enable_device (pdev)) {
+		printk ("Error enabling the device\n");
+		return ret;
+	}
+	
+	if (pdev->irq < 2) {
+		printk ("Invalid irq number\n");
+		ret = -EIO;
+	}
+	else {
+		printk ("Irq Obtained is %d",pdev->irq); 
+		dev->irq = pdev->irq;
+	}
+	return 0;
+}
+
+int rtl8139_init (struct net_device *dev)
+{
+	int ret;
+	struct pci_dev *pdev = NULL;
+	
+	if ((ret = rtl8139_probe (dev, pdev)) != 0)
+		return ret;
+	
+	dev->open = rtl8139_open;
+	dev->stop = rtl8139_release;
+	dev->hard_start_xmit = rtl8139_xmit;
+	printk ("My device initialized\n");
+	return 0;
+}
+</pre></b>
+<p>
+As you can see a probe funtion is called through <b><i>rtl8139_init</b></i> function. A detailed analysis of the probe functions shows that it has been passed pointers of kind <b><i>struct net_device</b></i> and <b><i>struct pci_dev</b></i>. The <b><i>struct pci_dev</b></i> holds the pci interface and other holds the network interface respectively, which has been mentioned 
+earlier.
+<p>
+The function <b><i>pci_present</i></b> checks for a valid pci support available. It returns a value '0' on 
+Success. Thereafter a probe of RTL8139 is initiated through the <b><i>pci_find_device</i></b> function. It accepts the vendor_ID, device_ID and the 'pdev' structure as argument. On an error-free return i.e. when RTL8139 is 
+present, it sends the pdev structure filled. The constants PCI_VENDOR_ID_REALTEK, PCI_DEVICE_ID_REALTEK_8139 defines the vendorID and device_ID
+of the realtek card. These are defined in linux/pci.h.
+<p>
+<b><i>pci_read_config_byte/word/dword</b></i> are functions read byte/word/dword memory locations from the configuration space respectively. A call to <b><i>pci_enable</b></i> function to enable pci device 
+for rtl8139, which also helps in registering its interrupt number to the interface. Hence if everything goes safe and error-free, your rtl_8139 has been detected and assigned an interrupt number.
+<p>In the next section we would see how to detect the hardware address of rtl8139 and start communication.
+
+
+
+
+
+
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<P>
+<img ALIGN="LEFT" ALT="[BIO]" SRC="../gx/2002/note.png">
+<em>
+Author has just completed B.Tech from Govt. Engg. College Thrissur.
+</em>
+<br CLEAR="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+
+<!-- *** BEGIN copyright *** -->
+<hr>
+<CENTER><SMALL><STRONG>
+Copyright &copy; 2003, Bhaskaran.
+Copying license <A HREF="../copying.html">http://www.linuxgazette.net/copying.html</A><BR> 
+Published in Issue 93 of <i>Linux Gazette</i>, August 2003
+</STRONG></SMALL></CENTER>
+<!-- *** END copyright *** -->
+<HR>
+
+<!--startcut ==========================================================-->
+<CENTER>
+<!-- *** BEGIN navbar *** -->
+<A HREF="levkovich.html">&lt;&lt;&nbsp;Prev</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="index.html">TOC</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../index.html">Front Page</A>&nbsp;&nbsp;|&nbsp;&nbsp;Talkback&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../faq/index.html">FAQ</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="ramankutty.html">Next&nbsp;&gt;&gt;</A>
+<!-- *** END navbar *** -->
+</CENTER>
+</BODY></HTML>
+<!--endcut ============================================================-->

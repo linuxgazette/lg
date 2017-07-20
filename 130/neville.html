@@ -1,0 +1,734 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>DNS techniques LG #130</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="dyckoff.html" >&lt;-- prev</A> | <A HREF="okopnik.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>DNS techniques</h1>
+<p id="by"><b>By <A HREF="../authors/neville.html">Ed Neville</A></b></p>
+
+<h3>Introduction</h3>
+
+<p>This guide shall show how to setup djbdns for a SOHO
+environment.</p>
+
+<p>Named/BIND (Berkeley Internet Name Daemon) is a popular DNS
+(Domain Name System) server, but perhaps it has had a few general
+problems.</p>
+
+<p>With a default installation of 'named', you leave yourself open
+to proxy for anyone on the Internet to make DNS queries through
+your open system, which is a caching nameserver on all
+interfaces.<a name="1_back"></a><a href="#1">[1]</a> I have found of late that DJB's DNS suite of tools to
+be of great efficiency and use.</p>
+
+<p>Despite its merits, there is one major drawback: you cannot
+run a DNS server and a DNS cache in the same instance on the same
+interface. Some might see this to be both confusing and
+irritating; I see this as security. I run a typical SOHO setup: I
+have a handful of domain names and a handful of computers on the
+LAN. This is how I run things here, and that is the basis for
+this article.</p>
+
+<p>To illustrate the network layout:</p>
+
+<p><img src="misc/neville/dns.png" name="Graphic1" alt="Net diagram"
+width="501" height="182" border="1"></p>
+
+<p>
+In this example, you need to decide whether to put the DNS server in your
+LAN or if you have it at the firewall. DNS lookups (should) create little load
+on your network, so it's not necessary to set up a dedicated box. If you do
+choose to set up a dedicated box, then it will probably sit idle for most
+of the time, in which case you might want to make it double up as a backup
+server; therefore, you should not be short of disk space, here.</p>
+
+<p>In my example, the Internet cloud is attached to a 35.45.55.65
+IP address, and the LAN clients are on a 192.168.0.0-255 network
+(otherwise known as a 192.168.0.0/24 RFC 1918 private
+network).</p>
+
+<p>The plan here is to set up 'tinydns' to serve our UDP DNS
+lookups, 'dnscache' to serve the LAN with a DNS cache's lookups, and a
+private 'tinydns' server to respond with NXDOMAIN <a name="2_back"></a><a href="#2">[2]</a> on lookups from 
+which potentially bad Internet traffic might result.</p>
+
+<h3>Getting Required Parts</h3>
+
+<p>One of the instant hurdles for anyone who has not done source
+installations is that the entire suite of programs DJB
+provides is in source code. The code is very well written, and
+compiles just fine on most systems, but his licence does not
+permit his software to be redistributed if altered. Because of
+this, most distributions cannot provide binary packages.</p>
+
+<p>There are three main parts to getting up and running with
+DJB's DNS packages:</p>
+
+<h3>daemontools</h3>
+
+<p><a href="http://cr.yp.to/daemontools/daemontools-0.76.tar.gz">http://cr.yp.to/daemontools/daemontools-0.76.tar.gz</a>
+provides a suite of programs for managing system services. The
+bulk of the suite is supervisory programs, which consist of a super
+service and monitoring utilities. This is what will keep the DNS
+services running: even in the event of a program crash, the super
+service will restart things for us.</p>
+
+<h3>ucspi-tcp</h3>
+
+<p>'ucspi' provides TCP server and client programs that allow
+callers to talk TCP through stdin/stdout-like read/writes. This
+cuts out a large security risk that the callers would otherwise
+have to code against (such as some basic buffer overflows).</p>
+
+<h3>djbdns</h3>
+
+<p><a href="http://cr.yp.to/djbdns/djbdns-1.05.tar.gz">http://cr.yp.to/djbdns/djbdns-1.05.tar.gz</a>
+is the suite of DNS programs and libraries that provide the DNS information
+to queries.</p>
+
+<p><a name="g" id="g"></a>We'll put daemontools
+in the /package directory, the super service directory will be /service, 
+ucspi tools will go into /usr/local, and the DNS programs will have their
+configuration in /etc.</p>
+
+<p class="editorial">[ The locations of the two directories suggested
+above, '/service' and '/package', are not compliant with either FSSTND or
+FHS standards, as far as I'm aware; placing these subdirectories somewhere
+other than the root directory (e.g., "/opt" is reserved for this purpose
+under the FHS) may be advisable. -- Ben ]</p>
+
+<h3>Installing Daemontools</h3>
+
+<p>Following the basic setup directions from DJB's pages:</p>
+
+<pre class="code">
+mkdir -p /package
+chmod 1755 /package
+cd /package
+wget http://cr.yp.to/daemontools/daemontools-0.76.tar.gz
+tar zxpf daemontools-0.76.tar.gz
+cd admin/daemontools-0.76
+</pre>
+
+<p>The compilation and installation is taken care of via a single
+command, <code>package/install</code>.</p>
+
+<p>We should now have supervise running from /etc/inittab, if
+not, run 'svscan &amp;' manually.</p>
+
+<h3>Installing ucspi-tcp</h3>
+
+<p>As with daemon-tools, we shall follow the DJB notes for
+installation.</p>
+
+<pre class="code">
+cd ~
+wget http://cr.yp.to/ucspi-tcp/ucspi-tcp-0.88.tar.gz
+tar zxpf ucspi-tcp-0.88.tar.gz
+cd ucspi-tcp-0.88
+</pre>
+
+<p>Compile the ucspi-tcp programs by typing 'make';
+As root, install the ucspi-tcp programs under '/usr/local'
+with 'make setup check'.
+
+
+<h3>djbdns</h3>
+
+<pre class="code">
+cd ~
+wget http://cr.yp.to/djbdns/djbdns-1.05.tar.gz
+tar zxpf djbdns-1.05.tar.gz
+cd djbdns-1.05
+echo gcc -O2 -include /usr/include/errno.h &gt; conf-cc
+make
+</pre>
+
+<p>There is a slight bug with compiling, after some recent changes
+with <code>glibc</code>; hence, the fifth line in the above code block
+replaces the original compilation options. Once this is complete, we can
+get on with configuring the system.
+</p>
+
+<h3>Configuring the DNS Cache</h3>
+
+<p>We need to create a new user account for 'dnscache', so it can run as
+that user, since running services as root invites a host of security
+problems. The same reasoning applies for setting up the groups.</p>
+
+<pre class="code">
+groupadd dnscache
+groupadd dnslog
+useradd -g dnscache dnscache
+useradd -g dnslog dnslog
+</pre>
+
+<p>Now, let's set up the cache directory:</p>
+
+<pre>
+dnscache-conf dnscache dnslog /etc/dnscache
+</pre>
+
+<p>Choose an IP for the DNS cache to listen on, and write it into
+"/etc/dnscache/env/IP". In my case, I have the private IP address
+192.168.0.1 on my firewall's LAN interface, so I place this IP address
+here:</p>
+
+<pre>
+echo 192.168.0.1 &gt; /etc/dnscache/env/IP
+</pre>
+
+<p>Next, we'll add a setting to tell 'dnscache' which source IP
+addresses to service; we do this by 'touch'ing the IP
+ranges in /etc/dnscache/root/ip/:</p>
+<pre>
+touch /etc/dnscache/root/ip/192.168.0
+</pre>
+
+<p>The next step would be to link this directory into the
+super-service directory, but we shall get to that in a
+moment.</p>
+
+
+<h3>Configuring the DNS Server</h3>
+
+<p>The DNS server and DNS cache cannot operate on the same interface using
+the same protocol. BIND <em>can</em> do this; however, this is not desirable
+default behavior. BIND suffered for a long time from being exploited
+by people who shifted the lookup work onto third-party daemons.</p>
+
+<p>'tinydns', in my example above, is set to operate on 35.45.55.65,
+serving the contents of my DNS datafile only. If the answer that
+the client wants is not in the datafile, then the lookup fails.</p>
+
+<pre>
+groupadd tinydns
+useradd -g tinydns tinydns
+tinydns-conf tinydns dnslog /etc/tinydns 35.45.55.65
+</pre>
+
+<p>We should now have a tinydns directory in /etc/tinydns. Let's
+make sure it's set to listen on the correct IP address by
+inspecting the contents of "/etc/tinydns/env/IP", which should hold
+your desired DNS-serving IP address. In my case, this is
+35.45.55.65.</p>
+
+
+<h3>data.cdb</h3>
+
+<p> 'tinydns' uses a hash database lookup file. This makes query
+lookups extremely fast and efficient. The hash file is stored in
+CDB format. This file can be transported to any architecture and
+it will remain compatible; this makes DNS clusters very easy to
+maintain.</p>
+
+<p>In /etc/tinydns/root/, there is a data file and a Makefile. When the
+Makefile is run, the file 'data.cdb' is created.  DNS zones contain (among
+other items) A(+), MX(@), NS(&amp;), Zones(Z), and Cnames(C).</p>
+
+<h4>A Records</h4>
+
+<p>Let's take a look at the simplest, the A record:</p>
+
+<pre class="code">
++example.com:35.45.55.65:86400
+</pre>
+
+<p>Above, we set the A record of the host example.com to the IP
+address 35.45.55.65 with a TTL (Time To Live) of one day in
+seconds.</p>
+
+<h4>CNAME Records</h4>
+
+<p>CNAME records are similar; they are pointers to an address
+record. The problem with address records is that, when the IP
+address changes, often the DNS administrator has to re-jig many
+address records, often at the same time as the IP address is
+altered. CNAMEs are a way to reference A records. The only
+problem with a CNAME is that it causes two lookups rather than
+just the one lookup; this obviously affects you if bandwidth and
+time is short. <a name="3_back"></a><a href="#3">[3]</a></p>
+
+<pre class="code">
+Cwww.example.com:example.com.:60
+</pre>
+
+<p>The above shows the hostname www.example.com points to
+example.com with a TTL of 1 minute. Please note the trailing '.' at
+the end of the host target.</p>
+
+<h4>Mailer Records</h4>
+
+<p>MX records differ slightly from CNAME ones because they must
+also contain the mailer preference.</p>
+
+<pre class="code">
+@example.com::mail.example.com.:10:86400
+</pre>
+
+<p>Here we see that the MX, for example, points to the A record of
+example.com with a preference of 10. Please note the trailing '.'
+after the address target. Also note that it is often a bad idea
+to specify a CNAME as the mailer target. Putting a CNAME here
+does not gain you anything, other than having three lookups rather
+than two each time an MX lookup is performed. <a name="4_back"></a><a href="#4">[4]</a></p>
+
+<h4>Nameserver Records</h4>
+
+<p>When organising DNS for your domain, it is important that the
+Name Server (NS) records at your domain's DNS server match the
+root's NS list.</p>
+
+<pre class="code">
+&amp;example.com::ns0.example.com.:86400
+</pre>
+
+<p>Above, we specify that the NS for example.com is the address
+record ns0.example.com. Please note the trailing '.'!</p>
+
+<h4>Zone Records</h4>
+
+<p>The zone record also contains information other than records; mainly, this
+provides zone update details. Here, one must specify the SOA (start of
+authority), which in most cases is your primary nameserver, so secondary
+name servers know where to find updated information.</p>
+
+<pre class="code">
+Zexample.com:ns0.example.com.:hostmaster.example.com.:2005090312:7200:7200:2419200:604800
+</pre>
+
+<p>The above states that the zone name is example.com, with the
+primary name server of ns0.example.com. The hostmaster email
+address is hostmaster@example.com. The first '.' is assumed as an
+@.</p>
+
+<p>We use the date in 'YYYYMMDDHH' format as the serial number for the zone
+<a name="5_back"></a><a href="#5">[5]</a>. These values are
+specified in seconds and are (in order from left to right):</p>
+
+<ol>
+  <li>
+    <p>refresh</p>
+  </li>
+
+  <li>
+    <p>retry</p>
+  </li>
+
+  <li>
+    <p>expire</p>
+  </li>
+
+  <li>
+    <p>minimum refresh</p>
+  </li>
+</ol>
+
+<p>We now have a basic setup. The full zone layout is as
+follows:</p>
+
+<pre class="code">
+Zexample.com:ns0.example.com.:hostmaster.example.com.:2005090312:7200:7200:2419200:604800
+&amp;example.com::ns0.example.com.:86400
+@example.com::mail.example.com.:10:86400
+Cwww.example.com:example.com.:60
++example.com:35.45.55.65:86400
++mail.example.com:35.45.55.65:86400
++ns0.example.com:35.45.55.65:86400
+</pre>
+
+<p>Once you have written your zonefile, you should run the make
+program to build this into the 'data.cdb', as mentioned above.</p>
+
+<p>For full documentation on the format of the datafile, you might want to
+visit <a
+href="http://cr.yp.to/djbdns/tinydns-data.html">http://cr.yp.to/djbdns/tinydns-data.html</a>.</p>
+
+
+<h3>Starting the Services</h3>
+
+<p>Once happy with the configuration, we can start the services by
+linking them both to the /service directory. To do this, just
+issue the following two commands:</p>
+
+<pre>
+ln -s /etc/tinydns /service
+ln -s /etc/dnscache /service
+</pre>
+
+<p>Wait for a few seconds, then issue 'ps -aux'; you should see
+output similar to the following:</p>
+
+<pre class="code">
+root      2241  0.0  0.0  1276   256 ?        S    Jul27   0:00 supervise dnscache
+root      2250  0.0  0.0  1276   256 ?        S    Jul27   0:00 supervise tinydns
+dnscache  2252  0.0  0.1  2860  1588 ?        S    Jul27   7:02 /usr/local/bin/dnscache
+dnslog    2254  0.0  0.1  1416   328 ?        S    Jul27   0:42 multilog t ./main
+tinydns   2265  0.0  0.0  1532   320 ?        S    Jul27   0:31 /usr/local/bin/tinydns
+dnslog    2272  0.0  0.0  1416   328 ?        S    Jul27   0:10 multilog t ./main
+</pre>
+
+<p>If you do not see the above, then it might be that your
+'supervise' program is not running. You should ensure that your
+'/etc/inittab' file contains this line:</p>
+
+<pre>
+SV:123456:respawn:/services/svscanboot
+</pre>
+
+<p>Then, send init a HUP signal:</p>
+<pre>
+kill -HUP 1
+</pre>
+
+<p>Then, check that 'supervise' actually starts. If not, there will
+be a message about the failure against the 'readproctile' process
+in your 'ps' output.</p>
+
+<h3>Logging</h3>
+
+<p>It is now important to check the status of the processes
+that are running; we can do this through the multilog output, which is
+located in '/etc/tinydns/log/main/current' and
+'/etc/dnscache/log/main/current'. </p>
+
+<p>The best way to watch these files is with the following
+command (from the log directory):</p>
+<pre>
+tail -F current
+</pre>
+
+<p>As these files can be rotated frequently, using the '-F' parameter will
+cause the 'tail' program to watch for file changes and reposition the file
+pointer at the beginning of the file at log rotation time.</p>
+
+<p>We should see the following output (for tinydns):</p>
+
+<pre>
+@4000000044e38ce704a37e0c starting tinydns
+</pre>
+
+<p>and the following for dnscache:</p>
+<pre>
+@4000000044e38d0f165dc2ec starting
+</pre>
+
+<p>If you see errors, then you might have to go through the above
+installation instructions, checking that everything has been followed
+correctly. If you see output, then this is even better, since it means your
+programs are working (one hopes) as expected.</p>
+
+<h3>Testing</h3>
+
+<p>To test that the DNS cache is operating correctly, you can type
+the following:</p>
+
+<pre class="code">
+nslookup &ndash; 192.168.0.1
+set q=mx
+yahoo.com
+</pre>
+
+<p>The line 'set q=mx' tells nslookup to make MX queries, which
+will return Yahoo's mail servers:</p>
+
+<pre>
+yahoo.com mail exchanger = 1 mx2.mail.yahoo.com.
+yahoo.com mail exchanger = 1 mx3.mail.yahoo.com.
+yahoo.com mail exchanger = 5 mx4.mail.yahoo.com.
+yahoo.com mail exchanger = 1 mx1.mail.yahoo.com.
+</pre>
+
+<p>To test that the the DNS server is running correctly, we can do
+the following:</p>
+
+<pre class="code">
+nslookup &ndash; 35.45.55.65
+set q=mx
+example.com
+</pre>
+
+<p>There are other tools you might like to use for DNS
+debugging, named 'host' and 'dig': these are very powerful and are
+great fun for scripting.<a name="5_back"></a><a href="#5">[5]</a> If you happen to know how to program in
+Perl, you might like to get the Perl module Net::DNS, which
+provides a wealth of DNS lookup functions.</p>
+
+<h3>DNS Poisoning</h3>
+
+<p>DNS poisoning is the method in which we taint results to suit
+the query. For example, if you were to discover an Internet shock
+site, you could prevent lookups of this site by telling the DNS
+cache to use a given DNS server for all these queries. The DNS
+server in this case would be set to respond with NXDOMAIN for
+every lookup; thus we can send any query we like there and we
+know it is always going to give the same result, NXDOMAIN. This
+is the ideal result, as the lookup does not wait around for a
+timeout.</p>
+
+<p>In the /etc/dnscache/root/servers/ directory, you can place the
+IP address of the poisoned server in the file matching the domain
+name you want poisoned. For example, inside /etc/dnscache/root/servers/doubleclick.net,
+I have 127.0.0.7.</p>
+
+<h3>Setting up the Forge Server</h3>
+
+<p>We're going to repeat the setup above for the 'tinydns' server,
+but with the small exception of the datafile and its installation
+location.</p>
+
+<pre class="code">
+tinydns-conf tinydns dnslog /etc/tinyforge
+cd /etc/tinyforge/root
+echo '.:' &gt; data
+</pre>
+
+<p>This line in the data file affects all lookups.</p>
+
+<pre class="code">
+make
+echo '127.0.0.7' &gt; /etc/tinyforge/env/IP
+</pre>
+
+<p>The above line tells 'tinyforge' which IP address to listen
+on.</p>
+
+<p>We must setup a local interface for tinyforge to bind to:</p>
+
+<pre>
+ifconfig lo:1 127.0.0.7
+</pre>
+
+<p>(You will need to add this to your system configuration.)</p>
+
+<pre>
+ln -s /etc/tinyforge /service
+</pre>
+
+<p>And now, we start the service by linking it in the /service
+directory; you might want to repeat the testing above, to verify
+that lookups are correctly returning NXDOMAIN.</p>
+
+<p>When you execute 'svc -h /service/dnscache', the servers
+directory will be reloaded, and specified domains will be
+forwarded to the DNS forge server.</p>
+
+<h3>Further Setup</h3>
+
+<p>There is a project at
+<a href="http://www.bleedingsnort.com/blackhole-dns/files/">http://www.bleedingsnort.com/blackhole-dns/files/</a> where a list of
+inappropriate sites is maintained. This can be easily scripted
+into a directory of DNS servers. The script is not included here,
+as the file layout is subject to change.</p>
+
+<p>If you're like me, you will want statistics of which domains
+are looked up on your tinydns server most frequently: You can get
+this information quite easily from '/etc/tinydns/log/main/'. I
+suggest reading this periodically via a Perl script and feeding
+the information into a normalised MySQL database.</p>
+
+<h3>Performance</h3>
+
+<p>There are many advantages to having all the DNS settings in a
+single file. In my case, this single file is generated from a
+database, which I shall not go into here, but this allows friends
+or customers to make changes via a Web interface.</p>
+
+<p>With BIND, the zones are stored in single files. If you were to have a
+huge number of files in a single directory, the OS would have to open the
+directory at reload time for processing. This could take some time if you
+had a large number of zone files.<a name="7_back"></a><a href="#7">[7]</a> This might seem trivial, perhaps, but,
+if your business is to provide DNS, you might want to schedule your reloads
+rather than allow customers to queue up reloads.</p>
+
+<p>The single data hash file is very effective. During the make
+process, the datafile is named 'data.cdb.tmp' until the build is
+complete, then renamed to 'data.cdb'. This allows datafile
+creation without interruption to the running tinydns server.</p>
+
+<hr>
+
+<p><a name="1"></a><a href="#1_back">[1]</a> Rick Moen adds:  The point is valuable and well taken.  If using
+BIND9, Rob Thomas's <a
+href="http://www.cymru.com/Documents/secure-bind-template.html">"Secure
+BIND Template"</a> is a far better starting point than the normal BIND9
+configuration, and among many other improvements use the "view"
+partitioning scheme to limit recursive-DNS accees to specified
+more-trusted-network IPs, only.</p>
+
+<p><a name="2"></a><a href="#2_back">[2]</a> RM: This DNS return-value string is short for "no such
+domain".</p>
+
+<p><a name="3"></a><a href="#3_back">[3]</a> RM:  There's one other very serious problem with CNAMEs:  They may not 
+be used to define a hostname that is also used for an NS, MX, or any other
+DNS record (see:  RFC1912 2.4 and RFC2181 10.3).</p>
+
+<p>New DNS admins almost always vastly overuse CNAMEs:  The reason
+appears to be lack of awareness of the performance hit from that second
+lookup and of the RFC restrictions, combined with uncertainty about
+whether multiple "A" records pointing to a single IP are OK.  The latter
+is almost always, in fact, the right solution, except where pointing to
+an out-of-domain FQDN (fully-qualified domain name). Yes, CNAMEs are
+faster to re-point when/if IPs change, but that's what search and replace
+is for.</p>
+
+<p><a name="4"></a><a href="#4_back">[4]</a> RM: Because of the RFC's prohibition of same, they may also get
+your domain's outbound mail refused.</p>
+
+<p><a name="5"></a><a href="#5_back">[5]</a> RM: If working on zonefiles with other system administrators, you
+will find that S/Ns of the form YYYYMMDDnn (where nn starts at "00") 
+predominate, and are nearly an industry standard -- permitting as they do
+99 zonefile changes per day.  In any event, never put yourself in a
+situation where you'll wish to edit to a numerically lower S/N, as 
+troublesome footwork is required if it's ever necessary to propagate 
+such a change to secondaries that normally act only on S/N
+increases.</p>
+
+<p><a name="6"></a><a href="#6_back">[6]</a> RM: In fact, use of the venerable if somewhat dotty 'nslookup' tool
+is now deprecated is favour of 'dig' and 'host'. There are a number of
+reasons for this, and they are comprehensively (if with a certain savage
+joy) catalogued by knowledgeable djbdns fancier Jonathan deBoyne Pollard, here:
+<a href="http://homepages.tesco.net/J.deBoynePollard/FGA/nslookup-flaws.html">http://homepages.tesco.net/J.deBoynePollard/FGA/nslookup-flaws.html</a>
+Fortunately, 'dig' and 'host' are really good tools, and you'll be glad
+(eventually) to have rid yourself of the nslookup habit.</p>  
+
+<p><a name="7"></a><a href="#7_back">[7]</a> RM: Someone using BIND9 for primary nameservice on 5,000 zones would 
+actually probably use the BIND DLZ (BIND Dynamically Loadable Zones,
+<a href="http://bind-dlz.sourceforge.net/">http://bind-dlz.sourceforge.net/</a> variant, or the "LDAP sdb" patch
+(<a href="http://www.venaas.no/ldap/bind-sdb/">http://www.venaas.no/ldap/bind-sdb/</a>) against BIND9, both of which back-end BIND9 into
+a SQL database instead of its default flatfile storage.  However, large sites might 
+prefer specialised and higher-performance
+primary-nameserver packages such as NSD (<a href="http://www.nlnetlabs.nl/nsd/">http://www.nlnetlabs.nl/nsd/</a>), 
+MyDNS (<a href="http://mydns.bboy.net/">http://mydns.bboy.net/</a>), or PowerDNS
+(<a href="http://www.powerdns.com/products/powerdns/">http://www.powerdns.com/products/powerdns/</a>) -- all likewise open source.</p>
+
+<p>I have all known choices for Linux catalogued in my knowledgebase at 
+"DNS Servers" on <a
+href="http://linuxmafia.com/kb/Network_Other/">http://linuxmafia.com/kb/Network_Other/</a>.</p>
+
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:130/neville.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/authors/neville.jpg" class="bio">
+</p>
+
+<p>
+<em>
+Born: 1980 Reading, UK. Graduated from Reading College with BSc
+(Hons) Computing with Internet Technologies. Favourite programming
+languages, perl, c, php, java. Became interested in Linux around 1997,
+worked professionally with linux since 2001 with Debian. Often
+responsible for corporate network design. In spare time Ed likes to
+spend time in the gym, learning Russian, helps users on many
+linux/programming mail lists and researching the linux kernel. Ed
+prefers to live healthy.
+
+</em>
+
+</p>
+<br clear="all">
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2006, Ed Neville. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 130 of Linux Gazette, September 2006
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="dyckoff.html" >&lt;-- prev</A> | <A HREF="okopnik.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/mailman/listinfo/">Mailing Lists</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">September 2006 (#130)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

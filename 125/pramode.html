@@ -1,0 +1,446 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>uClinux on Blackfin BF533 Stamp - A DSP Linux Port (Part 2) LG #125</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="pfeiffer.html" >&lt;-- prev</A> | <A HREF="ruecker.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>uClinux on Blackfin BF533 Stamp - A DSP Linux Port (Part 2)</h1>
+<p id="by"><b>By <A HREF="../authors/pramode.html">Pramode C.E.</A></b></p>
+
+<p>
+<p>
+In <a href="../123/jesslyn.html">Part 1</a> of 
+this series, we had examined how to connect a BF533 Stamp board to our 
+GNU/Linux machine and run a simple `hello, world' program. In
+this article, we shall look at writing simple device drivers to access 
+the LED's and buttons on the board as well as manipulating 
+the on-chip watchdog timer.
+
+<h3>Compiling the uClinux kernel</h3>
+
+<p>
+You can download the uClinux kernel (with Blackfin support) from 
+<a href="http://blackfin.uclinux.org/projects/uclinux533/">blackfin.uclinux.org/projects/uclinux533</a> - I am using the 2005R3 release.
+
+<p>
+Before you start compiling the kernel, make sure that you have set up 
+the GNU toolchain for the Blackfin processor as described in 
+Part 1; the Blackfin uClinux documentation project offers
+<a href="http://docs.blackfin.uclinux.org/doku.php?id=setting_up_your_development_host">more information</a>.
+
+<p>
+The kernel compilation process is documented in detail <a
+href="http://docs.blackfin.uclinux.org/doku.php?id=basic_compilation">here</a>
+- it's fairly standard procedure (make menuconfig; make).
+You can simply use the default settings most of the time; the 
+only change I made was enabling loadable module support.
+
+<p>
+The kernel binary (in ELF format) will be present under the folder 
+uClinux-dist/images; it will be a file named `linux'. Don't be
+surprised by the size of the file (around 5.6Mb in my case) - the
+file contains not only kernel code but also an elementary root file
+system which gets loaded onto a ramdisk when the board is powered up!
+It seems that this file system is built from the directory tree rooted
+at uClinux-dist/romfs/.
+
+<h3>Downloading the kernel onto the board</h3>
+
+<p>
+Connect the Stamp board to the serial port of the PC and fire up
+`minicom'. As soon as you feed power to the board, a boot loader program
+called `uboot' starts running looking for keystrokes out of the
+serial port - if you hit `enter' in 5 seconds, `uboot' will suspend
+the booting process and display a prompt where you can enter some
+simple commands. The `print' command should show you several lines
+of the form `name=value'. We are interested in two such `names'; they
+are `serverip' and `ipaddr'. We shall assign values to them by
+typing:
+<pre>
+
+set ipaddr 192.168.1.1
+set serverip 192.168.1.2
+
+</pre>
+
+<p>
+The name `ipaddr' refers to the IP address assigned to the Ethernet
+controller on the stamp board and `serverip' refers to the IP
+address of the Ethernet card on the PC to which the board is
+connected. You should now check whether `uboot' is able to 
+communicate with the PC via the Ethernet link by running:
+<pre>
+
+ping 192.168.1.2
+
+</pre>
+
+
+<p>
+We have to set up a TFTP server on the PC and verify that it is
+working properly. As I am using Ubuntu, I had to `apt-get' three
+packages - tftp, tftpd and xinetd. (Note: the `apt-get' command is
+used to download and install packages on Debian GNU/Linux 
+systems). The `xinetd' program should be instructed to start the
+TFTP daemon by creating a file called /etc/xinetd.d/tftp which
+contains entries of the form:
+<pre>
+
+service tftp
+{
+	socket_type		= dgram
+	protocol	= udp
+	wait		= yes
+	user		= root
+	server 	= /usr/sbin/in.tftpd
+	server_args = -s /boot
+	wait		= yes
+	disable	= no
+}
+
+</pre>
+
+<p>
+The `server_args' line specifies that files to be download via 
+TFTP should be placed under /boot.
+
+<p>
+Once this file is created, we should verify whether everything is
+working fine by starting `xinetd', copying the Blackfin uClinux
+kernel image to /boot and running tftp (on the PC):
+<pre>
+
+$ cd /tmp
+$ tftp localhost
+tftp&gt; get linux
+Received 5676668 bytes in 0.9 seconds
+
+</pre>
+
+<p>
+Once we have verified that the Ethernet link between our GNU/Linux 
+machine and the Stamp board is working OK (by pinging from uboot)
+and that the TFTP server on the PC also has been configured 
+properly, we can reboot the board, hit `enter', get into the `uboot'
+prompt and type:
+<pre>
+
+tftpboot 0x1000000 linux
+
+</pre>
+
+<p>
+This will download the newly created kernel image (called `linux') 
+from /boot of our PC to the memory of the stamp board. Once this
+is over, we should type:
+<pre>
+
+bootelf 0x1000000
+
+</pre>
+
+<p>
+and the board will boot with the downloaded kernel. Once we log onto
+the board, we should again configure the Ethernet controller with
+the proper ip address using the `ifconfig' command.
+
+<p>
+More info regarding `uboot' can be obtained from
+<a href="http://docs.blackfin.uclinux.org/doku.php?id=das_u-boot_on_blackfin">here</a>.
+
+<h3>Our first kernel module</h3>
+
+<p>
+Here is a simple `hello, world' loadable kernel module:
+
+<p>
+<a href="misc/pramode/listing1.txt">[Listing 1]</a>
+<pre>
+
+#include &lt;linux/module.h&gt;
+
+int init_module()
+{
+	printk("Hello...\n");
+	return 0;
+}
+
+void cleanup_module()
+{
+	printk("World...\n");
+}
+
+</pre>
+
+<p>
+This module can be compiled with the help of the following
+`Makefile':
+
+<p>
+<a href="misc/pramode/listing2.txt">[Listing 2]</a>
+<pre>
+
+obj-m:=test.o
+default:
+	make -C /usr/local/src/uClinux-dist/linux-2.6.x/ M=`pwd`
+
+</pre>
+
+<p>
+We can `ftp' the resulting object file `test.ko' onto the stamp 
+board and load it into the kernel by running `insmod ./test.ko'.
+
+<h3>A minor problem</h3>
+
+<p>
+It seems that the file system on the board does not have the 
+`mknod' command. It's very easy to build one ourselves:
+
+<p>
+<a href="misc/pramode/listing3.txt">[Listing 3]</a>
+<pre>
+
+#include &lt;sys/types.h&gt;
+#include  &lt;sys/stat.h&gt;
+
+main(int argc, char *argv[])
+{
+	int r;
+	if(argc != 4) {
+		printf("Usage: mknod file major minor");
+		exit(1);
+	}
+	r=mknod(argv[1], S_IFCHR|0777, makedev(atoi(argv[2]), atoi(argv[3])));
+	if(r &lt; 0) {
+		perror("mknod");
+		exit(1);
+	}
+}
+
+</pre>
+
+
+<p>
+The code should be compiled like this:
+<pre>
+
+bfin-uclinux-gcc -Wl,elf2flt mknod.c -o mknod
+
+</pre>
+
+It can be ftp'd onto the board or can be made part of the file
+system by copying to uClinux-dist/romfs/bin and building the
+kernel once again.
+
+<h3>Blinking LED's</h3>
+
+<p>
+The BF533 Stamp board comes with 3 LED's and 3 buttons attached to
+a few General Purpose I/O pins (or `programmable flags' PF0 to PF15
+as per the Blackfin manual) - the LED's are on PF2, PF3 and PF4. 
+The GPIO pins can be programmed via certain memory mapped registers.
+The pin direction (input or output) can be set by writing to a
+`direction register' at location 0xFFC00730 - if a bit of this 
+register is `set', the corresponding pin acts as output and if it
+is clear, the pin acts as an input pin; for example, writing:
+<pre>
+
+*((unsigned short*)0xFFC00730) = 0x1;
+
+</pre>
+
+<p>
+will result in PF0 being configured as output and all others as
+input.
+
+<p>
+The uClinux kernel for the Blackfin processor comes with macros
+using which we can access all these registers - the above expression
+can be rewritten as:
+<pre>
+
+*pFIO_DIR = 0x1;
+
+</pre>
+
+<p>
+There are two other registers which we can use to set or clear the
+GPIO pins - writing a 1 to a bit of the FIO_FLAG_S register results
+in the corresponding GPIO pin going high and writing a 1 to a bit of 
+the FIO_FLAG_C register results in the pin going low. All these
+registers can be accessed only from kernel space. <a href="misc/pramode/listing4.txt">Listing 4</a> 
+is a simple character driver which sets or clears PF2 
+depending on a value it receives from user space. The file
+<i>drivers/char/pflags.c</i> in the Blackfin uClinux kernel source 
+is a more complete implementation.
+
+<h3>Programming the watchdog</h3>
+
+<p>
+A watchdog timer is a critical part of many applications which
+depend on the reliable operation of computer software - it's basically
+a timer which counts down to zero and resets the microprocessor
+when the count reaches zero - follow <a href="http://www.embedded.com/2000/0011/0011feat4.htm">this link</a> for more information. 
+
+<p>
+The Blackfin CPU has a 32 bit watchdog timer. The registers
+associated with this timer are the watchdog count, status and
+control registers. The status register holds the current watchdog
+count value which gets decremented by one every clock cycle (the
+system clock is 100MHz on my board). Writing any value to this register
+when the watchdog is enabled results in the register being loaded
+with the value of the count register. Writing a value to the count
+register when the watchdog is disabled results in that value being
+copied to the status register. When the status register value becomes
+zero, the watchdog triggers an event which was previously selected
+by writing to a few bits of the control register (usually a system
+reset). The watchdog is enabled by writing any value other than
+0xAD to bits D4 to D11 of the control register. Bits D1 and D2 of
+the control register decide the event to be triggered on timeout - 
+setting the value to 00 chooses `system reset' as the event.
+
+<p>
+The  working of the watchdog can be tested by writing a simple module
+whose <i>init_module</i> function contains the following lines:
+<pre>
+
+*pWDOG_CNT = 500000000 // timeout in 5 seconds
+*pWDOG_CTL = 0; // choose `reset' event and
+ // enable watchdog.
+
+</pre>
+
+<p>
+The system will reboot five seconds after inserting the module!
+
+<h3>Conclusion</h3>
+
+<p>
+We have seen how to do simple kernel programming on the BF533 Stamp board. 
+Myself and <a href="http://linuxgazette.net/authors/jesslyn.html"> Jesslyn</a>
+(my student and author of the <a href="http://linuxgazette.net/123/jesslyn.html">first part</a>) 
+would love to share with LG readers many more experiments using 
+the Stamp board in later parts of this series!
+
+
+
+
+</p>
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:125/pramode.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<!-- *** BEGIN bio *** -->
+<hr>
+<P>
+<img ALIGN="LEFT" ALT="[BIO]" SRC="../gx/2002/note.png" class="bio">
+<em>
+
+As a student, I am constantly on the lookout for fun
+and exciting things to do with my GNU/Linux machine. As
+a teacher, I try to convey the joy of experimentation,
+exploration, and discovery to my students. You can read about
+my adventures with teaching and learning <a
+href="http://www.livejournal.com/users/pramode_ce">here</a>.
+
+</em>
+<br CLEAR="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2006, Pramode C.E.. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 125 of Linux Gazette, April 2006
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="pfeiffer.html" >&lt;-- prev</A> | <A HREF="ruecker.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">April 2006 (#125)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

@@ -1,0 +1,100 @@
+#!/bin/bash
+#############################################################################
+# unpackUSB       script to check whether the USB flash stick
+#                 is attached at boot-time and, if so, unpack the data files
+#                 runlevel set to 99 in order to start late
+#
+# chkconfig: 5 99 20
+# description: script to automatically unpack USB backup at startup
+#
+#############################################################################
+flash="/vol/flash"                                        # automounter dir
+bin="/home/gerrit/bin";                                   # where `pack' resides
+confdir="${flash}/.conf.d"                                # configuration dir
+file="${flash}/actual.2"                                  # main archive file
+idfile="${confdir}/.idfile"                               # to store serial number
+serialnum="${confdir}/.serialnum"                         # actual secret
+log="/var/log/USB-flash-auto-unpack.log"                  # logfile
+PS3=">> "
+
+# set PATH correctly so that ~/bin is searched first
+export PATH="${bin}:/usr/local/sbin:/usr/local/bin:${PATH}"
+
+# act according to commandline argument of the init file
+case "$1" in
+  start)                                                  # unpack archive
+    echo -n "USB Flash: "
+    if [ -d "$flash/" ]; then                             # slash required: automounter
+       if [ -f "$file" ]                                  # file exists: unpack
+        then                                              # check whether it was created here
+          if [ $(tar jtf ${file}|head -1) == $(hostname) ]
+          then
+             echo "File \"$file\" was created on this host. Not unpacking." | tee -a ${log}
+             else
+               # authentication: if the file contents of the file pointed to by $idfile do not match
+               #                 the serial number stored in $serialnum, refuse to do anything
+               if ! [ -e "${serialnum}" -a -e "${idfile}" ] || [ "$(<$(<${idfile}))" != "$(<${serialnum})" ]
+               then
+                  echo "Authentication procedure failed." >&2
+                  exit 9
+               fi
+	       pack --unpack  2>&1 | tee ${log} | tee ${flash}/.conf.d/pack-$(hostname).log
+           fi
+        else  echo "mounted. File \"$file\" not present." | tee -a ${log}
+       fi
+       echo "Logged at $(/bin/date)" >> ${log}            # record timestamp
+
+    else
+       echo "not mounted."
+    fi     ;;
+  stop)    ;;                                             # ignored
+
+  status)  if [ -f "${log}" ]                             # show logfile
+             then      less -fR ${log}                    # honour ascii control chars
+                       stty sane                          # restore tty state
+             else      echo "No logfile present.";
+           fi;;
+  log)  hosts=""
+        for i in $(find $confdir -name pack-*.log);       # check the log files
+        do hosts="$(basename ${i/pack-//} .log) $hosts";  # determine host names
+        done
+        if [ -n "$hosts" ];then
+         while true; do
+           echo "Select the host whose logfile you'd like to see ('q' exits)"
+           select host in $hosts;
+           do
+            case $REPLY in
+              [1-9]) if [ -e "${confdir}/pack-${host}.log" ]
+                     then
+                       stamp="${confdir}/timestamp-${host}";
+                       if [ -e $stamp ]; then
+                        clear
+                        x="Timestamp for ${host%%.*} is $(perl -le 'for (<>) { print $_=localtime($_) }' $stamp)"
+                        p=$(echo $x |sed 's#\.#\\.#g; s#:#\\:#g; s#2005##g')
+                       fi
+                      less -P"%Pb\%  $p%t" -fr "${confdir}/pack-${host}.log"       # view the file
+                      stty sane                                                   # restore tty state
+                     else echo "Not a valid choice"; continue 1;
+                     fi ;;
+                  q) echo "Exiting, as you wish."; exit;;
+                  *) continue ;;
+            esac
+            break
+           done
+          done
+          fi;;
+  update-secret)
+        if [ -e ${idfile} ]
+        then
+           md5sum $0 | tee ${serialnum} | tee "$(<${idfile})"
+	   echo "Updated, but: you need to copy $(<${idfile}) to the other computer."
+        else
+	   echo "You need to create a sensible ID file $idfile!"
+	   exit 9
+	fi;;
+  *)
+    echo $"Usage: ${0##*/} {start|stop|status|log|update-secret}"
+    exit 1
+esac
+
+exit 0

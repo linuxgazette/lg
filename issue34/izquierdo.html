@@ -1,0 +1,244 @@
+<!--startcut ==========================================================-->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML>
+<HEAD>
+   <TITLE>Building an automatic ftp retriever LG #34</TITLE>
+   <META NAME="GENERATOR" CONTENT="Mozilla/3.01Gold (X11; I; Linux 2.0.34 i586) [Netscape]">
+</HEAD>
+<BODY TEXT="#000000" BGCOLOR="#FFFFFF" LINK="#0000EF" VLINK="#55188A" ALINK="#FF0000">
+<!--endcut ============================================================-->
+
+<P><B>&quot;Linux Gazette...<I>making Linux just a little more fun!</I>&quot;
+</B></P>
+
+<H1 ALIGN=CENTER>
+<HR WIDTH="100%">Building an Automatic FTP Retriever</H1>
+
+<CENTER><P>by <A HREF="mailto:aizquier@ciencias.ciencias unal.edu.co">Manuel
+Arturo Izquierdo </A></P></CENTER>
+
+<CENTER><P>
+<HR WIDTH="100%"></P></CENTER>
+
+<P>Internet is the big and wide world of infomation, which is really great,
+but when one works on a limited Internet access, retrieving big amounts
+of data may become a nigthmare. This is my particular case. I work at the
+National Astronomic Observatory, Universidad Nacional de Colombia. Its
+ethernet LAN is attached to a main ATM university's network backbone. However,
+the external connection to the world goes through a 64K bandwidth channel
+and that's a real problem when more than 500 users surf the net on day
+time, for Internet velocity becomes offendly slow. Matter change when night
+comes up and there is nobody at the campus, and so the transmition rate
+grows to acceptable levels. Then, one can downloading easily big quantities
+of information (for example, a whole Linux distribution). But as we are
+mortal human beings, it's not very advisable to keep awake all nights working
+at the computer. Then a solution arises: Program the computer so it works
+when we sleep. Now the question is: How to program a Linux box to do that?
+This is the reason I wrote this article.</P>
+
+<P>On this writting I cover the concerning about ftp connections. I have
+not worked yet on http connections, if you did so, please tell me.</P>
+
+<P>At first sight, a solution comes up intuitively: Use the <TT>at</TT>
+command to program an action at a given time. Let's remember how looks
+a simple ftp session (in bold are the commands entered by user):</P>
+
+<PRE>bash$ <B>ftp anyserver.anywhere.net
+</B>Connected to anyserver.anywhere.net.
+220 anyserver FTP server (Version wu-2.4(1) Tue Aug 8 15:50:43 CDT 1995) 
+ready.
+Name (anyserver:theuser): <B>anonymous
+</B>331 Guest login ok, send your complete e-mail address as password.
+Password:<B><I>(an e-mail address)
+</I></B>230 Guest login ok, access restrictions apply.
+Remote system type is UNIX.
+Using binary mode to transfer files.
+ftp&gt; <B>cd pub
+</B>ftp&gt; <B>bin
+</B>ftp&gt; <B>get anyfile.tar.gz
+</B>150 Opening BINARY mode data connection for anyfile.tar.gz (3217 bytes).
+226 Transfer complete.
+3217 bytes received in 0.0402 secs (78 Kbytes/sec)
+ftp&gt; <B>bye
+</B>221 Goodbye.
+bash$ 
+</PRE>
+
+<P>You can write a small shell script containing the steps that <TT>at</TT>
+will execute. To manage the internal ftp commands into a shell script you
+can use a shell syntax feature that permits to embed data that supposely
+would come from the standard input into a script. This is called a &quot;here&quot;
+document:</P>
+
+<PRE>#! /bin/sh
+echo This will use a &quot;here&quot; document to embed ftp commands in this script
+# Begin of &quot;here&quot; document
+ftp &lt;&lt;**
+open anyserver.anywhere.net
+anonymous
+mymail@mailserver.net
+cd pub
+bin
+get anyfile.tar.gz
+bye
+**
+# End of &quot;here&quot; document
+echo ftp transfer ended.</PRE>
+
+<P>Note that all the data between the <TT>**</TT> strings are sended to
+the ftp program as if it has been written by the user. So this script would
+open a ftp connection to <TT>anyserver.anynet.net</TT>, loging as <TT>anonymous</TT>
+with <TT>mymail@mailserver.net</TT> as password, will retrieve the <TT>anyfile.tar.gz</TT>
+file located at the <TT>pub</TT> directory using binary transfer mode.
+Theoretically this script looks okay, but on practice it won't work. Why?
+Because the ftp program does not accept the username and password via a
+&quot;here&quot; document; so in this case ftp will react with an &quot;Invalid
+comand&quot; to <TT>anonymous</TT> and <TT>mymail@mailserver.net</TT> .
+Obviously the ftp server will reject when no login and password data are
+sended.</P>
+
+<P>The tip to this lies in a hidden file that ftp uses called <TT>~/.netrc</TT>
+; this must be located on the home directory. This file contains the information
+required by ftp to login into a system, organized in tree text lines:</P>
+
+<PRE>machine  anyserver.anynet.net
+login    anonymous
+password mymail@mailserver.net</PRE>
+
+<P>In the case for private ftp connections, the<TT> password</TT> field
+must have the concerning account password, instead an email as for anonymous
+ftp. This may open a security hole, for this reason ftp will require that
+the <TT>~/.netrc</TT> file lacks of read, write, and execute permission
+to everybody, except the user. This is done easily using the <TT>chmod</TT>
+command:</P>
+
+<P><TT>chmod go-rwx .netrc</TT></P>
+
+<P>Now, our shell script will look so:</P>
+
+<PRE>#! /bin/sh
+echo This will use a &quot;here&quot; document to embed ftp commands in this script
+# Begin of &quot;here&quot; document
+ftp &lt;&lt;**
+open anyserver.anywhere.net
+cd pub
+bin
+get anyfile.tar.gz
+bye
+**
+# End of &quot;here&quot; document
+echo ftp transfer ended.</PRE>
+
+<P>ftp will extract the login and passwd information fron <TT>~/.netrc</TT>
+and will realize the connection. Say we called this script <TT>getdata</TT>
+(and made it executable with <TT>chmod ugo+x getdata</TT>), we can program
+its execution at a given time so:</P>
+
+<P><TT>bash$<B> at 1:00 am<BR>
+getdata<BR>
+(control-D)<BR>
+</B>Job 70 will be executed using /bin/sh<BR>
+bash$</TT></P>
+
+<P>When you return at the morning, the requested data will be on your computer!</P>
+
+<P>Another useful way to use this script is:</P>
+
+<PRE>bash$ <B>nohup getdata &amp;
+</B>[2] 131
+bash$ nohup: appending output to 'nohup.out'
+bash$ </PRE>
+
+<P><TT>nohup</TT> permits that the process it executes (in this case <TT>getdata</TT>)
+keeps runnig in spite of the user logouts. So you can work in anything
+else while in the background a set of files are retrieved, or make logout
+without kill the ftp children process.</P>
+
+<P>In short you may follow these steps:</P>
+
+<UL>
+<LI>Put the server name, user (anonymous) and password information in the
+<TT>~/.netrc</TT> file</LI>
+
+<LI>Be sure that the ~/.netrc file permissions be <TT>rwx------</TT></LI>
+
+<LI>Write a script with the template:<BR>
+<TT>#! /bin/sh<BR>
+ftp &lt;&lt;**<BR>
+open</TT> (the ftp servername)<BR>
+<BR>
+(sequence of ftp commands...)<BR>
+<BR>
+<TT>bye<BR>
+**</TT></LI>
+
+<LI>Allow execute permission to the script:&nbsp;<TT>chmod ugp+x scriptname</TT></LI>
+
+<LI>Program the execution time:<BR>
+<TT>at 1:00 am<BR>
+thescript<BR>
+(control-D)</TT></LI>
+</UL>
+
+<P>And voil&aacute;. </P>
+
+<P>Additionally you can add more features to the script, so it automatically
+manages the updating of the <TT>~/.netrc</TT> file and generates a log
+information file showing the time used:</P>
+
+<PRE>#!/bin/sh
+
+# Makes a backup of the old ~/.netrc file
+cp $HOME/.netrc $HOME/netrc.bak
+
+# Configures a new ~/.netrc
+rm $HOME/.netrc
+echo machine anyserver.anywhere.net &gt; $HOME/.netrc
+echo login anonymous &gt;&gt; $HOME/.netrc
+echo password mymail@mailserver.net &gt;&gt; $HOME/.netrc
+chmod go-rwx $HOME/.netrc
+echo scriptname log file &gt; scriptname.log
+echo Begin conection at: &gt;&gt; scriptname.log
+date &gt;&gt; scriptname.log
+ftp -i&lt;&lt;**
+open anyserver.anywhere.net
+bin
+cd pub
+get afile.tar.gz
+get bfile.tar.gz
+
+bye
+**
+echo End conection at: &gt;&gt; scriptname.log
+date &gt;&gt; scriptname.log
+# End of scriptname script</PRE>
+
+<P>To create by hand such script each time we need to download data may
+be annoying. For this reason I have wrote a small <A HREF="izquierdo2.html">tcl/tk8.0
+application</A> to generate a script under our needs.</P>
+
+<P>You can find detailed information about the ftp command set in its respective
+man page. </P>
+
+<P>
+<HR WIDTH="100%"></P>
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<center><H5>Copyright &copy; 1998, Manuel Arturo Izquierdo <BR> 
+Published in Issue 34 of <i>Linux Gazette</i>, November 1998</H5></center>
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<A HREF="./index.html"><IMG ALIGN=BOTTOM SRC="../gx/indexnew.gif" 
+ALT="[ TABLE OF CONTENTS ]"></A>
+<A HREF="../index.html"><IMG ALIGN=BOTTOM SRC="../gx/homenew.gif"
+ALT="[ FRONT PAGE ]"></A>
+<A HREF="./lg_answer34.html"><IMG SRC="../gx/back2.gif"
+ALT=" Back "></A>
+<A HREF="./jachim.html"><IMG SRC="../gx/fwd.gif" ALT=" Next "></A>
+<P> <hr> <P> 
+<!--startcut ==========================================================-->
+</BODY>
+</HTML>
+<!--endcut ============================================================-->

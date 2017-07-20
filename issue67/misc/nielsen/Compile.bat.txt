@@ -1,0 +1,75 @@
+### First of all, you have to compile Perl as a dynamic module. 
+### If you haven't done this, you should be able to install postgresql,
+### but it won't have the plperl interface. 
+
+cd /usr/local/src
+lynx --source ftp://postgresql.readysetnet.com/pub/postgresql/v7.1.1/postgresql-7.1.1.tar.gz > postgresql-7.1.1.tar.gz
+tar -zxvf postgresql-7.1.1.tar.gz
+cd postgresql-7.1.1
+
+### We need to set some environment variables -- which should be put
+#### into ~/.profile for the user postgres for the future. 
+
+PATH=/usr/local/pg711/bin:$PATH
+export PATH
+export LD_LIBRARY_PATH=/usr/local/pg711/lib
+export PGDATA=/usr/local/pg711/data
+export PGLIB=/usr/local/pg711/lib
+export POSTGRES_HOME=/usr/local/pg711
+
+  ### This script is setup to delete any previous installation. 
+  ### I did this so that I could debug it if it didn't work the first time.
+
+  #### Ignore any error message saying the database server is not running. You 
+  ### probably don't have one running.
+su -c '/usr/local/pg711/bin/initdb -D /usr/local/pg711/data -l logfile stop' postgres
+  ### Ignore any error message saying this user exists.
+adduser postgres
+rm -rvf /usr/local/pg711
+
+  ### Now let us make the destination directory have postgres own it. 
+mkdir /usr/local/pg711 
+chown postgres /usr/local/pg711
+
+  ### Ignore any make clean errors here. 
+make clean
+  ### Compile and install postgresql.
+./configure --prefix=/usr/local/pg711 --with-perl --with-tcl --with-CXX --with-python --enable-odbc 
+make
+make install
+
+  ### Now we need to install the perl interface for postgresql.
+gmake -C src/interfaces/perl5 install
+cd /usr/local/src/postgresql-7.1.1/src/interfaces/perl5
+perl Makefile.PL
+make 
+  ### Uncomment the next line if you want to test it. 
+##  su -c 'make test' postgres
+make install
+
+  ### Change ownership of all files to the user postgres.
+chown -R postgres /usr/local/pg711
+
+  ### Initialize the database. 
+su -c '/usr/local/pg711/bin/initdb -D /usr/local/pg711/data' postgres
+
+  ### Start the database server. 
+su -c '/usr/local/pg711/bin/pg_ctl -D /usr/local/pg711/data -l logfile start' postgres
+
+  ### The interfaces for perl, tcl, and pl/pgsql should have been created. 
+  ### Now add them. 
+  
+su -c 'createlang plpgsql template1' postgres
+su -c 'createlang pltcl template1' postgres
+
+### Now assuming you have perl 5.6.1 installed correctly.
+rm -f /usr/local/pg711/lib/libperl.so
+ln -s /usr/lib/perl5/5.6.1/i686-linux/CORE/libperl.so \
+  /usr/local/pg711/lib/libperl.so
+su -c 'createlang plperl template1' postgres
+
+  ### If it worked out correctly, any new database will copy itself from 
+  ### template1 and have perl, tcl, and pl/pgsql. 
+
+  ### Now additional stuff.
+su -c 'createdb postgres' postgres

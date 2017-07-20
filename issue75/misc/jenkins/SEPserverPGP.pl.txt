@@ -1,0 +1,120 @@
+#!/usr/local/bin/perl -w
+# @(#) SEPserverPGP.pl	Acquires Secure-EMail-Print files from POP3 server and
+#			passes them to designated printer(s). Requires 'pgp'.
+#			Intended for invocation via inittab entry.
+#			Graham Jenkins, IBM GSA, Dec. 2001. [Rev'd 2002/01/04]
+
+use strict;
+use File::Basename;
+use Net::POP3;
+use Date::Manip;
+use IO::File;
+use Sys::Syslog qw(:DEFAULT setlogsock); 
+my $host="bronzeback.in.telstra.com.au";	# Same host and password for
+my $pass="4no12c";				# each printer.
+my ($printer);
+defined($ARGV[0]) || die "Usage: ", basename($0). " printer1 [ printer2 ..]\n";
+my $tmp = "/tmp/".basename($0)."_". $ARGV[0];
+setlogsock('unix');
+openlog(basename($0), 'cons,nowait', 'local7');
+syslog ('info',"Starting ..");
+while (1) {					# Loop forever, processing 
+  sleep 30;					# all printers in each pass, and
+  foreach $printer (@ARGV) {process($printer);}	# sleeping for 30 seconds
+}						# between each pass.
+
+sub process {
+  my ($flag,$i,$j,$k,$l,$m,$user,$pop,@field,@part,$count,$top15,
+      $msgdate,$parsdate,%slot,$fh,%tp,$message,$buffer,$print);
+  $user = $_[0];
+  $pop = Net::POP3->new($host); 		# Login to POP3 server and get
+  $count = $pop->login($user,$pass) ;		# header plus 1st 15 lines
+  $count = -1 if ! defined ($count) ;		# of each message. Use apop
+  for ($i = 1; $i <= $count; $i++ ) {		# instead of login if server
+    $top15=$pop->top($i,15) ;			# supports it.
+    if ($top15) { 			
+      undef @part;
+      $msgdate = "";
+      for ($j = 0; $j < 99; $j++ ) {
+        if (@$top15[$j]) {			# Use arrival-date on POP3
+          if($msgdate eq "") {			# server to ascertain age of
+            (@field) = split(/;/,@$top15[$j]);	# message; if it is stale,
+            if ( defined($field[1])) {		# delete it and loop for next.
+              $parsdate=&ParseDate($field[1]);	# (Search for semi-colon
+              if( $parsdate ) {			# followed by valid date.)
+                $msgdate="Y";
+                if(&Date_Cmp($parsdate, &DateCalc("today","-3 days") ) lt 0 ) {
+                  syslog('info',"Stale msg: $user $parsdate");
+                  $pop->delete($i);
+                  goto I			# If POP3 server does
+                }				# automatic message expiration
+              }					# this entire section can be
+            }					# omitted.
+          }
+          (@field)=split(/ /,@$top15[$j]);$m=0;	# Extract content-type fields.
+          while (defined($field[$m])) {
+            if ( $field[$m] =~ m/^-----BEGIN/){	# PGP Message start
+              if(! defined $part[1]) {foreach $m (0,1,2){$part[$m]=1}}
+            }				
+            elsif( $field[$m] =~ m/^id=/ ) {	# Message/partial .. id
+              $part[0]=$field[$m]; $part[0]=~s/id=//; $part[0]=~s/\;//
+            }
+            elsif( $field[$m] =~ m/^number=/ ){	# Message/partial .. number
+              $part[1]=$field[$m]; $part[1]=~s/\D//g
+            }
+            elsif( $field[$m] =~ m/^total=/ ) {	# Message/partial .. total
+              $part[2]=$field[$m]; $part[2]=~s/\D//g
+            }
+            $m++
+          }
+          if (defined($part[0]) && defined($part[1])) {
+            $slot{$part[0]."=".$part[1]}=$i;	# If we found enough fields,
+            if ( defined($part[2]) ) {		# record mail-slot for part.
+              $tp{$part[0]} = $part[2] if $part[2] eq $part[1]
+            }
+          }
+          goto J if ! defined($part[0]) ;
+          goto I if ! defined($tp{$part[0]});
+          for ($k=1;$k<=$tp{$part[0]};$k++){	# Check if we have all parts.
+            goto I if ! defined($slot{$part[0]."=".$k});
+          }					
+          $fh=new IO::File
+           "| /usr/local/bin/pgp -f 2>$tmp |lpr -P $user >/dev/null" or goto I;
+          for ($k=1;$k<=$tp{$part[0]};$k++){	# Assemble parts into pipe. 
+            $message=$pop->get($slot{$part[0]."=".$k});
+            $l=0; $buffer=""; $print="N";
+            while ( defined(@$message[$l]) ) {
+              chomp @$message[$l]; 		# Part 1: start at "-----BEGIN",
+              if( $k == 1 ) {			# stop before 2nd blank line.
+                if( @$message[$l]=~m/^-----BEGIN/ ) { $m=-2;  $print="Y"}
+                if( $print eq "Y" ) {
+                  if( @$message[$l] eq "" ) { $m++; if( $m >= 0)   {last} } 
+                  $buffer=$buffer.@$message[$l]."\n"
+                }
+              }					# Part 2,3,..: skip 1 blank line
+              else {				# after "id=", then start; stop
+                if( $print eq "Y" ) {		# before next blank line.
+                  if( @$message[$l] eq "" )                        {last} 
+                  $buffer=$buffer.@$message[$l]."\n"
+                }
+                if( @$message[$l]=~m/id=/ )                  {$print="R"}
+                if((@$message[$l] eq "") && ($print eq "R")) {$print="Y"}
+              }
+              $l++;
+            }
+            print $fh $buffer or goto I;
+          }
+          $fh->close || goto I;
+          open $fh, $tmp;
+          while (<$fh>) { chomp; syslog('info', $_) }
+          close $fh;
+          for ($k=1;$k<=$tp{$part[0]};$k++){
+            $pop->delete($slot{$part[0]."=".$k})
+          }
+          goto I;
+        }
+J:    }	
+    }
+I:}
+  $pop->quit() if ($count >= 0);
+}

@@ -1,0 +1,1273 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>Parallel Processing on Linux with PVM and MPI LG #65</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<CENTER>
+<A HREF="http://www.linuxgazette.net/">
+<H1><IMG ALT="LINUX GAZETTE" SRC="../gx/lglogo.png" 
+	WIDTH="600" HEIGHT="124" border="0"></H1></A> 
+
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="jenkins.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../faq/index.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="lilly.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+<P>
+</CENTER>
+
+<!--endcut ============================================================-->
+
+<H4 ALIGN="center">
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H1><font color="maroon">Parallel Processing on Linux with PVM and MPI</font></H1>
+<H4>By <a href="mailto:jurahul@hotmail.com">Rahul U. Joshi</a></H4>
+</center>
+<P> <HR> <P>  
+
+<!-- END header -->
+
+
+
+
+<EM>This article aims to provide an introduction to PVM and MPI, two widely used
+software systems for implementing parallel message passing programs. They enable us to use a group of heterogeneous UNIX/LINUX computers connected by a network as a single machine for solving a large problem.</EM>
+
+<H2><A NAME="s1">1. Introduction to Parallel Processing</A></H2>
+
+<P>Parallel processing is a form of computing in which a number of activities are
+carried out concurrently so that the effective time required to solve the
+problem is reduced. In the previous days, parallel processing was used for such
+thing as large scale simulations (e.g. molecular simulations, simulation of the
+explosion of an atomic bomb etc), solving large number crunching and data
+processing problems (e.g. compiling the census data) etc. However, as the cost
+of hardware is decreasing rapidly, parallel processing is being uses more and
+more in routine tasks. Multiple processor servers have been in existence for
+a long time. Parallel processing is also used in your own PC too. For example,
+a graphics processor working along with the main processor to render graphics
+on your monitor is also a form of parallel processing.
+<P>
+<P>However, apart from the hardware facilities for parallel processing, some
+software support too is required so that we can run the programs in parallel
+and coordinate their execution. Such a coordination is necessary due to the
+dependencies of the parallel programs on one other. This will become 
+clearer when we work through an example. The most widely used method to achieve
+such coordination is <EM> message passing </EM> in which the programs coordinate
+their execution and in general communicate with each other by passing <EM>message's</EM> to one other. So, for example, a program may tell another program,
+``Ok! Here is the intermediate result you need to proceed.'' If all this sounds
+too abstract, lets proceed with a very simple example.
+<H2><A NAME="s2">2. A Very Simple Problem</A></H2>
+
+<P>In this section, we will consider a very simple problem and consider how we
+can use parallel processing to speed up its execution. The problem is to find
+the sum of a list of integers stored in an array. Let us say that there are
+100 integers stored in an array say <CODE>items</CODE>. Now, how do we parallelize
+this program? That is, we must first find out a way in which this problem can
+be solved by a number of programs working concurrently. Many a times, due to
+<EM> data dependencies</EM>, parallelization becomes a difficult problem. For
+example, if you want to evaluate <EM>(a + b) * c</EM>, which involves two
+operations, we cannot do them concurrently, the addition must be done before
+the multiplication. Fortunately, for the problem that we have chosen, 
+parallelization is easy. Suppose that 4 program or processors will be working
+simultaneously to solve the addition problem. Then the simplest strategy would
+be to break the array <CODE>items</CODE> into 4 parts and have each program process
+one part. Thus the parallelization of the problem is as follows:
+<OL>
+<LI> Four programs say P0, P1, P2 and P3 will solve the problem.</LI>
+<LI> P0 will find the sum of array elements <CODE>items[0]</CODE> to 
+<CODE>items[24]</CODE>. Similarly, P1 will find the sum of <CODE>items[25]</CODE>
+to <CODE>items[49]</CODE>, P2 <CODE>items[50]</CODE> to <CODE>items[74]</CODE> and
+P3 <CODE>items[75]</CODE> to <CODE>items[99]</CODE>.</LI>
+<LI> After these programs have executed, there must be some other program to
+find the sum of the 4 results obtained and give the final answer. Also,
+the elements of the array <CODE>items</CODE> are not known to the programs
+P0 to P3 and hence some program must tell these programs the values
+of the elements. Thus, apart from P0 to P3, we will require one more program
+that distributes data, collects results and coordinates execution.
+We call such a program as <EM>master</EM> and the programs P0 to P3 as
+<EM>slaves</EM> and this organization as the <EM>master - slave paradigm</EM>.</LI>
+</OL>
+<P>With this organization in mind, let us write the algorithms for the master
+and the slave programs.
+
+<HR NOSHADE>
+<PRE>
+/* Algorithm for the master program */
+initialize the array `items'.
+
+/* send data to the slaves */
+for i = 0 to 3
+    Send items[25*i] to items[25*(i+1)-1] to slave Pi
+end for
+
+/* collect the results from the slaves */
+for i = 0 to 3
+    Receive the result from slave Pi in result[i]
+end for
+
+/* calculate the final result */
+sum = 0
+for i = 0 to 3
+    sum = sum + result[i]
+end for
+
+print sum
+</PRE>
+<HR NOSHADE>
+The algorithm for the slave can be written as follows.
+<HR NOSHADE>
+<PRE>
+/* Algorithm for the slave program */
+
+Receive 25 elements from the master in some array say `items'
+
+/* calculate intermediate result */
+sum = 0
+for i = 0 to 24
+    sum = sum + items[i]
+end for
+
+send `sum' as the intermediate result to the master
+</PRE>
+<HR NOSHADE>
+
+<H2><A NAME="s3">3. Implementing with PVM</A></H2>
+
+<P>Now that the basic algorithm has been designed, let us now consider how we
+can implement it. What hardware shall we run this program on? Clearly, very
+few of us have access to special machines designed to run parallel programs.
+However, no special hardware requirements are there in order to implement this
+program. A single computer or a group of interconnected computers will do,
+thanks to PVM, a software system that enables us to use interconnected computers
+for parallel program execution. PVM stands for Parallel Virtual Machine. It
+enables you to create number of programs or processes that run concurrently on same or different machines
+and provided functions with which you can pass messages among the processes for
+coordination. Even if you have a single computer, PVM will work on it, although
+there will be no ``real'' parallel processing as such. However, for learning
+purpose, that should be fine. Later on I will describe how to do ``real''
+parallel processing using the PVM.
+<P>In order to use the PVM system, you need to install the PVM software on your
+Linux system. In case you are using Red Hat Linux, then the RPM package for
+PVM is included on the CD, so that you can install it as you normally install
+other packages. Assuming that you have installed PVM system on your machine,
+create the following directories(s) in your home directory: 
+<CODE>~/pvm3/bin/LINUX/</CODE>. Why ? Because PVM requires that some of the 
+executables you create be copied in this directory. Once you have done this,
+your setup is ready. Test this by giving the command <CODE>pvm</CODE> on the
+prompt. This will start the <EM>PVM Console</EM> from which you can give
+commands to the PVM system and query status information. If everything is set
+OK, you will see the <CODE>pvm&gt;</CODE> prompt. Here enter the command <CODE>conf</CODE>.
+The output should look something like this.
+<PRE>
+pvm&gt; conf
+conf
+1 host, 1 data format
+                    HOST     DTID     ARCH   SPEED       DSIG
+               joshicomp    40000    LINUX    1000 0x00408841
+</PRE>
+<P>What does this mean? The PVM System allows you to consider a group of 
+interconnected LINUX system to be viewed as a ``virtual'' computer having much
+higher computing capacity than the individual machines. Thus, PVM will
+distribute the processes among a number of computers. However, by default, PVM
+considers that only the host that you are working on is to be included in the
+PVM machine, i.e. all processes you create will be scheduled to run on the
+same host. The <CODE>conf</CODE> command shows what hosts or nodes are in the
+PVM. Currently, there is only one. Later on, we will see how to add more hosts.
+Presently, exit the PVM console by giving the command <CODE>halt</CODE>
+<P>
+<P>
+<H2>3.1 A Demonstration Program</H2>
+
+<P>Now that you are ensured that the PVM system has been properly installed,
+let us see how to write the programs. Programs for the PVM system can be
+written in both FORTRAN and C. We will be using the C language. To use the
+PVM system, you include some calls to the PVM functions in your C program
+along with the other statements and link the PVM library with your programs.
+To get you started with PVM, let us write a simple program in which there
+will be a master and a slave. The master will send the slave some string,
+which the slave will convert to upper case and send back to the master. The
+master and the slave programs are given as follows. To compile the programs,
+give the command <CODE>make -f makefile.demo</CODE>. 
+
+<P> <A HREF="misc/joshi/Pvmmpi.tgz">[Click here for a tar file containing the
+program listings.]</A>
+
+<HR NOSHADE>
+<PRE>
+      1 /* -------------------------------------------------------------------- *
+      2  * master_pvm.c                                                         *
+      3  *                                                                      *
+      4  * This is the master program for the simple PVM demonstration.         *
+      5  * -------------------------------------------------------------------- */
+      6 #include &lt;stdio.h&gt;
+      7 #include &lt;stdlib.h&gt;
+      8 #include &lt;pvm3.h&gt;           /* declares PVM constants and functions */
+      9 #include &lt;string.h&gt;
+        
+     10 int main()
+     11 {
+     12     int mytid;              /* our task ID          */
+     13     int slave_tid;          /* task ID of the slave */
+     14     int result;
+     15     char message[] = "hello pvm";
+     16     
+     17     /* enroll ourselves into the PVM system and get our ID */
+     18     mytid = pvm_mytid();
+        
+     19     /* spawn the slave */
+     20     result = pvm_spawn("slave_pvm", (char**)0, PvmTaskDefault, 
+     21                         "", 1, &amp;slave_tid);
+        
+     22     /* check if the slave was spawned successfully          */
+     23     if(result != 1)
+     24     {
+     25         fprintf(stderr, "Error: Cannot spawn slave.\n");
+        
+     26         /* clean up and exit from the PVM system            */
+     27         pvm_exit();
+     28         exit(EXIT_FAILURE);
+     29     }
+        
+     30     /* initialize the data buffer to send data to slave     */
+     31     pvm_initsend(PvmDataDefault);
+        
+     32     /* ``pack'' the string into the data buffer             */
+     33     pvm_pkstr(message);
+        
+     34     /* send the string to the slave with a message tag of 0 */
+     35     pvm_send(slave_tid, 0);
+        
+     36     /* wait and receive the result string from the slave    */
+     37     pvm_recv(slave_tid, 0);
+        
+     38     
+     39     /* ``unpack'' the result from the slave                 */
+     40     pvm_upkstr(message);
+        
+     41     /* show the result from the slave                       */
+     42     printf("Data from the slave : %s\n", message);
+        
+     43     /* clean up and exit from the PVM system                */
+     44     pvm_exit();
+     45     
+     46     exit(EXIT_SUCCESS);
+     47 } /* end main() */
+        
+     48 /* end master_pvm.c */
+</PRE>
+<HR NOSHADE>
+<PRE>
+      1 /* -------------------------------------------------------------------- *
+      2  * slave_pvm.c                                                          *
+      3  *                                                                      *
+      4  * This is the slave program for the simple PVM demonstration           *
+      5  * -------------------------------------------------------------------- */
+      6 #include &lt;stdio.h&gt;
+      7 #include &lt;ctype.h&gt;
+      8 #include &lt;stdlib.h&gt;
+      9 #include &lt;pvm3.h&gt;
+        
+     10 #define MSG_LEN     20
+     11 void convert_to_upper(char*);
+        
+     12 int main()
+     13 {
+     14     int mytid;
+     15     int parent_tid;
+     16     char message[MSG_LEN];
+        
+     17     /* enroll ourselves into the PVM system         */
+     18     mytid = pvm_mytid();
+        
+     19     /* get the task ID of the master                */
+     20     parent_tid = pvm_parent();
+        
+     21     /* receive the original string from master      */
+     22     pvm_recv(parent_tid, 0);
+     23     pvm_upkstr(message);
+        
+     24     /* convert the string to upper case             */
+     25     convert_to_upper(message);
+        
+     26     /* send the converted string to the master      */
+     27     pvm_initsend(PvmDataDefault);
+        
+     28     pvm_pkstr(message);
+     29     pvm_send(parent_tid, 0);
+        
+     30     /* clean up and exit from the PVM system        */
+     31     pvm_exit();
+     32     
+     33     exit(EXIT_SUCCESS);
+     34 } /* end main() */
+        
+     35 /* function to convert the given string into upper case */
+     36 void convert_to_upper(char* str)
+     37 {
+     38     while(*str != '\0')
+     39     {
+     40         *str = toupper(*str);
+     41         str++;
+     42     }
+     43 } /* end convert_to_upper() */
+        
+     44 /* end slave_pvm.c */
+</PRE>
+<HR NOSHADE>
+<PRE>
+      1 # Make file for the demo PVM program
+        
+      2 .SILENT :
+      3 # paths fro PVM include files and libraries
+      4 INCDIR=-I/usr/share/pvm3/include
+      5 LIBDIR=-L/usr/share/pvm3/lib/LINUX
+        
+      6 # link the PVM library
+      7 LIBS=-lpvm3
+      8 CFLAGS=-Wall
+      9 CC=gcc
+     10 TARGET=all
+        
+     11 # this is where the PVM executables go
+     12 PVM_HOME=$(HOME)/pvm3/bin/LINUX
+        
+     13 all : $(PVM_HOME)/master_pvm $(PVM_HOME)/slave_pvm
+        
+     14 $(PVM_HOME)/master_pvm : master_pvm.c
+     15     $(CC) -o $(PVM_HOME)/master_pvm master_pvm.c $(CFLAGS) $(LIBS) \
+     16           $(INCDIR) $(LIBDIR)
+        
+     17 $(PVM_HOME)/slave_pvm : slave_pvm.c
+     18     $(CC) -o $(PVM_HOME)/slave_pvm slave_pvm.c $(CFLAGS) $(LIBS) \
+     19           $(INCDIR) $(LIBDIR)
+</PRE>
+<HR NOSHADE>
+<P>
+<P>Once your programs have been
+compiled, you must copy them into the <CODE>~/pvm3/bin/LINUX</CODE> directory. 
+(The makefile does it by default). Now to run the programs, you must first
+start the PVM system. To do this give the command <CODE>pvm</CODE> to start the
+PVM Console. Now at the <CODE>pvm&gt;</CODE> prompt, type <CODE>quit</CODE>. The output
+will be as follows:
+<PRE>
+pvm&gt; quit
+quit
+
+Console: exit handler called
+pvmd still running.
+</PRE>
+
+Notice the last line, indicating that the PVM daemon (<CODE>pvmd</CODE>) is still
+running. To run the PVM programs, you need to run the PVM daemon which manages
+the exchange of messages and that what we are doing here. Once the PVM daemon
+is running, you can run the program by the following commands:
+<PRE>
+[rahul@joshicomp rahul]$ cd ~/pvm3/bin/LINUX/
+[rahul@joshicomp LINUX]$ ./master_pvm
+Data from the slave : HELLO PVM
+[rahul@joshicomp LINUX]$
+</PRE>
+<P>
+<P>Notice that the string is now in upper case as expected.
+<P>
+<H2>3.2 Explanation of the program</H2>
+
+<P>In this section, we will see exactly how this program works. First of all
+to use PVM function, you need to include a header file <CODE>pvm3.h</CODE> in
+your programs. This is done in line 8 of <CODE>master_pvm.c</CODE> and in
+line 9  of <CODE>slave_pvm.c</CODE>. Also when compiling the programs, you need
+to link it with the PVM library. This is done by specifying the <CODE>-lpvm3</CODE>
+option to the compiler, as done in line 7 of <CODE>makefile.demo</CODE>. Also, you
+need to specify to the compiler the paths of header and library files, as
+is done on lines 4 and 5 of the makefile.
+<P>
+<P>In the master program, we first get the <EM>task ID</EM> of the master by 
+calling the PVM function <CODE>pvm_mytid()</CODE>. The
+PVM system assigns each process a unique 32 bit integer called as its <EM>task
+ID</EM> in the same way as Linux assigns each process a process ID. The task
+ID helps us identify the process with which we need to communicate. However,
+the master does not uses its task ID (stored in <CODE>mytid</CODE>) ever. Our
+intention here is just to call the function <CODE>pvm_mytid()</CODE>. This
+function enrolls the process into the PVM system and generates a unique task
+ID for the process. If we do not explicitly enroll the process, PVM 
+automatically enrolls our process on the first call to any PVM function. Next
+we use <CODE>pvm_spawn()</CODE> to create the slave process. The first parameter,
+<CODE>"slave_pvm"</CODE> is the name of the executable for the slave. The second
+parameter is the arguments that you wish to the pass to the slaves (similar to 
+<CODE>argv</CODE> in normal C). Since we do not want to send any arguments, we
+set this value to 0. The third parameter is a flag with which we can control
+how and where PVM starts the slave. Since we have only a single machine, we
+set this flag to <CODE>PvmTaskDefault</CODE>, specifying PVM to use default
+criteria while spawning the slave. The fourth parameter is the name of the
+host or the architecture on which we wish to run the program and here it is
+kept empty. It is used to specify the host or the architecture when the flag
+is other than <CODE>PvmTaskDefault</CODE>.The fifth parameter specifies the number 
+of slaves to spawn and the sixth parameter is a pointer to an array in which 
+the IDs of the slaves will be returned. This function returns the number of 
+slaves actually spawned which we check for correctness.
+<P>
+<P>A message in PVM consists of basically two parts, the data and a <EM>tag</EM>
+that identifies the type of the message. The tag helps us distinguish between
+different messages. For example, in the addition example, which we are going
+to implement, suppose that you are expecting that each slave will send to the 
+master an integer which is the sum of the elements it added. It is also
+quite possible that some slave may encounter some error and may want to send
+the master an integer which indicates the error code. How does the master
+distinguish whether an integer it received from the slave is an intermediate
+result or an error code? This is where tags come in picture. You may assign
+the message for intermediate result a tag say <CODE>MSG_RESULT</CODE> which you
+will <CODE>#define</CODE> in some header file and a tag say <CODE>MSG_ERROR</CODE> for
+the message indicating error. The master will then look at the message tags
+to decide whether the message contains intermediate result or error.
+<P>
+<P>To send a message, you first need to ``initialize'' the send buffer. This is
+done by calling the <CODE>pvm_initsend()</CODE> function. The parameter to
+this function specifies the ``encoding'' scheme to be used. When we want to
+exchange data between machines with different architectures (like say between
+a Pentium machine and a SPARC Workstation) then we need to encode the data at
+the sending end and decode at the receiving end so that data is properly
+delivered. The parameter to <CODE>pvm_initsend()</CODE> specifies the encoding
+scheme to be used. The value <CODE>PvmDataDefault</CODE> specifies an encoding
+scheme which enables data to be safely exchanged between heterogeneous
+architectures. Once the buffer has been initialized, we need to put data into
+the buffer and encode it. In our case, the data is a string, so we use the
+function <CODE>pvm_pkstr()</CODE> to ``pack'' i.e. encode and put the data into
+the buffer. If we had to send an integer, there is a different function
+<CODE>pvm_pkint()</CODE>. Similarly, there are functions for other data types.
+Once the data is packed, we call <CODE>pvm_send()</CODE> to send the message. 
+The first argument is the ID of the process to which the message is to be sent
+and the second argument is the message tag. Since there is only one type of 
+message here, we set the tag to 0. 
+<P>
+<P>Once the data is sent to the slave, the slave will process it and return it
+to the master as we shall see. So we now call <CODE>pvm_recv()</CODE> to receive
+the data from the slave. Again, the parameters are the task ID from which
+the message is expected and the tag of the expected message. If the desired
+message has not yet been sent, this function waits and does not return. Thus,
+in effect, the master is now waiting for the slave to process the data. Once
+the message arrives, the data is still in the receive buffer. It needs to be
+``unpacked'' i.e decoded to get the original message. This decoding is done
+by the <CODE>pvm_upkstr()</CODE> function. We then display the processes string.
+<P>
+<P>Before the PVM program exits, it must tell the PVM system that it is leaving
+the PVM system so that resources occupied by the process can be released. This
+is done by calling the <CODE>pvm_exit()</CODE> function. After that, the master
+exits.
+<P>
+<P>The slave program is easy to understand. First it finds the task ID of the
+master (which is also its parent as the master spawned the slave) by calling
+the function <CODE>pvm_parent()</CODE>. It then receives the message string from
+the master, converts it to uppercase and send the resulting string to the
+master.
+<H2>3.3 The Addition Program</H2>
+
+<P>Now that you know some basics of a PVM program, let us implement the addition
+algorithm we developed using PVM. There will be one master and 4 slaves. The
+master will first spawn 4 slaves and send each one their part of data. The 
+slaves will add the data and send the results to the master. Thus, two
+types of messages are exchanged, one when the master send data to slaves, for
+which we will use the tag <CODE>MSG_DATA</CODE> and the other when the slaves
+send results to master, for which we will use the tag <CODE>MSG_RESULT</CODE>.
+The rest is simple. The master and the slave programs are given below.
+<HR NOSHADE>
+<PRE>
+      1 /* -------------------------------------------------------------------- *
+      2  * common.h                                                             *
+      3  *                                                                      *
+      4  * This header file defines some common constants.                      *
+      5  * -------------------------------------------------------------------- */
+      6 #ifndef COMMON_H
+      7 #define COMMON_H
+    
+      8 #define NUM_SLAVES      4                   /* number of slaves     */
+      9 #define SIZE            100                 /* size of total data   */
+     10 #define DATA_SIZE       (SIZE/NUM_SLAVES)   /* size for each slave  */
+    
+     11 #endif
+     12 /* end common.h */
+</PRE>
+<HR NOSHADE>
+<PRE>
+      1 /* -------------------------------------------------------------------- *
+      2  * tags.h                                                               *
+      3  *                                                                      *
+      4  * This header file defines the tags that will be used for messages.    *
+      5  * -------------------------------------------------------------------- */
+      6 #ifndef TAGS_H
+      7 #define TAGS_H
+    
+      8 #define MSG_DATA            101     /* data from master to slave    */
+      9 #define MSG_RESULT          102     /* result from slave to master  */
+    
+     10 #endif
+    
+     11 /* end tags.h */
+</PRE>
+<HR NOSHADE>
+<PRE>
+  1 /* -------------------------------------------------------------------- *
+  2  * master_add.c                                                         *
+  3  *                                                                      *
+  4  * Master program for adding the elements of an array by using PVM      *
+  5  * -------------------------------------------------------------------- */
+  6 #include &lt;stdio.h&gt;
+  7 #include &lt;stdlib.h&gt;
+  8 #include &lt;pvm3.h&gt;           /* PVM constants and declarations   */
+  9 #include "tags.h"           /* tags for messages                */
+ 10 #include "common.h"         /* common constants                 */
+    
+ 11 int get_slave_no(int*, int);
+    
+ 12 int main()
+ 13 {
+ 14     int mytid;
+ 15     int slaves[NUM_SLAVES]; /* array to store the task IDs of slaves    */
+ 16     int items[SIZE];        /* data to be processes                     */
+ 17     int result, i, sum;
+ 18     int results[NUM_SLAVES];    /* results from the slaves              */
+    
+ 19     /* enroll into the PVM system   */
+ 20     mytid = pvm_mytid();
+    
+ 21     /* initialize the array `items' */
+ 22     for(i = 0; i &lt; SIZE; i++)
+ 23         items[i] = i;
+    
+ 24     /* spawn the slaves             */
+ 25     result = pvm_spawn("slave_add", (char**)0, PvmTaskDefault,
+ 26                        "", NUM_SLAVES, slaves);
+    
+ 27     /* check if proper number of slaves are spawned     */
+ 28     if(result != NUM_SLAVES)
+ 29     {
+ 30         fprintf(stderr, "Error: Cannot spawn slaves.\n");
+ 31         pvm_exit();
+ 32         exit(EXIT_FAILURE);
+ 33     }
+    
+ 34     /* distribute the data among the slaves     */
+ 35     for(i = 0; i &lt; NUM_SLAVES; i++)
+ 36     {
+ 37         pvm_initsend(PvmDataDefault);
+ 38         pvm_pkint(items + i*DATA_SIZE, DATA_SIZE, 1);
+ 39         pvm_send(slaves[i], MSG_DATA);
+ 40     }
+    
+ 41     /* receive the results from the slaves      */
+ 42     for(i = 0; i &lt; NUM_SLAVES; i++)
+ 43     {
+ 44         int bufid, bytes, type, source;
+ 45         int slave_no;
+ 46         
+ 47         /* receive message from any of the slaves       */
+ 48         bufid = pvm_recv(-1, MSG_RESULT);
+    
+ 49         /* get information about the message            */
+ 50         pvm_bufinfo(bufid, &amp;bytes, &amp;type, &amp;source);
+ 51         
+ 52         /* get the slave number that sent the message   */
+ 53         slave_no = get_slave_no(slaves, source);
+    
+ 54         /* unpack the results at appropriate position   */
+ 55         pvm_upkint(results + slave_no, 1, 1);
+ 56     }
+    
+ 57     /* find the final result            */
+ 58     sum = 0;
+ 59     for(i = 0; i &lt; NUM_SLAVES; i++)
+ 60         sum += results[i];
+    
+ 61     printf("The sum is %d\n", sum);
+    
+ 62     /* clean up and exit from the PVM system    */
+ 63     pvm_exit();
+    
+ 64     exit(EXIT_SUCCESS);
+ 65 } /* end main() */
+ 66         
+ 67 /* function to return the slave number of a slave given its task ID */
+ 68 int get_slave_no(int* slaves, int task_id)
+ 69 {
+ 70     int i;
+    
+ 71     for(i = 0; i &lt; NUM_SLAVES; i++)
+ 72         if(slaves[i] == task_id)
+ 73             return i;
+    
+ 74     return -1;
+ 75 } /* end get_slave_no() */
+    
+ 76 /* end master_add.c */
+
+</PRE>
+<HR NOSHADE>
+<PRE>
+  1 /* -------------------------------------------------------------------- *
+  2  * slave_add.c                                                          *
+  3  *                                                                      *
+  4  * Slave program for adding elements of an array using PVM              *
+  5  * -------------------------------------------------------------------- */
+  6 #include &lt;stdlib.h&gt;
+  7 #include &lt;pvm3.h&gt;
+  8 #include "tags.h"
+  9 #include "common.h"
+    
+ 10 int main()
+ 11 {
+ 12     int mytid, parent_tid;
+ 13     int items[DATA_SIZE];           /* data sent by the master  */
+ 14     int sum, i;
+ 15     
+ 16     /* enroll into the PVM system       */
+ 17     mytid = pvm_mytid();
+    
+ 18     /* get the task ID of the master    */
+ 19     parent_tid = pvm_parent();
+    
+ 20     /* receive the data from the master */
+ 21     pvm_recv(parent_tid, MSG_DATA);
+ 22     pvm_upkint(items, DATA_SIZE, 1);
+    
+ 23     /* find the sum of the elements     */
+ 24     sum = 0;
+ 25     for(i = 0; i &lt; DATA_SIZE; i++)
+ 26         sum = sum + items[i];
+    
+ 27     /* send the result to the master    */
+ 28     pvm_initsend(PvmDataDefault);
+ 29     pvm_pkint(&amp;sum, 1, 1);
+ 30     pvm_send(parent_tid, MSG_RESULT);
+    
+ 31     /* clean up and exit from PVM       */
+ 32     pvm_exit();
+ 33     
+ 34     exit(EXIT_SUCCESS);
+ 35 } /* end main() */
+
+</PRE>
+<HR NOSHADE>
+<PRE>
+  1 # Make file for the PVM program for addition - makefile.add
+    
+  2 .SILENT :
+  3 # paths fro PVM include files and libraries
+  4 INCDIR=-I/usr/share/pvm3/include
+  5 LIBDIR=-L/usr/share/pvm3/lib/LINUX
+    
+  6 # link the PVM library
+  7 LIBS=-lpvm3
+  8 CFLAGS=-Wall
+  9 CC=gcc
+ 10 TARGET=all
+    
+ 11 # this is where the PVM executables go
+ 12 PVM_HOME=$(HOME)/pvm3/bin/LINUX
+    
+ 13 all : $(PVM_HOME)/master_add $(PVM_HOME)/slave_add
+    
+ 14 $(PVM_HOME)/master_add : master_add.c common.h tags.h
+ 15     $(CC) -o $(PVM_HOME)/master_add master_add.c $(CFLAGS) $(LIBS) \
+ 16           $(INCDIR) $(LIBDIR)
+ 17   
+ 18 $(PVM_HOME)/slave_add : slave_add.c common.h tags.h
+ 19     $(CC) -o $(PVM_HOME)/slave_add slave_add.c $(CFLAGS) $(LIBS) \
+ 20          $(INCDIR) $(LIBDIR)
+</PRE>
+<HR NOSHADE>
+<P>
+<P>Let us consider the slave program first, because it is simple. The slave
+receives the 25 array elements from the master in the array <CODE>items</CODE>,
+finds their sum and sends the result to the master with the message tag
+as <CODE>MSG_RESULT</CODE>. Now consider the master. We define an array 
+<CODE>slaves</CODE> of size <CODE>NUM_SLAVES</CODE> which will store the task ID's of
+the slaves spawned by the parent. There is another array <CODE>results</CODE> in
+which the results from the slaves are stored. The master first initializes
+the array <CODE>items</CODE> and then spawns the slaves. After that it distributes
+the data among the slaves. In the call to <CODE>pvm_pkint()</CODE> on line 38,
+the first parameter is the pointer to the array in which the integers are
+stored, the second is the number of integers to pack and the third is the
+``stride.'' Stride means how many elements to skip when packing. When it is 1,
+consecutive elements are packed. When it is 2, PVM will skip 2 elements when
+packing with the result that all even numbered elements (0, 2, 4 ...) will
+be packed. Here we keep its value as 1. 
+<P>
+<P>Once the data has been distributed among the slaves, the master has to wait
+till the slaves return the intermediate results. One possibility when
+accepting the results is that the master will first collect the result from 
+slave 0 (i.e slave whose task ID is stored in <CODE>slave[0]</CODE>), then from
+slave 1 and so on. However, this may not be an efficient approach. For example,
+it may be that slave 0 is working on a slower machine than slaves 1, 2 and 3.
+In that case, since the master is waiting from slave 0, the results from
+slaves 1, 2 and 3 are yet to be collected even though the calculations are
+completed. In this case it may be fine, but consider the situation in which
+the slave, when finished doing one job is given another job. In that case, we
+would like to give a slave its next job immediately after it has completed its
+current job. Thus, the master must be in a position to respond messages from
+any of the slaves. This is what is being done here.
+<P>In the call to <CODE>pvm_recv()</CODE> on line 48, we know that the first 
+parameter is the task ID of the message source. If this value is kept -1, it 
+signifies a <EM>wild card</EM> i.e. messages from any process with message tag
+<CODE>MSG_RESULT</CODE> will be received by the master. The received message
+along with some control information is stored in a buffer called as <EM>active
+receive buffer</EM>. The call returns a unique ID for this buffer. Now, we
+want to know who is the sender of the message so that we can assign the message
+data to the appropriate element of the array <CODE>results</CODE>. The function
+<CODE>pvm_bufinfo()</CODE> returns information about the message in the buffer,
+such as the message tag, the number of bytes and the senders task ID. Once we
+have the senders task ID, we set the appropriate element of the <CODE>results</CODE>
+array to the integer sent by the slave. The rest of the program should be
+easy to understand.
+<P>
+<H2>3.4 Working with PVM</H2>
+
+<P>In case you are interested, you can think of some problems for which you can
+write parallel programs. Many a times, due to bugs etc., you may need to clean
+up the state of the things before starting. The PVM Console provides with
+the command <CODE>halt</CODE> that kills the PVM daemon. Then all the PVM processes
+will halt or you can halt them with the Linux <CODE>kill</CODE> command. In case
+you have a network of Linux machines interconnected by say a LAN, then you
+can also do ``real'' parallel processing. First of all, install PVM on all the
+hosts you wish to use and then use the <CODE>add</CODE> command in the PVM Console
+to add hosts to the virtual machine. Then PVM will schedule some of the 
+processes to run on these hosts, so that real parallel processing is achieved.
+<P>
+<H2><A NAME="s4">4. Implementing with MPI</A></H2>
+
+<P>We have seen in the previous section the implementation of the addition
+program using the PVM. Now let us consider another approach that can be
+used in developing parallel programs. This approach is using the MPI
+library. MPI stands for <EM>Message Passing Interface</EM>. It is a standard
+developed to enable us to write portable message passing applications. It
+provides functions for exchanging messages and many other activities as well.
+It must be noted that unlike PVM which is a software system, MPI is a standard,
+so that many implementations of the MPI standard exist. We will use an
+implementation of MPI called LAM which stands for <EM>Local Area Multicomputer</EM>. It is also available on the Red Hat Linux CD as an RPM package, so
+installation may not be a problem.
+<P>
+<P>After you have installed the RPM package, go to the <CODE>/usr/boot</CODE>
+directory and create a file named <CODE>conf.lam</CODE> and type in a single line 
+in it: <CODE>lamd $inet_topo</CODE>. The same directory will also have a file
+named <CODE>bhost.def</CODE> else create it and type in a single line in it:
+<CODE>localhost</CODE>. Now to test whether everything is working correctly,
+type at the prompt, <CODE>lamboot</CODE>. You will get the following response:
+<PRE>
+[rahul@joshicomp boot]$ lamboot
+
+LAM 6.3.1/MPI 2 C++/ROMIO - University of Notre Dame
+
+[rahul@joshicomp boot]$
+</PRE>
+<P>
+<P>If the output indicates an error, then there is some problem with the 
+installation, either follow the above steps or see the <EM>lamboot(1)</EM>
+manual page for troubleshooting.
+<P>
+<P>Assuming that LAM/MPI is properly installed on your system, let us again
+write a small demonstration program for MPI. 
+<P>
+<H2>4.1 A Demonstration MPI Program</H2>
+
+<P>We will again write a simple master - slave program in which we are supposed to
+evaluate the expression <EM>(a + b) * (c - d)</EM>. The master will read the
+values of <EM>a, b, c,</EM> and <EM>d</EM> from the user and one slave will
+calculate <EM>(a + b)</EM> and the other one will calculate <EM>(c - d)</EM>.
+The program is as follows.
+<P>
+<HR NOSHADE>
+<PRE>
+  1 /* -------------------------------------------------------------------- *
+  2  * mpi_demo.c                                                           *
+  3  *                                                                      *
+  4  * A simple MPI demonstration program to evaluate an expression.        *
+  5  * -------------------------------------------------------------------- */
+  6 #include &lt;stdio.h&gt;
+  7 #include &lt;stdlib.h&gt;
+  8 #include &lt;lam/mpi.h&gt;            /* for MPI constants and functions      */
+    
+  9 #define MSG_DATA        100     /* message from master to slaves        */
+ 10 #define MSG_RESULT      101     /* message from slave to master         */
+    
+ 11 #define MASTER          0       /* rank of master                       */
+ 12 #define SLAVE_1         1       /* rank of first slave                  */
+ 13 #define SLAVE_2         2       /* rank of second slave                 */
+    
+ 14 /* functions to handle the tasks of master, and the two slaves          */
+ 15 void master(void);
+ 16 void slave_1(void);
+ 17 void slave_2(void);
+    
+ 18 int main(int argc, char** argv)
+ 19 {
+ 20     int myrank, size;
+ 21     
+ 22     /* initialize the MPI system                                        */
+ 23     MPI_Init(&amp;argc, &amp;argv);
+    
+ 24     /* get the size of the communicator i.e. number of processes        */
+ 25     MPI_Comm_size(MPI_COMM_WORLD, &amp;size);
+    
+ 26     /* check for proper number of processes                             */
+ 27     if(size != 3)
+ 28     {
+ 29         fprintf(stderr, "Error: Three copies of the program should be run.\n");
+ 30         MPI_Finalize();
+ 31         exit(EXIT_FAILURE);
+ 32     }
+ 33     
+ 34     /* get the rank of the process                                      */
+ 35     MPI_Comm_rank(MPI_COMM_WORLD, &amp;myrank);
+    
+ 36     /* perform the tasks according to the rank                          */
+ 37     if(myrank == MASTER)
+ 38         master();
+ 39     else if(myrank == SLAVE_1)
+ 40         slave_1();
+ 41     else
+ 42         slave_2();
+    
+ 43     /* clean up and exit from the MPI system                            */
+ 44     MPI_Finalize();
+    
+ 45     exit(EXIT_SUCCESS);
+ 46 } /* end main() */
+    
+ 47 /* function to carry out the masters tasks          */
+ 48 void master(void)
+ 49 {
+ 50     int a, b, c, d;
+ 51     int buf[2];
+ 52     int result1, result2;
+ 53     MPI_Status status;
+    
+ 54     printf("Enter the values of a, b, c, and d: ");
+ 55     scanf("%d %d %d %d", &amp;a, &amp;b, &amp;c, &amp;d);
+    
+ 56     /* send a and b to the first slave              */
+ 57     buf[0] = a;
+ 58     buf[1] = b;
+ 59     MPI_Send(buf, 2, MPI_INT, SLAVE_1, MSG_DATA, MPI_COMM_WORLD);
+    
+ 60     /* send c and d to the secons slave             */
+ 61     buf[0] = c;
+ 62     buf[1] = d;
+ 63     MPI_Send(buf, 2, MPI_INT, SLAVE_2, MSG_DATA, MPI_COMM_WORLD);
+    
+ 64     /* receive results from the slaves              */
+ 65     MPI_Recv(&amp;result1, 1, MPI_INT, SLAVE_1, MSG_RESULT, 
+ 66              MPI_COMM_WORLD, &amp;status);
+ 67     MPI_Recv(&amp;result2, 1, MPI_INT, SLAVE_2, MSG_RESULT, 
+ 68              MPI_COMM_WORLD, &amp;status);
+    
+ 69     /* final result                                 */
+ 70     printf("Value of (a + b) * (c - d) is %d\n", result1 * result2);
+ 71 } /* end master() */
+    
+ 72 /* function to carry out the tasks of the first slave       */
+ 73 void slave_1(void)
+ 74 {
+ 75     int buf[2];
+ 76     int result;
+ 77     MPI_Status status;
+ 78     
+ 79     /* receive the two values from the master       */ 
+ 80     MPI_Recv(buf, 2, MPI_INT, MASTER, MSG_DATA, MPI_COMM_WORLD, &amp;status);
+ 81     
+ 82     /* find a + b                                   */
+ 83     result = buf[0] + buf[1];
+    
+ 84     /* send result to the master                    */
+ 85     MPI_Send(&amp;result, 1, MPI_INT, MASTER, MSG_RESULT, MPI_COMM_WORLD);
+ 86 } /* end slave_1() */
+    
+ 87 /* function to carry out the tasks of the second slave      */
+ 88 void slave_2(void)
+ 89 {
+ 90     int buf[2];
+ 91     int result;
+ 92     MPI_Status status;
+ 93     
+ 94     /* receive the two values from the master       */
+ 95     MPI_Recv(buf, 2, MPI_INT, MASTER, MSG_DATA, MPI_COMM_WORLD, &amp;status);
+ 96     
+ 97     /* find c - d                                   */
+ 98     result = buf[0] - buf[1];
+    
+ 99     /* send result to master                        */
+100     MPI_Send(&amp;result, 1, MPI_INT, MASTER, MSG_RESULT, MPI_COMM_WORLD);
+101 } /* end slave_2() */
+    
+102 /* end mpi_demo.c */
+</PRE>
+<HR NOSHADE>
+<PRE>
+  1 # Makefile for MPI demo program - makefile.mpidemo
+  2 .SILENT:
+  3 CFLAGS=-I/usr/include/lam -L/usr/lib/lam
+  4 CC=mpicc
+    
+  5 mpi_demo : mpi_demo.c
+  6     $(CC) $(CFLAGS) mpi_demo.c -o mpi_demo
+</PRE>
+<HR NOSHADE>
+    
+<P>To compile this program, give the command <CODE>make -f makefile.mpidemo</CODE>.
+Once you have compiled the program, to run the program you first need to 
+``start'' or ``boot'' the Local Area Multicomputer system. This is done with
+the <CODE>lamboot</CODE> command. After that, to run the program by giving the
+following command: <CODE>mpirun -np 3 mpi_demo</CODE>.
+<PRE>
+[rahul@joshicomp parallel]$ lamboot
+
+LAM 6.3.1/MPI 2 C++/ROMIO - University of Notre Dame
+
+[rahul@joshicomp parallel]$ mpirun -np 3 mpi_demo
+Enter the values of a, b, c, and d: 1 2 3 4
+Value of (a + b) * (c - d) is -3
+[rahul@joshicomp parallel]$
+</PRE>
+<P>
+<H2>4.2 Explanation of the Program</H2>
+
+<P>To use the MPI system and functions, you first need to include the header
+file <CODE>mpi.h</CODE> as is done in line 8. In case of PVM, different processes
+are identified with their task ID's. In case of MPI, the MPI system assigns
+each process a unique integer called as its <EM>rank</EM> beginning with 0.
+The rank is used to identify a process and communicate with it. Secondly,
+each process is a member of some <EM>communicator</EM>. A communicator can
+be thought of as a group of processes that may exchange messages with each
+other. By default, every process is a member of the communicator called
+<CODE>MPI_COMM_WORLD</CODE>. Although we can create new communicators, this leads
+to an unnecessary increase in complexity, so we suffice ourselves by using the
+<CODE>MPI_COMM_WORLD</CODE> communicator.
+<P>
+<P>Any MPI program must first call the <CODE>MPI_Init()</CODE> function. This function
+is used by the process to enter the MPI system and also do any specific
+initialization required by the system. Next, we get the size of the 
+<CODE>MPI_COMM_WORLD</CODE> communicator i.e. the number of processes in it using the <code>MPI_Comm_size()</code> function. The
+first parameter is the communicator and the second is a pointer to an integer
+in which the size will be returned. Here, we need exactly 3 processes, one 
+master and two slaves. After that, we get the rank by calling 
+<CODE>MPI_Comm_rank()</CODE>. The three processes will have ranks 0, 1 and 2. All
+these processes are essentially identical i.e. there is no inherent 
+master - slave relationship between them. So it is up to us to decide who will
+be the master and who will be the slaves. We choose rank 0 as master and ranks
+1 and 2 as slaves. It can also be seen that we have included the code for both
+the master and the two slaves in the same program. Depending upon the rank,
+we choose to execute the appropriate function. Note that there is no spawning
+of processes as in PVM, and as we shall see, we choose to decide the number
+of process to be spawned from a command line argument rather than the program
+spawning slaves. Once the execution is finished,
+we must call the <CODE>MPI_Finalize()</CODE> function to perform final clean up.
+<P>
+<P>Let us now consider the master function. After reading the values of a, b, c, 
+and d from the user, the master must send a and b to slave 1 and c and d to
+slave 2. Instead of sending the variables individually, we choose to pack them
+up in an array and send the array of 2 integers instead. It is always better
+to pack up the data you want to send into a single message rather than to send
+a number of messages for individual data items, this saves the communication
+overhead involved in passing the messages. Once the buffer is ready, unlike PVM,
+we do not need to pack or encode the data, MPI will manage these details
+internally. So we can directly call the <CODE>MPI_Send()</CODE> function to send
+the data. The first parameter (line 59) is the address of the buffer, the
+second one the number of elements in the message, the third is a specification
+of the data type of the buffer, which here is <CODE>MPI_INT</CODE> specifying that
+the buffer is an array of integers. Next comes the rank of the process to which
+we want to send the message. Here it is <CODE>SLAVE_1</CODE> (#defined as 1).
+Next is the <EM>message tag</EM> similar to that in case of PVM. Final parameter
+is the communicator of which the receiver is a member, which in this case, is
+<CODE>MPI_COMM_WORLD</CODE>.
+<P>
+<P>Once the data is distributed among the slaves, the master must wait for the
+slaves to send the results. For simplicity, we first collect the message from
+the slave 1 and then from slave 2. To receive a message, we use the 
+<CODE>MPI_Recv()</CODE> function. Again, packing and decoding is handled by MPI
+internally. The first argument (line 65) is the address of the buffer in which
+to receive the data. The second is the size of the buffer in terms of the
+number of elements, which in this case is 1. Next is the data type, which is
+<CODE>MPI_INT</CODE> here. Next three parameters specify the rank of the source of
+the message, the tag of the expected message and the communicator of which the
+source is the member. The final argument is a pointer to a structure of type
+<CODE>MPI_Status</CODE> in which some status information will be returned (however,
+we ignore this information). Now that you know about the basic MPI terms,
+the <CODE>slave_1()</CODE> and <CODE>slave_2()</CODE> functions should be clear.
+<P>
+<P>
+<P>In this program, the code for the master as well as the slaves was in the same
+executable file. Later on we will see how we can execute multiple executables.
+From the makefile, we see that to compile the MPI program, a wrapper program
+<CODE>mpicc</CODE> is provided which links the required libraries automatically.
+To run the program, use the <CODE>mpirun -np 3 mpi_demo</CODE> command after 
+booting the LAM. Here we specify LAM to create 3 processes, one master and two
+slaves.
+<P>
+<H2>4.3 The Addition Program Again</H2>
+
+<P>Let us now re implement the addition program that we designed before using MPI.
+Here we will also show you how to execute separate programs in MPI. When we
+use a single executable in the MPI program, we call it <EM>Single Program
+Multiple Data (SPMD)</EM> application. When two or more executables are
+involved, we call it <EM>Multiple Program Multiple Data (MPMD)</EM> application.
+With LAM, MPMD programs are executed with the help of an <EM>application
+schema</EM>. But before that, let us see the source of the master and the slave
+programs.
+<HR NOSHADE>
+<PRE>
+  1 /* -------------------------------------------------------------------- *
+  2  * master_mpi.c                                                         *
+  3  *                                                                      *
+  4  * Master program for adding the elements of an array using MPI         *
+  5  * -------------------------------------------------------------------- */
+  6 #include &lt;stdio.h&gt;
+  7 #include &lt;stdlib.h&gt;
+  8 #include &lt;lam/mpi.h&gt;        /* MPI constants and functions              */
+  9 #include "tags.h"           /* tags for different messages              */
+ 10 #include "common.h"         /* common constants                         */
+    
+ 11 int main(int argc, char** argv)
+ 12 {
+ 13     int size, i, sum;
+ 14     int items[SIZE];
+ 15     int results[NUM_SLAVES];
+ 16     MPI_Status status;
+    
+ 17     /* initlalize the MPI System                */
+ 18     MPI_Init(&amp;argc, &amp;argv);
+    
+ 19     /* check for proper number of processes     */
+ 20     MPI_Comm_size(MPI_COMM_WORLD, &amp;size);
+    
+ 21     if(size != 5)
+ 22     {
+ 23         fprintf(stderr, "Error: Need exactly five processes.\n");
+ 24         MPI_Finalize();
+ 25         exit(EXIT_FAILURE);
+ 26     }
+    
+ 27     /* initialize the `items' array             */
+ 28     for(i = 0; i &lt; SIZE; i++)
+ 29         items[i] = i;
+    
+ 30     /* distribute the data among the slaves     */
+ 31     for(i = 0; i &lt; NUM_SLAVES; i++)
+ 32         MPI_Send(items + i*DATA_SIZE, DATA_SIZE, MPI_INT, i + 1,
+ 33                  MSG_DATA, MPI_COMM_WORLD);
+    
+ 34     /* collect the results from the slaves      */
+ 35     for(i = 0; i &lt; NUM_SLAVES; i++)
+ 36     {
+ 37         int result;
+ 38         
+ 39         MPI_Recv(&amp;result, 1, MPI_INT, MPI_ANY_SOURCE, MSG_RESULT,
+ 40                  MPI_COMM_WORLD, &amp;status);
+ 41         results[status.MPI_SOURCE - 1] = result;
+ 42     }
+    
+ 43     /* find the final answer                    */
+ 44     sum = 0;
+ 45     for(i = 0; i &lt; NUM_SLAVES; i++)
+ 46         sum = sum + results[i];
+    
+ 47     printf("The sum is %d\n", sum);
+    
+ 48     /* clean up and exit the MPI system         */
+ 49     MPI_Finalize();
+    
+ 50     exit(EXIT_SUCCESS);
+ 51 } /* and main() */
+    
+ 52 /* end master_mpi.c */
+</PRE>
+<HR NOSHADE>
+<PRE>
+  1 /* -------------------------------------------------------------------- *
+  2  * slave_mpi.c                                                          *
+  3  *                                                                      *
+  4  * Slave program for adding array elements using MPI.                   *
+  5  * -------------------------------------------------------------------- */
+  6 #include &lt;stdio.h&gt;
+  7 #include &lt;stdlib.h&gt;
+  8 #include &lt;lam/mpi.h&gt;        /* MPI functions and constants  */
+  9 #include "tags.h"           /* message tags                 */
+ 10 #include "common.h"         /* common constants             */
+    
+ 11 #define MASTER  0           /* rank of the master           */
+    
+ 12 int main(int argc, char** argv)
+ 13 {
+ 14     int items[DATA_SIZE];
+ 15     int size, sum, i;
+ 16     MPI_Status status;
+    
+ 17     /* initialize the MPI system            */
+ 18     MPI_Init(&amp;argc, &amp;argv);
+    
+ 19     /* check for proper number of processes */
+ 20     MPI_Comm_size(MPI_COMM_WORLD, &amp;size);
+    
+ 21     if(size != 5)
+ 22     {
+ 23         fprintf(stderr, "Error: Need exactly five processes.\n");
+ 24         MPI_Finalize();
+ 25         exit(EXIT_FAILURE);
+ 26     }
+    
+ 27     /* receive data from the master         */
+ 28     MPI_Recv(items, DATA_SIZE, MPI_INT, MASTER, MSG_DATA,
+ 29              MPI_COMM_WORLD, &amp;status);
+    
+ 30     /* find the sum                         */
+ 31     sum = 0;
+ 32     for(i = 0; i &lt; DATA_SIZE; i++)
+ 33         sum = sum + items[i];
+    
+ 34     /* send the result to the master        */
+ 35     MPI_Send(&amp;sum, 1, MPI_INT, MASTER, MSG_RESULT, MPI_COMM_WORLD);
+    
+ 36     /* clean up and exit MPI system         */
+ 37     MPI_Finalize();
+    
+ 38     exit(EXIT_SUCCESS);
+ 39 } /* end main() */
+    
+ 40 /* end slave_mpi.c */
+</PRE>
+<HR NOSHADE>
+<PRE>
+  1 # Makefile for MPI addition program - makefile.mpiadd
+  2 .SILENT:
+  3 CFLAGS=-I/usr/include/lam  -L/usr/lib/lam
+  4 CC=mpicc
+    
+  5 all : master_mpi slave_mpi
+    
+  6 master_mpi : master_mpi.c common.h tags.h
+  7     $(CC) $(CFLAGS) master_mpi.c -o master_mpi
+    
+  8 slave_mpi : slave_mpi.c common.h tags.h
+  9     $(CC) $(CFLAGS) slave_mpi.c -o slave_mpi
+</PRE>
+<HR NOSHADE>
+<P>
+<P>To compile the programs, type <CODE>make -f makefile.mpiadd</CODE>. (The
+files <code>common.h</code> and <code>tags.h</code> are the same as used for the PVM program.)
+This will create the <CODE>master_mpi</CODE> and <CODE>slave_mpi</CODE> executables. Now how do
+we tell MPI to run both these executables. This is where <EM>application
+schema file</EM> comes in. The application schema file specifies the executables
+to be run, the nodes on which to run and the number of copies of the executable
+to run. Create a new file <CODE>add.schema</CODE> and type in it the following
+lines:
+<PRE>
+# Application schema for the addition program using MPI
+n0 master_mpi
+n0 -np 4 slave_mpi
+</PRE>
+<P>This file specifies that MPI should start 1 copy of the master (which will have
+rank 0) and 4 copies of slaves on the node n0, i.e. the local node. You can
+specify many more parameters in this schema file like command line arguments 
+etc., see the manual page <EM>appschema(1)</EM>. Once the schema file is ready,
+you can run the programs as follows:
+<PRE>
+[rahul@joshicomp parallel]$ lamboot
+
+LAM 6.3.1/MPI 2 C++/ROMIO - University of Notre Dame
+
+[rahul@joshicomp parallel]$ mpirun add.schema
+The sum is 4950
+[rahul@joshicomp parallel]$
+</PRE>
+<P>
+<P>Much of the program should be easy to understand. On line 39, when receiving
+intermediate results from the slaves, we specify the source as 
+<CODE>MPI_ANY_SOURCE</CODE>, since we want to respond to slaves in the order in
+which they complete the calculations, as discussed earlier. In this case, the
+<CODE>status</CODE> structure contains the actual source in the field 
+<CODE>MPI_SOURCE</CODE>. We use this information to set the appropriate element from
+the <CODE>results</CODE> array to the intermediate result received. 
+<P>In case you have a network of interconnected computers, you can make programs
+run on many computers by suitably modifying the application schema file. Instead
+of specifying n0 as the host, specify the name of the host and the number of
+processes you wish to schedule on that host. For more information about this,
+see the manual pages and the references. 
+<P>
+<H2><A NAME="s5">5. Conclusion</A></H2>
+
+<P>We have seen how to write parallel programs using the PVM and MPI libraries.
+Since there libraries are available on many platforms and these are the defacto
+standards used for implementing parallel programs, programs written with PVM
+or MPI will run with little or no modification on large scale machines, if the
+need arises. What we have basically concentrated on in this article is the
+<EM>point to point</EM> communication functions provides by these libraries and
+their use in message passing. Apart from these facilities, both PVM and MPI
+provide a number of advanced features such as <EM>collective communication 
+(broadcasting or multicasting), process groups and group management, reduction
+functions etc.</EM> You are welcome to explore these advanced features. These
+public domain softwares enable us to use a network of computers as a single large
+computer, so in case you have some such large problem to solve, you may consider
+using a network at your college or office. You will have to refer to the books
+given below for the exact details of how such a setup may be established.
+Many tutorials as well as books are available to help you. Below is a list of 
+the material I referred.
+<P>
+<OL>
+<LI><EM>PVM: Parallel Virtual Machine - A User's Guide and Tutorial for
+Networked Parallel Computing</EM>, Al Geist, Adam Beguelin, 
+Jack Dongarra, Robert Manchek, Weicheng Jiang and Vaidy Sunderam,
+MIT Press. Available at 
+<A HREF="http://www.netlib.org">www.netlib.org</A></LI>
+<LI> <EM>MPI: The Complete Reference</EM>, Marc Snir, Steve Otto, 
+Steven Huss-Lederman, David Waker and Jack Dongarra, MIT Press.
+Available at 
+<A HREF="http://www.netlib.org">www.netlib.org</A>.</LI>
+<LI>  <EM>RS/6000 SP: Practical MPI Programming</EM>,Yukiya Aoyama and Jan 
+Nakano, International Techical Support Organization, IBM Corporation,
+<A HREF="http://www.redbooks.ibm.com">www.redbooks.ibm.com</A>.
+</LI>
+<LI> <EM>A Beginner's Guide to PVM Parallel Virtual Machine</EM>, Clay 
+Breshears and Asim YarKhan, Joint 
+Institute of Computational Science, University of Tennessee, USA.
+<A HREF="http://www-jics.cs.utk.edu/PVM/pvm/_guide.html">www-jics.cs.utk.edu/PVM/pvm/_guide.html</A>.</LI>
+<LI> <EM>PVM: An Introduction to Parallel Virtual Machine</EM>, Emily Angerer 
+Crawford, Office of Information Technology, High Performance Computing,
+<A HREF="http://www.hpc.gatech.edu/seminar/pvm.html">www.hpc.gatech.edu/seminar/pvm.html</A>.</LI>
+</OL>
+
+<P>
+<H2>6. Acknowlegements</H2>
+<P>
+I would like to thank my project guide <em>Dr. Uday Khedker</em> for his
+encouragement and help. I would like to thank the <em>Center for Developement
+of Advanced Computing</em> for allowing me to run the MPI and PVM programs on
+the PARAM Supercomputer and <em>Dr. Anabarsu</em> for guiding me during the
+implementation.
+
+
+
+
+
+<!-- *** BEGIN copyright *** -->
+<P> <hr> <!-- P --> 
+<H5 ALIGN=center>
+
+Copyright &copy; 2001, Rahul U. Joshi.<BR>
+Copying license <A HREF="../copying.html">http://www.linuxgazette.net/copying.html</A><BR> 
+Published in Issue 65 of <i>Linux Gazette</i>, April 2001</H5>
+<!-- *** END copyright *** -->
+
+<!--startcut ==========================================================-->
+<HR><P>
+<CENTER>
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="jenkins.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../faq/index.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="lilly.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+</CENTER>
+</BODY></HTML>
+<!--endcut ============================================================-->

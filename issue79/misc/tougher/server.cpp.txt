@@ -1,0 +1,172 @@
+//
+//
+// Copyright 2002 Rob Tougher <robt@robtougher.com>
+//
+// This file is part of xmlrpc.
+//
+// xmlrpc is free software; you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation; either version 2 of the License, or
+// (at your option) any later version.
+//
+// xmlrpc is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with xmlrpc; if not, write to the Free Software
+// Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+//
+//
+
+
+#include "server.hpp"
+#include "xmlrpc_exceptions.hpp"
+#include "server_socket.hpp"
+#include "socket_exceptions.hpp"
+#include "request.hpp"
+#include "thread_group.hpp"
+#include "thread_exceptions.hpp"
+
+
+namespace xmlrpc
+{
+
+  class accept_thread
+  {
+  public:
+
+    accept_thread ( sockets::server_socket& socket,
+		    server& s )
+      : m_socket ( socket ),
+	m_server ( s )
+    {}
+
+    ~accept_thread(){}
+
+    void operator ()()
+    {
+      std::cout << "Thread created: " << (long*)this << "\n";
+
+      while ( true )
+	{
+	  try
+	    {
+	      //
+	      // Accept an incoming socket request
+	      //
+	      sockets::server_socket new_sock;
+	      m_socket.accept ( new_sock );
+
+	      std::string data, tmp;
+
+	      std::cout << "Socket accepted: thread " << (long*)this << "\n";
+
+	      new_sock >> tmp;
+	      data += tmp;
+
+	      //
+	      // Keep reading until we get to the terminator.
+	      //
+	      while ( data.find ( request().terminator(), 0 ) == data.npos )
+		{
+		  tmp = "";
+		  new_sock >> tmp;
+		  data += tmp;
+		}
+
+	      if ( data.find ( request().terminator(), 0 ) == data.npos )
+		{
+		  // problem!
+		  reply rp;
+		  rp.add_error ( "We did not receive a terminator." );
+		  new_sock << rp.get_xml()
+			   << rp.terminator();
+		}
+	      else
+		{
+		  // Cut the terminator out of the request string.
+		  data = data.substr ( 0,
+				       data.find ( request().terminator(), 
+						   0 ) );
+
+		  try
+		    {
+		      request r;
+		      r.load_xml ( data );
+
+		      //
+		      // Call the derived class
+		      //
+		      reply rp = m_server.handle_request ( r );
+
+		      //
+		      // Send the reply back to the client
+		      //
+		      new_sock << rp.get_xml()
+			       << rp.terminator();
+
+		    }
+		  catch ( request_exception& e )
+		    {
+		      // problem!
+		      reply rp;
+		      rp.add_error ( "XML request was not properly formed." );
+		      new_sock << rp.get_xml()
+			       << rp.terminator();
+		    }
+		}
+	    }
+	  catch ( sockets::socket_exception& ) {}
+	}
+    }
+
+  private:
+    sockets::server_socket& m_socket;
+    server& m_server;
+
+  };
+
+
+
+  server::server ( const int port ) :
+    m_port ( port ),
+    m_threads ( 5 )
+  {}
+  server::~server (){}
+
+
+  void server::run()
+  {
+    try
+      {
+	sockets::server_socket server ( m_port );
+
+	try
+	  {
+	    threads::thread_group<accept_thread> accept_threads;
+
+	    // create threads
+	    for ( int i = 0; i < m_threads; i++ )
+	      {
+		accept_threads.add_thread ( accept_thread ( server, *this ) );
+	      }
+
+	    // wait for the threads to finish
+	    accept_threads.join_all();
+
+	  }
+	catch ( threads::exception& e )
+	  {
+	    throw xmlrpc::exception ( "Error while creating the threads." );
+	  }
+      }
+    catch ( sockets::exception& e )
+      {
+	std::string msg = "Error while running the server: ";
+	msg += e.description();
+	throw run_exception ( msg );
+      }
+  }
+};

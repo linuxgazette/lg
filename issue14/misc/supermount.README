@@ -1,0 +1,141 @@
+Supermount README
+=================
+
+For supermount v0.4
+
+Supermount is a pseudo-filesystem which manages filesystems on
+removable media like floppy disks and CD-ROMs.  It aims to make
+management of removable media as easy as it is under DOS.
+
+With supermount, you can change the disk in the drive whenever you
+want (with the obvious exception that you shouldn't do it when the
+filesystem is actively in use).  You don't need to "cd" out of the
+directory first, and you don't need to tell the kernel what you're
+doing --- supermount will detect the media change automatically.
+
+Supermount will automatically detect whether the media you are
+mounting is read-write or readonly, and if you mount a write-protected
+disk, then the subfs will be mounted as a readonly filesystem.
+
+Supermount detects when you have finished activity on the subfs, and
+will flush all buffers to the disk before completing the operation.
+So, if you copy a file onto a supermounted floppy disk, the data will
+all be written to disk before the "cp" command finishes.  When the
+command does complete, it will be safe to remove the disk.
+
+It is worth while defining what I mean by "activity" here.  The subfs
+is active if there are any processes running which have a handle on a
+non-directory inode on the subfs, or which have a file open on the
+subfs (even if only for reading).  There is one important case which
+does NOT count as activity: if you "cd" to a directory or a
+subdirectory under the supermount mount point, then that reference
+does not make the subfs active, and you can safely remove the disk.
+
+Yes, that's right.  You can "cd /floppy; ls" and get a listing of a
+dos floppy.  Remove the disk, insert a new one, and "ls" will now list
+the new contents.  Remove the disk altogether, and "ls" will give you
+an I/O error.  Put in a new disk, and "ls" starts working again.  It
+is NOT an error to remove a supermounted disk which is acting as the
+current working directory for one or more processes!
+
+
+The Superfilesystem and Subfilesystem concepts
+----------------------------------------------
+
+Normally, when you mount a filesystem, you create a direct connection
+between a mount point in the directory tree and a filesystem on a
+block device.  Supermount adds an extra layer in between; with
+supermount, you explicitly mount the pseudo-filesystem (the
+"superfilesystem") on the mount point, and supermount then
+automatically mounts the real filesystem (the "subfilesystem") on the
+block device when needed.
+
+Running supermount
+------------------
+
+To run supermount, compile and install a kernel with the supermount
+patches and select "Y" to the question
+
+	Dynamic mounting of removable media?
+
+when you run "make config".  You set up a supermount filesystem with
+the normal mount command, using the syntax:
+
+	mount -o <superfs-options>,--,<subfs-options> / <mount-point>
+
+Notice that I specified "/" instead of giving a block device to
+supermount.  This is because the supermount filesystem is NOT
+connected to a block device; rather, supermount is responsible for
+connecting a separate filesystem to the block device.  You specify
+this by providing the <superfs-options> field, where the following
+options are currently recognised:
+
+* subfs=<filesystem-type>		[default is "msdos"]
+
+	Specify the subfilesystem type.  "msdos" and "iso9660" have
+been tested, but any block-device filesystem should work with one
+important restriction: the filesystem must NOT try to write to the
+device when you unmount it.  This is because supermount doesn't know
+in advance when it will have to unmount the subfs, so it doesn't try
+to do so until it detects that the media has been changed.  By this
+time it is too late to write to the device!
+
+	If you mount supermount as a readonly filesystem ("mount -r"
+or "mount -o ro"), then you won't have this problem.  Otherwise, you
+will not be able to use the ext2fs or minix filesystems with
+supermount.  This will hopefully be addressed in a future release of
+supermount.
+
+* dev=<block-device>			[default is "/dev/fd0"]
+
+	Specify the block device on which the subfs is to be mounted.
+
+* debug
+
+	Enable debugging code in the supermount filesystem, if
+the debug option was enabled at compile time.  By default, debugging
+code is compiled into the kernel but is disabled until a debug mount
+option is seen.
+
+* '--'
+
+	All options after the option string '--' will be passed
+directly to the subfilesystem when it gets mounted.
+
+
+Here is an example of supermount options, taken directly out of my
+current /etc/fstab:
+
+/ /floppy	supermount	--,gid=51,conv=binary	0 0
+/ /cd		supermount	ro,fs=iso9660,dev=/dev/hdd,--,conv=binary 0 0
+
+This tells supermount to manage a msdos filesystem on /dev/fd0 mounted
+at /floppy (msdos and /dev/fd0 are defaults for supermount), with the
+msdos filesystem getting the options "gid=51,conv=binary".  My cdrom
+on /dev/hdd is similarly mounted on /cd.
+
+
+Enjoy supermount.  I hope you find it useful --- I certainly find it
+extremely convenient.  Send any comments, bug-fixes or bug-reports,
+suggestions and success stories to sct@dcs.ed.ac.uk.  Flames to
+/dev/null, please!
+
+Cheers,
+ Stephen.
+--
+Stephen Tweedie <sct@dcs.ed.ac.uk>
+Department of Computer Science, Edinburgh University, Scotland.
+
+
+================================================================
+Changes for v0.4:
+Performance tuning only.  Read-only operations like "find" should now
+be MUCH faster.
+
+Changes for v0.3:
+Fixed supermount_create bug; now returns a properly attached
+superinode.
+
+Changes for v0.2:
+Improved device invalidation code, so CD-ROMs work now.
+

@@ -1,0 +1,380 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>Pl/Python and Cursors in Pl/Pgsql for PostgreSQL LG #80</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<CENTER>
+<A HREF="http://www.linuxgazette.net/">
+<IMG ALT="LINUX GAZETTE" SRC="../gx/lglogo.png" 
+	WIDTH="600" HEIGHT="124" border="0"></A> 
+<BR>
+
+<!-- *** BEGIN navbar *** -->
+<!-- *** END navbar *** -->
+<P>
+</CENTER>
+
+<!--endcut ============================================================-->
+
+<H4 ALIGN="center">
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H1><font color="maroon">Pl/Python and Cursors in Pl/Pgsql for PostgreSQL</font></H1>
+<H4>By <a href="mailto:articles@gnujobs.com">Mark Nielsen</a></H4>
+</center>
+<P> <HR> <P>  
+
+<!-- END header -->
+
+
+
+
+<ol>
+<li><a href="#Purpose">Purpose</a></li>
+<li><a href="#compile">Compiling PostgreSQL</a></li>
+<li><a href="#executing">Executing Pl/Python and Pl/PgSQL with Cursors</a></li>
+
+<li><a href="#suggestions">Suggestions for Future</a></li>
+<li><a href="#conclusions">Conclusion</a></li>
+<li><a href="#REF">References</a></li>
+</ol>
+
+<h3><a NAME="Purpose"></a>Purpose</h3>
+The purpose of this article is to get people more familiar with some new
+programming techniques with procedural languages in PostgreSQL 7.2. 
+I am really a big fan of procedural languages, and overall, PostgreSQL
+rocks when it comes to stored procedures. You can create many different
+types of functions like : SQL, Pl/PgSQL, Pl/Perl, and Pl/Tcl. Recently in 
+7.2, you also have Pl/Perlu and Pl/Python --- unrestricted Perl and 
+Python. The ability to use other programming languages inside a database
+server makes life a lot easier for a programmer (even if there is some
+inefficiency with Perl and Python). For a few years, I was irritated by the
+fact procedural languages couldn't return more than one item. That has sort
+of been taken care of, but not perfectly. One of the last areas to make my
+life ten times easier is to have procedural languages return more than item.
+We will see we can sort of do this, but I have suggestions to make it better.
+<p>
+NOTE: I am using Red Hat 7.2 as a base for this article. Things will be
+different with your version of Linux.
+
+
+<h3><a NAME="compile"></a>Compiling PostgreSQL</h3>
+
+There are three things you need to know when compiling PostgreSQL:
+<ol>
+<li>Edit src/pl/plperl/Makefile.PL and comment out lines 14 through 34.</li>
+<li> Edit src/include/pg_config.h.in and change
+<br>#define INDEX_MAX_KEYS          16
+<br>to
+<br>#define INDEX_MAX_KEYS          512
+</li>
+
+<li> Use this command to compile PostgreSQL:
+<br>adduser postgres
+<br>mkdir /usr/local/pg72
+<br>
+  ./configure --prefix=/usr/local/pg72 --with-libraries=/usr/lib/perl5/5.6.0/i386-linux/CORE/libperl.a --with-perl --with-python
+<br>make
+<br>make install
+<br>chown -R postgres /usr/local/pg72
+<br>mkdir /home/postgres
+<br>chown postgres /home/postgres
+<br>su -l postgres
+</li>
+</ol>
+You can also add odbc, tcl, and other languages, but I am just using Perl
+and Python as examples for now. After you execute "make" and "make install",
+follow these commands as the user postgres.
+<ol>
+<li>
+<br>PATH=/usr/local/pg72/bin:$PATH
+<br>export PATH
+<br>LD_LIBRARY_PATH=/usr/local/pg72/lib
+<br>export LD_LIBRARY_PATH
+<br>export PGDATA=/usr/local/pg72/data
+<br>export PGLIB=/usr/local/pg72/lib
+</li>
+<li>initdb</li>
+<li>/usr/local/pg72/bin/pg_ctl -D /usr/local/pg72/data -l /tmp/pg_logfile start</li>
+<li>createlang plperl template1</li>
+<li>createlang plpython template1</li>
+<li>createlang plpgsql template1</li>
+<li>createdb postgres</li>
+</ol>
+
+<h3><a NAME="executing"></a>Executing Pl/Python and Pl/PgSQL with Cursors</h3>
+Here are a list of commands you can execute using the command "psql template1".
+This assumes the database "postgres" has been created.
+<p>
+Execute these commands:
+<pre>
+
+\c postgres
+
+drop table contact;
+create table contact (
+first text, last text, phone text, address text,
+city text,state text, zip text
+);
+
+drop function replace_e_to_a(text);
+CREATE FUNCTION replace_e_to_a(text) RETURNS text AS
+'
+import re
+Text1 = re.sub(''e'', ''a'',args[0])
+return Text1
+'
+LANGUAGE 'plpython';
+
+drop function replace_numbers_to_z(text);
+CREATE FUNCTION replace_numbers_to_z(text) RETURNS text AS
+'
+import re
+Text1 = re.sub(''[0-9]'', ''z'',args[0])
+return Text1
+'
+LANGUAGE 'plpython';
+
+insert into contact values ('Mark','Nielsen','123-123-1234',
+  '1234 Somewhere St.', 'Some City 123', 'TX','12345-1234');
+insert into contact values ('Mark','Nielsen2','123-123-1234',
+  '3456 Somewhere St.', 'Some City 444', 'MI','12345-1234');
+insert into contact values ('Mark','Nielsen3','123-123-1234',
+  '5678 Somewhere St.', 'Some City 654', 'AX','12345-1234');
+
+select first, last, address  from contact;
+
+drop function select_contact();
+CREATE FUNCTION select_contact () RETURNS refcursor AS '
+DECLARE
+    cursor1 CURSOR FOR select replace_e_to_a(first)as first, 
+                        replace_e_to_a(last) as last,
+                        replace_numbers_to_z(address) as address
+            from contact;
+BEGIN
+ open cursor1;
+ return (cursor1);
+END;
+' LANGUAGE 'plpgsql';
+
+begin;
+select select_contact();
+FETCH cursor1; FETCH cursor1;FETCH cursor1;
+end;
+</pre>
+
+and the output should look like:
+
+<pre>
+DROP
+CREATE
+DROP
+CREATE
+DROP
+CREATE
+INSERT 255188 1
+INSERT 255189 1
+INSERT 255190 1
+ first |   last   |      address       
+-------+----------+--------------------
+ Mark  | Nielsen  | 1234 Somewhere St.
+ Mark  | Nielsen2 | 3456 Somewhere St.
+ Mark  | Nielsen3 | 5678 Somewhere St.
+(3 rows)
+
+DROP
+CREATE
+BEGIN
+ select_contact 
+----------------
+ cursor1
+(1 row)
+
+ first |  last   |      address       
+-------+---------+--------------------
+ Mark  | Nialsan | zzzz Somewhere St.
+(1 row)
+
+ first |   last   |      address       
+-------+----------+--------------------
+ Mark  | Nialsan2 | zzzz Somewhere St.
+(1 row)
+
+ first |   last   |      address       
+-------+----------+--------------------
+ Mark  | Nialsan3 | zzzz Somewhere St.
+(1 row)
+
+COMMIT
+
+</pre>
+
+From this example, you can see how the Pl/pgSQL executes the Python 
+procedures (the Pl/Python procedures). You don't need Pl/pgSQL to execute
+Pl/Python procedures, I just did it that way. You can only use
+Perl and Python to manipulate data, not change data in the tables. 
+Perl and Python just input and output data, they don't do anything to
+the database directly. 
+Also, pl/perlu gets installed
+when you compile Perl into PostgreSQL, which is nice. 
+
+
+<h3><a NAME="suggestions"></a>Suggestions for Future</h3>
+I still have three big complaints/suggestions:
+<ol>
+<li>Procedures seem to be able to only return one "item'. It can't return
+two items. For me, I would like to be able to return at least two items --
+a cursor and a flag saying if the cursor is good or not. Cursors DO NOT
+make procedures return more than one value, they return the cursor which
+you can consider to be a reference to many items, not the items themselves.
+The way I compile my procedures is that they can take upto 512 variables
+of input, but they can only return one "item". I am dumbstruck as to why
+that is. I tried to read of the discussions on the mailing lists and docs,
+but I got lost. 
+</li> 
+<li> There doesn't seem to be very many things you can do to cursors, like
+see how many entries there are, if there are any entries left, if there
+are any entries at all, if it executed correctly, etc. Cursors need to be
+advanced some more. Perhaps I just don't have enough experience with 
+cursors to comment on them.</li>
+<li>Procedures can't return rows of data. Besides the fact it can only
+return one item, it can't return rows of one items or rows which contain
+multiple items. Being able to return multiple rows with multiple fields
+would be cool. Even if we only want to return one row of data, it would
+be nice to return a cursor as one item, and then its status (good, bad, 
+how many, etc) as well. If you can return more than one item, you might
+as well make it unlimited or limited by a compile-time number (like inputs
+are).</li>
+</ol>
+
+I like the progression of procedural languages in PostgreSQL. It seems
+to be way ahead of a lot of the other free database servers and even
+most of the commercial ones. Taking it to the next step would really make
+it more of a kick-butt database server. I try to help out by writing
+up articles, perhaps you can try to help out by adding features?
+<p>
+This isn't really a complaint of cursors, but of DBD:Pg for Perl, and
+possibly other interfaces to PostgreSQL -- cursors really aren't supported,
+as far as I can tell. Thus, if Pl/PgSQL could return multiple rows
+of multiple items, it would take care of this problem. 
+<p>
+The only other way I know to store data from a procedure is into a temporary
+table which can be accessed after the procedure has finished. 
+To me, that is a bit extreme for 99% of the data I want to get. It is
+extreme because usually I just want one row of data and creating a table
+just for one row of data isn't worth the effort. 
+
+
+<h3><a NAME="conclusions"></a>Conclusions.</h3>
+Pl/Python will finally let me let go of Perl once and for all (I have
+converted myself to Python). Pl/PgSQL is getting closer to something
+that makes it easy for me to program and create complicated procedures
+ -- I just wish it could actually return multiple items and not
+just a reference to a cursor or other single item.  
+<p>
+The sad thing is, my version of DBD::Pg for Perl and my Python interface
+don't support cursors, and so, it is useless for me to the most part, but
+at least it is getting better. I found some things at
+<a href="http://developer.postgresql.org/todo.php">
+http://developer.postgresql.org/todo.php</a> which look promising. Since
+cursors really aren't supported in the programming languages I use, if
+I truly need to store lots of data, I will probably have to use 
+temporary tables. I still don't understand why a procedural language 
+can't return data like you can in a normal sql command. Whatever the 
+limitation is, it would be nice to overcome. 
+
+<h3>
+<a NAME="REF"></a>References</h3>
+
+<ol>
+<li>
+<a href="http://www.gnujobs.com/Articles/24/nielsen.html">
+Standard Database Setup with Perl and PostgreSQL: Part 3
+</a></li>
+<li>
+<a href="http://www.gnujobs.com/Articles/22/Perl_PostgreSQL2.html">
+Part 2: PostgreSQL: Perl procedures with PL/pgSQL</a></li>
+<li><a href="http://www.gnujobs.com/Articles/20/Perl_PostgreSQL.html">
+Part 1: PostgreSQL: Perl procedures with PL/pgSQL</a>.</li>
+<li>An older article 
+setting of Web and Database Servers.
+<li><a href="http://www.brw.net/php/whitepapers.php">
+Branden Williams articles</a> on PostgreSQL. </li>
+<li><a href="http://techdocs.postgresql.org/oresources.php">
+http://techdocs.postgresql.org/oresources.php</a></li>
+<li><a href="http://techdocs.postgresql.org/">
+http://techdocs.postgresql.org/</a></li>
+<li> Some links which have nothing to do with this article, but I am
+ considering for future articles.
+  <ul>
+  <li><a href="http://authpg.sourceforge.net/">
+http://authpg.sourceforge.net/</a>. </li>
+<li><a href="http://www.digitalstratum.com/pglogd/">
+http://www.digitalstratum.com/pglogd/</a></li>
+  <li><a href="http://www.giuseppetanzilli.it/mod_auth_pgsql/">
+http://www.giuseppetanzilli.it/mod_auth_pgsql/</a></li>
+ <li><a href="http://www.zort.ca/postgresql/">
+http://www.zort.ca/postgresql/</a> -- very nice and I will use this. I tried
+ it, and it grouped all my tables together, so I had to ungroup it
+ and separate out the tables. 
+ <li><a href="http://www.brasileiro.net/postgres/cookbook/">
+http://www.brasileiro.net/postgres/cookbook/</a></li>
+
+  </ul>
+
+<li>
+If this article
+changes, it will be available at
+<a href="http://www.gnujobs.com/Articles/26/nielsen.html">
+http://www.gnujobs.com/Articles/26/nielsen.html</a></li>
+</ol>
+
+
+
+
+
+
+
+<!-- *** BEGIN bio *** -->
+<SPACER TYPE="vertical" SIZE="30">
+<p> 
+<h4><img align=bottom alt="" src="../gx/note.gif">Mark Nielsen</h4>
+<EM>Mark works at
+<a href="http://www.audioboomerang.com/">AudioBoomerang.com</a>
+ which creates, delivers, and tracks personalized multimedia email, web,
+and newsletter campaigns. He works as a consultant delivering end products
+to AudioBoomerang.com clients, such as advanced customized statistical
+reports used for demographic or pyschological profiles for future campaigns.
+In his spare time, he writes articles relating to Free Software (GPL) or
+Free Literature (FDL) and is involved with the non-profit learning center
+<a href="http://www.eastmont.net">eastmont.net</a>.</EM>
+
+<!-- *** END bio *** -->
+
+<!-- *** BEGIN copyright *** -->
+<P> <hr> <!-- P --> 
+<H5 ALIGN=center>
+
+Copyright &copy; 2002, Mark Nielsen.<BR>
+Copying license <A HREF="../copying.html">http://www.linuxgazette.net/copying.html</A><BR> 
+Published in Issue 80 of <i>Linux Gazette</i>, July 2002</H5>
+<!-- *** END copyright *** -->
+
+<!--startcut ==========================================================-->
+<HR><P>
+<CENTER>
+<!-- *** BEGIN navbar *** -->
+<!-- *** END navbar *** -->
+</CENTER>
+</BODY></HTML>
+<!--endcut ============================================================-->

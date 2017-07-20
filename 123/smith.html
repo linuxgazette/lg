@@ -1,0 +1,563 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>A Short Tutorial on XMLHttpRequest() LG #123</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="jesslyn.html" >&lt;-- prev</A> | <A HREF="vishnu.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>A Short Tutorial on XMLHttpRequest()</h1>
+<p id="by"><b>By <A HREF="../authors/smith.html">Bob Smith</A></b></p>
+
+<p>
+<a name="Intro"></a><h3>Introduction</h3>
+<p>
+This tutorial will show you how to build a web page that responds to
+asynchronous events.  In five simple exercises, we'll show you the core of
+an Asychronous JavaScript And XML (AJAX) application.  You'll have to learn
+a little JavaScript, but there's no requirement to learn anything about
+XML. Our goal is to show you how to build a responsive web application with
+a minimum investment of time.
+</p>
+
+<p>
+<b>What you should already know:</b>  You should be familiar with basic web
+page creation and have a general idea of the client/server nature of web
+page requests. You should also understand how CGI programs work and 
+have some experience with CGI programming; we use a few lines of PHP in
+our exercises, but you can replace this with C or Perl if you wish.
+</p>
+
+<p>
+<b>Requirements for the examples:</b>  To do the exercises in this
+tutorial, you will need a browser with JavaScript enabled.  JavaScript is
+on by default in most browsers, so this shouldn't require any action
+on your part unless you prevously disabled it. You will also need to have
+a web server that supports PHP and CGI, and the ability to upload web pages
+to it. You should be ready to go if you already have Apache and PHP
+installed on your PC; in fact, our exercises assume that you're using your
+PC for the web server.
+</p>
+
+
+<a name="Overview"></a> <h3>Application Overview</h3>
+<p>
+To illustrate the need for AJAX, let's consider a real-world example:
+we've built a <a href="../120/smith.html">telephone answering machine</a>
+and we want the caller ID information to be presented on a web page, which
+we can view while we are at home or at work.  The data flow in our
+application looks something like this:
+
+<pre class="code">
+  (answering_machine -&gt; syslog -&gt; fifo -&gt; Apache -&gt; web_page)
+</pre>
+
+Our answering machine will log caller ID information via syslog using
+LOG_LOCAL3, a facility not used by any other applications on our
+system, and a syslog rule in '/etc/syslog.conf' will direct messages
+with this facility to a FIFO located in the Apache document directory.
+In this tutorial, we will deal with getting the strings from that FIFO to
+display on a web page. Writing to a FIFO is the asynchronous part of our
+sample application.
+</p>
+
+
+<a name="Start"></a> <h3>Getting Started</h3>
+<p>
+In the first exercise, we are going to test the development
+environment by running a simple PHP application.  Save <a
+href="misc/smith/getfifo.php.txt">the following program</a> as
+<i>getfifo.php</i> in the document directory of your web server:
+
+<pre class="code">
+&lt;?php
+  $fp = fopen("ajaxfifo", "r");
+  if ($fp) {
+    $ajaxstring = fgets($fp, 128);
+    fclose($fp);
+  }
+
+  header("Content-Type: text/html");
+  print($ajaxstring);
+?&gt;
+</pre>
+
+Now, create a fifo in the same directory:
+
+<pre class="code">
+mkfifo ajaxfifo
+</pre>
+
+Try to view <i>getfifo.php</i> using your web browser; it
+should hang, waiting for the read of 'ajaxfifo' to complete. Write some
+data to the FIFO before the browser times out:
+
+<pre class="code">
+echo "Hello, World" &gt; ajaxfifo
+</pre>
+
+The text that you entered should appear in your browser window.
+Continue on to the next exercise if the data was displayed properly.
+If the data did not appear, go back and verify that the web server
+and PHP are installed and working properly.
+</p>
+
+
+<a name="DOM"></a> <h3>DOM in Two Lines of Code</h3>
+<p>
+JavaScript is an object-oriented language and treats a displayed web page
+as an object.  The Document Object Model, or DOM, describes the objects,
+properties, and verbs (or <i>methods</i>) available within JavaScript.
+By using the DOM, you can name different parts of a web page and can then
+perform different actions on those parts. 
+</p>
+
+<p>
+The following exercise verifies that JavaScript is enabled in your
+browser by creating a named region on a web page, and putting some
+text into that named region. Copy the <a
+href="misc/smith/hello.html">following program</a> to <i>hello.html</i> in
+the document directory of your web server:
+
+<pre class="code">
+&lt;html&gt;
+&lt;head&gt;
+&lt;title&gt;Exercise 2: Use DOM to Test JavaScript&lt;/title&gt;
+
+&lt;script language=javascript type="text/javascript"&gt;
+&lt;!-- Hide script from non-JavaScript browsers
+
+  // SayHello() prints a message in the document's "hello" area
+  function SayHello() {
+    document.getElementById("hello_area").innerHTML="Hello, World";
+    return;
+  }
+
+--&gt;
+&lt;/script&gt;
+&lt;/head&gt;
+
+&lt;body onload="SayHello()"&gt;
+&lt;h3&gt;&lt;center&gt;Exercise 2:  Use DOM to Test JavaScript&lt;/center&gt;&lt;/h3&gt;
+&lt;/p&gt;
+&lt;div id="hello_area"&gt;This text is replaced.&lt;/div&gt;
+&lt;/body&gt;
+&lt;/html&gt;
+</pre>
+
+The above code defines a section of the web page as "hello_area"
+and uses the subroutine <i>SayHello()</i> to put text in that
+section.  Load <i>hello.html</i> and verify that your browser's
+JavaScript displays "Hello, World" on the web page.
+</p>
+
+<a name="Callbacks"></a> <h3>Callbacks in JavaScript</h3>
+A callback is a subroutine that is called when a particular event
+occurs. JavaScript has a fairly complete set of events to which you
+can attach a callback. The following program starts a timer using a
+callback that is invoked when the page is loaded,  and a callback
+associated with the timer displays a counter and restarts itself.
+Copy <a href="misc/smith/callback.html">this program</a> to
+<i>callback.html</i> in your server's document directory, and verify that
+the count is updated in your browser window every two seconds.
+
+<pre class="code">
+&lt;html&gt;
+&lt;head&gt;
+&lt;title&gt;Exercise 3: A JavaScript Callback Demo&lt;/title&gt;
+
+&lt;script language=javascript type="text/javascript"&gt;
+&lt;!-- Hide script from non-JavaScript browsers
+  var count;
+  count = 0;
+
+  // Put the current count on the page
+  function DisplayCount() {
+    // Put current time in the "count" area of the web page
+    document.getElementById("count_area").innerHTML=
+      "The count is: " + count++;
+
+    // Schedule next call to DisplayCount
+    setTimeout("DisplayCount()", 2000);
+    return;
+  }
+--&gt;
+&lt;/script&gt;
+&lt;/head&gt;
+
+&lt;body onload="DisplayCount()"&gt;
+&lt;h3&gt;&lt;center&gt;Exercise 3: A JavaScript Callback Demo&lt;/center&gt;&lt;/h3&gt;
+&lt;div id="count_area"&gt;This text is replaced.&lt;/div&gt;
+&lt;/body&gt;
+&lt;/html&gt;
+</pre>
+</p>
+
+<a name="XNMHttpRequest"></a> <h3>How to use XMLHttpRequest()</h3>
+<p>
+XMLHttpRequest is a JavaScript subroutine that lets you make an
+HTTP request and attach a callback to the response.  Since the
+response has a callback, the browser is free to continue responding
+to user input.  In a way, XMLHttpRequest is to JavaScript what
+select() is to C - a way to wait for an event. XMLHttpRequest() is
+what puts the 'A' in AJAX.
+</p>
+
+<p>
+The following exercise adds only XMLHttpRequest() to the previous
+examples. We request the data from <i>getfifo.php</i> using
+XMLHttpRequest(), and tie a callback to the arrival of the
+response. The response callback displays the data using a named
+division per the DOM. Copy the <a href="misc/smith/async.html">following
+code</a> into <i>async.html</i>:
+
+<pre class="code">
+&lt;html&gt;
+&lt;head&gt;
+&lt;title&gt;Exercise 4: An XMLHttpRequest() Demo&lt;/title&gt;
+
+&lt;script language=javascript type="text/javascript"&gt;
+&lt;!-- Hide script from non-JavaScript browsers
+
+  var req_fifo;
+
+  // GetAsyncData sends a request to read the fifo.
+  function GetAsyncData() {
+    url = "getfifo.php";
+
+    // branch for native XMLHttpRequest object
+    if (window.XMLHttpRequest) {
+      req_fifo = new XMLHttpRequest();
+      req_fifo.abort();
+      req_fifo.onreadystatechange = GotAsyncData;
+      req_fifo.open("POST", url, true);
+      req_fifo.send(null);
+    // branch for IE/Windows ActiveX version
+    } else if (window.ActiveXObject) {
+      req_fifo = new ActiveXObject("Microsoft.XMLHTTP");
+      if (req_fifo) {
+        req_fifo.abort();
+        req_fifo.onreadystatechange = GotAsyncData;
+        req_fifo.open("POST", url, true);
+        req_fifo.send();
+      }
+    }
+  }
+
+  // GotAsyncData is the read callback for the above XMLHttpRequest() call.
+  // This routine is not executed until data arrives from the request.
+  // We update the "fifo_data" area on the page when data does arrive.
+  function GotAsyncData() {
+    // only if req_fifo shows "loaded"
+    if (req_fifo.readyState != 4 || req_fifo.status != 200) {
+      return;
+    }
+    document.getElementById("fifo_data").innerHTML=
+      req_fifo.responseText;
+
+    // Schedule next call to wait for fifo data
+    setTimeout("GetAsyncData()", 100);
+    return;
+  }
+
+--&gt;
+&lt;/script&gt;
+
+&lt;/head&gt;
+&lt;body onload="GetAsyncData()"&gt;
+&lt;h3&gt;Exercise 4: An XMLHttpRequest() Demo&lt;/h3&gt;&lt;p&gt;
+&lt;div id="fifo_data"&gt; &lt;/div&gt;
+
+&lt;/body&gt;
+&lt;/html&gt;
+</pre>
+
+Load <i>async.html</i> and, if all has gone well, everything sent
+to <i>ajaxfifo</i> will appear in the browser window.  For example:
+
+<pre class="code">
+echo "Hello, AJAX" &gt; ajaxfifo
+</pre>
+
+<div style="text-align: center">
+<img src="misc/smith/asyncdemo.png" alt="Sample screen for Exercise 4" border="2">
+</div>
+<br clear="all">
+</p>
+
+
+<a name="Appliance"></a> <h3>An Appliance Web UI</h3>
+<p>
+If you were building an appliance (such as our answering machine),
+you'd want your web UI to respond to events occuring in the appliance; the
+exercises above show how to do this.  But you might also want your
+appliance UI to have some controls available to the user.  The final
+exercise below adds code to the previous exercise to show you how to tie
+buttons in a web form to JavaScript subroutines.  This exercise
+demonstrates that a web UI can wait for asynchronous events and still
+be interactive.
+</p>
+
+<p>
+Copy <a href="misc/smith/async.html"><i>async.html</i></a> to a file called
+<i>webui.html</i> and add the following subroutine to the JavaScript
+code:
+
+<pre class="code">
+// setColor updates the "color_area" with the color specified
+  function setColor(new_color) {
+    color_text = "&lt;table border=2 bgcolor=";
+    if ("Blue" == new_color) {
+      color_text += "\"Blue\"&gt;"
+    }
+    else if ("Red" == new_color) {
+      color_text += "\"Red\"&gt;"
+    }
+    else {       // shouldn't get here
+      color_text += "\"Green\"&gt;"
+    }
+    color_text += "&lt;tr&gt;&lt;td&gt;A little color&lt;/td&gt;&lt;/tr&gt;&lt;/table&gt;";
+    document.getElementById("color_area").innerHTML=color_text;
+  }
+</pre>
+
+Add a form to the HTML part of <i>webui.html</i>:
+
+<pre class="code">
+&lt;body onload="GetAsyncData()"&gt;
+&lt;h3&gt;Exercise 5: A Trivial Web UI&lt;/h3&gt;&lt;p&gt;
+&lt;div id="fifo_data"&gt; &lt;/div&gt;
+&lt;p&gt;
+&lt;div id="color_area"&gt;No color yet.&lt;/div&gt;&lt;p&gt;
+&lt;form&gt;
+&lt;input type=button value="Blue" onClick="setColor('Blue')"&gt;
+&lt;input type=button value="Red" onClick="setColor('Red')"&gt;
+&lt;/form&gt;
+&lt;/body&gt;
+</pre>
+
+</p>
+
+
+<a name="Summary"></a> <h3>Summary and Notes</h3>
+<p>
+In this short tutorial, we've explored the fundamentals for building
+responsive, interactive web interfaces using JavaScript and
+XMLHttpRequest(). In order to focus on the core concepts, we've ignored
+many important details, such as error handling and return codes. Hopefully,
+you can add the techniques shown in this article to your web toolbox.  
+</p>
+
+<p>
+<b>FIFO versus /dev/fanout:</b> Open two browser windows displaying
+<i>async.html</i> and write some data into the FIFO; notice that the data
+that you write will appear in only one window. This is because the FIFO
+passes the data to only one of the readers.  In a real application, we
+would want to use a fanout device so that the data is written to all
+readers.  Fanout is described in a <a
+href="http://linuxgazette.net/122/smith.html">previous Linux Gazette
+article</a> as well as on the <a
+href="http://www.linuxtoys.org/fanout/fanout.html">author's home page</a>.
+</p>
+
+<p>
+<b>XML:</b> If you are getting only a single piece of data from your
+web server, you can use the code in this article.  As soon as you ask
+for more than one piece of data, you should switch to XML.  It does
+not need to be difficult.
+</p>
+
+<p>
+As an example, let's say that you've modified <i>getfifo.php</i> to use the
+caller ID to look up the time and duration of the last time you spoke with
+the caller, and you want to return this information along with the
+caller ID string. The PHP code to build an XML response for the three
+pieces of data might look like this:
+
+<pre class="code">
+&lt;?php
+  header("Content-Type: text/xml");
+  print("&lt;?xml version=\"1.0\" ?&gt;\n");
+  print("&lt;caller_info&gt;\n");
+  printf("&lt;caller_id&gt;%s&lt;/caller_id&gt;\n",       "Mary");
+  printf("&lt;lastcalltime&gt;%s&lt;/lastcalltime&gt;\n", "10:24 am");
+  printf("&lt;lastcalldur&gt;%s&lt;/lastcalldur&gt;\n",   "12:05");
+  print("&lt;/caller_info&gt;\n");
+?&gt;
+</pre>
+
+Instead of using <i>req_fifo.responseText</i> to get the whole
+body of the reply, you would use the following to extract each
+of the three fields you want:
+
+<pre class="code">
+  callid = req_fifo.responseXML.getElementsByTagName("caller_id");
+  calltm = req_fifo.responseXML.getElementsByTagName("lastcalltime");
+  calldur = req_fifo.responseXML.getElementsByTagName("lastcalldur");
+  callid[0].childNodes[0].nodeValue;
+
+  document.getElementById("caller_data").innerHTML=
+    callid[0].childNodes[0].nodeValue;
+  document.getElementById("lastcalltime").innerHTML=
+    calltm[0].childNodes[0].nodeValue;
+  document.getElementById("lastcalldur").innerHTML=
+    calldur[0].childNodes[0].nodeValue;
+</pre>
+
+There are simpler and better ways to do this, but the above code
+should give you an idea of what to expect.
+</p>
+
+<p>
+<b>Further reading:</b>  The Apple developer's web site has a
+good article on XMLHttpRequest().  You can find it here:
+<br>
+<a href="http://developer.apple.com/internet/webcontent/xmlhttpreq.html">
+http://developer.apple.com/internet/webcontent/xmlhttpreq.html</a>
+</p>
+
+<p>
+You may find the tutorials at the JavaScript Kit web site to be a big
+help if you'd like to expand on the knowledge you've gained from this
+article. You can find their tutorials here:
+<br>
+<a href="http://www.javascriptkit.com/javatutors/">
+http://www.javascriptkit.com/javatutors/</a>
+</p>
+
+<p>
+The IBM DeveloperWorks web site has some great articles on AJAX
+and XML.  We found this one particularly useful:
+<br>
+<a href="http://www.ibm.com/developerworks/web/library/wa-ajaxintro1.html">
+http://www.ibm.com/developerworks/web/library/wa-ajaxintro1.html</a>
+</p>
+
+<p>
+Finally, you might be interested in the low cost answering machine
+that's at the heart of this author's appliance:
+<br>
+<a href="http://www.linuxtoys.org/answer/answering_machine.html">
+http://www.linuxtoys.org/answer/answering_machine.html</a>
+
+
+</p>
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:123/smith.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<!-- *** BEGIN bio *** -->
+<hr>
+<p>
+
+<img align="left" alt="[BIO]" src="../gx/authors/smith.jpg" class="bio">
+
+</p>
+<p>
+<em>
+
+Bob is an electronics hobbyist and Linux programmer.  He
+is one of the authors of "Linux Appliance Design" to be
+published by No Starch Press.
+
+
+</em>
+</p>
+<br clear="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2006, Bob Smith. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 123 of Linux Gazette, February 2006
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="jesslyn.html" >&lt;-- prev</A> | <A HREF="vishnu.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">February 2006 (#123)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

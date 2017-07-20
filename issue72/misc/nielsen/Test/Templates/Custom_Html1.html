@@ -1,0 +1,270 @@
+#!/usr/bin/perl
+
+#              Create Functions for Perl/PostgreSQL version 1.0
+
+#                       Copyright 2001, Mark Nielsen
+#                            All rights reserved.
+#    This Copyright notice was copied and modified from the Perl 
+#    Copyright notice. 
+#    This program is free software; you can redistribute it and/or modify
+#    it under the terms of either:
+
+#        a) the GNU General Public License as published by the Free
+#        Software Foundation; either version 1, or (at your option) any
+#        later version, or
+
+#        b) the "Artistic License" which comes with this Kit.
+
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See either
+#    the GNU General Public License or the Artistic License for more details.
+
+#    You should have received a copy of the Artistic License with this
+#    Kit, in the file named "Artistic".  If not, I'll be glad to provide one.
+
+#    You should also have received a copy of the GNU General Public License
+#   along with this program in the file named "Copying". If not, write to the 
+#   Free Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 
+#    02111-1307, USA or visit their web page on the internet at
+#    http://www.gnu.org/copyleft/gpl.html.
+
+
+### PACKAGE TABLENAME SCRIPTNAME
+
+#print "Content-type: text/html\n\n\n";
+
+#-------------------------------------------------
+# Load the standard modules and initiaize variables.
+use strict;
+use PACKAGE::Misc;
+use PACKAGE::Constants;
+use PACKAGE::Get_Info;
+use PACKAGE::Set_Info;
+use CGI;
+
+my $Global = PACKAGE::Constants::Get_Constants;
+  ### Get the database connection. 
+my $dbh = $Global->{'dbh'};
+
+  ## Load the get info module. 
+my $Info = new PACKAGE::Get_Info;
+  ## Grab the user_id, if we don't get one, abort. 
+my $User_Id = $Info->{'users'}->{'users_id'};
+  ## If $ENV{'REMOTE_USER'} is not defined, and that username doesn't
+  ## exist in the users table, abort. We assume that is $ENV{'REMOTE_USER'}
+  ## is defined that they logged in correctly.  
+my $User_Okay = 1;
+if ($User_Id < 1) {print "Location: Error_No_User.pl\n\n";}
+
+#------------------------------------------------------------
+# Print Content-Type and get the queried variables.
+
+print "Content-type: text/html\n\n\n";
+
+my $query = new CGI;
+my $Update = $query->param('update');
+my $Action = $query->param('action');
+my @Params = $query->param();
+
+my $Id_Encrypted = $query->param('id');
+my $Id = 0;
+if ($Id_Encrypted ne "") {$Id = PACKAGE::Misc->Decrypt($Id_Encrypted);}
+
+my $Ids = {};
+my $Ids_Encrypted= {};
+OTHERIDS
+
+#-------------------------------------------
+# Execute any perl methods, which in turn correspond to a database method.
+# We could create a generic perl method for this for any table. 
+# All we would have to do is submit a list of fields for "new" and
+# "update" plus the id. 
+
+if ($Action eq "new") {$Id = "";}
+elsif ($Action eq "delete") 
+  {
+  my $Delete = new PACKAGE::Set_Info;
+  my $Result = $Delete->Set_TABLENAME('id'=>$Id,'command'=>'delete');
+  $Id = "";
+  }
+elsif ($Action eq "undelete") 
+  {
+  my $Undelete = new PACKAGE::Set_Info;
+  my $Result = $Undelete->Set_TABLENAME('id'=>$Id,'command'=>'undelete');
+  }
+elsif ($Action eq "purge") 
+  {
+  my $Purge = new PACKAGE::Set_Info;
+  my $Result = $Purge->Set_TABLENAME('id'=>$Id,'command'=>'delete');
+  my $Result = $Purge->Set_TABLENAME('id'=>$Id,'command'=>'purgeone');
+  $Id = "";
+  }
+elsif ($Update eq "update") 
+  {
+     ### Update the title of the list
+  my $Update = new PACKAGE::Set_Info;
+     ### Create the array that we want to submit to the function. 
+  my $Fields = {};
+  DEFINEFIELDS
+
+     ### Update the table and submit the $Fields array. 
+  my $Result = $Update->Set_TABLENAME('id'=>$Id,'command'=>'change','fields'=>$Fields);
+  }
+elsif ($Update eq "new")
+  {
+  my $Insert = new PACKAGE::Set_Info;
+     ### Insert new thing into TABLENAME table. 
+  $Id = $Insert->Set_TABLENAME('command'=>'insert');
+
+     ### Create the array that we want to submit to the function.
+  my $Fields = {};
+
+  DEFINEFIELDS
+    ### Hardcode the users_id if you don't want it to change. 
+#  $Fields->{'users_id'} = $User_Id;
+
+#  $query->param(-delete=>'users_id');
+#  $query->param(-name=>'users_id',value=>$Info->{'users'}->{'users_id'});
+
+  my $Result = $Insert->Set_TABLENAME('id'=>$Id,'command'=>'change',"fields"=>$Fields);
+  }
+
+#----------------------------------------------------------------------
+# Now create a list of all the items in this table. Then we can choose
+# which ones we want to edit. This could be put into a perl method
+# instead of duplicating it for each webpage. 
+
+### Now taken care of by the module Get_TABLENAME
+
+  ### Create the main list of items we are editing. 
+  ### If there is a users_id in the table, only select the ones that we own.  
+my $List = "";
+my $Id_Values = {};
+
+ ### You might want to modify this sql so that you use more descriptive titles.
+my $Temp_List = $Info->List('TABLENAME','all','none');
+foreach my $Key (sort keys %$Temp_List)
+  {
+  my $ref = $Temp_List->{$Key};
+  my $Selected = "";
+  if ($ref->{'TABLENAME_id'} eq $Id) {$Selected = " selected";}
+  my $Id_Encrypt = PACKAGE::Misc->Encrypt($ref->{'TABLENAME_id'});
+  my $Status = "Active";
+  if ($ref->{'active'} == 0) {$Status = "Inactive";}
+
+  my $Title = $ref->{'TABLENAME_id'};
+      ### We are looking for the field "title", but change it so what the field
+      ### should be. This is just an example. 
+  if (exists $ref->{'title'}) {$Title = $ref->{'title'}}
+  $List .= qq(<option value="$Id_Encrypt" $Selected> $Status : $Title\n);
+  }
+if ($List eq "") {$List = "<option value=''> None\n";}
+
+#-------------------------------------------------------------------
+# Get all the information about this entry in the table. 
+# Again we could create a standard perl module to do this. 
+
+my $Other_Lists = {};
+my $Other_Info = {};
+my $Type = "new";
+my $Id_Encrypt = "";
+my $Message = "Create a new TABLENAME.";
+my $TABLENAME_Info = {};
+if ($Id > 0) 
+  {
+  $Type = "update";
+  $Id_Encrypt = PACKAGE::Misc->Encrypt($Id);
+    ## Get the information about the email_list
+  $TABLENAME_Info = $Info->Info('TABLENAME', $Id);
+  $Message = "Update Information for TABLENAME_id = $Id.";
+    ### Remember to create a list to choose between ids, and also the
+    ### capability to directly change the data of the foriegn id without
+    ### changing the id being edited. 
+
+  SETIDSOTHER
+  }
+
+#-------------------------------------------------------------------
+# Create the other lists for primary keys of other tables. 
+# This could be modularized as well. 
+
+OTHER_LISTS
+
+#------------------------------------------------------------------
+# Print out the html code with some debug info at bottom.
+
+print qq(
+<title>PACKAGE : TABLENAME editing</title>
+<body bgcolor=#eeeeee>
+<table border=0 width=100% height=100%>
+<tr><td></td></tr>
+<tr><Td width=20% valign=top>
+	 );
+#print "<!--#include virtual=menu.html  -->";
+print qq (
+<table border=1 width=100% height=100%>
+<tr><td valign=top>
+<!--#include virtual=index.html  -->
+</td></tr>
+</table>
+);
+
+print qq(
+</td>
+<td valign=top>
+<h1> Editing data in the table "TABLENAME".</h1>
+<form method=post action=TABLENAME.pl>
+<table border=0>
+<tr><td><select name=id> $List  </select></td>
+<td><select name=action >
+  <option value=new> New
+  <option value=edit selected> Edit
+  <option value=delete> Inactive 
+  <option value=undelete> Active
+  <option value=purge> Delete
+  </select></td>
+  <td><input type=submit value="Submit"></td>
+</tr>
+</table>
+</form>
+
+<hr>
+$Message
+<form method=post action="TABLENAME.pl" ENCTYPE="multipart/form-data">
+<input type=hidden name=update value=$Type>
+<input type=hidden name=id value="$Id_Encrypt">
+<table border=1 width=100% height=100%>
+HTML_FIELDS
+</table>
+
+<input type=submit value="$Message">
+</form>
+
+</td>
+</tr>
+</table>
+
+);
+
+print "<hr>These webpages are not meant for production use. They are
+meant to provide novice programmers examples on how to access the database.
+These sample webpages have all the code necessary for generic,
+Mason, or Perl ASP scripts. To incorporate into an ASP or Mason site
+should require very little programming. In general, you should modularize
+stuff as much as possible as described in the source code of this webpage. 
+There is too much perl code for this webpage, again, please modularize
+the methods for your own uses and you should get rid of most of the
+repetitious perl code that can be usd for all webpages and put it into
+modules. 
+<p>
+These sample webpages should follow the
+SDS (Standard Database Setup) since they don't create any custom sql
+queries but use standard Perl modules. \n";
+
+print "<hr>Printing out the variables submitted through the POST or GET
+methods and their values. Useful for debug purposes.\n";
+foreach my $Param (sort @Params) 
+  {my $Value = $query->param($Param); print "<br>$Param = $Value\n";}
+
+

@@ -1,0 +1,71 @@
+/*============ pp_access.h =====================================
+
+  PURPOSE - this module supports access to the parallel port. 
+            It has several key uses-
+                - saving the initial pp state.
+                - restoring the pp state.
+                - maintaining an image of the pp data and control
+                  registers,  see the notes.
+                - setting and testing bits and bytes within the pp
+                  data, control, and status registers.
+
+     NOTE - Bit manipulation can be done on a data and control
+            image and then the image written to the port.  This
+            ensure no intermediate states on the port and faster
+            access as only one IO is required ( IO take 0.9 us).
+            Note the macros at the end of the *.h file.
+          - macros are used for IO to reduce the complexity for the
+            user and to be fatser than function calls.
+            For very highest speed just write direct to the registers.
+          - this implmentation is only useful if just one serial
+            port is being controlled.  An object solution would
+            be much better for multiple ports.
+
+   CHECK PP ACCESS  : there are several steps required to get parallel
+                      port access-
+          - check in BIOS and ensure that the pp is in SPP, compatible,
+            or bidirectional mode.  It must not be in EPP or ECP mode.
+          - IO access must be enabled either in the main application
+            program or using lp_tty_start program
+          
+*/
+
+#ifndef PP_ACCESS
+#define PP_ACCESS
+
+#include <sys/io.h>
+
+//------ Data that defines ports and port content. --------------------------
+int lp_base_addr ;                  // save base addr of pp port. 
+#define status_offset  1
+#define control_offset 2
+
+unsigned char save_data ;           // save of original values.
+unsigned char save_control ;
+unsigned char image_data ;          // use image as master record of port.
+unsigned char image_control ;
+
+#define lp0   0x378                 // lp (LPT) base addresses.
+#define lp1   0x278
+#define lp2   0x3BC
+#define lp_length   3
+
+
+//------ Routines ------------------------------------------------------------
+//--- initialise and restore printer port by number (0,1,2).
+void lp_init(short lp_num) ;
+void lp_restore() ;
+//--- return based address of printer port.
+int  lp_base() ;
+
+//--- MACROs, faster than function calls.
+#define TEST_Error    ( inb( lp_base_addr+status_offset) & 0x08) 
+
+#define SET_nInit     outb((image_control |= 0x04),lp_base_addr+control_offset)
+#define SET_nLinefeed outb((image_control &= 0xFD),lp_base_addr+control_offset) 
+#define CLR_nLinefeed outb((image_control |= 0x02),lp_base_addr+control_offset) 
+
+#define WR_pp_data( byte)   outb(( image_data = byte), lp_base_addr)
+#define RD_pp_data          ( image_data = inb( lp_base_addr))
+
+#endif 

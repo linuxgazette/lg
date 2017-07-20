@@ -1,0 +1,724 @@
+#!/usr/bin/perl 
+#===============================================================================
+#
+#         FILE:  internettester.pl
+#
+#        USAGE:  ./internettester.pl 
+#
+#  DESCRIPTION:  Tests the performance of "the Internet" by a variety of protocols.
+#
+#      OPTIONS:  Few, we pack everything into a config file.
+# REQUIREMENTS:  ---
+#         BUGS:  ---
+#        NOTES:  ---
+#       AUTHOR:  R. Pfeiffer (Mr), <lynx@luchs.at>
+#      COMPANY:  http://web.luchs.at/
+#      VERSION:  1.0
+#      CREATED:  30/07/09 22:07:37 CEST
+#     REVISION:  14/10/09 23:40:01 CEST
+#===============================================================================
+#
+# This file is part of internettester.pl.
+#
+# Foobar is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# internettester.pl is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with internettester.pl.  If not, see <http://www.gnu.org/licenses/>.
+
+use strict;
+use warnings;
+
+use Config::Simple;
+use Crypt::OpenSSL::Random;
+use File::Slurp;
+use File::Stat qw/:stat/;
+use Getopt::Long;
+use IO::Socket::SSL;
+use LWP::UserAgent;
+use Mail::Header;
+use Mail::IMAPClient;
+use Mail::Internet;
+use MIME::Base64;
+use MIME::Entity;
+use MIME::Tools;
+use Net::FTP;
+use Net::SCP;
+use Net::SMTP;
+use Pod::Usage;
+use Statistics::Descriptive;
+use Time::HiRes qw(gettimeofday tv_interval);
+use URI;
+
+#---------------------------------------------------------------------------
+#  Tests
+#---------------------------------------------------------------------------
+#
+# This code performs a series of tests involving network transmissions over
+# different protocols. All tests are performed multiple times and a statistic
+# is generated.
+#
+# HTTP upload to a "friendly" script expecting a POST request
+# HTTPS upload to a "friendly" script expecting a POST request
+# HTTP download
+# HTTPS download
+# SCP upload
+# SCP download
+# FTP upload
+# FTP download
+# SMTP transaction (sending a test email to a SMTP sink)
+# IMAP query of a mailbox (download & upload)
+
+#---------------------------------------------------------------------------
+#  Options
+#---------------------------------------------------------------------------
+
+my $opt_config = 'internettester.cfg';
+my $opt_debug = 0;
+
+#---------------------------------------------------------------------------
+#  Variables
+#---------------------------------------------------------------------------
+
+my $byte_count;
+my $config;
+my $data_chunk;
+my $data_count;
+my $data_rest;
+my $error;
+my $i;
+my $info;
+my $j;
+my $logfile;
+my $payload;
+my $randomfile = 0;
+my $rate;
+my $size;
+my $tests_count;
+my $testfile;
+
+my $dt;
+my $statistic;
+my $t0;
+my $t1;
+
+my $ftp;
+my $stou_name;
+
+my $scp;
+my $scp_host;
+my $scp_port;
+
+my $imap;
+my $imap_uid;
+my $ssl_socket;
+my @uids;
+
+# Email
+my $mail_body =<<FOOBAR;
+Dear recipient,
+
+this email was automatically generated and contains no information. The
+attachment is either random data or a user-supplied test file. You can
+delete this email.
+
+With best regards,
+internettester.pl.
+FOOBAR
+my $mail_rcpt;
+my $mime_top;
+my $smtp;
+
+my $mail_report =<<FOOBAR;
+Dear recipient,
+
+this email contains the log file of a bandwidth test. The log file is
+attached. You can view it with any text viewer.
+
+With best regards,
+internettester.pl.
+FOOBAR
+my $mail_logfile;
+
+my $request;
+my $result;
+my $ua_string = 'web.luchs.at - Network Performance Measurement';
+my $useragent;
+my $uri;
+
+#---------------------------------------------------------------------------
+#  Functions
+#---------------------------------------------------------------------------
+sub print_statistics {
+    my $L = shift;
+    my $s = shift;
+
+    printf $L "Number of tests    : %13u\n", $s->count();
+    printf $L "Mean               : %10.02f KiB/s\n", $s->mean();
+    printf $L "Minimum            : %10.02f KiB/s\n", $s->min();
+    printf $L "Maximum            : %10.02f KiB/s\n", $s->max();
+    printf $L "Standard deviation : %10.02f KiB/s\n\n", $s->standard_deviation();
+    return;
+}
+
+#---------------------------------------------------------------------------
+#  MAIN
+#---------------------------------------------------------------------------
+
+# Parse options
+GetOptions( 'config=s' => \$opt_config,
+            'debug=i' => \$opt_debug
+          );
+
+# Read configuration file
+$config = new Config::Simple($opt_config);
+
+$logfile     = $config->param('logfile');
+$tests_count = $config->param('tests');
+
+# Open log file and write header information.
+open( LOGFILE, "> $logfile" ) or die 'Cannot open logfile for writing.';
+print LOGFILE "+"x75,"\n";
+printf LOGFILE "+ Test run - using configuration file %s - \n",$opt_config;
+print LOGFILE "+ ",`date`,"\n";
+print LOGFILE "+ \n";
+
+# Check if we need to create a temporary file
+if ( $config->param('data_file') eq 'none' ) {
+    my $random_seed = Crypt::OpenSSL::Random::random_bytes(10);
+    Crypt::OpenSSL::Random::random_seed($random_seed);
+    $byte_count = $config->param('data_bytes');
+    $data_chunk = $config->param('data_chunk');
+    $data_count = int($byte_count / $data_chunk);
+    $data_rest  = $byte_count % $data_chunk;
+    $testfile   = 'randomtestfile.dat';
+    open( TESTFILE, "> $testfile" );
+    binmode(TESTFILE);
+    for ($i=0; $i<$data_count; $i++) {
+        print(TESTFILE Crypt::OpenSSL::Random::random_pseudo_bytes($data_chunk));
+    }
+    print(TESTFILE Crypt::OpenSSL::Random::random_pseudo_bytes($data_chunk));
+    close(TESTFILE);
+    $randomfile = 1;
+}
+else {
+    $testfile = $config->param('data_file');
+}
+
+$info = stat($testfile);
+printf LOGFILE "+ Test file has a size of %u bytes.\n",$info->size;
+print LOGFILE "+\n\n";
+print LOGFILE "+"x75,"\n\n";
+
+# --- HTTP ---------------------------------------------------------
+# Write banner
+print LOGFILE "--- HTTP download ","-"x57,"\n";
+
+# Create user agent object
+$useragent = LWP::UserAgent->new;
+$useragent->agent($ua_string);
+$useragent->from('noc@lists.luchs.at');
+$useragent->cookie_jar({ file => "/tmp/.internettest_cookies.txt" });
+$useragent->env_proxy;
+
+# GET
+$i = 0;
+$size = 0;
+$uri = URI->new($config->param('http_download'));
+$statistic = Statistics::Descriptive::Sparse->new();
+do {
+    $request = HTTP::Request->new( GET => $config->param('http_download') );
+    $request->push_header( Accept => '*/*' );
+    $request->push_header( Host => $uri->host );
+    $t0 = [gettimeofday];
+    $result = $useragent->request($request,'/dev/null');
+    if ( !$result->is_success ) {
+        print LOGFILE "Error while requesting HTTP download link: ",$result->code,"\n";
+    }
+    else {
+        if ( $size == 0 ) {
+            $size = $result->header( 'content_length' );
+        }
+    }
+    $t1 = [gettimeofday];
+    $dt = tv_interval $t0, $t1;
+    $rate = ($size / $dt) / 1024;
+    if ( $opt_debug > 0 ) {
+        print "DEBUG: HTTP GET - $dt seconds for $size bytes ($rate Kib/s)\n";
+    }
+    $statistic->add_data($rate);
+    $i++;
+} while ( $i<$tests_count );
+print_statistics( *LOGFILE, $statistic );
+undef $statistic;
+
+# POST
+print LOGFILE "--- HTTP upload ","-"x59,"\n";
+
+$i = 0;
+$size = $byte_count;
+$uri = URI->new($config->param('https_upload'));
+$statistic = Statistics::Descriptive::Sparse->new();
+do {
+    $t0 = [gettimeofday];
+    $payload = encode_base64(read_file($testfile));
+    $size = length($payload);
+    $result = $useragent->post( $config->param('http_upload'),
+                                [ 'payload' => $payload ],
+                                Accept => '*/*',
+                                Host => $uri->host );
+    if ( !$result->is_success ) {
+        print LOGFILE "Error while requesting HTTP upload link: ",$result->code,"\n";
+    }
+    $t1 = [gettimeofday];
+    $dt = tv_interval $t0, $t1;
+    $rate = ($size / $dt) / 1024;
+    if ( $opt_debug > 0 ) {
+        print "DEBUG: HTTP POST - $dt seconds for $size bytes ($rate Kib/s)\n";
+    }
+    $statistic->add_data($rate);
+    $i++;
+} while ( $i<$tests_count );
+print_statistics( *LOGFILE, $statistic );
+undef $statistic;
+
+# --- HTTPS --------------------------------------------------------
+# Write banner
+print LOGFILE "--- HTTPS download ","-"x56,"\n";
+
+$i = 0;
+$size = 0;
+$uri = URI->new($config->param('https_download'));
+$statistic = Statistics::Descriptive::Sparse->new();
+do {
+    $t0 = [gettimeofday];
+    $request = HTTP::Request->new( GET => $config->param('https_download') );
+    $request->push_header( Accept => '*/*' );
+    $request->push_header( Host => $uri->host );
+    $result = $useragent->request($request,'/dev/null');
+    if ( !$result->is_success ) {
+        print LOGFILE "Error while requesting HTTPS download link: ",$result->code,"\n";
+    }
+    else {
+        if ( $size == 0 ) {
+            $size = $result->header( 'content_length' );
+        }
+    }
+    $t1 = [gettimeofday];
+    $dt = tv_interval $t0, $t1;
+    $rate = ($size / $dt) / 1024;
+    if ( $opt_debug > 0 ) {
+        print "DEBUG: HTTPS GET - $dt seconds for $size bytes ($rate Kib/s)\n";
+    }
+    $statistic->add_data($rate);
+    $i++;
+} while ( $i<$tests_count );
+print_statistics( *LOGFILE, $statistic );
+undef $statistic;
+
+# POST
+print LOGFILE "--- HTTPS upload ","-"x58,"\n";
+
+$i = 0;
+$size = $byte_count;
+$uri = URI->new($config->param('https_upload'));
+$statistic = Statistics::Descriptive::Sparse->new();
+do {
+    $t0 = [gettimeofday];
+    $payload = encode_base64(read_file($testfile));
+    $size = length($payload);
+    $result = $useragent->post( $config->param('https_upload'),
+                                [ 'payload' => $payload ],
+                                Accept => '*/*',
+                                Host => $uri->host );
+    if ( !$result->is_success ) {
+        print LOGFILE "Error while requesting HTTP upload link: ",$result->code,"\n";
+    }
+    $t1 = [gettimeofday];
+    $dt = tv_interval $t0, $t1;
+    $rate = ($size / $dt) / 1024;
+    if ( $opt_debug > 0 ) {
+        print "DEBUG: HTTPS POST - $dt seconds for $size bytes ($rate Kib/s)\n";
+    }
+    $statistic->add_data($rate);
+    $i++;
+} while ( $i<$tests_count );
+print_statistics( *LOGFILE, $statistic );
+undef $statistic;
+
+# --- FTP ----------------------------------------------------------
+# Check if we really need FTP
+
+if ( $config->param('ftp_username') ne 'skip' ) {
+    # Write banner
+    print LOGFILE "--- FTP upload ","-"x60,"\n";
+
+    $i = 0;
+    $size = $byte_count;
+    $statistic = Statistics::Descriptive::Sparse->new();
+    # Open FTP connection
+    $ftp = Net::FTP->new( $config->param('ftp_server'), Passive => 1 );
+    if ( $ftp ) {
+        $ftp->login( $config->param('ftp_username'), $config->param('ftp_password') );
+        if ( $config->param('ftp_path') ne 'none' ) {
+            $ftp->cwd($config->param('ftp_path'));
+        }
+        $ftp->binary;
+        do {
+            $t0 = [gettimeofday];
+            $stou_name = $ftp->put_unique($testfile);
+            if ( $i < ($tests_count-1) ) {
+                $ftp->delete($stou_name);
+            }
+            $t1 = [gettimeofday];
+            $dt = tv_interval $t0, $t1;
+            $rate = ($size / $dt) / 1024;
+            if ( $opt_debug > 0 ) {
+                print "DEBUG: FTP upload - $dt seconds for $size bytes ($rate Kib/s)\n";
+            }
+            $statistic->add_data($rate);
+            $i++;
+        } while ( $i<$tests_count );
+        print_statistics( *LOGFILE, $statistic );
+        undef $statistic;
+
+        print LOGFILE "--- FTP download ","-"x58,"\n";
+        $i = 0;
+        $statistic = Statistics::Descriptive::Sparse->new();
+        do {
+            $t0 = [gettimeofday];
+            $ftp->get($stou_name,'/dev/null');
+            $t1 = [gettimeofday];
+            $dt = tv_interval $t0, $t1;
+            $rate = ($size / $dt) / 1024;
+            if ( $opt_debug > 0 ) {
+                print "DEBUG: FTP download - $dt seconds for $size bytes ($rate Kib/s)\n";
+            }
+            $statistic->add_data($rate);
+            $i++;
+        } while ( $i<$tests_count );
+        print_statistics( *LOGFILE, $statistic );
+        undef $statistic;
+
+        $ftp->delete($stou_name);
+        $ftp->quit();
+    }
+    else {
+        print LOGFILE "ERROR: Cannot connect to FTP server!\n";
+    }
+}
+
+# --- SCP ----------------------------------------------------------
+# Write banner
+print LOGFILE "--- SCP upload ","-"x60,"\n";
+
+$scp_port = $config->param('scp_port');
+if ( $scp_port != 22 ) {
+    $scp_host = sprintf("%s:%u",$config->param('scp_server'),$scp_port);
+}
+else {
+    $scp_host = $config->param('scp_server');
+}
+$scp = Net::SCP->new( $scp_host, $config->param('scp_user') );
+$i = 0;
+$size = $byte_count;
+$statistic = Statistics::Descriptive::Sparse->new();
+if ( $scp ) {
+    if ( $config->param('scp_path') ne 'none' ) {
+        $scp->cwd($config->param('scp_path'));
+    }
+    do {
+        $t0 = [gettimeofday];
+        $scp->put($testfile);
+        $t1 = [gettimeofday];
+        $dt = tv_interval $t0, $t1;
+        $rate = ($size / $dt) / 1024;
+        if ( $opt_debug > 0 ) {
+            print "DEBUG: SCP upload $dt seconds for $size bytes ($rate Kib/s)\n";
+        }
+        $statistic->add_data($rate);
+        $i++;
+    } while ( $i<$tests_count );
+    print_statistics( *LOGFILE, $statistic );
+    undef $statistic;
+
+    print LOGFILE "--- SCP download ","-"x58,"\n";
+    $i = 0;
+    $statistic = Statistics::Descriptive::Sparse->new();
+    do {
+        $t0 = [gettimeofday];
+        $scp->get($testfile,'/dev/null');
+        $t1 = [gettimeofday];
+        $dt = tv_interval $t0, $t1;
+        $rate = ($size / $dt) / 1024;
+        if ( $opt_debug > 0 ) {
+            print "DEBUG: SCP download - $dt seconds for $size bytes ($rate Kib/s)\n";
+        }
+        $statistic->add_data($rate);
+        $i++;
+    } while ( $i<$tests_count );
+    print_statistics( *LOGFILE, $statistic );
+    undef $statistic;
+
+    # Net::SCP knows no delete. :(
+    #$scp->delete($testfile);
+    #$scp->quit();
+}
+
+# --- SMTP ---------------------------------------------------------
+# Write banner
+print LOGFILE "--- SMTP sending ","-"x58,"\n";
+
+$i = 0;
+$statistic = Statistics::Descriptive::Sparse->new();
+do {
+    $mime_top = MIME::Entity->build(
+                  Description => 'This is an automatically generated email for testing purposes.',
+                  Type => 'multipart/mixed',
+                  From => $config->param('smtp_from'),
+                  To => $config->param('smtp_to'),
+                  Subject => sprintf($config->param('smtp_subject'),$i)
+                );
+    $mime_top->attach( Type => 'text/plain; charset=utf-8',
+                       Encoding => 'quoted-printable',
+                       Data => $mail_body
+                     );
+    $mime_top->attach( Type => 'application/octet-stream',
+                       Encoding => 'base64',
+                       Path => $testfile
+                     );
+    $t0 = [gettimeofday];
+    $smtp = Net::SMTP->new( $config->param('smtp_server'), Port => $config->param('smtp_port') );
+    $smtp->mail($config->param('smtp_from'));
+    $smtp->recipient($config->param('smtp_to'));
+    $smtp->data();
+    $smtp->datasend($mime_top->stringify);
+    $smtp->dataend();
+    $smtp->quit;
+    $t1 = [gettimeofday];
+    $size = length($mime_top->stringify);
+    $dt = tv_interval $t0, $t1;
+    $rate = ($size / $dt) / 1024;
+    if ( $opt_debug > 0 ) {
+        print "DEBUG: SMTP send - $dt seconds for $size bytes ($rate Kib/s)\n";
+    }
+    $statistic->add_data($rate);
+    $i++;
+} while ( $i<$tests_count );
+print_statistics( *LOGFILE, $statistic );
+undef $statistic;
+
+# --- IMAP ---------------------------------------------------------
+# Write banner
+print LOGFILE "--- IMAP sending ","-"x58,"\n";
+
+$error = 0;
+if ( $config->param('imap_ssl') eq 'yes' ) {
+    $ssl_socket = IO::Socket::SSL->new( PeerAddr => $config->param('imap_server'),
+                                        PeerPort => $config->param('imap_port'),
+                                        Proto    => 'tcp',
+                                        SSL_version => 'SSLv3',
+                                        SSL_cipher_list => 'ALL',
+                                        SSL_key_file => $config->param('ssl_key'),
+                                        SSL_cert_file => $config->param('ssl_cert'),
+                                        SSL_ca_file => $config->param('ssl_ca')
+                                      );
+    if ( $ssl_socket ) {
+        $imap = Mail::IMAPClient->new;
+        $imap->Socket($ssl_socket);
+        if ( $imap->connect ) {
+            $imap->User($config->param('imap_username'));
+            $imap->Password($config->param('imap_password'));
+            if ( !$imap->login ) {
+                printf LOGFILE "ERROR: Cannot login (%s)\n",$imap->LastError;
+                $error++;
+            }
+        }
+        else {
+            printf LOGFILE "ERROR: Cannot connect to IMAP server (%s)\n",$imap->LastError;
+            $error++;
+        }
+    }
+    else {
+        printf LOGFILE "ERROR: Could not connect to IMAP server (%s)\n",$imap->LastError;
+        $error++;
+    }
+}
+else {
+    $imap = Mail::IMAPClient->new( Server => $config->param('imap_server'),
+                                   Port => $config->param('imap_port'),
+                                   User => $config->param('imap_username'),
+                                   Password => $config->param('imap_password') );
+    if ( !$imap ) {
+        printf LOGFILE "ERROR: Could not connect to IMAP server (%s)\n",$imap->LastError;
+        $error++;
+    }
+}
+
+if ( $error == 0 ) {
+    $i = 0;
+    $statistic = Statistics::Descriptive::Sparse->new();
+    $size = length($mime_top->stringify) * $config->param('imap_messages');
+    $imap->select('INBOX');
+    do {
+        # Add messages to INBOX
+        $t0 = [gettimeofday];
+        $j = $config->param('imap_messages');
+        do {
+            $imap_uid = $imap->append('INBOX',$mime_top->stringify);
+            if ( !$imap_uid ) {
+                printf LOGFILE "ERROR: Could not append email message to INBOX (%s)\n",$imap->LastError;
+            }
+            $j--;
+        } while ( $j > 0 );
+        $t1 = [gettimeofday];
+        $dt = tv_interval $t0, $t1;
+        $rate = ($size / $dt) / 1024;
+        if ( $opt_debug > 0 ) {
+            print "DEBUG: IMAP append - $dt seconds for $size bytes ($rate Kib/s)\n";
+        }
+        $statistic->add_data($rate);
+        $i++;
+        # Delete messages from INBOX (we do not time this operation).
+        @uids = $imap->messages or printf LOGFILE "ERROR: Could not select email messages in folder (%s)\n",$imap->LastError;
+        if ( scalar(@uids) > 0 ) {
+            if ( !$imap->delete_message(\@uids) ) {
+                printf LOGFILE "ERROR: Could not delete email message from INBOX (%s)\n",$imap->LastError;
+            }
+            else {
+                $imap->expunge('INBOX');
+            }
+        }
+    } while ( $i<$tests_count );
+    print_statistics( *LOGFILE, $statistic );
+    undef $statistic;
+
+    # Write banner for message retrieval test
+    print LOGFILE "--- IMAP retrieving ","-"x56,"\n";
+    # First we prepare the data to be retrieved
+    $j = $config->param('imap_messages');
+    do {
+        $imap_uid = $imap->append('INBOX',$mime_top->stringify);
+        if ( !$imap_uid ) {
+            printf LOGFILE "ERROR: Could not append email message to INBOX (%s)\n",$imap->LastError;
+        }
+        $j--;
+    } while ( $j > 0 );
+    $i = 0;
+    $statistic = Statistics::Descriptive::Sparse->new();
+    @uids = $imap->messages or printf LOGFILE "ERROR: Could not select email messages in folder (%s)\n",$imap->LastError;
+    do {
+        $t0 = [gettimeofday];
+        $imap->message_to_file('/dev/null',@uids)
+               or printf LOGFILE "ERROR: Could not retrieve email messages from folder (%s)\n",$imap->LastError;
+        $t1 = [gettimeofday];
+        $dt = tv_interval $t0, $t1;
+        $rate = ($size / $dt) / 1024;
+        if ( $opt_debug > 0 ) {
+            print "DEBUG: IMAP retrieve - $dt seconds for $size bytes ($rate Kib/s)\n";
+        }
+        $statistic->add_data($rate);
+        $i++;
+    } while ( $i<$tests_count );
+    print_statistics( *LOGFILE, $statistic );
+
+    # Cleanup - delete messages from INBOX (we do not time this operation).
+    @uids = $imap->messages or printf LOGFILE "ERROR: Could not select email messages in folder (%s)\n",$imap->LastError;
+    if ( scalar(@uids) > 0 ) {
+        if ( !$imap->delete_message(\@uids) ) {
+            printf LOGFILE "ERROR: Could not delete email message from INBOX (%s)\n",$imap->LastError;
+        }
+        else {
+            $imap->expunge('INBOX');
+        }
+    }
+}
+
+# Disconnect from IMAP server.
+$imap->close;
+$imap->disconnect or printf LOGFILE "ERROR: Could not disconnect from IMAP server (%s)\n",$imap->LastError;
+
+# End
+if ( $randomfile == 1 ) {
+    unlink($testfile);
+}
+close(LOGFILE);
+
+# Check if we have email addresses to mail the report to.
+if ( $config->param('email') ne 'none' ) {
+    $mime_top = MIME::Entity->build(
+                  Description => 'This is an automatically generated email containing a log file.',
+                  Type => 'multipart/mixed',
+                  From => $config->param('smtp_from'),
+                  To => $config->param('email'),
+                  Cc => $config->param('cc'),
+                  Subject => 'Internet tester result log file'
+                );
+    $mime_top->attach( Type => 'text/plain; charset=utf-8',
+                       Encoding => 'quoted-printable',
+                       Data => $mail_report
+                     );
+    $mail_logfile = read_file($config->param('logfile'));
+    $mime_top->attach( Type => 'text/plain; charset=utf-8',
+                       Encoding => 'quoted-printable',
+                       Data => $mail_logfile
+                     );
+    $smtp = Net::SMTP->new( $config->param('smtp_relay'), Port => $config->param('smtp_port') );
+    $smtp->mail($config->param('smtp_from'));
+    $smtp->recipient($config->param('email'));
+    $smtp->cc($config->param('cc'));
+    $smtp->data();
+    $smtp->datasend($mime_top->stringify);
+    $smtp->dataend();
+    $smtp->quit;
+}
+
+__END__
+=pod
+=encoding utf8
+
+=head1 NAME
+
+internettester.pl - performs a series of network tests
+
+=head1 SYNOPSIS
+
+internettester.pl [OPTIONS]
+
+=head1 DESCRIPTION
+
+This script reads a configuration file and performs a series of network transmission
+tests. It uses HTTP, HTTPS, FTP, SCP, SMTP and IMAP to transmit data across the network.
+All tests except SMTP are bidirectional. The results are written to a logfile which
+can be emailed to a recipient.
+
+=head1 OPTIONS
+
+=over 8
+
+=item B<--config configfile>
+
+Since we need a lot of options all of them are taken from a configuration file. The default
+name for the file is 'internettester.cfg'. The FTP test can be skipped if you use the login
+'skip'.
+
+=item B<--debug n>
+
+Indicates debug level. 0 means no output, greater values produce debug information.
+Defaults to 0.
+
+=head1 BUGS
+
+Please let me know if you find any.
+
+=head1 AUTHOR
+
+René Pfeiffer <lynx@luchs.at>
+

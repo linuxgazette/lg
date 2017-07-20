@@ -1,0 +1,50 @@
+# Version for ssh-add of SuSE 8.2
+# "ssh-add -l" test
+# exit coddes are  * 0 for  keys available
+#                  * 1 aent is there but no keys
+#                  * 2 no agent
+
+
+shopt -s nullglob
+user=`whoami`
+result=`ps ux | grep ssh-agent | grep $user | grep -v grep`
+
+if [ -z "$result" ] ; then
+	echo -n no ssh-agent found, starting new one...
+	eval `ssh-agent`
+fi
+
+# now there should run an ssh-agent
+# let's make sure we can talk to it
+
+ssh-add -l > /dev/null 2>&1
+if (( $? < 2 )) ; then
+	echo ok, ssh-agent accessible.
+else
+	echo "ssh-agent should run, but we can't talk to it"
+	echo -n "attempting to set environment variables:"
+
+	for socket in /tmp/ssh-*/agent* ; do
+	    echo trying $socket....
+	    SSH_AUTH_SOCK=$socket
+	    export SSH_AUTH_SOCK
+	    ssh-add -l > /dev/null 2>&1
+	    if (( $? < 2 )) ; then
+		echo OK.
+		SAVE_SSH_SOCKET=$socket
+	    else
+		echo "dead socket, deleting..."
+	#	rm -rf `dirname $socket`
+	    fi
+	done
+	export SSH_AUTH_SOCK=$SAVE_SSH_SOCKET
+
+	ssh-add -l > /dev/null 2>&1
+	if (( $? < 2 )) ; then
+           echo
+	else
+	    echo "*** still no working ssh-agent"
+   	    echo "something is wrong, manual fix needed!"
+	fi
+fi
+

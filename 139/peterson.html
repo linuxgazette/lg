@@ -1,0 +1,660 @@
+<!DOCTYPE html
+	PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+	 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en-US" xml:lang="en-US">
+<head>
+<title>Writing PostgreSQL Functions in C LG #139</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link rel="stylesheet" href="../lg.css" type="text/css" media="screen, projection"  />
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+<link rel="shortcut icon" href="../favicon.ico" />
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+</head>
+<body>
+
+<a href="../">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+<div id="navigation">
+<table summary="masthead" width="100%">
+<tr>
+<td align="center" colspan="3" style="font-size: 10px; font-weight: bold">
+<a href="../index.html">Home</a>
+<a href="http://linuxgazette.net">Main Site</a>
+<a href="../faq/index.html">FAQ</a>
+
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/mailman/listinfo/">Mailing Lists</a>
+<a href="../jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+<hr width="99%" style="border: 1px inset #000033">
+</td>
+</tr>
+<tr>
+<td width="40%" align="left" style="font-size: 10px; font-weight: bold">
+The Free International Online Linux Monthly
+</td>
+<td width="20%" align="center" style="font-size: 10px; font-weight: bold">
+ISSN: 1934-371X
+</td>
+<td width="40%" align="right" style="font-size: 10px; font-weight: bold">
+Main site: <a href="http://linuxgazette.net">http://linuxgazette.net</a> 
+</td>
+</table>
+</div>
+
+
+<div id="breadcrumbs1">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">June 2007 (#139)</a> &gt; 
+Article
+
+</div>
+
+<div class="articlecontent1">
+<div class="content">
+
+<div id="previousnexttop">
+<A HREF="okopnik.html" >&lt;-- prev</A> | <A HREF="collinge.html" >next --&gt;</A>
+</div>
+
+<h1>Writing PostgreSQL Functions in C</h1>
+<p id="by"><b>By <a href="../authors/peterson.html">Ron Peterson</a></b></p>
+
+<h3 id="prereq">Introduction</h3>
+
+<p>PostgreSQL is a powerhouse in its own right, but it is also
+extensible.  You have a lot of options when it comes to extending
+PostgreSQL.  You can use SQL, PL/pgSQL, PL/Tcl, PL/Perl, PL/Python, and
+more.  Each option has its advantages.  C has the advantage of speed, of
+course.  Because PostgreSQL itself is written in C, writing C code also
+allows you to leverage some of PostgreSQL's own internal code.  Your C
+code can also readily leverage any number of other programming
+libraries.  C functions are also a stepping stone toward defining your
+own new PostgreSQL base types. Ready to get started?  Great!  Because 
+instead of trying to butter you up with a witty preamble, I'm going to 
+take you straight to work.</p>
+
+<hr><h3 id="prereq">Prerequisites</h3>
+<p>You'll need a fairly recent version of PostgreSQL to follow along.
+I'm not going to discuss PostgreSQL's older Version 0 calling
+convention.  I'm also using the PGXS build system, which was introduced
+in PostgreSQL version 8.0.  The packaged version of PostgreSQL included
+with Debian Sarge or Redhat AS4 is older than that.  I have compiled and
+used the code below on Debian Etch's packaged version, Fedora Core 6's
+packaged version, and on my own compiled from source installation of
+PostgreSQL 8.2.4.</p>
+
+<p>If you are using your distribution's packaged version of the
+PostgreSQL server, rather than rolling your own; you need to make sure
+that you install the corresponding development package, for example:</p>
+
+<pre>
+Debian Etch:
+  apt-get install postgresql-server-dev-8.1 postgresql-8.1
+Fedora Core 6:
+  yum install postgresql-server postgresql-devel
+</pre>
+
+<p>I'm going to assume you know the basics of how to configure and run
+PostgreSQL.  If not, there are plenty of <a
+href="#resources">resources</a> to help you get going. I also included
+an example build script at the end of this article.</p>
+
+<p>Obviously you'll also need a C compiler.  Make also comes in handy.
+Unless, like Alan Cox, you are able to directly manipulate the bits
+inside of your computer with your mind, you will also appreciate the use
+of a keyboard and monitor.  I think we're ready now.</p>
+
+<hr><h3 id="hello">Hello, World!</h3>
+
+<p>This month I'll present a simple example, and follow-up with some
+explanations.  We're going to write a function that takes a single text
+argument, and appends it to the the string 'Hello, '.</p>
+
+<p><pre>
+prompt&gt; select hello( 'World!' );
+     hello
+---------------
+ Hello, World!
+</pre></p>
+
+<p>Using your favorite editor (**cough**<a
+href="#emacs">emacs</a>**cough**), create a file called example.c as
+follows:</p>
+
+<p><pre>
+#include "postgres.h"
+#include "fmgr.h"
+#include &lt;string.h&gt;
+
+#ifdef PG_MODULE_MAGIC
+PG_MODULE_MAGIC;
+#endif
+
+Datum hello( PG_FUNCTION_ARGS );
+
+PG_FUNCTION_INFO_V1( hello );
+Datum
+hello( PG_FUNCTION_ARGS )
+{
+   // variable declarations
+   char greet[] = "Hello, ";
+   text *towhom;
+   int greetlen;
+   int towhomlen;
+   text *greeting;
+
+   // Get arguments.  If we declare our function as STRICT, then
+   // this check is superfluous.
+   if( PG_ARGISNULL(0) ) {
+      PG_RETURN_NULL();
+   }
+   towhom = PG_GETARG_TEXT_P(0);
+
+   // Calculate string sizes.
+   greetlen = strlen(greet);
+   towhomlen = VARSIZE(towhom) - VARHDRSZ;
+
+   // Allocate memory and set data structure size.
+   greeting = (text *)palloc( greetlen + towhomlen );
+   VARATT_SIZEP( greeting ) = greetlen + towhomlen  + VARHDRSZ;
+
+   // Construct greeting string.
+   strncpy( VARDATA(greeting), greet, greetlen );
+   strncpy( VARDATA(greeting) + greetlen,
+            VARDATA(towhom),
+            towhomlen );
+
+   PG_RETURN_TEXT_P( greeting );
+}
+</pre></p>
+
+<p>Now let's build this program, install it, and use it.  <a
+href="http://www.postgresql.org/docs/8.2/static/xfunc-c.html#DFUNC">Section
+33.9.6</a> of the official PostgreSQL documentation explains the
+details.  Unless you're doing something complicated, the
+PostgreSQL Extension Building Infrastructure, aka PGXS, will probably
+suffice.  Create the following Makefile in the same directory as your
+code:</p>
+
+<p><pre>
+MODULES = example
+PGXS := $(shell pg_config --pgxs)
+include $(PGXS)
+</p></pre>
+
+<p>Run 'make' and then 'make install' as a user with permission to write
+the example.so file you just made to the PostgreSQL server's lib
+directory.</p>
+
+<p>With the module in place, all that's left to do is to bind our
+'hello' function inside of our example.so module to a SQL function that
+we can use inside our database.  The following SQL will do the trick.
+Put the following text in a file called 'example.sql'.</p>
+
+<p><pre>
+CREATE OR REPLACE FUNCTION
+  hello( TEXT )
+RETURNS
+  TEXT
+AS
+  'example.so', 'hello'
+LANGUAGE
+  C
+STRICT
+IMMUTABLE;
+</p></pre>
+
+<p>Open a database with the PostgreSQL interactive command line editor
+'psql' as a user with permission to create new functions
+(i.e. superuser).  Create your new 'hello' function by loading the
+example.sql code above.  For example:
+
+<p><pre>
+prompt&gt; \i example.sql
+CREATE FUNCTION
+
+=&gt; CREATE TEMP TABLE test( name ) AS
+-&gt; VALUES ('Xavier'), ('Yari'), ('Zack');
+
+=&gt; SELECT hello( name ) FROM test;
+    hello     
+--------------
+ Hello, Xavier
+ Hello, Yari
+ Hello, Zack
+(3 rows)
+</pre></p>
+
+<hr><h3 id="review">What We Did</h3>
+
+<p>What could possibly be cooler than that?!  Now let's review what we
+did.</p>
+
+<p>I'll begin by noting that there are actually two PostgreSQL C
+language calling conventions: an older 'Version 0' convention and the
+newer 'Version 1' convention.  I'm focusing exclusively on the Version 1
+convention.</p>
+
+<p>We begin by including postgres.h and fmgr.h.  There are other
+PostgreSQL header files that you will need if you begin developing more
+complicated code, but you can pretty much expect that you'll always need
+at least these two.  The include statements are followed by a "magic
+block".  This block is required as of PostgreSQL version 8.2.  This
+statement ensures that the database doesn't load improperly
+versioned object files.  The magic block is followed by our C function
+declaration.  We can have as many functions in a single object file as
+we like.  In this example, we only declare and define one function,
+called 'hello'.  I like to put forward declarations of all my C
+functions at the beginning of my code to avoid annoying compiler
+warnings.  A quiet compiler is a happy compiler.  The
+PG_FUNCTION_INFO_V1 macro is required for all dynamically loaded Version
+1 functions.  I actually have no idea what it does, but I know what
+happens when you leave it out: nothing good.</p>
+
+<p>And now at the beginning of our actual function
+definition, we can see in the variable declarations that we're using a
+PostgreSQL defined type: 'text'.  Of course there are other PostgreSQL
+types worth knowing about as well.  <a
+href="http://www.postgresql.org/docs/8.2/static/xfunc-c.html#XFUNC-C-TYPE-TABLE">Table
+33-1</a> in the official PostgreSQL documentation enumerates the C types
+corresponding to built-in SQL types.  You should use PG_GETARG_xxx() and
+PG_RETURN_xxx() functions to retrieve and return these values from your
+function.  A few examples:</p>
+
+<p><pre>
+int32    PG_GETARG_INT32(0)     PG_RETURN_INT32(arg)
+bytea *  PG_GETARG_BYTEA_P(0)   PG_RETURN_BYTEA_P(arg)
+text *   PG_GETARG_TEXT_P(0)    PG_RETURN_TEXT_P(arg)
+</pre></p>
+
+<p>The argument to the GETARG functions indicates the position of the
+argument in the function call.  The argument to the RETURN functions is
+a variable containing data to be returned.  The _P suffix means
+'pointer'.  Let's get our input.  Again, the GETARG arguments indicate
+position.  So PG_ARGISNULL(0) refers to our first (and only) argument.
+If that argument is NULL, we return NULL, and we're done.  Later, when
+we look at the SQL we use to import our function, we'll see that
+declaring our SQL function STRICT makes this NULL check superfluous, but
+I like to include it anyway.  If our argument is not NULL, then we drop
+through and use the PG_GETARG_TEXT_P macro to assign the first argument
+(they are zero indexed) to our 'towhom' variable.</p>
+
+<p>Variable length types such as bytea or text are always passed by
+reference.  We then use macros to set and retrieve the data within our
+variable length data types.  Let's take a quick look at the 'varlena'
+data structure used internally by PostgreSQL to represent variable
+length data structures.  This will help us understand how some of the
+other macros we use operate.  (As an aside, the name of this structure
+is where A. Elain Mustain <a
+href="http://www.varlena.com/GeneralBits/68.php">got the name</a> for
+her online PostgreSQL newsletter.)</p>
+
+<p><pre>
+struct varlena
+{
+  int32 vl_len;
+  char  vl_dat[1];
+};
+</pre></p>
+
+<p>The value vl_len member of this structure indicates how much data the
+structure is holding.  The vl_dat member holds the data.  Pretty simple,
+huh?  However, there's no reason to go poking at this structure
+directly.  In fact, we should not assume that this structure even
+exists.  Instead, we get and set variable length data with macros.  The
+VARSIZE macro tells us the total size of our 'towhom' text.  The
+VARHDRSZ macro is a constant, and represents the overhead consumed by
+the vl_len member of our varlena structure.  So VARSIZE(towhom) -
+VARHDRSZ gives us the number of octets in our text string.  We use the
+VARATT_SIZEP macro to set the vl_len member of our 'greeting' text equal
+to the size of the text string it's going to store.  Note that
+PostgreSQL text strings are not null terminated.  The varlena data
+structure obviates the need for an end of string delimiter.  The VARDATA
+macro returns a pointer to the data member of our 'greeting' string.</p>
+
+<p>Again: while it's educational to understand what's happening under
+the hood, don't go poking around at PostgreSQL internals when you don't
+have to.  Use the provided macros instead.</p>
+
+<p>One last note about our C code.  Use 'palloc', not 'malloc'.
+PostgreSQL's memory allocation function automatically takes care of
+certain cleanup operations that would otherwise be impossible.  How
+would you free the memory pointed to by a pointer that's returned from
+our function, for example?  PostgreSQL takes care of this for us.
+That's not to say we shouldn't free memory when we can.  Use the palloc
+function's corresponding 'pfree' function to free memory when it's no
+longer needed.</p>
+
+<hr><h3 id="sql">Our SQL Function Definition</h3>
+
+<p>Our CREATE FUNCTION call maps our C function to a corresponding SQL
+function, which we will also call 'hello'.  Our SQL function is defined
+to take a single TEXT argument, and to return a TEXT result.  We can
+include more than one function inside a single object file, but for
+today, our example.so file only includes our single 'hello'
+function.</p>
+
+<p>Our function is declared to be STRICT, meaning that it will return
+NULL on NULL input.  This saves processing overhead (and makes our
+functions's NULL checking superfluous, as already mentioned).  Our
+function is also declared IMMUTABLE, which means that our function does
+not modify the database, and that for any given input, the function will
+always return the same output.</p>
+
+<p>See the PostgreSQL documentation for <a
+href="http://www.postgresql.org/docs/8.2/static/sql-createfunction.html">CREATE
+FUNCTION</a> for more details about this statement.</p>
+
+<hr><h3 id="summary">Wrapping Up</h3>
+
+<p>In my next article, I'll expand on this introduction to PostgreSQL C
+programming.  I'll show how to use PGXS when you want to link against
+external libraries, and I'll explain how to process tuple arguments.
+I'll also show how to use the 'ereport' function to provide diagnostic
+output while debugging C code that's running inside of a database.</p>
+
+<p>Until then, you might want to take a look in the PostgreSQL
+distribution's 'contrib' directory for more examples.  Even if you don't
+understand all the code there, you'll almost certainly find something
+you can use.  There's a lot of really excellent work in there.</p>
+
+<hr><h3 id="install">Hasty PostgreSQL Installation HOWTO</h3>
+
+<p>Here's the script I use to build PostgreSQL.  You'll need to make
+sure you have the development versions of required libraries
+installed, e.g. on Debian Sarge you'll need libpam-dev, libperl-dev,
+etc.</p>
+
+<p><pre>
+NAME=postgresql
+VER=8.2.4
+APP=${NAME}-${VER}
+SRCDIR=/usr/get/src/${NAME}/${APP}
+INSTALLDIR=/local/apps/versioned/$APP
+LOGFILE=/local/data/build/${APP}.log
+
+[ -d $INSTALLDIR ] &amp;&amp; rm -rf $INSTALLDIR
+cd ${SRCDIR}
+[ -f config.cache ] &amp;&amp; rm -f config.cache
+# make clean
+./configure \
+    --prefix=$INSTALLDIR \
+    --with-pgport=5432 \
+    --with-pam \
+    --with-perl \
+    --with-python \
+    --with-openssl \
+    --with-readline \
+    --enable-thread-safety \
+    &gt; $LOGFILE 2&gt;&amp;1
+
+RETVAL=$?
+[ ! $RETVAL -eq 0 ] &amp;&amp;
+make &gt;&gt; $LOGFILE 2&gt;&amp;1
+
+ETVAL=$?
+[ ! $RETVAL -eq 0 ] &amp;&amp;
+make install &gt;&gt; $LOGFILE 2&gt;&amp;1
+
+RETVAL=$?
+exit $RETVAL
+</pre></p>
+
+I like to symlink my versioned installation to /local/apps/postgresql
+(so I can quickly change between minor version numbers by changing a
+single symlink); then I symlink the binaries in /local/apps/postgresql
+to a bin directory on my search path, somewhere where
+ldconfig will find them (see /etc/ld.so.conf), and so on.
+
+Create a PostgreSQL superuser and group (Typically 'postgres' &amp;
+'postgres').  Create a directory for log files and for the database
+which are owned by this user, and give that user write permission.
+
+Here's a simple init script.  Use the 'init' function to create an empty
+database.
+
+<p><pre>
+#!/bin/sh
+
+VER=8.2
+PGACCOUNT=postgres
+POSTBIN=/local/bin
+PGCTL=${POSTBIN}/pg_ctl
+INITDB=${POSTBIN}/initdb
+DATADIR=/db/postgres/${VER}
+LOGFILE=/var/log/postgres/pg_ctl.log
+ENCODING="SQL_ASCII"
+
+# Set postgresql options in postgresql.conf
+
+[ -f ${PGCTL} ] || exit 0
+
+init () {
+    echo -n "Initializing PostgreSQL database"
+    echo
+    su - postgres -c "${INITDB} -D ${DATADIR} -E $ENCODING"
+    echo
+}
+
+start () {
+    echo -n "Starting PostgreSQL..."
+    echo
+    su - postgres -c "${PGCTL} start -D ${DATADIR} -l ${LOGFILE}"
+    echo
+}
+
+stop () {
+    echo -n "Stopping PostgreSQL..."
+    echo
+    su - postgres -c "${PGCTL} stop -D ${DATADIR} -m smart"
+    echo
+}
+
+restart () {
+    echo -n "Restarting PostgreSQL..."
+    echo
+    stop
+    sleep 5
+    start
+}
+
+reload () {
+    echo -n "Reloading PostgreSQL configuration..."
+    echo
+    su - postgres -c "${PGCTL} reload -D ${DATADIR}"
+    echo
+}
+
+status () {
+    echo -n "Checking PostgreSQL status..."
+    echo
+    su - postgres -c "${PGCTL} status -D ${DATADIR}"
+}
+
+case "$1" in
+  init)
+    init
+    ;;
+  start)
+    start
+    ;;
+  stop)
+    stop
+    ;;
+  restart)
+    restart
+    ;;
+  reload)
+    reload
+    ;;
+  *)
+    echo "Usage: $0 {init|start|stop|restart|reload|status}"
+    exit 1
+esac
+
+exit 0
+</pre></p>
+
+<p>I also like to give myself and root, ident authorization to run as the
+'postgres' superuser (i.e. I like to be able to run 'psql -U postgres'
+when I'm doing development work so I can get into the database quickly).
+Append something like the following to
+${your_db_directory}/pg_ident.conf:</p>
+
+<p><pre>
+amap          myusername          iddb
+amap          myusername          myusername
+amap          myusername          postgres
+amap          postgres            postgres
+amap          root                postgres
+</pre></p>
+
+<p>This presumes you have enabled ident authentication in pg_hba.conf,
+like so:</p>
+
+<p><pre>
+local all all ident amap
+</pre></p>
+
+<p>That's a pretty hasty PostgreSQL installation HOWTO.  It's a little
+off-topic, but I thought it might help jump start a potential proselyte
+or two.</p>
+
+<hr><h3 id="emacs">Emacs Errata</h3>
+
+<p>I'm a big fan of SQL Mode for Emacs (see <a
+href="#resources">Resources</a> below).  I run split windows, and use
+keyboard shortcuts to run bits of the SQL I'm editing in my *SQL*
+buffer.  However, I've always found that sql.el needs a little tweak.
+The problem is that when you run 'M-x sql-postgres', it won't prompt you
+for a user name.  Unless you always want to connect to the database as
+your shell account username, or unless you exclusively use ident
+authentication, you'll want to fix this.  Find sql.el on your system,
+and edit the PostgreSQL section as follows:</p>
+
+<p><pre>
+< (sql-get-login 'database 'server)
+> (sql-get-login 'database 'user 'server)
+
+> (if (not (string= "" sql-user))
+>   (setq params (append (list "-U" sql-user) params)))
+</pre></p>
+
+<p>Run 'byte-compile-file' to create sql.elc.  If you enter nothing at
+the 'User:' prompt, you will connect as the current user.  If you want
+to use PostgreSQL's ident authentication (assuming you have this
+configured in PostgreSQL's pg_hba.conf and pg_ident.conf), leave the
+'Server:' prompt blank.  Enter a server name and a password if you are
+doing host based authentication.</p>
+
+<hr><h3 id="resources">Resources</h3>
+
+<ul>
+<li><a href="http://www.postgresql.org/docs/">Official PostgreSQL Documentation</a>
+<li><a href="http://www.postgresql.org/docs/8.2/static/xfunc-c.html">C-Language Function Documentation</a>
+<li>Bruce Momjian's excellent <a href="http://www.postgresql.org/docs/books/awbook.html">PostgreSQL Book</a>
+<li>A. Elain Mustain's excellent <a href="http://www.varlena.com/varlena/GeneralBits/">PostgreSQL General Bits</a>
+<li><a href="http://www.postgresql.org/docs/techdocs.4">Community Provided Installation Documentation</a></li>
+<li>Other community created PostgreSQL <a href="http://www.postgresql.org/docs/techdocs.2">Articles and Documentation</a>
+<li><a href="http://www.emacswiki.org/cgi-bin/wiki?SqlMode">SQL Mode for Emacs</a></li>
+</ul>
+
+
+<script type="text/javascript">
+digg_url = 'http://linuxgazette.net/139/peterson.html';
+digg_title = 'Writing PostgreSQL Functions in C';
+digg_bodytext = 'PostgreSQL is a powerhouse in its own right, but PostgreSQL is also extensible Your C code can also readily leverage any number of other programming libraries.  C functions are also a stepping stone toward defining your
+own new PostgreSQL base types, should you be so inclined.  Ready to get started?  Great!';
+digg_topic = 'programming';
+</script>
+<script src="http://digg.com/tools/diggthis.js" type="text/javascript"></script> 
+
+
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:139/peterson.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<!-- *** BEGIN bio *** -->
+<hr>
+<p>
+<img align="left" alt="Bio picture" src="../gx/authors/peterson.jpg" class="bio">
+</p>
+<p>
+<em>
+
+Ron Peterson is a Network & Systems Manager at Mount Holyoke College in
+the happy hills of western Massachusetts. He enjoys lecturing his three
+small children about the maleficent influence of proprietary media
+codecs while they watch Homestar Runner cartoons together.
+
+</em>
+</p>
+<br clear="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2007, Ron Peterson. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication License</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 139 of Linux Gazette, June 2007
+</p>
+
+</div>
+
+<div id="previousnextbottom">
+<A HREF="okopnik.html" >&lt;-- prev</A> | <A HREF="collinge.html" >next --&gt;</A>
+</div>
+
+</div>
+</div>
+
+<script src="http://www.google-analytics.com/urchin.js"
+type="text/javascript">
+</script>
+<script type="text/javascript">
+_uacct = "UA-1204316-1";
+urchinTracker();
+</script>
+
+
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+</body>
+</html>
+

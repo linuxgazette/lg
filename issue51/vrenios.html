@@ -1,0 +1,110 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>Process Cloning in C LG #51</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<!-- *** BEGIN navbar *** -->
+<A HREF="index.html"><IMG ALT="[ Table of Contents ]" 
+	SRC="../gx/indexnew.gif" WIDTH=163 HEIGHT=60 ALIGN=bottom ></A>
+<A HREF="../index.html"><IMG ALT="[ Front Page ]" 
+	SRC="../gx/homenew.gif" WIDTH=163 HEIGHT=60 ALIGN=bottom></A>
+<A HREF="steffler.html"><IMG ALT="[ Prev ]" SRC="../gx/back2.gif" WIDTH=41 HEIGHT=60 ALIGN=bottom></A>
+<A HREF="../faq/index.html"><IMG ALT="[ Linux Gazette FAQ ]" 
+	SRC="./../gx/dennis/faq.gif"WIDTH=163 HEIGHT=60 ALIGN=bottom></A>
+<A HREF="lg_backpage51.html"><IMG ALT="[ Next ]" SRC="../gx/fwd.gif" WIDTH=41 HEIGHT=60 ALIGN=bottom  ></A>
+<!-- *** END navbar *** -->
+
+<!--endcut ============================================================-->
+
+<H4>
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H1><font color="maroon">Process Cloning in C</font></H1>
+<H4>By <a href="mailto:Alex.Vrenios@motorola.com">Alex Vrenios</a></H4>
+</center>
+<P> <HR> <P>  
+
+<!-- END header -->
+
+
+
+
+<P> <B>Introduction:</B> </P>
+<P>Software mobility means different things to different people. <I>Mobile computing</I> is often used to mean email access from a laptop, <I>process migration</I> refers to the automatic redistribution of active processes within a cluster system, and <I>agent migration</I> describes processes on a mission, gathering data for a full report upon returning home. The first example is an extension of the client-server paradigm of the 1980s while the other examples, self-directed movement of a process from one networked machine to another, is the subject of leading edge research [1]. </P>
+<P>Cluster systems are multi-computers, a network of machines that present a single-server image to a client. There are many different processes running on a cluster system, some of which may self-replicate in order to handle a suddenly higher client request load. A cluster operating system may direct one or more of its processes to migrate to other machines on its network, redistributing the overall system resource load. </P>
+<P>Autonomous agents are single processes that are best described by example. Consider wanting to collect the cheapest possible prices on all the components needed to build your "dream computer" system. Imagine having to visit or call all those parts stores to compare prices of system boards, disk and CD-ROM drives, etc. Now imagine sending your intelligent agent software out to do web searches, examining each site, and returning with the complete list of parts, including prices and URLs. If you give it your credit card number, all those parts could be shipped to your door! You get the idea. </P>
+<P>The very first step toward implementing any process migration system is to figure out how to get a duplicate process started on some other machine from within your active process. This isn't quite a remote-fork operation because the new process can be started from its beginning. This isn't just a remote-shell operation, either, because there is no guarantee that a copy of the binary executable exists on the remote machine. What techniques do you use? What system file modifications must be made to a remote machine in order to make it amenable to your request to run a copy of your active process? Let's examine the issues surrounding what we call <B>process cloning</B>. </P>
+<P>&nbsp;</P>
+<P><B>Background:</B> </P>
+<P>The approach is to develop a <I>service</I> and an associated function interface. Your process calls the function with the name of a remote host. The function connects to a well-known port on the remote machine to invoke the cloned service through the inter-networking daemon, inetd. </P>
+<P>Early Unix systems ran daemons for every service that waited for a remote connection. When you used telnet, for example, there was a telnet daemon named telnetd waiting for your connection to port number 23 on the remote machine. (Port 23 is always used for telnet. It is one of many so-called well-known ports defined in /etc/services.) There came to be so many daemon processes waiting for connections that the amount of available swap space and the number of user processes became limited. </P>
+<P>The super-server solved these problems by waiting for a connection to one of a list of its well-known ports, automatically starting associated servers when connections were made. One need only add a line entry to two files to register a new service. You must be root to edit these files or to request that inetd reinitialize itself and reread them [2]. </P>
+<P>Keep in mind that when you allow a process on some remote machine to start a copy of itself on your machine, you bare a significant <U>security risk</U> of that new process being hostile. All of the computers on my network are completely under my control so security is not a concern of mine. That issue will not be discussed further.</P>
+<P>&nbsp;</P>
+<P><B>How It Works:</B> </P>
+<P>The service needs to be defined in /etc/services. Add an entry as follows:</P>
+<PRE>&#9;clone&#9;5050/tcp&#9;# automatically starts cloned</PRE>
+<P>&nbsp;</P>
+<P>where clone is the service name, 5050 is the well-known port number, and tcp is the communications socket's transport protocol. We picked the 5050 port because it was higher than the reserved system port numbers, and it wasn't already in use. (The 50-50, half-and-half connotation will make this port number easy to remember.) </P>
+<P>The clone service needs to be defined to inetd in /etc/inetd.conf as follows: </P>
+<PRE>
+&#9;clone&#9;stream&#9;tcp&#9;nowait&#9;root&#9;/user/bin/cloned&#9;cloned</PRE>
+<P>&nbsp;</P>
+<P>where clone is the service name, a match to the /etc/services entry. (See the man pages for inetd.conf for descriptions of other parameters [2].) Note that inetd will not know about these new entries until the system is rebooted, or unless you issue a command to force it to reread its configuration file. Issue </P>
+<PRE>
+&#9;&gt;killall -HUP inetd</PRE>
+<P>&nbsp;</P>
+<P>as the root user to make inetd reread its service definition file. </P>
+<P>&nbsp;</P>
+<P><B>How It's Used:</P>
+</B><P>Your application makes a function call to clone() with the name of the remote host where the new copy of your process is to be started. The clone() function determines the name of the active process by searching for its own process id in a ps command output listing. It uses which command output to find the path to the executable. </P>
+<P>When clone() connects to port 5050, inetd accepts the connection and does the plumbing necessary to set cloned's stdin to the socket receive stream and its stdout to the socket send stream. The cloned service gets control from inetd via fork() and execl() calls [3]. </P>
+<P>When cloned gets control on the remote machine, it reads the name of the executable that is sent in the first packet. The received executable data will be written to the local /tmp area using the same executable name.</P>
+<P>&nbsp;</P>
+<P><B>Summary:</P>
+</B><P>The local application calls clone() with the name of the remote host. The clone() function connects to the clone service port, causing cloned to be started on the remote machine. It then copies the executable over the socket connection to the remote machine, where it is written into the local /tmp area by the cloned daemon, activating it via fork() and execl().</P>
+<P>What happens next depends on the needs of your application. You may wish to open a new connection to your remote clone so both copies remain active. You may wish to terminate the local version to effect agent migration. You might even have the remote copy start another remote copy somewhere else, forming a daisy-chain peer-to-peer network.</P>
+<P>How it all works is ultimately up to you, but the first step is to get that process active on a remote machine. An application named <A HREF="misc/vrenios/test.c.txt">test.c</A> and the clone daemon, <A HREF="misc/vrenios/cloned.c.txt">cloned.c</A> along with its interface function, <A HREF="misc/vrenios/clone.c.txt">clone.c</A> are included with this article. All are written in C and tested on Red Hat Linux version 4.2. </P>
+<P>&nbsp;</P>
+<P><B>References:</P>
+</B><P>[1] Milojicic, D., Douglis, F. and Wheeler, R., Processes, Computers, and Agents, Association for Computing Machinery Press, 1998.</P>
+<P>[2] See the Unix man pages for inetd and inetd.conf.</P>
+<P>[3] Stevens, W. R., Unix Network Programming, Prentice-Hall, 1990. 
+
+
+
+<!-- *** BEGIN copyright *** -->
+<P> <hr> <!-- P --> 
+<H5 ALIGN=center>
+
+Copyright &copy; 2000, Alex Vrenios<BR> 
+Published in Issue 51 of <i>Linux Gazette</i>, March 2000</H5>
+<!-- *** END copyright *** -->
+
+<!--startcut ==========================================================-->
+<!-- P --> <HR> <!-- P -->
+
+<FONT SIZE="+2">Talkbacks</FONT>
+<P>
+<!-- *** BEGIN navbar *** -->
+<A HREF="index.html"><IMG ALT="[ Table of Contents ]" 
+	SRC="../gx/indexnew.gif" WIDTH=163 HEIGHT=60 ALIGN=bottom ></A>
+<A HREF="../index.html"><IMG ALT="[ Front Page ]" 
+	SRC="../gx/homenew.gif" WIDTH=163 HEIGHT=60 ALIGN=bottom></A>
+<A HREF="steffler.html"><IMG ALT="[ Prev ]" SRC="../gx/back2.gif" WIDTH=41 HEIGHT=60 ALIGN=bottom></A>
+<A HREF="../faq/index.html"><IMG ALT="[ Linux Gazette FAQ ]" 
+	SRC="./../gx/dennis/faq.gif"WIDTH=163 HEIGHT=60 ALIGN=bottom></A>
+<A HREF="lg_backpage51.html"><IMG ALT="[ Next ]" SRC="../gx/fwd.gif" WIDTH=41 HEIGHT=60 ALIGN=bottom  ></A>
+<!-- *** END navbar *** -->
+</BODY></HTML>
+<!--endcut ============================================================-->

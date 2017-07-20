@@ -1,0 +1,510 @@
+#######################################################################
+## proc send_expect
+## 
+## Copyright (c) David L. Fisher, 1999
+## 
+## This software is copyrighted David L. Fisher.  The following 
+## terms apply to all files associated with the software unless
+## explicitly disclaimed in individual files.
+## 
+## The author hereby grants permission to use, copy, modify,
+## distribute, and license this software and its documentation for any
+## purpose, provided that existing copyright notices are retained in
+## all copies and that this notice is included verbatim in any
+## distributions. No written agreement, license, or royalty fee is
+## required for any of the authorized uses. Modifications to this
+## software may be copyrighted by their authors and need not follow
+## the licensing terms described here, provided that the new terms are
+## clearly indicated on the first page of each file where they apply. 
+## 
+## IN NO EVENT SHALL THE AUTHOR OR DISTRIBUTORS BE LIABLE TO ANY PARTY
+## FOR DIRECT, INDIRECT, SPECIAL, INCIDENTAL, OR CONSEQUENTIAL DAMAGES
+## ARISING OUT OF THE USE OF THIS SOFTWARE, ITS DOCUMENTATION, OR ANY
+## DERIVATIVES THEREOF, EVEN IF THE AUTHORS HAVE BEEN ADVISED OF THE
+## POSSIBILITY OF SUCH DAMAGE.
+## 
+## THE AUTHORS AND DISTRIBUTORS SPECIFICALLY DISCLAIM ANY WARRANTIES,
+## INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+## MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND
+## NON-INFRINGEMENT.  THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS,
+## AND THE AUTHORS AND DISTRIBUTORS HAVE NO OBLIGATION TO PROVIDE
+## MAINTENANCE, SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
+## 
+## GOVERNMENT USE: If you are acquiring this software on behalf of the 
+## U.S. government, the Government shall have only "Restricted Rights"
+## in the software and related documentation as defined in the Federal 
+## Acquisition Regulations (FARs) in Clause 52.227.19 (c) (2).  If you
+## are acquiring the software on behalf of the Department of Defense,
+## the software shall be classified as "Commercial Computer Software"
+## and the Government shall have only "Restricted Rights" as defined
+## in Clause 252.227-7013 (c) (1) of DFARs.  Notwithstanding the
+## foregoing, the authors grant the U.S. Government and others acting
+## in its behalf permission to use and distribute the software in
+## accordance with the terms specified in this license.
+## 
+#######################################################################
+#######################################################################
+## NAME
+##      send_expect
+##
+## DESCRIPTION
+##      Send a string to a remote system and look for the echo.
+##
+## INPUTS
+##      id              - spawn id of the remote process
+##      command         - command string to send (default is blank)
+##      flags           - currently unused
+##
+## OUTPUTS
+##      On success, returns 0
+##      On failure, returns 1 and saves the expect internal
+##      diagnostics that were generated on the failed transmission
+##      attempt
+##
+## NOTES
+##
+## 1:   This procedure uses four different transmission modes in an
+##      attempt to match the echo string with the send string.  Only
+##      after all have been exhausted will an error be returned.
+##      The modes are:
+##        1 - send fast - send the entire string without management
+##        2 - send with send_slow - send the entire string with a
+##            specified send_slow list
+##        3 - send blocks - send small blocks of the string and
+##            generate regular expressions on the fly to match garbage
+##            characters in the echo (this is useful for noisy routers
+##            and those which don't allow convenient control of their
+##            tty settings)
+##        4 - send characer loop - send one character at a time, and
+##            wait for the echo before sending the nexxt character.
+##            This mode is basically guaranteed to work as long as
+##            there's a valid connection, but it's the slowest mode.
+##      If a mode fails to match the echo, a GNU standard control-U is
+##      sent to kill the current command line and give the harness a
+##      clean slate for trying the next transmission mode
+##
+## 2:   DIAGNOSTICS FILE - this procedure manages the creation and
+##      association of the diagnostics file(s) - a small file is
+##      created for each send attempt, and if there is a failure, the
+##      file is renamed and kept.  If there is no error, it is deleted
+##      and recreated for the next attempt.  This is to keep the size
+##      of the diagnostics file small, and to keep its content
+##      directly associated with a send failure.  Since internals are
+##      always logged, there is the same performance hit as in
+##      creating the huge single file. The benefit of this approach is
+##      in debugging.
+##
+## 3:   COMMAND TERMINATION - this procedure strips off the very last
+##      character in the send string (whether it's a carriage return
+##      or text character) and won't send it until the string has
+##      matched up to that point.  This is becuase on some systems,
+##      other characters may preclude the need for a carriage return
+##      and execute a command upon reception of the last character -
+##      we don't want this unless we've matched the entire send string
+##      and know that the command being executed is the one we sent.
+##
+## 4:   this procedure now keeps the diags files for any command that
+##      must be retransmitted after a kill character due to a mode
+##      timeout the counter for the diag files here is
+##      sendGlobals(killed) and the array element conatining the
+##      filenames is sendGlobals(kill$sendGlobals(killed))
+##
+#######################################################################
+proc send_expect { id command { flags "" } } {
+
+    global sendGlobals;
+    global send_slow;
+    global ch;
+    global sessions;
+    global files;
+    global globals;
+    
+    ## this is more than enough time for the matching we're doing here
+    set timeout 2;
+
+    ##-----------------------------------------------------------------
+    ## if we're called just to send a carriage return, send it and return -
+    ## do not update the history for this send
+    ##-----------------------------------------------------------------
+    if { "$command" == "\r" } {
+        if { [send_only $id "\r"] } {
+            puts stderr "Unable to send carriage return";
+            return $sendGlobals(error);
+        } else {
+            return $sendGlobals(success);
+        }
+    }
+
+    ##-----------------------------------------------------------------
+    ## create the command portion of the diagnostics file name - just want
+    ## the first word in the command string
+    ##-----------------------------------------------------------------
+    set cmdname [lindex $command 0];
+    set saveFile "send.kill.[expr $sendGlobals(killed)+1].$cmdname.diags";
+
+    ##-----------------------------------------------------------------
+    ## initialize settings for this attempt
+    ##-----------------------------------------------------------------
+    set sendGlobals(command)    "$command";
+    set sendGlobals(stringSent) "";
+    set sendGlobals(ssFlag)     "";
+    set sendGlobals(thisMode)   0;
+    incr sendGlobals(numSent);
+    
+    ##-----------------------------------------------------------------
+    ## make sure we have a valid useMode element
+    ##-----------------------------------------------------------------
+    if { $sendGlobals(useMode) < 1 || $sendGlobals(useMode) > 4 } {
+        puts stderr "Invalid sendGlobals(useMode) - defaulting to 1";
+        set sendGlobals(useMode) 1;
+    }
+
+    ##-----------------------------------------------------------------
+    ## strip off the last character and use it as the terminator
+    ##-----------------------------------------------------------------
+    set sendGlobals(terminator) [string range $command end end];
+    set len      [expr [string length $command] - 1];
+    set command  [string range $command 0 [expr $len - 1]];
+
+    ##------------------------------------------------------------------
+    ## handle diagnostics file and exp_internal
+    ## every time we open a file use the same name - this is to
+    ## overwrite the last file since the send was successful
+    ## if its contents are associated with an error, we rename it
+    ## later on when we detect the error
+    ##------------------------------------------------------------------
+    if { $sendGlobals(logDiags) } {
+	set exp_internal_old [exp_internal -info];
+        exp_internal -f $sendGlobals(diagFile) $exp_internal_old;
+    }
+
+    ####################################################################
+    ################ time to send the string ###########################
+    ####################################################################
+
+
+    ##------------------------------------------------------------------
+    ## MODE 1 - send the entire string without further management;
+    ## send_slow is disabled for this mode (trying for fastest transmission)
+    ##------------------------------------------------------------------
+    if { $sendGlobals(useMode) == 1 } {
+        if { $sendGlobals(Mode1FailMax) > 0 &&
+             $sendGlobals(Mode1FailMax) > $sendGlobals(Mode1Failures) } {
+            set sendGlobals(thisMode) 1;
+            if { [send_only $id "$command"] } {
+                puts stderr "Unable to send command \"$command\"";
+                return $sendGlobals(error);
+            }
+            expect {
+                -i $id
+                -re "$command" {
+                    set sendGlobals(stringSent) "$command";
+                    if { "$sendGlobals(terminator)" != "" } {
+                        if { [send_only $id "$sendGlobals(terminator)"] } {
+                            puts stderr "Unable to terminate command";
+                            return $sendGlobals(error);
+                        }
+                    }
+		    ## this only works with UNIX currently
+		    ## or at least, not with the cygwin NT expect port
+                    if { $sendGlobals(logDiags) } {
+			exp_internal $exp_internal_old;
+                        catch {exec rm $sendGlobals(diagFile)};
+			#catch {file delete -force $sendGlobals(diagFile)};
+                    }
+		    return $sendGlobals(success);
+                }
+                timeout {
+                    puts stderr "Mode 1 failed to match entire string";
+                }
+            }
+
+	    ##----------------------------------------------------------
+	    ## kill the command line and clear the buffer
+	    ##----------------------------------------------------------
+            if { [send_only $id $sendGlobals(kill) 0] } {
+                puts stderr "Unable to kill command";
+                return $sendGlobals(error);
+            }
+            expect -i $id -re "\[^\r\n\]*";
+            incr sendGlobals(kills);
+            incr sendGlobals(Mode1Failures);
+            puts stderr "Mode 1 failed";
+        }
+	# if we haven't failed out of this mode
+    }
+    # if we're supposed to use this mode
+
+    ##------------------------------------------------------------------
+    ## MODE 2 - use the send_slow variable
+    ## NOTE: developers may want to experiment with adding some
+    ## iterations and modifying the send_slow list on the fly
+    ##------------------------------------------------------------------
+    set sendGlobals(ssFlag) "-s";
+    if { $sendGlobals(useMode) <= 2 } {
+        if { $sendGlobals(Mode2FailMax) > 0 &&
+             $sendGlobals(Mode2FailMax) > $sendGlobals(Mode2Failures) } {
+            puts stderr "Entering send mode 2";
+            set sendGlobals(thisMode) 2;
+
+            ## manage the send_slow list - add a delay between each char
+            set send_slow "$sendGlobals(interval) $sendGlobals(delay)";
+
+            if { [send_only $id "$command"] } {
+                puts stderr "Unable to send command \"$command\"";
+                return $sendGlobals(error);
+            }
+            expect {
+                -i $id
+                -re "$command" {
+                    set sendGlobals(stringSent) "$command";
+                    if { "$sendGlobals(terminator)" != "" } {
+                        if { [send_only $id "$sendGlobals(terminator)"] } {
+                            puts stderr "Unable to terminate command";
+                            return $sendGlobals(error);
+                        }
+                    }
+                    ## keep the diags file to debug the interface
+                    if { $sendGlobals(logDiags) } {
+			exp_internal "$exp_internal_old";
+                        catch {exec mv $sendGlobals(diagFile) $saveFile}
+			#catch {file rename -force $sendGlobals(diagFile) $saveFile};
+                        set sendGlobals(kill$sendGlobals(killed)) $saveFile;
+                        exp_internal "$exp_internal_old";
+                        puts stderr "Command killed in mode 1; see $saveFile";
+                    }
+                    return $sendGlobals(success);
+                }
+                timeout {
+                    puts stderr "Mode 2 failed to match entire string";
+                }
+            }
+
+	    ##----------------------------------------------------------
+	    ## kill the command line and clear the buffer
+	    ##----------------------------------------------------------
+            if { [send_only $id $sendGlobals(kill) 0] } {
+                puts stderr "Unable to kill command";
+                return $sendGlobals(error);
+            }
+            expect -i $id -re "\[^\r\n\]*";
+            incr sendGlobals(kills);
+            incr sendGlobals(Mode2Failures);
+            puts stderr "Mode 2 failed";
+        }
+    }
+
+    ##------------------------------------------------------------------
+    ## MODE 3 - send in small blocks and tolerate garbage characters
+    ##          in the echo - the size of the block is hardcoded at 8
+    ##          because of the static expect expression that follows
+    ##          and the regular expression generation
+    ##------------------------------------------------------------------
+    set sendGlobals(stringSent)      "";
+    set sendLength                   [string length $command];
+    set success                      1;
+    set timeout                      1;
+    set blocksize                    8;
+    set sendGlobals(ssFlag)          "-s";
+
+    if { $sendGlobals(useMode) <= 3 } {
+        if { $sendGlobals(Mode3FailMax) > 0 &&
+             $sendGlobals(Mode3FailMax) > $sendGlobals(Mode3Failures) } {
+            puts stderr "Entering send mode 3";
+            set sendGlobals(thisMode) 3;
+            set sendBlock             "";
+            set sendLength            [string length $command];
+            set success               1;
+
+            ##--------------------------------------------------------------
+            ## loop through blocks of blocksize characters - create
+            ## expressions to match the send block with control
+            ## sequences anywhere in the block
+            ##--------------------------------------------------------------
+            for {set sendGlobals(index) 0}           \
+                {$sendGlobals(index) < $sendLength}  \
+                {incr sendGlobals(index) $blocksize} {
+
+                ## generate the regular expressions for the expect clause
+                set sendBlock [string range $command $sendGlobals(index) \
+                              [expr $sendGlobals(index) + $blocksize - 1]];
+                for { set k 0 } { $k < $blocksize } { incr k } {
+                    set s${k}_left      [string range $sendBlock 0 $k];
+                    set s${k}_right     [string range $sendBlock [expr $k+1] end];
+                }
+
+                ## send the block
+                if { [send_only $id "$sendBlock"] } {
+                    puts stderr "Unable to send block \"$sendBlock\"";
+                    return $sendGlobals(error);
+                }
+
+                ##---------------------------------------------------------
+                ## now look for the echo of the block sent
+                ##----------------------------------------------------------
+                expect {
+                    -i $id
+                    -re "$sendBlock"                        { }
+                    -re "${s0_left}\[^\r\n\]*${s0_right}"   { }
+                    -re "${s1_left}\[^\r\n\]*${s1_right}"   { }
+                    -re "${s2_left}\[^\r\n\]*${s2_right}"   { }
+                    -re "${s3_left}\[^\r\n\]*${s3_right}"   { }
+                    -re "${s4_left}\[^\r\n\]*${s4_right}"   { }
+                    -re "${s5_left}\[^\r\n\]*${s5_right}"   { }
+                    -re "${s6_left}\[^\r\n\]*${s6_right}"   { }
+                    -re "${s7_left}\[^\r\n\]*${s7_right}"   { }
+                    timeout {
+                        set success 0;
+                        puts stderr "Mode 3 failed to match block:";
+			puts stderr "$sendGlobals(stringSent)\"$sendBlock\"";
+                        break;
+                    }
+                }
+                append sendGlobals(stringSent) "$sendBlock";
+            }  
+	    # block loop
+
+            ##--------------------------------------------------------------
+            ## if this attempt was successful, send the terminating character
+            ##--------------------------------------------------------------
+            if { $success } {
+                ## only call send_only if the terminator is nonblank
+                if { "$sendGlobals(terminator)" != "" } {
+                    if { [send_only $id "$sendGlobals(terminator)"] } {
+                        puts stderr "Unable to terminate command";
+                        return $sendGlobals(error);
+                    }
+                }
+                ## here we know the command had to be killed in modes 1 & 2
+                if { $sendGlobals(logDiags) } {
+		    exp_internal "$exp_internal_old";
+                    set sendGlobals(kill$sendGlobals(killed)) $saveFile;
+                    catch {exec mv $sendGlobals(diagFile) $saveFile}
+		    #catch {file rename $sendGlobals(diagFile) $saveFile};
+                    puts stderr "Command killed in modes 1 & 2; see $saveFile";
+                }
+                return $sendGlobals(success);
+            }
+	    
+	    ##----------------------------------------------------------
+	    ## kill the command line and clear the buffer
+	    ##----------------------------------------------------------
+	    if { [send_only $id $sendGlobals(kill) 0] } {
+		puts stderr "Unable to kill command";
+		return $sendGlobals(error);
+	    }
+	    expect -i $id -re "\[^\r\n\]*";
+	    incr sendGlobals(kills);
+	    incr sendGlobals(Mode3Failures);
+	    puts stderr "Mode 3 failed";
+        }
+        # if failmax not reached
+    }
+    # if use this mode
+
+    ##-----------------------------------------------------------------
+    ## MODE 4 - index through the string one character at a time
+    ##          if this mode fails, it's pretty much all over
+    ## NOTE: there is no failmax check for this mode - if mode
+    ## rejection is being used (in other words, enough failures causes
+    ## the mode to be skipped) this mode cannot be skipped - it's the
+    ## last hope of a successful transmission
+    ## send_slow is disabled for this mode (unnecessary)
+    ##------------------------------------------------------------------
+    set sendGlobals(stringSent)      "";
+    set sendLength                   [string length $command];
+    set success                      1;
+    set timeout                      1;
+    set sendGlobals(ssFlag)          "";
+
+    puts stderr "Entering send mode 4";
+    set sendGlobals(thisMode) 4;
+    if { $sendGlobals(useMode) <= 4 } {
+        for {set sendGlobals(index) 0}         \
+            {$sendGlobals(index) < $sendLength} \
+            {incr sendGlobals(index)} {
+            set sendChar [string range $command \
+		    $sendGlobals(index) $sendGlobals(index)];
+            if { [send_only $id $sendChar] } {
+                puts stderr "Unable to send character \"$sendChar\"";
+                return $sendGlobals(error);
+            }
+
+            ##----------------------------------------------------------
+            ## need to add the backslash for shell-significant and
+            ## expression-significant characters or this expression may
+            ## match when we don't want it to
+            ##----------------------------------------------------------
+            set expChar "\\$sendChar";
+            expect {
+                -i $id
+                -re "$expChar" {
+                    append sendGlobals(stringSent) "$sendChar";
+                    continue;
+                }
+                timeout {
+                    #####################################################
+                    ## FAILURE!!!                                      ##
+                    ## this is where we call it a day - can't even     ##
+                    ## verify a single character                       ##
+                    #####################################################
+                    puts stderr "Mode 4 failed to match single character";
+                    puts stderr "Unable to send \"$command\"";
+                    puts stderr "Successfully sent: \"$sendGlobals(stringSent)\"";
+                    if { [send_only $id $sendGlobals(kill) 0] } {
+                        puts stderr "Unable to kill command";
+                        return $sendGlobals(error);
+                    }
+                    expect -i $id -re "\[^\r\n\]*";
+                    incr sendGlobals(kills);
+                    incr sendGlobals(errors);
+                    ##---------------------------------------------------
+                    ## use the first word in the command string as the
+                    ## command name for the diags file - then rename the
+                    ## file so its doesn't get overwritten
+                    ##---------------------------------------------------
+                    set cmd [lindex $command 0];
+                    if { $sendGlobals(logDiags) } {
+                        set sendGlobals($sendGlobals(errors),file) $saveFile;
+			set sendGlobals(kill$sendGlobals(killed)) $saveFile;
+                        catch {exec mv $sendGlobals(diagFile) $saveFile}
+			#catch {file rename -force $sendGlobals(diagFile) $saveFile}
+                        exp_internal "$exp_internal_old";
+                        puts stderr "TRANSMISSION FAILURE:\n[getMsg]";
+                    }
+                    puts stderr "Interface timeout on session $id";
+                    return $sendGlobals(error);
+                }
+            }
+	    # expect clause
+        }
+	# char loop
+
+        ## once we get here, send the carriage-return
+        if { "$sendGlobals(terminator)" != "" } {
+            if { [send_only $id "$sendGlobals(terminator)"] } {
+                puts stderr "Unable to terminate command";
+                return $sendGlobals(error);
+            }
+        }
+        
+
+        ## here we know the command had to be killed in modes 1,2 & 3
+        if { $sendGlobals(logDiags) } {
+	    exp_internal "$exp_internal_old";
+            set sendGlobals(kill$sendGlobals(killed)) $saveFile;
+            catch {exec mv $sendGlobals(diagFile) $saveFile}
+	    #catch {file rename -force $sendGlobals(diagFile) $saveFile}
+            puts stderr "Command killed in modes 1, 2 & 3; see $saveFile";
+        }
+        return $sendGlobals(success);
+    }
+    # if use this mode
+
+    ## if we get here, something went wrong
+    puts stderr "send_expect: unable to complete send";
+    return $sendGlobals(error);
+}
+
+
+

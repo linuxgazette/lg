@@ -1,0 +1,118 @@
+#include <fcntl.h>
+#include <stdio.h>
+#include <string.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netdb.h>
+/*
+**   Function clone() connects to well-known port 5050,
+**   causing inetd to start the "replication" service.
+**
+**   Function clone() transmits a copy of the calling
+**   binary executable to the remote host to the clone
+**   service daemon, cloned.
+**
+**   The clone server, cloned, receives the binary from
+**   clone(), creates a copy in its /tmp area and then
+**   issues an execl() to it.
+**
+**   > The binary executable must be somewhere in $path
+**     on the local machine. The "which" command finds
+**     the local copy of it for open, first, then for
+**     subsequent transmission to cloned.
+**
+**   gcc -c clone.c # creates clone.o for gcc of test.c
+*/
+int clone(hostname)
+char *hostname;               /* host where clone starts */
+{
+   struct sockaddr_in sock;   /* structure for socket I/O */
+   struct hostent *hp;        /* structure for IP address */
+   FILE *fp;                  /* file pointer for popen() */
+   int len;                   /* number of bytes received */
+   int pid;                   /* match process id in ps */
+   int sfd;                   /* socket file descriptor */
+   int fd;                    /* binary file descriptor */
+   int i;
+   char buffer[1024];         /* control and data buffer */
+   char binary[64];           /* name of binary executable */
+   char path[256];            /* path to binary executable */
+   char buf[256];
+   char cmd[32];
+
+   /*
+   **   Get name of binary executable
+   */
+   pid = getpid(); /* local process id */
+   if((fp = popen("ps -c", "r")) == NULL)
+   {
+      perror("popen()");
+      exit(-1);
+   }
+   fgets(buffer, sizeof(buffer), fp); /* header */
+   while(fgets(buffer, sizeof(buffer), fp) != NULL)
+   {
+      buffer[strlen(buffer)-1] = '\0'; /* <nl> */
+      sscanf(buffer, "%d %*s %*s %*s %s", &i, binary);
+      if(i == pid) /* process id ours? */
+         break; /* yes: binary now set */
+   }
+   fclose(fp);
+
+   /*
+   **   Get path to binary executable
+   */
+   sprintf(buffer, "which %s", binary);
+   fp = popen(buffer, "r");
+   fgets(path, sizeof(path), fp);
+   /* remove final <nl> char */
+   path[strlen(path)-1] = '\0';
+   fclose(fp);
+
+   /*
+   **   Get client socket for inetd clone service
+   */
+   if((sfd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+   {
+      perror("clone(): socket()");
+      exit(-1);
+   }
+
+   /*
+   **   Set up socket info for connect
+   */
+   bzero((char *) &sock, sizeof(sock));
+   hp = gethostbyname(hostname);
+   bcopy(hp->h_addr, &sock.sin_addr, hp->h_length);
+   sock.sin_family = hp->h_addrtype;
+   sock.sin_port = htons(5050); /* cloned's port */
+
+   /*
+   **   Connect to the "inetd" cloned service's well-known port
+   */
+   if(connect(sfd, (struct sockaddr *) &sock, sizeof(sock)) < 0)
+   {
+      perror("clone(): connect()");
+      exit(-1);
+   }
+
+   /*
+   **   Send cloned the name of this binary
+   */
+   sprintf(buffer, "%s", binary);
+   send(sfd, buffer, strlen(buffer)+1, 0);
+   recv(sfd, buffer, sizeof(buffer), 0); /* ACK */
+   /* do received length checking if desireable */
+
+   fd = open(path, O_RDONLY); /* open local binary */
+   /* transmit binary to cloned 1 packet at a time */
+   while((len = read(fd, buffer, sizeof(buffer))) > 0)
+   {
+      send(sfd, buffer, len, 0); /* each binary part */
+      recv(sfd, buffer, sizeof(buffer), 0); /* ACK */
+      /* do received length checking if desireable */
+   }
+   close(sfd);
+   close(fd);
+}

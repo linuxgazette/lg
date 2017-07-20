@@ -1,0 +1,72 @@
+#!/bin/bash
+
+# record and execute commands at the same time
+
+###############################################################################
+# CONFIGURATION
+###############################################################################
+medium="/vol/${vol:-flash}"                               # volatile medium
+conf="${medium}/.conf.d"                                  # configuration dir.
+cmds="${conf}/commands"                                   # commands file
+prog=${0##*/}                                             # program name
+cmd="$*"                                                  # command string
+
+###############################################################################
+# SUBROUTINES
+###############################################################################
+function die() { echo -e "$@\nExiting."; exit 1; }
+
+function usage() {                                        # the help screen
+  echo "Usage: $prog  [options]
+       set store=yes in order to enable store only.
+       set vol=<name of volatile medium under /vol> [e.g.: vol=floppy]"
+  exit 1
+}
+###############################################################################
+# SCRIPT PROPER
+###############################################################################
+# Sanity Checks
+[ $# -eq 0 ]     && usage
+[ -n "$USER"   ] || die "Your environment does not set the \$USER variable."
+[ -w "$medium" ] || die "Medium \"$medium\" is not writable."
+[ -d "$conf"   ] || mkdir -vp "$conf"
+
+# perform alias expansion
+if  x=$(alias $1 2>/dev/null) ; then
+ x="$(echo $x| sed 's#^.*=##; s#[\\'\'''\"']##g')"
+ echo -e "\033[1mSubstituting alias:\033[m $1 \033[1m=>\033[m $x"
+ shift
+ cmd="${x} $*"                                            # construct command
+fi
+
+# try the command and confirm it if something goes wrong
+if [ -z "$store" ] && ! eval ${cmd} ; then
+ echo -en "\033[1;31mCommand failed. Do you still want to store it [y/n]? "
+ read -n1 ans; echo -e "\033[m";
+ case "${ans}" in y|Y);; *) exit 0; esac
+fi
+
+
+###############################################################################
+# update the commands file
+###############################################################################
+#  the following puts a timestamp into the file and creates it if non-existent
+echo "# $(date) --------------------------" >> ${cmds}
+
+# check whether the directory stored last is identical with $pwd
+pwd="$(pwd)"                                              # determine cwd
+if [ -z "$(grep '^cwd=' "$cmds" |tail -1 |  grep "=\"$pwd\"")" ]
+then
+   echo 'cwd="'$pwd'"; [ -d "$cwd" ] && cd "$cwd"' >> ${cmds}
+fi
+
+# determine current id and, if necessary, prepend a 'su'
+case "$cmd" in
+ mkdir*|cp*|ln*) [ "$USER" != "root" ] && cmd="su $USER -c\"${cmd}\"";;
+esac
+
+# finally, put the command into the command file
+cat <<eof >> ${cmds}
+echo -e "\033[1m# ${cmd//\"/\"}\033[m"
+${cmd}
+eof

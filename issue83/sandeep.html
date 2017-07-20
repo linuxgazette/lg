@@ -1,0 +1,416 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>Process Tracing Using Ptrace, part 2 LG #83</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="ramankutty.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../lg_faq.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="stoddard.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+
+<!--endcut ============================================================-->
+
+<TABLE BORDER><TR><TD WIDTH="200">
+<A HREF="http://www.linuxgazette.net/">
+<IMG ALT="LINUX GAZETTE" SRC="../gx/2002/lglogo_200x41.png" 
+	WIDTH="200" HEIGHT="41" border="0"></A> 
+<BR CLEAR="all">
+<SMALL>...<I>making Linux just a little more fun!</I></SMALL>
+</TD><TD WIDTH="380">
+
+
+<center>
+<BIG><BIG><STRONG><FONT COLOR="maroon">Process Tracing Using Ptrace, part 2</FONT></STRONG></BIG></BIG><BR>
+<STRONG>By <A HREF="../authors/sandeep.html">Sandeep S</A></STRONG></BIG>
+
+</TD></TR>
+</TABLE>
+<P>
+
+<!-- END header -->
+
+
+
+
+<HR>
+<EM>The basic features of ptrace were explained in 
+<A HREF="../issue81/sandeep.html">Part I</A>. We saw a small example too. As I
+said earlier, the main applications of ptrace are accessing memory or registers
+of a process being run (either for debugging or for some evil purposes). So
+first we should have some basic idea on the binary format of executables - then
+only we know how and where to access them. So I shall give you a small tutorial
+on ELF, the binary format used in Linux. In the last section of this article,
+we find a small program which accesses the registers and memory of another one
+and modifies them so as to change the output of that process, by injecting some
+extra code.</EM>
+<HR>
+<P><B>Note:</B>  Please don't get confused. Definitely this is an article about ptrace,
+not about ELF. But a basic knowledge of ELF is required for accessing the core images 
+of processes. So it should be explained first.
+<P>
+<P>
+<H2><A NAME="s1">1. What is ELF?</A></H2>
+
+<P>ELF stands for Executable and Linking Format. It defines the format of 
+executable binaries used on Linux - and also for relocatable, shared object and
+core dump files too. ELF is used by both linkers and loaders. They view ELF
+from two sides, so both should have a common interface.
+<P>
+<P>The structure of ELF is such that it has many sections and segments.
+Relocatable files have section header tables, executable files have program
+header tables, and shared object files have both. In the coming sections I shall
+explain what these headers are.
+<P>
+<H2><A NAME="s2">2. ELF Headers</A></H2>
+
+<P>Every ELF file has an ELF header. It always starts at 
+offset 0 in the file. It contains the details of the binary file - should 
+it be interpreted, what data structures are related to the file, etc.
+<P>
+<P>The format of the header is given below (taken from /usr/src/include/linux/elf.h)
+<BLOCKQUOTE><CODE>
+<HR>
+<PRE>
+#define EI_NIDENT       16
+
+typedef struct elf32_hdr{
+  unsigned char e_ident[EI_NIDENT];
+  Elf32_Half    e_type;
+  Elf32_Half    e_machine;
+  Elf32_Word    e_version;
+  Elf32_Addr    e_entry;  /* Entry point */
+  Elf32_Off     e_phoff;
+  Elf32_Off     e_shoff;
+  Elf32_Word    e_flags;
+  Elf32_Half    e_ehsize;
+  Elf32_Half    e_phentsize;
+  Elf32_Half    e_phnum;
+  Elf32_Half    e_shentsize;
+  Elf32_Half    e_shnum;
+  Elf32_Half    e_shstrndx;
+} Elf32_Ehdr;
+</PRE>
+<HR>
+</CODE></BLOCKQUOTE>
+<P>
+<P>A small description on the fields is as follows
+<P>
+<OL>
+<LI><P>e_ident : Contains information about how to treat the binary. Platform dependent.
+<P>
+</LI>
+<LI><P>e_type  : Contains information on the type and how to use the binary. 
+Types are relocatable, executable, shared object and core file.
+<P>
+</LI>
+<LI><P>e_machine : As you have guessed, this field specifies the architecture - Intel 386, 
+Alpha, Sparc etc.
+<P>
+</LI>
+<LI><P>e_version : Gives the version of the object file.
+<P>
+</LI>
+<LI><P>e_phoff : Offset from start to the first program header.
+<P>
+</LI>
+<LI><P>e_shoff : Offset from start to the first section header.
+<P>
+</LI>
+<LI><P>e_flags : Processor specific flags. Not used in i386
+<P>
+</LI>
+<LI><P>e_ehsize : Size of the ELF header.
+<P>
+</LI>
+<LI><P>e_phentsize &amp; e_shentsize : Size of program header and section header 
+respectively.
+<P>
+</LI>
+<LI><P>e_phnum &amp; e_shnum : Number of program headers and section headers. Program 
+header table will be an array of program headers (e_phnum elements). Similar is 
+the case of section header table.
+<P>
+</LI>
+<LI><P>e_shstrndx : In the section header table a section contains the name of 
+sections. This is the index to that section in the table. (see below)
+<P>
+</LI>
+</OL>
+<P>
+<H2><A NAME="s3">3. Sections And Segments</A></H2>
+
+<P>As said above, linkers treat the file as a set of logical sections described by a 
+section header table, and loaders treat the file as a set of segments described by a 
+program header table. The following section gives details on sections and 
+segments/program headers.
+<P>
+<H2>3.1 ELF Sections and Section Headers</H2>
+
+<P>The binary file is viewed as a collection of sections which are arrays of bytes 
+of which no bytes are duplicated. Even though there will be helper information to 
+correctly interpret the contents of the section, the applications may interpret 
+in its own way.
+<P>
+<P>There will be a section header table which is an array of section headers.
+The zeroth entry of the table is always NULL and describe no part of the 
+binary. Each section header has the following format:
+(taken from /usr/src/include/linux/elf.h)
+<P>
+<BLOCKQUOTE><CODE>
+<HR>
+<PRE>
+typedef struct elf32_shdr {
+  Elf32_Word sh_name;           /* Section name, index in string tbl (yes Elf32) */
+  Elf32_Word sh_type;           /* Type of section (yes Elf32) */
+  Elf32_Word sh_flags;          /* Miscellaneous section attributes */
+  Elf32_Addr sh_addr;           /* Section virtual addr at execution */
+  Elf32_Off sh_offset;          /* Section file offset */
+  Elf32_Word sh_size;           /* Size of section in bytes */
+  Elf32_Word sh_link;           /* Index of another section (yes Elf32) */
+  Elf32_Word sh_info;           /* Additional section information (yes Elf32) */
+  Elf32_Word sh_addralign;      /* Section alignment */
+  Elf32_Word sh_entsize;        /* Entry size if section holds table */
+} Elf32_Shdr;
+</PRE>
+<HR>
+</CODE></BLOCKQUOTE>
+<P>
+<P>Now the fields in detail.
+<P>
+<OL>
+<LI><P>sh_name : This contains an index into the section contents of the 
+e_shstrndx  string table. This index is the start of a null terminated string 
+to be used as the name of the section. There are many, a few are given.
+<P>
+<UL>
+<LI>.text This section holds executable instructions of a program</LI>
+<LI>.data This section holds initialized data that contributes to the programs image.</LI>
+<LI>.init: This section holds executable instructions that contribute to the process 
+initialization code.</LI>
+</UL>
+<P>
+</LI>
+<LI><P>sh_type : Section type such as program data, symbol table, string table etc..
+<P>
+</LI>
+<LI><P>sh_flags : Contains information such as how to treat the contents of the section.
+<P>
+</LI>
+<LI><P>sh_addralign : Contains the alignment requirement of section contents,
+typically 0/1 (both meaning no alignment) or 4.
+<P>
+</LI>
+</OL>
+<P>
+<P>The remaining fields seem to be self explaining.
+<P>
+<H2>3.2 ELF Segments And Program Headers</H2>
+
+<P>The ELF segments are used during loading ie, when the image of the process 
+is made in the core. Each segment is described by a program header. There 
+will be a program header table in the file (usually near the ELF header).
+The table is an array of program headers. The format of the program header 
+is as follows.
+<P>
+<BLOCKQUOTE><CODE>
+<HR>
+<PRE>
+typedef struct
+{
+  Elf32_Word    p_type;                 /* Segment type */
+  Elf32_Off     p_offset;               /* Segment file offset */
+  Elf32_Addr    p_vaddr;                /* Segment virtual address */
+  Elf32_Addr    p_paddr;                /* Segment physical address */
+  Elf32_Word    p_filesz;               /* Segment size in file */
+  Elf32_Word    p_memsz;                /* Segment size in memory */
+  Elf32_Word    p_flags;                /* Segment flags */
+  Elf32_Word    p_align;                /* Segment alignment */
+} Elf32_Phdr;
+</PRE>
+<HR>
+</CODE></BLOCKQUOTE>
+<P>
+<OL>
+<LI><P>p_type : Gives information on how to treat the contents. It gives the type
+of program header such as 
+<P>
+<UL>
+<LI>unused </LI>
+<LI>loadable </LI>
+<LI>Dynamic linking information</LI>
+<LI>reserved</LI>
+</UL>
+<P>etc ..
+<P>
+</LI>
+<LI><P>p_vaddr : relative virtual address the segment expects to be loaded.
+<P>
+</LI>
+<LI><P>p_paddr : physical address of the segment expects to be loaded into the
+memory.
+<P>
+</LI>
+<LI><P>p_flags : Contains protection flags - read/write/execute permissions
+<P>
+</LI>
+<LI><P>p_align : Contains the alignment for the segment in memory. If the
+segment is of type loadable, then the alignment will be the expected page size.
+<P>
+</LI>
+</OL>
+<P>
+<P>Remaining fields appear to be self explaining.
+<P>
+<H2><A NAME="s4">4. Loading The ELF File</A></H2>
+
+<P>We have got some idea about the structure of ELF object files. Now we have to 
+know how and where these files are loaded for execution. Usually we just type 
+program name at the shell prompt. In fact a lot of interesting things happen
+after  the return key is hit. 
+<P>
+<P>First the shell calls the 
+standard libc function which in turn calls the kernel routine. Now the ball is 
+in kernel's court. The kernel opens the file and finds out the type/format of
+the executable. Then loads ELF and needed libraries, initializes the program's
+stack, and finally passes control to the program code.
+<P>
+<P>The program gets loaded to 0x08048000 (you can see this in /proc/pid/maps)
+and the stack starts from 0xBFFFFFFF (stack grows to numerically small addresses).
+<P>
+<H2><A NAME="s5">5. Code Injection</A></H2>
+
+<P>We have seen the details of the programs being loaded in the memory. So when
+a process is given and its memory space known, we can trace it (if we have
+permission) and access the private data structures of the process. It is very 
+easy to say this, but not that easy to do it. Why not make a try? 
+<P>
+<P>First of all, let's write a program to access the registers of another 
+program and 
+modify it. Here we use the following values of <CODE>request</CODE>.
+<P>
+<UL>
+<LI>PTRACE_ATTACH : Attach to the process pid.
+</LI>
+<LI>PTRACE_DETACH : Detach from the process pid. 
+<P><B>Note :</B> Do not forget to call this, otherwise the process will
+stay in stopped mode and is hard to recover.
+<P>
+</LI>
+<LI>PTRACE_GETREGS : This copies the process' registers into the struct
+pointed by data (addr is ignored). This structure is 
+<CODE>struct user_regs_struct</CODE> defined as this, in asm/user.h.
+
+<BLOCKQUOTE><CODE>
+<HR>
+<PRE>
+struct user_regs_struct {
+                long ebx, ecx, edx, esi, edi, ebp, eax;
+                unsigned short ds, __ds, es, __es;
+                unsigned short fs, __fs, gs, __gs;
+                long orig_eax, eip;
+                unsigned short cs, __cs;
+                long eflags, esp;
+                unsigned short ss, __ss;
+        };
+</PRE>
+<HR>
+</CODE></BLOCKQUOTE>
+
+</LI>
+<LI>PTRACE_SETREGS : Does just the reverse of GETREGS.
+</LI>
+<LI>PTRACE_POKETEXT : This copies 32 bits from the address pointed by data
+in the addr address of the traced process.</LI>
+</UL>
+<P>
+<P>Now we are going to inject a small piece of our code to image of the process being traced and force the process to execute our code by changing its instruction pointer.
+<P>
+<P>What we do is very simple. First we attach the process, and then read the 
+register contents of the process. Now insert the code which we want to get 
+executed in some location of the stack and the instruction pointer of the 
+process is changed to that location. Finally we detach the process. Now the 
+process starts to execute and will be executing the injected code.
+<P>
+<P>We have two source files, one is the assembly code to be injected and 
+other is the one which traces the process. I shall provide a small program 
+which we may trace.
+<P>
+<P>The source files
+<P>
+<UL>
+<LI>
+<A HREF="./misc/sandeep/Tracer.c">Tracer.c</A></LI>
+<LI>
+<A HREF="./misc/sandeep/Code.S">Code.S</A></LI>
+<LI>
+<A HREF="./misc/sandeep/Sample.c">Sample.c</A></LI>
+</UL>
+<P>
+<P>Now compile the files.
+<P>
+<BLOCKQUOTE><CODE>
+<HR>
+<PRE>
+#cc Sample.c -o loop
+#cc Tracer.c Code.S -o catch
+</PRE>
+<HR>
+</CODE></BLOCKQUOTE>
+<P>
+<P>Go to another console and run the sample program by typing
+<P>
+<BLOCKQUOTE><CODE>
+<HR>
+<PRE>
+#./loop
+</PRE>
+<HR>
+</CODE></BLOCKQUOTE>
+<P>
+<P>Come back and execute the tracer to catch the looping process and change its
+output. Type
+<P>
+<BLOCKQUOTE><CODE>
+<HR>
+<PRE>
+#./catch `ps ax | grep "loop" | cut -f 3 -d ' '`
+</PRE>
+<HR>
+</CODE></BLOCKQUOTE>
+<P>
+<P>Now go to where the sample program 'loop' runs and watch what happens. 
+Definitely your play with ptrace has begun.
+<P>
+<H2><A NAME="s6">6. Looking Forward</A></H2>
+
+<P>In the first part we traced a process and counted its number of instructions.
+In this part we studied the ELF file structure and injected a small piece of 
+code into some process. In next part I would expect to access the memory space
+of some process. Till then, bye from Sandeep S.
+
+
+
+
+<!-- *** BEGIN copyright *** -->
+<hr>
+<CENTER><SMALL><STRONG>
+
+Copyright &copy; 2002, Sandeep S.
+Copying license <A HREF="../copying.html">http://www.linuxgazette.net/copying.html</A><BR> 
+Published in Issue 83 of <i>Linux Gazette</i>, October 2002</H5>
+</STRONG></SMALL></CENTER>
+<!-- *** END copyright *** -->
+<HR>
+
+<!--startcut ==========================================================-->
+<CENTER>
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="ramankutty.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../lg_faq.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="stoddard.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+</CENTER>
+</BODY></HTML>
+<!--endcut ============================================================-->

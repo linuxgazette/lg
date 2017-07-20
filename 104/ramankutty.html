@@ -1,0 +1,857 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Inter-Process Communication - Part 1 LG #104</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="oregan3.html" >&lt;-- prev</A> | <A HREF="seymour.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Inter-Process Communication - Part 1</h1>
+<p id="by"><b>By <A HREF="../authors/ramankutty.html">Hiran Ramankutty</A></b></p>
+
+<p>
+<h2>Scope</h2>
+
+<p>
+The purpose of this article is to get the readers familiar with the different 
+mechanisms that are available for communicating between two or more processes. 
+This may also serve as a tutorial for the novice programmer. There might be 
+several good tutorials on this subject, but here I will try to communicate my 
+explorations of this subject. This article may not be technically perfect. 
+Please send your suggestions and queries to <img src="../gx/authors/email/ramankutty.png">.
+</p>
+
+<h2>Introduction</h2>
+
+<p>
+Inter-Process Communication, which in short is known as IPC, deals mainly with 
+the techniques and mechanisms that facilitate communication between 
+processes. Now, why do we need special separate mechanisms or techniques for 
+communicating between processes? Why isn't it possible to have information 
+shared between two processes without using such special mechanisms?
+</p>
+
+<p>
+Let us start from something primitive. Imagine you have two glasses completely 
+filled with water. One glass contains hot water and the other contains cold 
+water. What can you do to make the temperature of water in both the glasses 
+equal? The simplest answer will be to mix the water from both the glasses 
+in a glass with much bigger capacity. Once water is mixed, the temperature 
+becomes equal after some time. If one can remember, this will be framed as a 
+problem with some numerical data in a High-School Physics examination. If we go 
+by principles, then the phenomenon here is conduction. If we go by our topic of 
+IPC, then we can say that since the two glasses were full, we had to use another 
+glass with a larger capacity to mix the contents in order to balance their heat energy.
+</p>
+<p>
+Have you ever wondered about the communication medium used in telephones? What 
+about the blood transporting system in the human body which communicates 
+blood to different parts of the body? What about my fingers which are
+typing this document? My brain is doing so many things at a time. How is it
+directing one of my fingers to hit one key and some other finger to hit
+another key? How is it synchronizing the typing work that is done by both
+my hands? How is it also directing me to type the letters of a word that
+are actually coming to my mind?
+</p>
+
+<p>
+Don't worry. I am not going to give a class in Biology. But it would be good if 
+one can imagine a few more situations where we are using inter-process 
+communication, though not necessarily in the human body or in a computer 
+program. 
+</p>
+
+<p>
+So, where are we now? We know that some medium or other is required for 
+communication between different processes. Similarly, when it comes to computer 
+programs, we need some mechanism or medium for communication. Primarily, 
+processes can use the available memory to communicate with each other. But 
+then, the memory is completely managed by the operating system. A process will 
+be allotted some part of the available memory for execution. Then each process 
+will have its own unique user space. In no way will the memory allotted for
+one process overlap with the memory allotted for another process. Imagine
+what would happen otherwise!
+</p>
+
+<p>
+So, now the question - how do different processes with unique address space 
+communicate with each other? The operating system's kernel, which has access to 
+all the memory available, will act as the communication channel. Similar to
+our earlier example, where the glass with hot water is one process address
+space, the glass with cold water is another, and the glass with the larger
+capacity is the kernel address space, so that we pour both hot water and
+cold water into the glass with larger capacity.
+</p>
+
+<p>
+What next? There are different IPC mechanisms which come into use based on the
+different requirements. In terms of our water glasses, we can determine the
+specifics of both pouring the water into the larger glass and how it will
+be used after beign poured.
+</p>
+
+<h2>Basic IPC</h2>
+
+<p>
+OK, enough of glasses and water. The IPC mechanisms can be 
+classified into the following categories as given below:
+</p>
+<ol type="a">
+<li>pipes 
+<li>fifos
+<li>shared memory
+<li>mapped memory
+<li>message queues
+<li>sockets
+</ol>
+
+<h2>Pipes</h2>
+
+<p>
+Pipes were evolved in the most primitive forms of the Unix operating system. 
+They provide unidirectional flow of communication between processes within the same 
+system. In other words, they are half-duplex, that is, data flows in only one 
+direction. A pipe is created by invoking the <tt>pipe</tt> system call,
+which creates a pair of file descriptors. These descriptors 
+point to a pipe inode and the file descriptors are returned through the 
+<tt>filedes</tt> argument. In the file descriptor pair, <tt>filedes[0]</tt> is 
+used for reading whereas <tt>filedes[1]</tt> is used for writing. 
+</p>
+<p>
+Let me explain a scenario where we can use the <tt>pipe</tt> system call: 
+consider a keyboard-reader program which simply exits after any alpha-numeric 
+character is pressed on the keyboard. We will create two processes; one of 
+them will read characters from the keyboard, and the other will
+continuously check for alpha-numeric characters.  Let us see how the
+<tt>filedes</tt> returned by <tt>pipe</tt> can be of use in this scenario:
+(Text version: <a href="misc/ramankutty/kbdread-pipe.c.txt">kbdread-pipe.c.txt</a>)
+</p>
+
+<pre class="code">
+/***** KEYBOARD HIT PROGRAM *****/
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;sys/types.h&gt;
+#include &lt;unistd.h&gt;
+#include &lt;pthread.h&gt;
+#include &lt;ctype.h&gt;
+
+int filedes[2];
+
+void *read_char()
+{
+	char c;
+	printf("Entering routine to read character.........\n");
+	while(1) {
+		/* Get a character in 'c' except '\n'. */
+		c = getchar();
+		if(c == '\n')
+			c = getchar();
+		write(filedes[1], &amp;c, 1);
+		if(isalnum(c)) {
+			sleep(2);
+			exit(1);
+		}
+	}
+}
+
+void *check_hit()
+{
+	char c;
+	printf("Entering routine to check hit.........\n");
+	while(1) {
+		read(filedes[0], &amp;c, 1);
+		if(isalnum(c)) {
+			printf("The key hit is %c\n", c);
+			exit(1);
+		} else {
+			printf("key hit is %c\n", c);
+		}
+	}
+}
+		
+int main()
+{
+	int i;
+	pthread_t tid1, tid2;
+	pipe(filedes);
+	/* Create thread for reading characters. */
+	i = pthread_create(&amp;tid1, NULL, read_char, NULL);
+	/* Create thread for checking hitting of any keyboard key. */
+	i = pthread_create(&amp;tid2, NULL, check_hit, NULL);
+	if(i == 0) while(1);
+	return 0;
+}
+</pre>
+<p>
+Save and compile the program as <tt>cc filename.c -lpthread</tt>. Run the 
+program and check the results. Try hitting a different key every time.
+</p>
+<p>
+The <tt>read_char</tt> function simply reads a character other than '\n' from 
+the keyboard and writes it to <tt>filedes[1]</tt>. We have the thread 
+<tt>check_hit</tt>, which continuously checks for the character in 
+<tt>filedes[0]</tt>. If the character in <tt>filedes[0]</tt> is an 
+alpha-numeric character, then the character is printed and the program 
+terminates. 
+</p>
+
+<p>
+One major feature of <b>pipe</b> is that the data flowing through the 
+communication medium is transient, that is, data once read from the read 
+descriptor cannot be read again. Also, if we write data continuously into the 
+write descriptor, then we will be able to read the data only in the order in 
+which the data was written. One can experiment with that by doing successive 
+<tt>write</tt>s or <tt>read</tt>s to the respective descriptors.
+</p>
+
+<p>
+So, what happens when the <tt>pipe</tt> system call is invoked? A good look at 
+the manual entry for <tt>pipe</tt> suggests that it creates a pair of file
+descriptors. This suggests that the kernel implements <tt>pipe</tt> within
+the file system. However, <tt>pipe</tt> does not actually exist as such -
+so when the call is made, the kernel allocates free inodes and creates a
+pair of file descriptors as well as the corresponding entries in the file
+table which the kernel uses. Hence, the kernel enables the user to use the
+normal file operations like <tt>read, write</tt>, etc., which the user does
+through the file descriptors. The kernel makes sure that one of the
+descriptors is for reading and another one if for writing.
+</p>
+
+<p>
+I am not going to go into the details of the <tt>pipe</tt> implementation on the 
+kernel side. For further reading, one can refer the books mentioned at the end 
+of this article.
+</p>
+
+<h2>FIFOs</h2>
+
+<p>
+<b>FIFOs</b> (first in, first out) are similar to the working of <b>pipes</b>. 
+<b>FIFOs</b> also provide half-duplex flow of data just like <b>pipes</b>. The 
+difference between <b>fifos</b> and <b>pipes</b> is that the former is 
+identified in the file system with a name, while the latter is not. That is, 
+<b>fifos</b> are named pipes. <b>Fifos</b> are identified by an access 
+point which is a file within the file system, whereas <b>pipes</b> are 
+identified by an access point which is simply an allotted inode. Another 
+major difference between <b>fifos</b> and <b>pipes</b> is that <b>fifos</b> 
+last throughout the life-cycle of the system, while <b>pipes</b> last only 
+during the life-cycle of the process in which they were created. To make it 
+more clear, <b>fifos</b> exist beyond the life of the process. Since they are 
+identified by the file system, they remain in the hierarchy until explicitly 
+removed using <tt>unlink</tt>, but <b>pipes</b> are inherited only by related 
+processes, that is, processes which are descendants of a single process. 
+</p>
+
+<p>
+Let us see how a <tt>fifo</tt> can be used to detect a keypress, just as we
+did with pipes. The same program where we previously used a <tt>pipe</tt>
+can be modified and implemented using a <tt>fifo</tt>.
+</p>
+
+<p>
+(Text version: <a
+href="misc/ramankutty/write-fifo.c.txt">write-fifo.c.txt</a>)
+</p>
+<pre class="code">
+/***** PROGRAM THAT READS ANY KEY HIT OF THE KEYBOARD*****/
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;sys/types.h&gt;
+#include &lt;unistd.h&gt;
+#include &lt;pthread.h&gt;
+#include &lt;ctype.h&gt;
+#include &lt;sys/stat.h&gt;
+#include &lt;fcntl.h&gt;
+#include &lt;errno.h&gt;
+
+extern int errno;
+
+void *read_char()
+{
+	char c;
+	int fd;
+	printf("Entering routine to read character.........\n");
+	while(1) {
+		c = getchar();
+		fd = open("fifo", O_WRONLY);
+		if(c == '\n')
+			c = getchar();
+		write(fd, &amp;c, 1);
+		if(isalnum(c)) {
+			exit(1);
+		}
+		close(fd);
+	}
+}
+
+int main()
+{
+	int i;
+	pthread_t tid1;
+	i = mkfifo("fifo", 0666);
+	if(i &lt; 0) {
+		printf("Problems creating the fifo\n");
+		if(errno == EEXIST) {
+			printf("fifo already exists\n");
+		}
+		printf("errno is set as %d\n", errno);
+	}
+	i = pthread_create(&amp;tid1, NULL, read_char, NULL);
+	if(i == 0) while(1);
+	return 0;
+}
+</pre>
+<p>
+Compile this program using <tt>cc -o write_fifo filename.c</tt>. This program 
+reads characters (keypresses), and writes them into the special file 
+<b>fifo</b>. First the program creates a <b>fifo</b> with read-write 
+permissions using the function <tt>mkfifo</tt>. See the manual page for the 
+same. If the <b>fifo</b> exists, then <tt>mkfifo</tt> will return the 
+corresponding error, which is set in <tt>errno</tt>. The thread 
+<tt>read_char</tt> continuously tries to read characters from the keyboard. 
+</p>
+<cite>Note that the fifo is opened with the <tt>O_WRONLY</tt> (write only) flag
+</cite>.
+<p>
+Once it reads a character other than '\n', it writes the same into the write 
+end of the <b>fifo</b>. The program that detects it is given below: (text 
+version <a 
+href="misc/ramankutty/detect_hit.c.txt">detect_hit.c.txt</a>):
+</p>
+<pre class="code">
+/***** KEYBOARD HIT PROGRAM *****/
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;sys/types.h&gt;
+#include &lt;unistd.h&gt;
+#include &lt;pthread.h&gt;
+#include &lt;ctype.h&gt;
+#include &lt;errno.h&gt;
+#include &lt;fcntl.h&gt;
+#include &lt;sys/stat.h&gt;
+
+extern int errno;
+
+void *check_hit()
+{
+	char c;
+	int fd;
+	int i;
+	printf("Entering routine to check hit.........\n");
+	while(1) {
+		fd = open("fifo", O_RDONLY);
+		if(fd &lt; 0) {
+			printf("Error opening in fifo\n");
+			printf("errno is %d\n", errno);
+			continue;
+		}
+		i = read(fd, &amp;c, 1);
+		if(i &lt; 0) {
+			printf("Error reading fifo\n");
+			printf("errno is %d\n", errno);
+		}
+		if(isalnum(c)) {
+			printf("The key hit is %c\n", c);
+			exit(1);
+		} else {
+			printf("key hit is %c\n", c);
+		}
+	}
+}
+		
+int main()
+{
+	int i;
+	i = mkfifo("fifo", 0666);
+	if(i &lt; 0) {
+		printf("Problems creating the fifo\n");
+		if(errno == EEXIST) {
+			printf("fifo already exists\n");
+		}
+		printf("errno is set as %d\n", errno);
+	}
+	pthread_t tid2;
+	i = pthread_create(&amp;tid2, NULL, check_hit, NULL);
+	if(i == 0) while(1);
+	return 0;
+}
+</pre>
+<p>
+Here, again, it first tries to create a <b>fifo</b> which is created if it does 
+not exist. We then have the thread <tt>check_hit</tt> which tries to read 
+characters from the <b>fifo</b>. If the read character is alphanumeric, 
+the program terminates; otherwise the thread continues reading 
+characters from the <b>fifo</b>.
+</p>
+<cite>Here, the <b>fifo</b> is opened with the flag <tt>O_RDONLY</tt></cite>.
+
+<p>
+Compile this program with <tt>cc -o detect_hit filename.c</tt>. Now run the two 
+executables in separate terminals, but in the same working directory. 
+Irrespective of the order in which you run, look for the message <b>fifo 
+already exists</b> on the console. The first program (either of the two) that 
+you run will not give any error message for creation of the <b>fifo</b>. The 
+second program that you run will definitely give you the error for creation of 
+the <b>fifo</b>. In the terminal where you run <tt>write_fifo</tt>, give input 
+to standard output from your keyboard. You will get the message regarding the 
+key hit on the keyboard on the terminal running the executable 
+<tt>detect_hit</tt>. Analyze the working of the two programs by hitting several 
+keys.
+</p>
+
+<p>
+I have used two different programs for exhibiting the usage of <b>fifos</b>. 
+This can be done within a single program by forking the routines which are 
+called in the two program as threads. But I did this to show that unlike 
+<b>pipes</b>, <b>fifos</b> can be used for communication between unrelated 
+processes.
+</p>
+
+<p>
+Now try running the program again. You will get the message that the 
+<b>fifo</b> already exists even when you first run either of the two programs. 
+This shows that <b>fifos</b> are persistent as long as the system lives. That 
+is, the <b>fifos</b> will have to be removed manually - otherwise they will be 
+permanently recognized by the file system. This is unlike <b>pipes</b> which 
+are inherited as long as the process that created the <b>pipe</b> is running. 
+Once this process dies, the kernel also removes the identifiers (file 
+descriptors) for the <b>pipe</b> from the the file tables.
+</p>
+
+<p>
+The usage is rather simple and the main advantage is that there is no need for 
+any synchronization mechanism for accesses to the <b>fifo</b>. There are 
+certain disadvantages: they can only be used for communication between 
+processes running on the same host machine. Let us explore other IPC mechanisms 
+to see what have they in store.
+</p>
+
+<h2>Shared Memory</h2>
+
+<p>
+Shared Memory is one of the three kinds of System V IPC mechanism which enables 
+different processes to communicate with each other as if these processes 
+shared the virtual address space; hence, any process sharing the memory 
+region can read or write to it. One can imagine some part of memory 
+being set aside for use by different processes.
+</p>
+
+<p>
+The System V IPC describes the use of the shared memory mechanism as
+consisting of four steps. Taken in order, they are:
+</p>
+<ul>
+<li>Fetching an identifier for the shared memory area - <tt>shmget</tt> (shared 
+memory get)
+<li>Using the identifier to get the shared memory address - <tt>shmat</tt> 
+(shared memory attach),
+<li>Detaching the shared memory area after use - <tt>shmdt</tt> (shared 
+memory detach) and 
+<li>Finally using the address to control accesses, permissions, receive 
+information and destroy the shared memory area - <tt>shmctl</tt> (shared 
+memory control).
+</ul>
+
+<p>
+Let us examine the workings of the above system calls. Recall the keyboard
+hit program; we shall, once again, see another version of it, this time
+using the system calls associated with the shared memory mechanism.
+</p>
+
+<p>
+The code given below creates a shared memory area and stores the
+information of any key hit on the keyboard. Let us see the code first:
+(text version: <a 
+href="misc/ramankutty/write-shm.c.txt">write-shm.c.txt</a>)
+</p>
+<pre class="code">
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;sys/types.h&gt;
+#include &lt;sys/ipc.h&gt;
+#include &lt;sys/shm.h&gt;
+#include &lt;errno.h&gt;
+#include &lt;string.h&gt;
+#include &lt;ctype.h&gt;
+
+extern int errno;
+
+#define SIZE	1
+
+char *read_key;
+int shmid;
+
+int shared_init()
+{
+	if((shmid = shmget(9999, SIZE, IPC_CREAT | 0666)) &lt; 0) {
+		printf("Error in shmget. errno is: %d\n", errno);
+		return -1;
+	}
+	if((read_key = shmat(shmid, NULL, 0)) &lt; 0) {
+		printf("Error in shm attach. errno is: %d\n", errno);
+		return -1;
+	}
+	return 0;
+}
+
+void read_char()
+{
+	char c;
+	while(1) {
+		c = getchar();
+		if(c == '\n') {
+			c = getchar();
+		}
+		strncpy(read_key, &amp;c, SIZE);
+		printf("read_key now is %s\n", read_key);
+		if(isalnum(*read_key)) {
+			shmdt(read_key);
+			shmctl(shmid, IPC_RMID, NULL);
+			exit(1);
+		}
+	}
+}
+
+int main()
+{
+	if(shared_init() &lt; 0) {
+		printf("Problems with shared memory\n");
+		exit(1);
+	}
+	read_char();
+	return 0;
+}
+</pre>
+
+<p>
+Here we have a shared memory variable named <tt>read_key</tt>. The program 
+first initializes the shared memory area <tt>read_key</tt>. This is done by 
+generating a shared memory identifier <tt>shmid</tt> using the system call 
+<tt>shmget</tt>. In the context of the program, the first parameter for 
+<tt>shmget</tt> is <b>9999</b>, which is the key. This key is used to allocate 
+a shared memory segment. The second parameter, <tt>SIZE</tt> (defined as a 
+macro with the value 1), suggests that the shared memory segment will hold only 
+one of the type of the shared memory variable, that is, only 1 character. The 
+<tt>IPC_CREAT</tt> flag (third parameter) suggests that a new shared memory 
+segment has to be created, with read-write permissions (<tt>IPC_CREAT</tt> 
+logically OR ed with <b>0666</b>). This will return a valid shared memory 
+segment identifier on successful allocation. The identifier will be stored in 
+<tt>shmid</tt>. If shared memory segment allocation fails, then -1 is returned 
+and the <tt>errno</tt> is set appropriately. 
+</p>
+<cite>The key which is used to get a shared memory segment can be generated 
+randomly using the built-in function <tt>ftok</tt> to get a unique key. Refer 
+to the manual page for the usage.
+</cite>
+
+<p>
+Once the segment identifier is obtained, we have to attach the shared memory 
+segment to some address. This is done with the <tt>shmat</tt> system call. 
+This uses the segment identifier <tt>shmid</tt> as the first parameter. The 
+second parameter is the address of the shared memory segment; when this is 
+given as <tt>NULL</tt> (as in this program), the kernel will choose a
+suitable address. The third parameter is the flag specification which can
+be set if required or left as zero (see man page of <tt>shmdt</tt> for
+details). On success the shared memory segment is attached to
+<tt>read_key</tt>, otherwise -1 is returned along with the appropriate
+setting of the <tt>errno</tt>.
+</p>
+
+<p>
+If either <tt>shmget</tt> or <tt>shmat</tt> fails, the process terminates. On 
+success from both system calls, we proceed by invoking the
+<tt>read_char</tt> function, which reads keyboard inputs other than '\n'
+("Enter" key) and copies them to <tt>read_key</tt> in the shared
+memory. If the keyboard input is an alphanumeric character, the
+program stops reading inputs from the keyboard and the process
+terminates.
+</p>
+
+<p>
+We have another program running separately (it does not have to be in the
+same working directory) in the local system, which tries to read the data
+written in the shared memory area. The code is given below: (text version:
+<a href="misc/ramankutty/read-shm.c.txt">read-shm.c.txt</a>)
+</p>
+<pre class="code">
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;sys/types.h&gt;
+#include &lt;sys/ipc.h&gt;
+#include &lt;sys/shm.h&gt;
+#include &lt;errno.h&gt;
+#include &lt;string.h&gt;
+#include &lt;ctype.h&gt;
+
+extern int errno;
+
+#define SIZE	1
+
+char *detect_key;
+int shmid;
+
+int shared_init()
+{
+	if((shmid = shmget(9999, SIZE, 0444)) &lt; 0) {
+		printf("Error in shmget. errno is: %d\n", errno);
+		return -1;
+	}
+	if((detect_key = shmat(shmid, NULL, SHM_RDONLY)) &lt; 0) {
+		printf("Error in shm attach. errno is: %d\n", errno);
+		return -1;
+	}
+//	detect_key = NULL;
+	return 0;
+}
+
+void detect_hit()
+{
+	char c;
+	c = *detect_key;
+	while(1) {
+		if(c != *detect_key) {
+			if(isalnum(detect_key[0])) {
+				printf("detect_key is %s\n", detect_key);
+				shmdt(detect_key);
+				shmctl(shmid, IPC_RMID, NULL);
+				exit(1);
+			} else {
+				printf("detect_key is %s\n", detect_key);
+			}
+			c = *detect_key;
+		}
+	}
+}
+
+int main()
+{
+	if(shared_init() &lt; 0) {
+		printf("Problems with shared memory\n");
+		exit(1);
+	}
+	detect_hit();
+	return 0;
+}
+</pre>
+
+<p>
+Here, again, we have a shared memory initialization routine, which in fact does 
+not create a new shared memory segment, but rather tries to get access to 
+the existing shared memory segment. Compared to the previous program, the 
+absence of <tt>IPC_CREAT</tt> flag suggests that we do not have to create a new 
+shared memory segment. Instead, we simply have to get the corresponding 
+segment identifier which can be used to attach the existing shared memory 
+segment to some address. The mode <b>0444</b> restricts access to 
+the shared memory segment to 'read only'. If no shared memory segment 
+with key <b>9999</b> exists, we will get an error, which will be returned
+in <b>errno</b>. Once we get a valid identifier, we attach the 
+shared memory segment to an address. While attaching, we use the flag 
+<tt>SHM_RDONLY</tt> which specifies that the shared memory segment will
+be available only for reading.
+</p>
+
+<p>
+Next, we have the function <b>detect_hit</b>, which checks whether the
+pressed key was an alphanumeric character. The first program obviously has
+to run first; otherwise, the second program will show errors during the shared
+memory initialization, since it would be trying to get the identifier for a
+non-existent shared memory segment.
+</p>
+
+<p>
+The example shown here doesn't require any synchronization of access to the
+shared memory segment. That is because only one program writes into the
+shared memory and only one program reads from the shared memory area.  But
+again, there is a problem here. What if the detection program (second one)
+is started long after some user has started hitting the keys (running the
+first program)? We will not be able to track the previously hit keys.
+The solution for this is left as an exercise to the readers. 
+</p>
+
+<cite>The entry in <tt>/proc/sysvipc/shm</tt> gives a list of shared mermory in 
+use. Readers can compare the entries before running, during running and after 
+running the programs. Try to interpret the entry in <tt>/proc/sysvipc/shm</tt>.
+</cite>
+
+<p>
+Once the two programs identify an alphanumeric character, they will
+terminate. As part of that process, the shared memory area is detached by
+using the system call <tt>shmdt</tt>. In fact, upon exiting the detaching
+is done automatically. But the shared memory segment is not destroyed. This
+has to be done by invoking the system call <tt>shmctl</tt>, which takes
+the identifier for the shared memory area as an argument, as well as the command
+<tt>IPC_RMID</tt>, which marks the shared memory segment as destroyed. This
+has to be done, otherwise the shared memory segment will persist in memory
+or in the swap space.
+</p>
+<cite>At this point, observation of the entries in
+<tt>/proc/sysvipc/shm</tt> can be very useful.  If the shared memory
+segment is not destroyed, the entries will reflect this. Try this by
+running the program without <tt>shmctl</tt>.
+</cite>
+
+<p>
+This is the fastest IPC mechanism in the System V IPC services. However,
+the System V shared memory mechanism does not have any kind of scheme to
+ensure that one sees consistent data in the shared memory region.  That is,
+a process can read a shared memory area at the same time another process is
+writing to it. The programmer can then come across inconsistent data while
+executing the programs. This suggests that accesses to the shared memory
+region have to be mutually exclusive; this is achieved via the use of the
+semaphore mechanism. We can make the semaphore access the memory region to
+lock it and then release the semaphore when done.
+</p>
+
+<p>
+The shared memory mechanism can be used when the processes access the shared 
+memory areas at different times. One may wonder why we can't make the
+first process store the data in some file and make another process read the
+data from the file. But, reading data from a file involves things like:
+</p>
+<ul>
+<li>execution of system calls like <tt>open, read</tt> and <tt>close</tt>.
+<li>accessing the secondary storage device (generally hard disk) which involves 
+I/O operations.
+</ul>
+
+<p>
+These things are not significant if we have a small amount of data to be
+read. But when we have large amounts of data stored in a file, 
+then the load of the two activities mentioned above increases 
+significantly and there is a considerable amount of reduction in the 
+performance of the "reading program". This, again, has a solution, which is the 
+use of memory mapping - something I'll discuss at another time. 
+</p>
+
+
+<h2>Conclusion</h2>
+<p>
+We have seen the use of the primary IPC mechanisms, and also one of the System 
+V IPC mechanisms. We have seen some simple uses for <b>pipes, fifos</b>, and the
+<b>shared memory</b> mechanism. But one may come across some very complex 
+programs where these mechanisms will have to be used in a very strict and
+precise manner.  Otherwise, the program along with the programmer, will be
+dumped to <tt>/dev/null</tt>. There are still more things to be learned,
+not only for you but also for me. I shall come up with more in the next
+part, in which we will explore <b>semaphores</b>, <b>message queues</b>,
+<b>memory mapping</b> and <b>sockets</b>, and probably try to solve a few
+practical problems.
+</p>
+
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<P>
+<img ALIGN="LEFT" ALT="[BIO]" SRC="../gx/authors/ramankutty.jpg" width="200" height="200" class="bio">
+<em>
+
+I completed my B. Tech in Computer Science &amp; Engineering from a small town
+called Trichur, in Kerala, God's Own Country in India. Presently I am
+working in Naturesoft Pvt. Ltd, Chennai, India as a Programmer. I spend my
+free time reading books on Linux and exploring the same. Also, I have a
+good appetite for Physics. My motive in life is to go forward, onward and
+upward.
+
+</em>
+<br CLEAR="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2004, Hiran Ramankutty. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 104 of Linux Gazette, July 2004
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="oregan3.html" >&lt;-- prev</A> | <A HREF="seymour.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">July 2004 (#104)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/2003/sit3-shine.7-2.gif" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

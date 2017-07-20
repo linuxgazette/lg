@@ -1,0 +1,136 @@
+#!/usr/bin/wish -f
+#
+# Linux dialer. Shows on/off line, time on-line, and
+# pppd process identifier.
+#
+# (c) 1998 (GPL) Martin Vermeer
+#
+# User configurable:
+#----------------------------------------
+set path(pidof) /sbin/pidof
+set path(pppd) /usr/sbin/pppd
+set path(whoami) /usr/bin/whoami)
+#----------------------------------------
+# End user config
+
+set seconds 0
+set minutes 0
+label  .counter -text "0:00" -relief sunken
+
+## Test for root.
+#
+## Not needed if pppd suid root and /etc/ppp files 
+## "options" and connect/disconnect scripts 
+## (but NOT the "secrets" file!!! world readable
+## (or readable to a group you belong to)
+#
+# catch "exec $path(whoami)" result
+# if {$result != "root"} {
+#     set labeltext "Run me as ROOT!"
+#     after 10000 exit 
+#}
+
+# showpid -- routine to get and show process id, keep track
+#            of pppd link up/down status, and reset time
+#            counter if down
+#
+proc showpid {} {
+    global pid labeltext status seconds minutes path
+
+    if [catch "exec $path(pidof) pppd" pid] {set pid -1}
+    if {$pid != -1} {
+        set labeltext "Link pid: ${pid}"
+        set status 1
+    } else {
+        set labeltext "Link Down"
+        set status 0; set seconds 0; set minutes 0
+    } 
+}
+
+# tick -- routine to increment clock by 5 seconds every
+#         5 seconds, and minutes every minute.
+#         Don't be on-line over an hour :-)
+#
+proc tick {} {
+    global minutes seconds status pid labeltext
+    if $status {
+        after 5000 tick
+        incr seconds 5
+        if {$seconds >= 60} { set seconds 0; incr minutes }
+    } 
+    after 5000 showpid
+    .counter config -text [format "%d:%02d" $minutes $seconds]
+}
+
+# 
+# Find out if there was an old pppd process running:
+#
+if [catch "exec $path(pidof) pppd" pid] {set pid -1}
+if {$pid != -1} {
+    set labeltext "Old Link ${pid}"
+    set status 1
+    tick
+} else {
+    set labeltext "Link Down"
+    set status 0
+}
+
+#
+# Downcmd -- command to bring down the pppd link
+#
+proc Downcmd {} {
+global status path
+    # Get the pids of pppd processes into res:
+    if [catch "exec $path(pidof) pppd" res] {set res -1} 
+    if {$res != -1} {
+        # Some pppd process running; go get'em
+        catch "exec kill -9 $res" result
+        # Debug code:
+        # puts "pid=$res result=$result"
+    }
+    # Necessary to update $status to realistic value:
+    showpid
+    # await kill command to take effect:
+    while {$status == 1} showpid   
+    # don't come out until really down
+}
+
+# Upcmd -- Command to bring up the pppd link
+#          and start the clock ticking
+#
+proc Upcmd {} {
+    global status path seconds minutes
+    # start up pppd:
+    if [catch "exec $path(pidof) pppd" res] {set res -1}
+    if {$res == -1} {
+        # no pppd process running yet; start one
+        catch "exec /usr/sbin/pppd"
+        set status 1
+	# start clock running
+	set seconds 0
+        set minutes 0
+        tick
+    }
+    if {$res > 0} { 
+        set labeltext "Old Link: ${res}" 
+        set status 1
+    }
+}
+
+#
+# Define the widgets:
+#
+label        .name -textvariable labeltext 
+radiobutton  .up   -text "Up"   -variable status -value 1 -command Upcmd
+radiobutton  .down -text "Down" -variable status -value 0 -command Downcmd
+button       .quit -text "Quit" -command exit
+
+#
+# Lay out grid geometry:
+#
+grid .name     -row 0 -column 0 -columnspan 2 -sticky "ew"
+grid .up       -row 1 -column 1 -sticky "w"
+grid .down     -row 2 -column 1 -sticky "w"
+grid .quit     -row 2 -column 0 
+grid .counter  -row 1 -column 0 -sticky "ns"
+

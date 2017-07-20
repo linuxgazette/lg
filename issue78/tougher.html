@@ -1,0 +1,883 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>Xlib Programming in C++ LG #78</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<CENTER>
+<A HREF="http://www.linuxgazette.net/">
+<IMG ALT="LINUX GAZETTE" SRC="../gx/lglogo.png" 
+	WIDTH="600" HEIGHT="124" border="0"></A> 
+<BR>
+
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="taneja.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../lg_faq.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="lg_backpage.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+<P>
+</CENTER>
+
+<!--endcut ============================================================-->
+
+<H4 ALIGN="center">
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H1><font color="maroon">Xlib Programming in C++</font></H1>
+<H4>By <a href="mailto:robt@robtougher.com">Rob Tougher</a></H4>
+</center>
+<P> <HR> <P>  
+
+<!-- END header -->
+
+
+
+
+<dl>
+<dt><a href=#1>1. Introduction</a>
+<dt><a href=#2>2. Why not use a widget set?</a>
+<dt><a href=#3>3. The basics</a>
+<dd><a href=#3.1>3.1 Opening a display</a>
+<dd><a href=#3.2>3.2 Creating a window</a>
+<dd><a href=#3.3>3.3 Handling events</a>
+<dd><a href=#3.4>3.4 Drawing</a>
+<dt><a href=#4>4. Advanced - creating a command button from scratch</a>
+<dd><a href=#4.1>4.1 Requirements of the button</a>
+<dd><a href=#4.2>4.2 Giving it its own window</a>
+<dd><a href=#4.3>4.3 Implementing "pressed" and "not pressed" drawn states</a>
+<dd><a href=#4.4>4.4 Figuring out which state to draw</a>
+<dd><a href=#4.5>4.5 Giving it a "text" property</a>
+<dd><a href=#4.6>4.6 Generating an "on_click()" event</a>
+<dt><a href=#5>5. Conclusion</a>
+<dt><a href=#a>a. References</a>
+<dt><a href=#b>b. Files</a>
+</dl>
+
+
+
+
+<a name=1></a>
+<h2>1. Introduction</h2>
+
+
+<p>
+Xlib is a library that allows you to draw graphics on the screen 
+of any X server, local or remote, using
+the C language. All you need to do is include &lt;X11/Xlib.h&gt;, link
+your program using the -lX11 switch, and you are ready to 
+use any of the functions in the library.
+</p>
+
+<p>
+For example, say you want to create and show a window on 
+your local machine. You can write the following:
+</p>
+
+Listing 1: <a href="misc/tougher/example1.cpp.txt">example1.cpp</a>
+<pre>
+#include &lt;X11/Xlib.h&gt;
+#include &lt;unistd.h&gt;
+
+main()
+{
+  // Open a display.
+  Display *d = XOpenDisplay(0);
+
+  if ( d )
+    {
+      // Create the window
+      Window w = XCreateWindow(d, DefaultRootWindow(d), 0, 0, 200,
+			       100, 0, CopyFromParent, CopyFromParent,
+			       CopyFromParent, 0, 0);
+
+      // Show the window
+      XMapWindow(d, w);
+      XFlush(d);
+
+      // Sleep long enough to see the window.
+      sleep(10);
+    }
+  return 0;
+}
+</pre>
+
+
+<p>
+You can compile the program with the following command:
+</p>
+
+<pre>
+prompt$ g++ test.cpp -L/usr/X11R6/lib -lX11
+prompt$ ./a.out
+</pre>
+
+<p>
+and voilà, you have a window on your screen for 10 seconds:
+</p>
+
+<img src="misc/tougher/screen_small.png"></img>
+
+<p>
+The purpose of this article is to show you some simple classes
+that you can use when developing Xlib applications. We will create
+an example application that has a window with one button on it. 
+The button will be a custom button we develop using only 
+the Xlib library.
+</p>
+
+
+<a name=2></a>
+<h2>2. Why not use a widget set?</h2>
+
+
+
+<p>
+You might be asking yourself "why don't we just use a widget library,
+like <a href=http://www.trolltech.com/>QT</a>, or 
+<a href=http://www.gtk.org/>GTK</a>?". 
+These are valid questions. I use QT, and find it very 
+useful when developing C++ applications targeted for the Linux platform.
+</p>
+
+
+<p>
+The reason I created these classes was to get a better understanding
+of the X Window System. It forced me to figure out exactly what was going
+on under the hood in libraries like QT and GTK. Once I had finished, 
+I realized that the classes I created were actually <i>useful</i>.
+</p>
+
+<p>
+So hopefully you will find this article educational, and be able to
+use the classes presented in your own applications.
+</p>
+
+
+<a name=3></a>
+<h2>3. The basics</h2>
+
+
+<p>
+Now let's dive into some code. We'll go over some basic features
+of Xlib in this section.
+</p>
+
+
+<a name=3.1></a>
+<h3>3.1 Opening a display</h3>
+
+<p>
+The first class I created was the 
+<a href="misc/tougher/display.hpp.txt">display</a> class, 
+which was in charge of opening and closing a display. You'll
+notice that in example1.cpp, we don't close our display properly
+with XCloseDisplay(). With this class, it will be closed before
+the program exits. Our example now looks like this:
+</p>
+
+
+Listing 2: <a href="misc/tougher/example2.cpp.txt">example2.cpp</a>
+<pre>
+#include &lt;unistd.h&gt;
+
+<b>#include "xlib++/display.hpp"
+using namespace xlib;</b>
+
+main()
+{
+  <b>try
+    {</b>
+      // Open a display.
+      <b>display d("");</b>
+
+      // Create the window
+      Window w = XCreateWindow(<b>(Display*)d</b>,
+			       DefaultRootWindow(<b>(Display*)d</b>),
+			       0, 0, 200, 100, 0, CopyFromParent,
+			       CopyFromParent, CopyFromParent, 0, 0);
+
+      // Show the window
+      XMapWindow(d, w);
+      XFlush(d);
+
+      // Sleep long enough to see the window.
+      sleep(10);
+    }
+  <b>catch ( open_display_exception& e )
+    {
+      std::cout << "Exception: " << e.what() << "\n";
+    }</b>
+  return 0;
+}
+</pre>
+
+<p>
+Nothing spectacular, really. Just opens and closes a display.
+You'll notice in the 
+<a href="misc/tougher/display.hpp.txt">implementation</a> 
+that the display class defines the Display* operator, so all
+you have to do is cast the object to get the actual
+Xlib Display pointer.
+</p>
+
+<p>
+Also notice the try/catch block. All of the classes in this article
+throw custom exceptions to signal error conditions.
+</p>
+
+<a name=3.2></a>
+<h3>3.2 Creating a window</h3>
+
+<p>
+Next I wanted to make window creation easier, so I added a 
+<a href="misc/tougher/window.hpp.txt">window</a> class to the
+mix. This class creates and shows a window in its constructor,
+and destroys the window in its destructor. Our example now
+looks like this(pay no attention to the event_dispatcher class,
+we will go over that next):
+</p>
+
+Listing 3 : <a href="misc/tougher/example3.cpp.txt">example3.cpp</a>
+<pre>
+#include "xlib++/display.hpp"
+<b>#include "xlib++/window.hpp"</b>
+using namespace xlib;
+
+<b>class main_window : public window
+{
+ public:
+  main_window ( event_dispatcher& e ) : window ( e ) {};
+  ~main_window(){};
+};</b>
+
+main()
+{
+  try
+    {
+      // Open a display.
+      display d("");
+
+      <b>event_dispatcher events ( d );
+      main_window w ( events ); // top-level
+      events.run();</b>
+    }
+  catch ( exception_with_text& e )
+    {
+      std::cout << "Exception: " << e.what() << "\n";
+    }
+  return 0;
+}
+</pre>
+
+<p>
+Notice that our <b>main_window</b> class inherits from
+<b>xlib::window</b>. When we create the main_window object, the
+base class' constructor gets called, which creates the 
+actual Xlib window.
+</p>
+
+
+<a name=3.3></a>
+<h3>3.3 Handling events</h3>
+
+<p>
+You probably noticed the 
+<a href="misc/tougher/event_dispatcher.hpp.txt">event_dispatcher</a>
+class in the last example. This class takes events off of the
+application's queue, and dispatches them to the correct
+window.</p>
+
+<p>
+This class is defined as the following:
+</p>
+
+Listing 4 : 
+<a href="misc/tougher/event_dispatcher.hpp.txt">event_dispatcher.hpp</a>
+<pre>
+      class event_dispatcher
+	{
+	  // constructor, destructor, and others...
+	  [snip...]
+
+	  register_window ( window_base *p );
+	  unregister_window ( window_base *p );
+	  run();
+	  stop();
+	  handle_event ( event );
+	}
+</pre>
+
+
+<p>
+The event_dispatcher passes events to window classes via the
+<a href="misc/tougher/window_base.hpp.txt">window_base</a> interface.
+All of the classes in this article that represent windows derive
+from this class, and are able to catch messages from the dispatcher.
+Once they register themselves with the <b>register_window</b>
+method, they start receiving messages. 
+<a href="misc/tougher/window_base.hpp.txt">window_base</a> is
+declared as the following, and all classes deriving from it
+must define these methods:
+</p>
+
+
+Listing 5 : 
+<a href="misc/tougher/window_base.hpp.txt">window_base.hpp</a>
+<pre>
+      virtual void on_expose() = 0;
+
+      virtual void on_show() = 0;
+      virtual void on_hide() = 0;
+
+      virtual void on_left_button_down ( int x, int y ) = 0;
+      virtual void on_right_button_down ( int x, int y ) = 0;
+
+      virtual void on_left_button_up ( int x, int y ) = 0;
+      virtual void on_right_button_up ( int x, int y ) = 0;
+
+      virtual void on_mouse_enter ( int x, int y ) = 0;
+      virtual void on_mouse_exit ( int x, int y ) = 0;
+      virtual void on_mouse_move ( int x, int y ) = 0;
+
+      virtual void on_got_focus() = 0;
+      virtual void on_lost_focus() = 0;
+
+      virtual void on_key_press ( character c ) = 0;
+      virtual void on_key_release ( character c ) = 0;
+
+      virtual void on_create() = 0;
+      virtual void on_destroy() = 0;
+</pre>
+
+
+<p>
+Let's see if this actually works. We will try to handle a ButtonPress
+event in our window. Add the following code to our main_window
+class:
+</p>
+
+Listing 6 : 
+<a href="misc/tougher/example4.cpp.txt">example4.cpp</a>
+<pre>
+class main_window : public window
+{
+ public:
+  main_window ( event_dispatcher& e ) : window ( e ) {};
+  ~main_window(){};
+
+  <b>void on_left_button_down ( int x, int y )
+  {
+    std::cout << "on_left_button_down()\n";
+  }</b>
+
+};
+</pre>
+
+
+<p>
+Compile the code, run the example, and click inside of the
+window. It works! The event_dispatcher gets a ButtonPress
+message, and sends it to our window via the predefined <b>
+on_left_button_down</b> method.
+</p>
+
+
+<a name=3.4></a>
+<h3>3.4 Drawing</h3>
+
+<p>
+Next let's try to draw in our window. The X Window system defines
+the concept of a "graphics context" that you draw into, so I
+naturally created a class named <b>graphics_context</b>. The following
+is the class' definition:
+</p>
+
+
+Listing 7 : 
+<a href="misc/tougher/graphics_context.hpp.txt">graphics_context.hpp</a>
+<pre>
+  class graphics_context
+    {
+    public:
+      graphics_context ( display& d, int window_id );
+      ~graphics_context();
+
+      void draw_line ( line l );
+      void draw_rectangle ( rectangle rect );
+      void draw_text ( point origin, std::string text );
+      void fill_rectangle ( rectangle rect );
+      void set_foreground ( color& c );
+      void set_background ( color& c );
+      rectangle get_text_rect ( std::string text );
+      std::vector<int> get_character_widths ( std::string text );
+      int get_text_height ();
+      long id();
+
+    private:
+
+      display& m_display;
+      int m_window_id;
+      GC m_gc;
+    };
+</pre>
+
+
+<p>
+You pass this class a window id, and a display object, and
+then you can draw as much as you want using the drawing
+methods. Let's try it out. Add the following to our example:
+</p>
+
+Listing 8 : 
+<a href="misc/tougher/example5.cpp.txt">example5.cpp</a>
+<pre>
+#include "xlib++/display.hpp"
+#include "xlib++/window.hpp"
+<b>#include "xlib++/graphics_context.hpp"</b>
+using namespace xlib;
+
+
+class main_window : public window
+{
+ public:
+  main_window ( event_dispatcher& e ) : window ( e ) {};
+  ~main_window(){};
+
+  <b>void on_expose ()
+  {
+    graphics_context gc ( get_display(),
+			  id() );
+
+    gc.draw_line ( line ( point(0,0), point(50,50) ) );
+    gc.draw_text ( point(0, 70), "I'm drawing!!" );
+  }</b>
+
+};
+</pre>
+
+<p>
+The <b>on_expose()</b> method is called whenever the window
+is displayed, or "exposed". In this method we draw a line and
+some text in the window's client area. When you compile and run this
+example, you should see something similar to the following:
+</p>
+
+
+<img src="misc/tougher/draw_line.png"></img>
+
+<p>
+The <b>graphics_context</b> class is used extensively in the
+rest of this article.
+</p>
+
+<p>
+You may also notice a few helper classes in the above code,
+<a href="misc/tougher/shapes.hpp.txt">point and line</a>. These
+are small classes I created, all having to do with shapes. They
+don't look like they are necessary now, but they will be helpful
+later on if I have to perform complex operations with them, like
+transformations. For example, it is easier to say "line.move_x(5)",
+than to say "line_x += 5; line_y += 5;". It is much cleaner, and
+less error-prone.
+</p>
+
+<a name=4></a>
+<h2>4. Advanced - creating a command button from scratch</h2>
+
+<a name=4.1></a>
+<h3>4.1 Requirements of the button</h3>
+
+<p>
+Enough of the simple stuff - now let's move on to creating actual
+widgets that can be reused. Our focus now will be on
+creating a command button that we can use in an application.
+The requirements of this button are as follows:
+</p>
+
+<ul>
+<li>has its own window to receive events
+<li>has two drawn states - "pressed", and "not pressed"
+<li>draws the "pressed" state when the mouse button was pressed down
+when inside the control's rect, and the mouse is <b>still</b> over the control
+<li>draws the "not pressed" state when the mouse button is not down,
+or when the mouse button is down, and the mouse is outside the rect of
+the control
+<li>text property with get and set methods
+<li>can send an "on_click()" event to the client
+</ul>
+
+
+<p>
+This seems like a simple control, but implementing all of this will
+be more than trivial. The following sections describe this.
+</p>
+
+<a name=4.2></a>
+<h3>4.2 Giving it its own window</h3>
+
+<p>
+First off, we have to create a separate window for this command
+button. The constructor calls the <b>show</b> method, which in turn calls
+the <b>create</b> method, which is responsible for window creation:
+</p>
+
+Listing 9 : 
+<a href="misc/tougher/command_button.hpp.txt">command_button.hpp</a>
+
+<pre>
+      virtual void create()
+	{
+	  if ( m_window ) return;
+
+	  m_window = XCreateSimpleWindow ( m_display, m_parent.id(),
+					   m_rect.origin().x(),
+					   m_rect.origin().y(),
+					   m_rect.width(),
+					   m_rect.height(),
+					   0, WhitePixel((void*)m_display,0),
+					   WhitePixel((void*)m_display,0));
+
+	  if ( m_window == 0 )
+	    {
+	      throw create_button_exception 
+		( "could not create the command button" );
+	    }
+
+	  m_parent.get_event_dispatcher().register_window ( this );
+	  set_background ( m_background );
+	}
+</pre>
+
+
+<p>
+Looks alot like the <b>window</b> class' constructor, doesn't it?
+First it creates the window with the Xlib API XCreateSimpleWindow(),
+then it registers itself with the event_dispatcher so it will receive
+events, and finally it sets its background.
+</p>
+
+<p>
+Notice that we pass the parent window's id into the call to
+XCreateSimpleWindow(). We are telling Xlib that we want our
+command button to be a child window of the parent.
+</p>
+
+<a name=4.3></a>
+<h3>4.3 Implementing "pressed" and "not pressed" drawn states</h3>
+
+<p>
+Because the command button registered itself with the event_dispatcher,
+it will receive <b>on_expose()</b> events when it needs to draw
+itself. We will use the <b>graphics_context</b> class to draw both
+states.
+</p>
+
+<p>
+The following is the code that will be used for the "not
+pressed" state:
+</p>
+
+
+
+Listing 10 : 
+<a href="misc/tougher/command_button.hpp.txt">command_button.hpp</a>
+<pre>
+      // bottom
+      gc.draw_line ( line ( point(0,
+				  rect.height()-1),
+			    point(rect.width()-1,
+				  rect.height()-1) ) );
+      // right
+      gc.draw_line ( line ( point ( rect.width()-1,
+				    0 ),
+			    point ( rect.width()-1,
+				    rect.height()-1 ) ) );
+
+      gc.set_foreground ( white );
+
+      // top
+      gc.draw_line ( line ( point ( 0,0 ),
+			    point ( rect.width()-2, 0 ) ) );
+      // left
+      gc.draw_line ( line ( point ( 0,0 ),
+			    point ( 0, rect.height()-2 ) ) );
+
+      gc.set_foreground ( gray );
+
+      // bottom
+      gc.draw_line ( line ( point ( 1, rect.height()-2 ),
+			    point(rect.width()-2,rect.height()-2) ) );
+      // right
+      gc.draw_line ( line ( point ( rect.width()-2, 1 ), 
+			    point(rect.width()-2,rect.height()-2) ) );
+</pre>
+
+
+<p>
+When we finally compile and run this code later on, the button
+will look like this:
+</p>
+
+<img src="misc/tougher/command_button.png"></img>
+
+
+<p>
+Alternatively, when the button is pressed, the following
+code will be used to draw it:
+</p>
+
+
+Listing 11 : 
+<a href="misc/tougher/command_button.hpp.txt">command_button.hpp</a>
+<pre>
+      gc.set_foreground ( white );
+
+      // bottom
+      gc.draw_line ( line ( point(1,rect.height()-1),
+			    point(rect.width()-1,rect.height()-1) ) );
+      // right
+      gc.draw_line ( line ( point ( rect.width()-1, 1 ),
+			    point ( rect.width()-1, rect.height()-1 ) ) );
+
+      gc.set_foreground ( black );
+
+      // top
+      gc.draw_line ( line ( point ( 0,0 ),
+			    point ( rect.width()-1, 0 ) ) );
+      // left
+      gc.draw_line ( line ( point ( 0,0 ),
+			    point ( 0, rect.height()-1 ) ) );
+
+
+      gc.set_foreground ( gray );
+
+      // top
+      gc.draw_line ( line ( point ( 1, 1 ),
+			    point(rect.width()-2,1) ) );
+      // left
+      gc.draw_line ( line ( point ( 1, 1 ),
+			    point( 1, rect.height()-2 ) ) );
+</pre>
+
+
+<p>
+And the finished product will appear like the following:
+</p>
+
+<img src="misc/tougher/command_button_pressed.png"></img>
+
+
+
+<a name=4.4></a>
+<h3>4.4 Figuring out which state to draw</h3>
+
+
+<p>
+This seems like a pretty simple task - draw the "pressed" state
+when the mouse is down over the control, and draw the "not pressed"
+state when the mouse is up. This isn't entirely correct, though.
+When you press and hold the left mouse button over our control,
+and move the mouse out of the rect, the command button should draw
+the "not pressed" state, even though the left mouse button is
+currently pressed.
+</p>
+
+
+<p>
+The <a href="misc/tougher/command_button.hpp.txt">command_button</a>
+class uses two member variables to handle this - <b>m_is_down</b>,
+and <b>m_is_mouse_over</b>. Initially, when the mouse is pressed down
+over our control(see <b>on_left_button_down()</b>), we put ourselves into
+the down state, and refresh the control. This results in the command button
+drawing itself pressed. If, at any time, the mouse moves out of the rect
+of our control(see <b>on_mouse_exit()</b>), <b>m_is_mouse_over</b> 
+is set to false, and the control
+is refreshed. This results in the command button drawing itself in
+the "not pressed" state. If the mouse then moves into the rect of the
+control, <b>m_is_mouse_over</b> is toggled back to true, and the control
+is drawn pressed. Once the mouse button is released, we set ourselves to
+the "not pressed" state, and refresh ourselves.
+</p>
+
+
+<a name=4.5></a>
+<h3>4.5 Giving it a "text" property</h3>
+
+<p>
+This is a pretty simple task. We basically want the user of this
+command button to be able to get and set the text displayed.
+Here is the code:
+</p>
+
+Listing 12 : 
+<a href="misc/tougher/command_button.hpp.txt">command_button.hpp</a>
+<pre>
+      std::string get_name() { return m_name; }
+      void set_name ( std::string s ) { m_name = s; refresh(); }
+</pre>
+
+<p>
+The <b>refresh()</b> is in there so that the controls redraws itself
+with the new text.
+</p>
+
+
+<a name=4.6></a>
+<h3>4.6 Generating an "on_click()" event</h3>
+
+
+<p>
+We want the user of this command button to know when we
+were clicked. To do this, we will generate an "on_click()"
+event. The following is the definition of the 
+<b>command_button_base</b> class:
+</p>
+
+
+
+Listing 13 : 
+<a href="misc/tougher/command_button_base.hpp.txt">command_button_base.hpp</a>
+
+
+<pre>
+namespace xlib
+{
+  class command_button_base : public window_base
+    {
+    public:
+      virtual void on_click () = 0;
+    };
+};
+</pre>
+
+<p>
+What we are basically saying here is that "we support all events
+that a window does, plus one more - on_click()". The user
+of this button can derive a new class from it, implement
+the <b>on_click()</b> method, and take the appropriate action.
+</p>
+
+
+<a name=5></a>
+<h2>5. Conclusion</h2>
+
+<p>
+I really hope you enjoyed this article. We went over many
+features of Xlib, and wrapped them in C++ classes to
+make Xlib development easier in the future. If you have any
+questions, comments, or suggestions about this article,
+or about Xlib development in general, please feel free
+to <a href="mailto:robt@robtougher.com">email me</a>.
+
+
+<a name=a></a>
+<h2>a. References</h2>
+
+<ul>
+<li><a href="http://www.xfree86.org/">www.xfree86.org</a>-
+home page for XFree86, an open-source implementation of the
+X Window System
+<li><a href="http://tronche.com/gui/x/xlib/">Xlib Programming Manual</a>-
+great resource for information on Xlib development
+<li><a href="http://www.x.org/about_x.htm">The X Protocol</a> - information
+about the X protocol from www.x.org
+</ul>
+
+
+<a name=b></a>
+<h2>b. Files</h2>
+
+
+<ul>
+<li>Examples
+<ul>
+<li><a href="misc/tougher/Makefile.txt">Makefile</a> 
+- to compile all of the examples
+<li><a href="misc/tougher/example1.cpp.txt">Example1</a> 
+- creating a simple window with Xlib
+<li><a href="misc/tougher/example2.cpp.txt">Example2 </a>
+- using the <b>display</b> class
+<li><a href="misc/tougher/example3.cpp.txt">Example3 </a>
+- using the <b>window</b> class
+<li><a href="misc/tougher/example4.cpp.txt">Example4 </a>
+- event handling with <b>event_dispatcher</b>
+<li><a href="misc/tougher/example5.cpp.txt">Example5 </a>
+- drawing lines and text with the <b>graphics_context</b> class
+<li><a href="misc/tougher/example6.cpp.txt">Example6 </a>
+- our finished command button in action
+</ul>
+
+<li>xlib++ classes
+<ul>
+<li><a href="misc/tougher/pointer.hpp.txt">pointer.hpp</a> 
+- pointer class
+<li><a href="misc/tougher/shapes.hpp.txt">shapes.hpp </a>
+- contains various shape classes
+<li><a href="misc/tougher/character.hpp.txt">character.hpp,</a>
+<a href="misc/tougher/color.hpp.txt">color.hpp</a>
+- misc helpers
+<li><a href="misc/tougher/command_button_base.hpp.txt">
+command_button_base.hpp </a>
+- our <b>command_button_base</b> abstract class
+<li><a href="misc/tougher/command_button.hpp.txt">command_button.hpp </a>
+- our <b>command_button</b> class
+<li><a href="misc/tougher/event_dispatcher.hpp.txt">event_dispatcher.hpp</a>
+- <b>event_dispatcher</b> class for event handling
+<li><a href="misc/tougher/display.hpp.txt">display.hpp</a>
+- <b>display</b> class
+<li><a href="misc/tougher/exceptions.hpp.txt">exceptions.hpp</a>
+- various custom exception classes
+<li><a href="misc/tougher/graphics_context.hpp.txt">graphics_context.hpp</a>
+- our <b>graphics_context</b> class for drawing
+<li><a href="misc/tougher/window_base.hpp.txt">
+window_base.hpp </a>
+- our <b>window_base</b> abstract class
+<li><a href="misc/tougher/window.hpp.txt">window.hpp </a>
+- our <b>window</b> class for creating windows
+</ul>
+<li><a href="misc/tougher/COPYING.txt">COPYING</a> 
+- Copyright information for the source files in this project
+</ul>
+
+</body>
+</html>
+
+
+
+
+<!-- *** BEGIN bio *** -->
+<SPACER TYPE="vertical" SIZE="30">
+<P> 
+<H4><IMG ALIGN=BOTTOM ALT="" SRC="../gx/note.gif">Rob Tougher</H4>
+<EM> Rob is a C++ software engineer in the NYC area.
+When not coding on his favorite platform, you can
+find Rob strolling on the beach with his girlfriend, Nicole,
+and their dog, Halley. </EM>
+
+<!-- *** END bio *** -->
+
+<!-- *** BEGIN copyright *** -->
+<P> <hr> <!-- P --> 
+<H5 ALIGN=center>
+
+Copyright &copy; 2002, Rob Tougher.<BR>
+Copying license <A HREF="../copying.html">http://www.linuxgazette.net/copying.html</A><BR> 
+Published in Issue 78 of <i>Linux Gazette</i>, May 2002</H5>
+<!-- *** END copyright *** -->
+
+<!--startcut ==========================================================-->
+<HR><P>
+<CENTER>
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="taneja.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../lg_faq.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="lg_backpage.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+</CENTER>
+</BODY></HTML>
+<!--endcut ============================================================-->

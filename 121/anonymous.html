@@ -1,0 +1,360 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Firewall logging to MySQL - the quick and easy way LG #121</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="lg_cover.html" >&lt;-- prev</A> | <A HREF="hegde.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Firewall logging to MySQL - the quick and easy way</h1>
+<p id="by"><b>By <A HREF="../authors/anonymous.html">Anonymous</A></b></p>
+
+<p>
+<p>Security is a journey, not a destination. One good step along
+the way is to review and analyze your firewall logs and syslog
+messages on a regular basis. Unfortunately, the plain text logs
+produced by <code>syslog</code> are not in a form that is easily
+analyzed. Also, unless you are using <code>syslog-ng</code>, your
+firewall logs are probably scattered all over the various system
+message log files.</p>
+
+<p>This article will show you how to move your firewall logs from
+<code>syslog</code> text files to a MySQL database in 10 minutes or
+so. The following examples were carried out on a SuSE 10.0 system
+but you can easily adapt them for other distributions.</p>
+
+<h3>1. Verify kernel settings</h3>
+
+<p>You can skip this step if you are using the default SuSE 10.0
+kernel. The stock kernels that come with most distributions should
+be fine, but you will need to make sure you have your kernel
+compiled with the <code>CONFIG_NETFILTER</code>,
+<code>CONFIG_IP_NF_IPTABLES</code>,
+<code>CONFIG_IP_NF_FILTER</code>, and
+<code>CONFIG_IP_NF_TARGET_ULOG</code> options. Most firewalls will
+also need <code>CONFIG_IP_NF_CONNTRACK</code>,
+<code>CONFIG_IP_NF_FTP</code>, and
+<code>CONFIG_IP_NF_IRC</code>.</p>
+If you have a file called <code>/proc/config.gz</code>, it means
+your kernel was compiled with the IKCONFIG option.
+<code>/proc/config.gz</code> is the compressed version of the
+<code>.config</code> file that was used to generate that kernel, so
+you can check if you have the necessary options for
+<code>netfilter</code> and <code>ulog</code> with this command:
+
+<pre class="code">
+gunzip -c /proc/config.gz | grep -E 'CONFIG_(NETFILTER|(IP_NF_(IPTABLE|FILTER|TARGET_ULOG)))'
+</pre>
+
+<p>If they are not set as modules or compiled into the kernel you
+will need to change them and recompile the kernel. In
+<code>menuconfig</code> the following options need to be set:</p>
+
+<pre class="code">
+Networking options &gt; Network packet filtering
+Networking options &gt; Netfilter Configuration &gt; IP tables support
+Networking options &gt; Netfilter Configuration &gt; Packet filtering
+Networking options &gt; Netfilter Configuration &gt; ULOG target support
+</pre>
+
+<p>You might also want to verify that <code>iptables</code> is
+compiled with <code>ulog</code> support.<!--, although usually most
+recent kernels do support <code>netfilter</code> and
+<code>ulog</code> by default--></p>
+
+<h3>2.1. Install MySQL</h3>
+You can go directly to 2.2. if you have MySQL already setup.
+Otherwise:
+
+<pre class="code">
+apt install mysql
+/etc/init.d/mysql restart
+chkconfig mysql on
+</pre>
+
+<p>If you are using SuSE and do not have <a href=
+"http://linux01.gwdg.de/apt4rpm/">apt4rpm</a> installed on your
+system, I highly recommend that you do so, as it will greatly
+simplify your package management issues.</p>
+
+<p>You also need to set a password for the MySQL root user:</p>
+
+<pre class="code">
+mysqladmin -u root password 'yourpassword'
+</pre>
+
+<h3>2.2. Initialize the database</h3>
+Type in: 
+<!--20051124 dsrich - Added  '-u root' to the following as the author
+apparently assumes that the user is logged in as root - never a good
+idea,-->
+
+<pre class="code">
+mysql -p -u root
+</pre>
+then enter your password at the prompt. Once you have logged into
+your MySQL database, enter the following commands to prepare the
+database to receive firewall logs from ulog.
+
+<pre class="code">
+create database ulogdb;
+use ulogdb;
+source /path/to/nulog/scripts/ulogd.mysqldump;
+grant select,insert,update,drop,delete,create temporary tables, on ulogdb.* to ulog@localhost identified by 'ulogpass';
+flush privileges;
+quit;
+</pre>
+So what happened here?
+
+<ul>
+<li>We created a database ulogdb to host our logs</li>
+
+<li>We executed the SQL script <code>ulogd.mysqldump</code>,
+preparing the database for nulog-php, it allows to store more
+information than the MySQL table provided with ulogd, and you can
+find it in the scripts directory of nulog-php or <a href=
+"misc/anonymous/ulogd.mysqldump">right here</a>.</li>
+
+<li>We created an user &ldquo;ulog&rdquo; (with pass
+&ldquo;ulogpass&rdquo;) to have read/write access to that database.
+I highly recommend that you enter a different password than this
+example uses.</li>
+</ul>
+
+<h3>3.1. Install <code>ulogd</code></h3>
+You will need to install the logging daemon <code>ulogd</code>:
+
+<pre class="code">
+apt install ulogd-mysql
+</pre>
+
+<h3>3.2. Configure <code>ulogd.conf</code></h3>
+
+<p>Edit /etc/ulogd.conf to match what we set up previously:</p>
+
+<pre class="code">
+[MYSQL]
+table="ulog"
+pass="ulogpass"
+user="ulog"
+db="ulogdb"
+host="localhost"
+</pre>
+
+<p>You should change the password &ldquo;ulogpass&rdquo; to the
+password you set in the GRANT command in your MySQL database. Now
+uncomment the following line to send the data to MySQL:</p>
+
+<pre class="code">
+plugin /usr/lib/ulogd/ulogd_MYSQL.so
+</pre>
+
+<p>and comment out the following two lines to prevent logging to a
+text file:</p>
+
+<pre class="code">
+#syslogfile /var/log/ulogd.syslogmenu
+#plugin /usr/lib/ulogd/ulogd_LOGEMU.so
+</pre>
+
+<p>Now restart the ulogd daemon and set it to be automatically
+started at boot time with chkconfig:</p>
+
+<pre class="code">
+/etc/init.d/ulogd restart
+chkconfig ulogd on
+</pre>
+
+<h3>4. Redirect <code>iptables</code> Logging</h3>
+
+<p>The following <code>sed</code> command switches all your
+iptables rules to log through ULOG, we will assume that you store
+your iptables ruleset in a file called &ldquo;iptables&rdquo;
+(usually in /etc/sysconfig/ or /var/lib/)</p>
+
+<pre class="code">
+sed 's/LOG/ULOG/'; /etc/sysconfig/iptables &gt; /etc/sysconfig/uiptables
+iptables-restore &lt; /etc/sysconfig/uiptables
+</pre>
+
+<p>You are now all set up! All the logs from your firewall are now
+being logged in your MySQL database. Don't forget to update your
+firewall startup script so the new iptables are taken into
+account.</p>
+
+<h3>5. Import Your Old Logs</h3>
+
+<p>So far, so good, but you probably would like to have your old
+logs in MySQL also. Here is a little <a href=
+"misc/anonymous/nf2mysql.pl.txt">perl script</a> to allow you to
+import your old text logs to MySQL. Some of the regexps are reused
+from <a href="http://adcfw-log.sourceforge.net/">adcfw-log</a>. You
+can usually find your netfilter logs in /var/log/firewall-XXXXXX.gz
+or /var/log/messages-XXXXXX.gz. To import:</p>
+
+<pre class="code">
+gunzip -c /var/log/firewall-XXXXXX.gz | nf2sql.pl
+</pre>
+Repeat for each of your other log files. To process a current log
+file (or other uncompressed log file) such as /var/log/messages or
+/var/log/firewall:
+
+<pre class="code">
+nf2sql.pl &lt; /var/log/messages
+</pre>
+That's it!
+
+<h3>6. Analyze the Results</h3>
+
+<p>To analyze your logs in MySQL you can use <a href=
+"http://www.inl.fr/Nulog.html">nulog</a> or <a href=
+"http://webfwlog.sourceforge.net/">webfwlog</a></p>
+
+<h3>Links</h3>
+
+<p>This article was partly inspired by <a href=
+"http://www.wikilearning.com/logear_netfilter_en_una_base_de_datos-wkccp-673-1.htm">
+this article</a> (only available in Spanish).</p>
+
+<p>The original <code>ulog</code> page can be found <a href=
+"http://gnumonks.org/gnumonks/projects/project_details?p_id=1">here</a>.</p>
+
+<p>If you want to push it further and log all system messages to
+MySQL, you can take a look at this <a href=
+"http://gentoo-wiki.com/HOWTO_setup_PHP-Syslog-NG">HOWTO setup PHP
+syslog-ng</a> wiki entry.</p>
+
+<p><a href=
+"http://www.computerworld.com/printthis/2005/0,4814,105905,00.html">
+Here</a> is a reason to move away from the usual text file
+logging.</p>
+
+<p>If you do not have your iptables set already, you can easily
+build a good ruleset with <a href=
+"http://www.shorewall.net">shorewall</a>, <a href=
+"http://firehol.sourceforge.net">firehol</a> or <a href=
+"http://www.fs-security.com">firestarter</a>.</p>
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- ============================================================= -->
+<!-- *** BEGIN bio *** -->
+<hr>
+
+<p>
+<img ALIGN="LEFT" ALT="[BIO]" SRC="../gx/2002/note.png" class="bio">
+<em>
+
+A. N. Onymous has been writing for LG since the early days - generally by
+sneaking in at night and leaving a variety of articles on the Editor's
+desk. A man (woman?) of mystery, claiming no credit and hiding in
+darkness... probably something to do with large amounts of treasure in an
+ancient Mayan temple and a beautiful dark-eyed woman with a snake tattoo
+winding down from her left hip. Or maybe he just treasures his privacy. In
+any case, we're grateful for his contribution.<br>
+ -- Editor, Linux Gazette
+
+</em>
+<br CLEAR="all">
+
+<!-- *** END bio *** -->
+
+<!-- ============================================================= -->
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2005, Anonymous. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 121 of Linux Gazette, December 2005
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="lg_cover.html" >&lt;-- prev</A> | <A HREF="hegde.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">December 2005 (#121)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

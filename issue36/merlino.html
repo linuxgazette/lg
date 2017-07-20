@@ -1,0 +1,288 @@
+<!--startcut ==========================================================-->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML>
+<HEAD>
+<title>Running Your Own Domain Over a Part Time Dialup LG #36</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#A000A0"
+ALINK="#FF0000">
+<!--endcut ============================================================-->
+
+<H4>
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H1><font color="maroon">Running Your Own Domain Over a Part Time Dialup</font></H1>
+<H4>By <a href="mailto:joe@negia.net">Joe Merlino</a></H4>
+</center>
+<P> <HR> <P>  
+
+You love your linux box. You love the power. You love the flexability. You
+love the freedom. You really love the utter non-microsoftness of it. But
+deep down inside, you know there's something missing. A deep longing sits
+within you, crying out to be assuaged.
+<P>
+Your friends with full-time ethernet connections have it. Your really rich
+friend with a T-1 to the house has it. They can log into their linux boxen
+any time they want. They have their own domain names. You probably even
+have an account on one of their machines. But look what you're stuck with.
+Sure your modem's pretty fast, but it only dials up when you tell it to,
+and you can't tell it when you're not logged in. Even if you set it up to
+run as a cron job, you wouldn't know where to telnet to because your ISP
+gives you a different IP number every time you dial in.
+<P>
+How do you get remote access?
+<P>
+Fear not. There Is A Way. For the price of a dialup PPP account, you can
+have that precious remote access. And if you're willing to pay the freight
+to InterNIC (you can scrape up seventy bucks, can't you?) you can even
+have your own domain. Here's how:
+<P><HR> <P> 
+<H4> STEP 1 - SETTING UP PPP</H4> 
+<P>
+The general setup of PPP connections on Linux is well documented
+elsewhere, so I won't go into it, except to say that you need to have PPP
+set up to run non-interactively from a command line. Graphical programs to
+activate PPP such as EZPPP or Red Hat's netcfg won't work. This is because
+you're going to create a script to be run as a cron job, and that script
+needs to be able to call your PPP-connecting script.
+<P>
+For the purposes of this article, my PPP-connecting script is called
+/etc/ppp/ppp-on, and the script that ends the PPP connection is called
+/etc/ppp/ppp-off. You should be able to find examples of these sorts of
+scrips on the web.
+<P><HR> <P> 
+<H4>STEP 2 - DYNAMIC DNS SERVICE</H4> 
+<P>
+You probably have Domain Name Service (DNS) through your ISP, but your ISP
+doesn't keep track of your particular connection because it changes every
+time you dial in. Your ISP does this because it has more users than it
+does IP numbers. This makes sense when you consider that most of the
+people who use the service only connect for a short time - a couple of
+hours at most. You can probably get a full-time connection and a static IP
+number from your ISP, but such things are typically pretty expensive.
+<P>
+The thing is, you don't really need a static IP number to have a constant
+domain name. As long as the Domain Name Server where your domain name
+lives knows what your IP number is *at any given time*, you can get to
+your machine. And the DNS server where you domain name lives doesn't have
+to be the same one that belongs to your ISP.
+<P>
+I use a service provided by a company called Dyndns (www.dyndns.com)
+Dyndns will, for a fee, maintain your domain name in its database. The
+domain name you get can either be a subdomain of theirs (i.e.
+yourdomain.dyndns.com), which is cheaper, or your can have your own unique
+domain name (i.e. yourdomain.com), which is somewhat more expensive. If
+you want a unique domain name, irst, you have to register your domain name
+with InterNIC (www.internic.net). Dyndns will do this for you, for a fee,
+but it's so easy to do, you might as well save yourself the money and do
+it yourself. When you register with InterNIC, you have to supply the IP
+numbers of a primary and secondary DNS server. These numbers are available
+on Dyndns's web page. Once all of this goes through (read: is paid for),
+you're good to go.
+<P>
+The next thing you do is download a client program from Dyndns's website.
+They have a couple of different clients you can choose from (one in C, and
+one in Perl), and it might take some experimenting to figure out which one
+is better for you (even then, I had to have a friend of mine hack the
+Perl client a little to make it work).
+<P>
+When you are logged into your ISP, you run the client program. The client
+program gets your current IP number from the output of the 'ifconfig'
+command, and reports it to Dyndns's DNS server. Your domain name is now
+pointed at your machine.
+<P>
+[Note: Nothing I've said in this section should be considered an
+endorsement of or advertisement for Dyndns. I've used their service as an
+example because it's the service I use, and it's what I'm familiar with.]
+<P><HR> <P> 
+<H4>STEP 3 - AUTOMATING THE CONNECTION</H4> 
+<P>
+You've got the domain name, you've got the DNS service, amd you've got the
+client program working. Now you need a way to make the computer log itself
+onto your ISP without your actually being there to do it. Ah, the wonders
+of Linux! This is taken care of with a simple shell script. Here's what I
+use:
+
+<pre>
+#!/bin/bash
+
+#  This is a script that attempts to log into a remote dialup and
+#  establish a PPP connection. If it is sucessful, it runs 'ntpdate'
+#  (network clock set), NamedControl.pl (a perl script to update
+#  the dynamic DNS), and fetchmail for all accounts. If it fails, it
+#  makes two more attempts, and then exits.
+
+#  This script is released under the GNU General Public Licence. No
+#  warrenty whatsoever is expressed or implied.
+
+#  Original version was written by Joe Merlino &lt;joe@negia.net&gt;, November,
+#  1997.
+
+#  If you have an idea for an improvement to this script, please let me
+#  know. 
+
+#  set iteration counter at 1
+i=1
+while [ $i -le 3 ]
+  do
+
+    #  This part tests for the availability of the modem. If the modem
+    #  is available, it runs /etc/ppp/ppp-on. If not, it reports and
+    #  exits.
+
+    (
+    if (test -e /var/lock/LCK..modem)
+      then 
+        echo modem not available  # for some reason this didn't work. 
+        exit 0
+      else
+        /etc/ppp/ppp-on
+        sleep 45
+     fi
+    )
+
+    #  This part tests for the modem lock file, and if it exists, runs
+    #  the various programs needed to update the system from the network.
+    #  if the lock file is not found, it reports and exits.
+
+    (
+    #!/bin/bash
+    if (test -e /var/lock/LCK..modem)
+      then  
+        /etc/ppp/netpack  #invoke 'netpack' script
+        echo done
+      else
+       echo no connection
+    fi
+    )
+    sleep 60
+
+      #  This part again tests for the lock file, and if it finds it, sets
+      #  the iteration counter to 4 (so the script will exit). If the lock
+      #  file is not found, it incriments the counter by one.
+
+      if (test -e /var/lock/LCK..modem)
+        then
+          i=3
+      fi
+      i=`expr $i + 1`
+      echo $i
+  done
+</pre>
+
+You'll notice that this script calls another script, 'netpack'. I've done
+that because I have a set of things I like to do when my machine logs
+itself in. At the very least, 'netpack' should include your dynamic DNS 
+client script. I would also recommend that it include whatever you use
+to download your email (e.g. 'fetchmail' or 'popclient' or whatever). It
+would also be possible to replace the line that calls 'netpack' with a
+series of lines that call the various programs, but I like the modular
+design because I can edit 'netpack' on it's own.
+<P>
+I put both this script (which I named 'auto-up'), and 'netpack' in
+/etc/ppp/.
+<P>
+Once you've got all that set up, try running it manually to make sure it
+works. (Don't forget to give yourself execute permission.) Once you've
+established that it works, set it up as a cron job (using the 'crontab -e'
+command) to run whenever you want to have remote access to your linux box.
+Also, set up /etc/ppp/ppp-off to run when you want your access to end.
+<P>
+[Note: Some ISPs have a limit on the amount of time you can be connected
+without doing anything. This is to keep people from logging in and simply
+leaving their computers connected indefinitely. You should be aware of
+your ISP's policy with regard to this.]
+<P>
+And there it is. You now have remote access to your machine at specified
+times. Now you can start pining for a full-time connection.
+
+<p>Addendum: Between the time I wrote this article, and the time that this
+issue of <i>Linux Gazette</i> was posted, DynDNS added a web-based update
+system to its already existing methods. This means that you can update
+DynDNS manually, with your browser.
+
+<p>It also gives us the opportunity to write another Perl client. This one
+can be much more compact, and should work "out of the box" with only one
+small hack required for your account information.
+
+<p>If you want to use it, simply copy the text between the ---CUT--- lines to
+a file, give yourself execute permission, and use it in place of the other
+client program.
+<br><br><br>
+
+<pre>
+
+---------------CUT------------------
+
+#!/usr/bin/perl
+
+#
+# Client script for HTTP update of DynDNS's Dynamic Domain service.
+# Written by Joe Merlino  12/31/98
+# Licence: GNU GPL
+#
+
+use IO::Socket;
+
+# Replace the values below with your information as indicated
+
+$host = "master.dyndns.com";
+$myhost = "myhost";		#replace with your hostname
+$myname = "postmaster";		
+$mypass = "mypass";		#replace with your password
+
+
+# This part opens a connection to DynDNS's web server.
+$remote = IO::Socket::INET->new(
+	Proto => "tcp",
+	PeerAddr => "$host",
+	PeerPort => "http(80)"
+	) 
+	or die "couldn't open $host";
+
+# This part sends an HTTP request containing your information.
+print $remote "GET /dyndns/cgi/DynDNSWeb.cgi?name=$myname&passwd=$mypass&domain=$myhost&IP=AUTO HTTP/1.0\n\n";
+
+
+#This part extracts and prints DynDNS's response.
+while ($hrm = <$remote>) {
+
+	if ($hrm =~ /UPDATE/) {
+		$message = $hrm
+	}
+
+	if ($line =~ /THERE/) {
+		$message = $hrm
+	}
+}
+
+print "DynDNS: $message";
+
+-close $remote;
+---------------CUT------------------
+</PRE> 
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<center><H5>Copyright &copy; 1999, Joe Merlino <BR> 
+Published in Issue 36 of <i>Linux Gazette</i>, January 1999</H5></center>
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<A HREF="./index.html"><IMG ALIGN=BOTTOM SRC="../gx/indexnew.gif" 
+ALT="[ TABLE OF CONTENTS ]"></A>
+<A HREF="../index.html"><IMG ALIGN=BOTTOM SRC="../gx/homenew.gif"
+ALT="[ FRONT PAGE ]"></A>
+<A HREF="./ayers.html"><IMG SRC="../gx/back2.gif"
+ALT=" Back "></A>
+<A HREF="./ali.html"><IMG SRC="../gx/fwd.gif" ALT=" Next "></A>
+<P> <hr> <P> 
+<!--startcut ==========================================================-->
+</BODY>
+</HTML>
+<!--endcut ============================================================-->

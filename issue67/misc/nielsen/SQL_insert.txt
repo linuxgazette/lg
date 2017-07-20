@@ -1,0 +1,66 @@
+
+drop function insert_job (int4,text,text);
+CREATE FUNCTION insert_job (int4,text,text) RETURNS int2 AS '
+DECLARE
+    c_id_ins int4; j_name_ins text;  l_ins text; 
+    job_id1 int4; oid1 int4; test_id int4 := 0; j_no_ins int4 := 0;
+    record1 RECORD; record2 RECORD; record3 RECORD; record4 RECORD;
+BEGIN
+   j_name_ins := $2; l_ins  := $3; c_id_ins := $1;
+
+     -- We execute a few Perl procedures now. These are just examples
+     -- of Perl procedures.
+     -- Clean the name of the job.
+   SELECT INTO record4 clean_text(j_name_ins) as text1;
+   j_name_ins = record4.text1;
+     -- Clean the location of the job.
+   SELECT INTO record4 clean_text(l_ins) as text1;
+   l_ins = record4.text1;
+     -- Verify the values we insert are okay.
+   SELECT INTO record4 job_values_verify (c_id_ins, j_name_ins, l_ins) as no;
+   IF record4.no < 0 THEN return (record3.no); END IF;
+
+     -- See if we have unique names, otherwise return 0.
+   FOR record1 IN SELECT job_id FROM jobs  
+      where contact_id = c_id_ins and job_name = j_name_ins
+      LOOP
+      test_id := record1.job_id;
+   END LOOP;
+     -- If the job_id is null, great, otherwise abort and return -1;
+   IF test_id > 0 THEN return (-1); END IF;
+
+   FOR record3 IN SELECT max(job_no) from jobs_backup where contact_id = c_id_ins
+      LOOP
+      IF record3.max IS NULL THEN j_no_ins := 0; END IF;
+      IF record3.max > -1 THEN j_no_ins = record3.max + 1; END IF;
+   END LOOP;
+
+     -- Insert the stuff. Let the sequence determine the job_id.
+   insert into jobs (contact_id, job_no, job_name, job_location)
+        values (c_id_ins, j_no_ins, j_name_ins, l_ins);
+     -- Get the unique oid of the row just inserted. 
+   GET DIAGNOSTICS oid1 = RESULT_OID;
+     -- Get the job id. Do not use SELECT INTO, since record2 needs to be assigned.
+   FOR record2 IN SELECT job_id FROM jobs where oid = oid1
+      LOOP
+      job_id1 := record2.job_id;
+   END LOOP;
+   
+     -- If job_id1 is NULL, insert failed or something is wrong.
+   IF job_id1 is NULL THEN return (-2); END IF;
+     -- It should also be greater than 0, otherwise something is wrong.
+   IF job_id1 < 1 THEN return (-3); END IF;
+
+     -- Everything has passed, return job_id1 as job_id.
+   insert into jobs_backup (contact_id, job_no, job_name, job_location, action, error_code)
+        values (c_id_ins, j_no_ins, j_name_ins, l_ins, ''insert'', job_id1);
+   return (job_id1);
+END;
+' LANGUAGE 'plpgsql';
+select insert_job (1,'Job Title 1','Boston, MA');
+select insert_job (1,'Job Title 2','San Jose, CA');
+select insert_job (2,'Job Title 1','Columbus, Ohio');
+select insert_job (2,'Job Title 2','Houston, TX');
+select insert_job (3,'Job Title 1','Denver, CO');
+select insert_job (3,'Job Title 2','New York, NT');
+select * from jobs;

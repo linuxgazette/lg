@@ -1,0 +1,46 @@
+#!/bin/sh
+# BIPclient.sh  Brother Internet Print client program. Breaks incoming stream
+#               into parts of designated size, then does base-64 encoding of
+#               each part and emails it with appropriate preamble etc. to
+#               designated email address.  Graham Jenkins, IBM GSA, June 2001.
+
+[ $# -ne 2 ] && echo "Usage: `basename $0` kb-per-part destination">&2 &&
+  echo " e.g.: man a2ps | a2ps -o - | `basename $0` 16 lp3@acme.com">&2&& exit 2
+
+do_header () {                                  # Function to print header
+cat <<EOF
+START-BROBROBRO-START
+BRO-SERVICE=ZYXWVUTSRQ980
+BRO-NOTIFY=Always
+BRO-REPLY=$Me
+BRO-PARTIAL=$Part/$Total
+BRO-UID=$Me$Now
+STOP-BROBROBRO-STOP
+
+Content-Type: application/octet-stream; name="PrintJob.PRN"
+Content-Transfer-Encoding: base64
+
+EOF
+}
+
+Me=`whoami`@`hostname`
+[ -n "`domainname`" ] && [ "`domainname`" != "(none)" ] && Me=$Me.`domainname`
+Now=`date '+%Y%m%d%H%M%S'`                      # Generate email address,
+Dir=/tmp/`basename $0`.$Me$Now                  # timestamp and directory name
+trap 'rm -rf $Dir;echo Oops>&2;exit 1' 1 2 3 15 # Set cleanup trap
+
+mkdir $Dir                      || exit 1       # Create directory
+split -b ${1}k - $Dir/          || exit 1       # Generate parts
+Total=`ls $Dir|wc -w |tr -d ' '`|| exit 1       # Count parts
+
+Part=0
+for File in `ls $Dir/*` ; do                    # Encode and send parts
+  Part=`expr 1 + $Part`
+  [ -t 2 ] && echo "Sending part: $Part/"$Total"  to: $2 .. $Now" >&2
+  ( do_header
+    base64 $File                                # Use mmencode or base64
+    echo ) | Mail -s "Brother Internet Print Job" $2 
+done
+
+rm -rf $Dir                                     # Cleanup and exit
+exit 0

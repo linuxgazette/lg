@@ -1,0 +1,640 @@
+drop sequence class_sequence;
+create sequence class_sequence;
+drop sequence class_sequence_backup;
+create sequence class_sequence_backup;
+drop table class;
+create table class (
+class_id int4 NOT NULL PRIMARY KEY DEFAULT nextval('class_sequence'),
+    date_updated  timestamp NOT NULL default CURRENT_TIMESTAMP,
+    date_created  timestamp NOT NULL default CURRENT_TIMESTAMP,
+    active int2 CHECK (active in (0,1)) DEFAULT 0,
+time text not null default '' ,
+title text not null default '' ,
+description text not null default '' ,
+users_id int4 not null default 0  REFERENCES users
+       ON DELETE NO ACTION
+       ON UPDATE CASCADE 
+);drop table class_backup;
+create table class_backup (
+backup_id int4 NOT NULL UNIQUE DEFAULT nextval('class_sequence_backup'), 
+    class_id int4 NOT NULL DEFAULT 0,
+    date_updated  timestamp NOT NULL default CURRENT_TIMESTAMP,
+    date_created  timestamp NOT NULL default CURRENT_TIMESTAMP,
+    active int2 CHECK (active in (0,1)) DEFAULT 0,
+    time text not null default '',
+title text not null default '',
+description text not null default '',
+users_id int4 not null default 0, error_code text NOT NULL DEFAULT ''
+);
+drop view class_active;
+create view class_active as select * from class
+        where active = 1;
+drop view class_deleted;
+create view class_deleted as select * from class
+        where active = 0;
+drop view class_backup_ids;
+create view class_backup_ids as 
+           select distinct class_id from class_backup;
+drop view class_purged;
+create view class_purged as
+   select * from class_backup where oid = ANY (
+     select max(oid) from class_backup where class_id = ANY
+        (
+        select distinct class_id from class_backup
+          where class_backup.error_code = 'purge'
+           and NOT class_id = ANY (select class_id from class)
+        )
+        group by class_id
+     )
+    ;
+---              Generic Functions for Perl/Postgresql version 1.0
+
+---                       Copyright 2001, Mark Nielsen
+---                            All rights reserved.
+---    This Copyright notice was copied and modified from the Perl 
+---    Copyright notice. 
+---    This program is free software; you can redistribute it and/or modify
+---    it under the terms of either:
+
+---        a) the GNU General Public License as published by the Free
+---        Software Foundation; either version 1, or (at your option) any
+---        later version, or
+
+---        b) the "Artistic License" which comes with this Kit.
+
+---    This program is distributed in the hope that it will be useful,
+---    but WITHOUT ANY WARRANTY; without even the implied warranty of
+---    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See either
+---    the GNU General Public License or the Artistic License for more details.
+
+---    You should have received a copy of the Artistic License with this
+---    Kit, in the file named "Artistic".  If not, I'll be glad to provide one.
+
+---    You should also have received a copy of the GNU General Public License
+---   along with this program in the file named "Copying". If not, write to the 
+---   Free Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 
+---    02111-1307, USA or visit their web page on the internet at
+---    http://www.gnu.org/copyleft/gpl.html.
+
+-- create a method to unpurge just one item.  
+-- create a method to purge one item. 
+--  \i /tmp/Test/sample/class.table
+---------------------------------------------------------------------
+
+drop function sql_class_insert ();
+CREATE FUNCTION sql_class_insert () RETURNS int4 AS '
+DECLARE
+    record1 record;  oid1 int4; id int4 :=0; record_backup RECORD;
+BEGIN
+   insert into class (date_updated, date_created, active)
+        values (CURRENT_TIMESTAMP,CURRENT_TIMESTAMP, 1);
+     -- Get the unique oid of the row just inserted. 
+   GET DIAGNOSTICS oid1 = RESULT_OID;
+     -- Get the class id. 
+   FOR record1 IN SELECT class_id FROM class where oid = oid1
+      LOOP
+      id := record1.class_id;
+   END LOOP;
+   
+     -- If id is NULL, insert failed or something is wrong.
+   IF id is NULL THEN return (-1); END IF;
+     -- It should also be greater than 0, otherwise something is wrong.
+   IF id < 1 THEN return (-2); END IF;
+
+      -- Now backup the data. 
+    FOR record_backup IN SELECT * FROM class where class_id = id
+       LOOP
+       insert into class_backup (class_id, date_updated, date_created, 
+           active, error_code) 
+         values (id, record_backup.date_updated, record_backup.date_created,
+            record_backup.active, ''insert'');
+    END LOOP;
+
+     -- Everything has passed, return id as class_id.
+   return (id);
+END;
+' LANGUAGE 'plpgsql';
+---------------------------------------------------------------------
+
+drop function sql_class_delete (int4);
+CREATE FUNCTION sql_class_delete (int4) RETURNS int2 AS '
+DECLARE
+    id int4 := 0;
+    id_exists int4 := 0;
+    record1 RECORD; 
+    record_backup RECORD;
+    return_int4 int4 :=0;
+
+BEGIN
+     -- If the id is not greater than 0, return error.
+   id := clean_numeric($1);
+   IF id < 1 THEN return -1; END IF;
+
+     -- If we find the id, set active = 0. 
+   FOR record1 IN SELECT class_id FROM class 
+          where class_id = id
+      LOOP
+      update class set active=0, date_updated = CURRENT_TIMESTAMP
+           where class_id = id;  
+      GET DIAGNOSTICS return_int4 = ROW_COUNT;       
+      id_exists := 1;
+   END LOOP;
+      
+     -- If we did not find the id, abort and return -2.  
+   IF id_exists = 0 THEN return (-2); END IF;
+
+   FOR record_backup IN SELECT * FROM class where class_id = id
+      LOOP
+      insert into class_backup (class_id, date_updated, date_created,
+          active , time, title, description, users_id ,error_code)
+           values (record_backup.class_id, record_backup.date_updated, 
+             record_backup.date_updated, record_backup.active
+             , record_backup.time, record_backup.title, record_backup.description, record_backup.users_id , ''delete''
+      );
+   END LOOP;
+
+     -- If id_exists == 0, Return error.
+     -- It means it never existed. 
+   IF id_exists = 0 THEN return (-1); END IF;
+
+     -- We got this far, it must be true, return ROW_COUNT.   
+   return (return_int4);
+END;
+' LANGUAGE 'plpgsql';
+
+---------------------------------------------------------------------
+
+drop function sql_class_undelete (int4);
+CREATE FUNCTION sql_class_undelete (int4) RETURNS int2 AS '
+DECLARE
+    id int4 := 0;
+    id_exists int4 := 0;
+    record1 RECORD; 
+    record_backup RECORD;
+    return_int4 int4 :=0;
+
+BEGIN
+     -- If the id is not greater than 0, return error.
+   id := clean_numeric($1);
+   IF id < 1 THEN return -1; END IF;
+
+     -- If we find the id, set active = 1. 
+   FOR record1 IN SELECT class_id FROM class 
+          where class_id = id
+      LOOP
+      update class set active=1, date_updated = CURRENT_TIMESTAMP
+           where class_id = id;  
+      GET DIAGNOSTICS return_int4 = ROW_COUNT;       
+      id_exists := 1;
+   END LOOP;
+      
+     -- If we did not find the id, abort and return -2.  
+   IF id_exists = 0 THEN return (-2); END IF;
+
+   FOR record_backup IN SELECT * FROM class where class_id = id
+      LOOP
+      insert into class_backup (class_id, date_updated, date_created,
+          active , time, title, description, users_id ,error_code)
+           values (record_backup.class_id, record_backup.date_updated, 
+             record_backup.date_updated, record_backup.active
+             , record_backup.time, record_backup.title, record_backup.description, record_backup.users_id , ''undelete''
+      );
+   END LOOP;
+
+     -- If id_exists == 0, Return error.
+     -- It means it never existed. 
+   IF id_exists = 0 THEN return (-1); END IF;
+
+     -- We got this far, it must be true, return ROW_COUNT.   
+   return (return_int4);
+END;
+' LANGUAGE 'plpgsql';
+
+---------------------------------------------------------------------
+drop function sql_class_update (int4 , text, text, text, int4);
+CREATE FUNCTION sql_class_update  (int4 , text, text, text, int4) 
+  RETURNS int2 AS '
+DECLARE
+    id int4 := 0;
+    id_exists int4 := 0;
+    record_update RECORD; record_backup RECORD;
+    return_int4 int4 :=0;
+              var_2 text;
+          var_3 text;
+          var_4 text;
+          var_5 int4;
+
+BEGIN
+             var_2 := clean_text($2);
+         var_3 := clean_text($3);
+         var_4 := clean_text($4);
+         var_5 := clean_numeric($5);
+
+     -- If the id is not greater than 0, return error.
+   id := clean_numeric($1);
+   IF id < 1 THEN return -1; END IF;
+
+   FOR record_update IN SELECT class_id FROM class
+         where class_id = id
+      LOOP
+      id_exists := 1;
+   END LOOP;
+
+   IF id_exists = 0 THEN return (-2); END IF;
+
+   update class set date_updated = CURRENT_TIMESTAMP
+      , time = var_2, title = var_3, description = var_4, users_id = var_5 
+        where class_id = id;
+   GET DIAGNOSTICS return_int4 = ROW_COUNT;
+
+   FOR record_backup IN SELECT * FROM class where class_id = id
+      LOOP
+     insert into class_backup (class_id,
+         date_updated, date_created, active
+         , time, title, description, users_id, error_code)
+       values (record_update.class_id, record_backup.date_updated,
+         record_backup.date_updated, record_backup.active
+         , record_backup.time, record_backup.title, record_backup.description, record_backup.users_id, ''update''
+      );
+   END LOOP;
+
+     -- We got this far, it must be true, return ROW_COUNT.   
+   return (return_int4);
+END;
+' LANGUAGE 'plpgsql';
+---------------------------------------------------------------------
+
+drop function sql_class_copy (int4);
+CREATE FUNCTION sql_class_copy (int4) 
+  RETURNS int2 AS '
+DECLARE
+    id int4 := 0;
+    id_exists int4 := 0;
+    record1 RECORD; record2 RECORD; record3 RECORD;    
+    return_int4 int4 := 0;
+    id_new int4 := 0;
+    class_new int4 :=0;
+BEGIN
+     -- If the id is not greater than 0, return error.
+   id := clean_numeric($1);
+   IF id < 1 THEN return -1; END IF;
+
+   FOR record1 IN SELECT class_id FROM class where class_id = id
+      LOOP
+      id_exists := 1;
+   END LOOP;
+   IF id_exists = 0 THEN return (-2); END IF;
+
+     --- Get the new id
+   FOR record1 IN SELECT sql_class_insert() as class_insert
+      LOOP
+      class_new := record1.class_insert;
+   END LOOP;
+     -- If the class_new is not greater than 0, return error.
+   IF class_new < 1 THEN return -3; END IF;
+
+   FOR record2 IN SELECT * FROM class where class_id = id
+      LOOP
+
+     FOR record1 IN SELECT sql_class_update(class_new , clean_text(record2.time), clean_text(record2.title), clean_text(record2.description), clean_text(record2.users_id))
+        as class_insert
+      LOOP
+        -- execute some arbitrary command just to get it to pass. 
+      id_exists := 1;
+     END LOOP;
+   END LOOP;
+
+     -- We got this far, it must be true, return new id.   
+   return (class_new);
+END;
+' LANGUAGE 'plpgsql';
+
+------------------------------------------------------------------
+drop function sql_class_purge ();
+CREATE FUNCTION sql_class_purge () RETURNS int4 AS '
+DECLARE
+    record_backup RECORD; oid1 int4 := 0;
+    return_int4 int4 :=0;
+    deleted int4 := 0;
+    delete_count int4 :=0;
+    delete_id int4;
+
+BEGIN 
+
+     -- Now delete one by one. 
+   FOR record_backup IN SELECT * FROM class where active = 0
+      LOOP
+         -- Record the id we want to delete. 
+      delete_id = record_backup.class_id;
+
+      insert into class_backup (class_id, date_updated, date_created,
+          active , time, title, description, users_id ,error_code)
+           values (record_backup.class_id, record_backup.date_updated, 
+             record_backup.date_updated, record_backup.active
+             , record_backup.time, record_backup.title, record_backup.description, record_backup.users_id , ''purge''
+          );
+
+        -- Get the unique oid of the row just inserted. 
+      GET DIAGNOSTICS oid1 = RESULT_OID;
+
+        -- If oid1 less than 1, return -1
+      IF oid1 < 1 THEN return (-2); END IF;
+        -- Now delete this from the main table.   
+      delete from class where class_id = delete_id;
+
+        -- Get row count of row just deleted, should be 1. 
+      GET DIAGNOSTICS deleted = ROW_COUNT;
+        -- If deleted less than 1, return -3
+      IF deleted < 1 THEN return (-3); END IF;
+      delete_count := delete_count + 1;
+
+    END LOOP;
+
+     -- We got this far, it must be true, return the number of ones we had.  
+   return (delete_count);
+END;
+' LANGUAGE 'plpgsql';
+
+------------------------------------------------------------------
+drop function sql_class_purgeone (int4);
+CREATE FUNCTION sql_class_purgeone (int4) RETURNS int4 AS '
+DECLARE
+    record_backup RECORD; oid1 int4 := 0;
+    record1 RECORD;
+    return_int4 int4 :=0;
+    deleted int4 := 0;
+    delete_count int4 :=0;
+    delete_id int4;
+    purged_no int4 := 0;
+
+BEGIN
+
+    delete_id := $1;
+        -- If purged_id less than 1, return -4
+    IF delete_id < 1 THEN return (-4); END IF;
+
+   FOR record1 IN SELECT * FROM class 
+      where active = 0 and class_id = delete_id 
+      LOOP
+      purged_no := purged_no + 1;
+   END LOOP;
+
+        -- If purged_no less than 1, return -1
+   IF purged_no < 1 THEN return (-1); END IF;
+
+     -- Now delete one by one.
+   FOR record_backup IN SELECT * FROM class where class_id = delete_id
+      LOOP
+
+      insert into class_backup (class_id, date_updated, date_created,
+          active , time, title, description, users_id ,error_code)
+           values (record_backup.class_id, record_backup.date_updated,
+             record_backup.date_updated, record_backup.active
+             , record_backup.time, record_backup.title, record_backup.description, record_backup.users_id , ''purgeone''
+          );
+
+        -- Get the unique oid of the row just inserted.
+      GET DIAGNOSTICS oid1 = RESULT_OID;
+
+        -- If oid1 less than 1, return -2
+      IF oid1 < 1 THEN return (-2); END IF;
+        -- Now delete this from the main table.
+      delete from class where class_id = delete_id;
+
+        -- Get row count of row just deleted, should be 1.
+      GET DIAGNOSTICS deleted = ROW_COUNT;
+        -- If deleted less than 1, return -3
+      IF deleted < 1 THEN return (-3); END IF;
+      delete_count := delete_count + 1;
+
+    END LOOP;
+
+     -- We got this far, it must be true, return the number of ones we had.
+   return (delete_count);
+END;
+' LANGUAGE 'plpgsql';
+
+------------------------------------------------------------------------
+drop function sql_class_unpurge ();
+CREATE FUNCTION sql_class_unpurge () RETURNS int2 AS '
+DECLARE
+    record1 RECORD;
+    record2 RECORD; 
+    record_backup RECORD;
+    purged_id int4 := 0;
+    purge_count int4 :=0;
+    timestamp1 timestamp;
+    purged_no int4 := 0;
+    oid1 int4 := 0;
+    oid_found int4 := 0;
+    highest_oid int4 := 0;
+
+BEGIN
+
+     -- Now get the unique ids that were purged. 
+   FOR record1 IN select distinct class_id from class_backup 
+       where class_backup.error_code = ''purge''
+          and NOT class_id = ANY (select class_id from class)
+      LOOP
+
+      purged_id := record1.class_id;
+      timestamp1 := CURRENT_TIMESTAMP;
+      purged_no := purged_no + 1;
+      oid_found := 0;
+      highest_oid := 0;
+
+        -- Now we have the unique id, find its latest date. 
+
+      FOR record2 IN select max(oid) from class_backup 
+          where class_id = purged_id and error_code = ''purge''
+        LOOP 
+          -- record we got the date and also record the highest date.
+        oid_found := 1; 
+        highest_oid := record2.max;
+      END LOOP;
+ 
+         -- If the oid_found is 0, return error. 
+      IF oid_found = 0 THEN return (-3); END IF;
+
+        -- Now we have the latest date, get the values and insert them. 
+      FOR record_backup IN select * from class_backup 
+          where oid = highest_oid
+        LOOP 
+
+      insert into class_backup (class_id, date_updated, date_created,
+          active , time, title, description, users_id ,error_code)
+           values (purged_id, record_backup.date_updated, 
+             timestamp1, record_backup.active
+             , record_backup.time, record_backup.title, record_backup.description, record_backup.users_id , ''unpurge''
+          );
+
+        -- Get the unique oid of the row just inserted. 
+      GET DIAGNOSTICS oid1 = RESULT_OID;
+        -- If oid1 less than 1, return -1
+      IF oid1 < 1 THEN return (-1); END IF;
+
+      insert into class (class_id, date_updated, date_created,
+          active , time, title, description, users_id)
+           values (purged_id, timestamp1,
+             timestamp1, record_backup.active
+             , record_backup.time, record_backup.title, record_backup.description, record_backup.users_id );
+        -- Get the unique oid of the row just inserted.
+      GET DIAGNOSTICS oid1 = RESULT_OID;
+        -- If oid1 less than 1, return -2
+      IF oid1 < 1 THEN return (-2); END IF;
+
+      END LOOP;
+
+   END LOOP;
+
+     -- We got this far, it must be true, return how many were affected.  
+   return (purged_no);
+END;
+' LANGUAGE 'plpgsql';
+
+---------------------------------------------------------------------
+drop function sql_class_unpurgeone (int4);
+CREATE FUNCTION sql_class_unpurgeone (int4) RETURNS int2 AS '
+DECLARE
+    record_id int4;
+    record1 RECORD;
+    record2 RECORD;
+    record_backup RECORD;
+    return_int4 int4 :=0;
+    purged_id int4 := 0;
+    purge_count int4 :=0;
+    timestamp1 timestamp;
+    purged_no int4 := 0;
+    oid1 int4 := 0;
+    oid_found int4 := 0;
+    highest_oid int4 := 0;
+
+BEGIN
+
+      purged_id := $1;
+        -- If purged_id less than 1, return -1
+      IF purged_id < 1 THEN return (-1); END IF;
+        --- Get the current timestamp.
+      timestamp1 := CURRENT_TIMESTAMP;
+
+   FOR record1 IN select distinct class_id from class_backup
+       where class_backup.error_code = ''purge''
+          and NOT class_id = ANY (select class_id from class)
+          and class_id = purged_id
+      LOOP
+      purged_no := purged_no + 1;
+
+   END LOOP;
+
+        -- If purged_no less than 1, return -1
+   IF purged_no < 1 THEN return (-3); END IF;
+
+        -- Now find the highest oid.  
+   FOR record2 IN select max(oid) from class_backup
+          where class_id = purged_id and error_code = ''purge''
+        LOOP
+          -- record we got the date and also record the highest date.
+        oid_found := 1;
+        highest_oid := record2.max;
+    END LOOP;
+
+         -- If the oid_found is 0, return error.
+    IF oid_found = 0 THEN return (-4); END IF;
+
+        -- Now get the data and restore it. 
+    FOR record_backup IN select * from class_backup 
+          where oid  = highest_oid
+        LOOP 
+        -- Insert into backup that it was unpurged. 
+      insert into class_backup (class_id, date_updated, date_created,
+          active , time, title, description, users_id ,error_code)
+           values (purged_id, timestamp1, 
+             record_backup.date_created, record_backup.active
+             , record_backup.time, record_backup.title, record_backup.description, record_backup.users_id , ''unpurgeone''
+          );
+
+        -- Get the unique oid of the row just inserted. 
+      GET DIAGNOSTICS oid1 = RESULT_OID;
+        -- If oid1 less than 1, return -1
+      IF oid1 < 1 THEN return (-1); END IF;
+        -- Insert into live table. 
+      insert into class (class_id, date_updated, date_created,
+          active , time, title, description, users_id)
+           values (record_backup.class_id, timestamp1,
+             record_backup.date_updated, record_backup.active
+             , record_backup.time, record_backup.title, record_backup.description, record_backup.users_id );
+        -- Get the unique oid of the row just inserted.
+      GET DIAGNOSTICS oid1 = RESULT_OID;
+        -- If oid1 less than 1, return -2
+      IF oid1 < 1 THEN return (-2); END IF;
+
+      END LOOP;
+
+     -- We got this far, it must be true, return how many were affected (1).  
+   return (purged_no);
+END;
+' LANGUAGE 'plpgsql';
+
+insert into class (class_id, date_updated, date_created, active)
+    values (0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0);
+insert into class_backup (backup_id, class_id, 
+     date_updated, date_created, active, error_code)
+    values (0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0, 'table creation');
+
+
+
+
+drop function clean_text (text);
+CREATE FUNCTION  clean_text (text) RETURNS text AS '
+  my $Text = shift;
+    # Get rid of whitespace in front. 
+  $Text =~ s/^\\s+//;
+    # Get rid of whitespace at end. 
+  $Text =~ s/\\s+$//;
+    # Get rid of anything not text.
+  $Text =~ s/[^ a-z0-9\\/\\`\\~\\!\\@\\#\\$\\%\\^\\&\\*\\(\\)\\-\\_\\=\\+\\\\\\|\[\\{\\]\\}\\;\\:\\''\\"\\,\\<\\.\\>\\?\\t\\n]//gi;
+    # Replace all multiple whitespace with one space. 
+  $Text =~ s/\\s+/ /g;
+  return $Text;
+' LANGUAGE 'plperl';
+ -- Just do show you what this function cleans up. 
+select clean_text ('       ,./<>?aaa aa      !@#$%^&*()_+| ');
+
+drop function clean_alpha (text);
+CREATE FUNCTION  clean_alpha (text) RETURNS text AS '
+  my $Text = shift;
+  $Text =~ s/[^a-z0-9_]//gi;
+  return $Text;
+' LANGUAGE 'plperl';
+ -- Just do show you what this function cleans up. 
+select clean_alpha ('       ,./<>?aaa aa      !@#$%^&*()_+| ');
+
+drop function clean_numeric (text);
+CREATE FUNCTION  clean_numeric (text) RETURNS int4 AS '
+  my $Text = shift;
+  $Text =~ s/[^0-9]//gi;
+  return $Text;
+' LANGUAGE 'plperl';
+ -- Just do show you what this function cleans up.
+select clean_numeric ('       ,./<>?aaa aa      !@#$%^&*()_+| ');
+
+drop function clean_numeric (int4);
+CREATE FUNCTION  clean_numeric (int4) RETURNS int4 AS '
+  my $Text = shift;
+  $Text =~ s/[^0-9]//gi;
+  return $Text;
+' LANGUAGE 'plperl';
+ -- Just do show you what this function cleans up.
+select clean_numeric (11111);
+
+
+
+select sql_class_insert();
+select sql_class_update(1,'2 hours', 'Introduction to Linux Part 1','This is a description of this class. Not much here so far.', 1);
+
+select sql_class_insert();
+select sql_class_update(2,'3 hours', 'Introduction to Linux Part 2','This is a description of this class. Not much here so far.', 2);
+
+
+
+vacuum;

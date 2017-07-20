@@ -1,0 +1,333 @@
+<html>
+<head>
+<link href="../../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<title>The Answer Gang: LG 116: Why does this connection stop being</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+.articlecontent {
+        position:absolute;
+        top:143px;
+}
+-->
+</style>
+</head>
+<body>
+<img src="../../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="../lg_tips.html" >&lt;-- 2c Tips</A> 
+| <A HREF="../lg_answer.html">TAG Index</a> 
+| <A HREF="1.html">1</a> | <A HREF="2.html">2</a> | <A HREF="3.html">3</a>
+| <A HREF="4.html">4</a> | <A HREF="5.html">5</a> | <A HREF="6.html">6</a>
+| <a href="../../tag/kb.html">Knowledge Base</a>
+</div>
+
+
+
+<h1 align="center"><IMG SRC="../../gx/dennis/qbubble.gif" align="left"> The Answer Gang <IMG SRC="../../gx/dennis/bbubble.gif" align="right"></h1>
+
+<p align="center">By Jim Dennis, Jason Creighton, Chris G, Karl-Heinz, and... 
+	(<A HREF="../../tag/bios.html">meet the Gang</A>) ... 
+	the Editors of <I>Linux Gazette</I>... and 
+	<a href="../../tag/members-faq.html">You</a>!</p>
+<br clear="both">
+<HR>
+<!-- begin 6 -->
+<H3 align="left"><img src="../../gx/dennis/qbubble.gif" 
+	height="50" width="60" alt="(?) " border="0"
+	>Why does this connection stop being</H3>
+
+<p><strong>From Andy Smith 
+
+<P>
+Hi there,
+</P>
+<P>
+Today I sent this email to the netfilter list, but I've had no
+responses yet; can the answer gang get anywhere with it?
+</P>
+<P>
+Since writing this email I have started graphing how many lines are
+in <TT>/proc/net/ip_conntrack</TT>, and the value does not go above 200.  The
+maximum according to <TT>/proc/sys/ipv4/ip_conntrack</TT> is 32768 so I don't
+think my connection tracking table is overflowing..
+</P>
+<P>
+Although having said that I haven't experienced the abrupt
+disconnection again yet either.  Perhaps the connections increase
+dramatically at that time of day.
+</P>
+<P>
+Andy
+</P>
+
+<!-- end 1 -->
+<!--              . . . . . . . . . . . . . . . . . . .              -->
+<HR WIDTH="40%" ALIGN="center">
+Tue, 14 Jun 2005 16:11:05 +0000
+<BR>Question on netfilter mailing list (netfilter from lists.netfilter.org)
+
+<P>
+Hi,
+</P>
+<P>
+This is rather a long email and so I hope that someone who knows
+about netfilter, bridging and possibly Xen will have patience to
+read it all the way through.
+</P>
+<P>
+I have a server that I run Xen
+(<A HREF="http://www.cl.cam.ac.uk/Research/SRG/netos/xen"
+	>http://www.cl.cam.ac.uk/Research/SRG/netos/xen</A>) on, with 6 xen
+user domains (virtual machines).
+</P>
+<P>
+For those unfamiliar with Xen, the dom0 (host machine) has a virtual
+network interface for each user domain and each of those virtual
+interfaces are bridged onto xen-br0, along with the machine's real
+eth0.  In each user domain, the virtual interface appears as eth0.
+</P>
+<P>
+In dom0 I have iptables running, with the eb-nf support of linux
+2.6.11 and the physdev module loaded so that I can match traffic
+coming in to each of my user domains.
+</P>
+<P>
+Part of my ruleset looks like this:
+</P>
+
+<pre>        $IPT -A FORWARD -m state --state ESTABLISHED,RELATED -j ACCEPT
+
+        $IPT -A FORWARD -m physdev --physdev-out vif+ -j domu_forward_in
+        $IPT -A FORWARD -m physdev --physdev-in vif+ -j domu_forward_out
+
+        ######################################################################
+        # strugglers.net
+        ######################################################################
+
+        $IPT -A domu_forward_in -m physdev --physdev-out vif-struggler.0 -j domu_forward_in_strugglers
+        $IPT -A domu_forward_in_strugglers -p tcp --syn -j domu_forward_in_strugglers_tcp
+        $IPT -A domu_forward_in_strugglers_tcp -p tcp --dport 22 -j ACCEPT
+        $IPT -A domu_forward_in_strugglers -m limit --limit 1/s -j LOG --log-prefix "FWD DROP: "
+        $IPT -A domu_forward_in_strugglers -j DROP
+</pre>
+<P>
+Now, I have noticed that while this works most of the time, for
+reasons unknown to me, some TCP connections just seem to stop being
+tracked and hit the DROP rule.  Even though they have been tracked
+fine for several hours.  This happens on every user domain to all
+kinds of TCP connections, but I have pared the ruleset down to just
+the one domain (strugglers.net) and SSH to demonstrate.
+</P>
+<P>
+If I add a rule in domu_forward_in_strugglers to allow all TCP to
+port 22 regardless of state the I have no problems.
+</P>
+<P>
+This does not seem to affect the INPUT table where I have a similar
+set of rules.
+</P>
+<P>
+Today I decided to take a tcpdump while I was ssh'd in up until when
+it kicked me out.  I ssh'd in at approx 13:07 GMT and got kicked out
+at approx 15:32:49 GMT.  Here is a selection of what got logged on
+the console of dom0:
+</P>
+<p align="center">See attached <tt><a href="../misc/wanted/andy.dom0-console-log.txt">andy.dom0-console-log.txt</a></tt></p>
+<P>
+At the same time I see a lot of TCP connections suddenly being
+denied to a number of other user domains, so I suspect that all TCP
+connect tracking was purged then for some reason.
+</P>
+<P>
+Although I was kicked out, I was able to reconnect straight away (as you would
+expect from the above ruleset, it allows the SYN to port 22 and away we go)and
+in fact that is how I am typing this email to you now.
+</P>
+<P>
+Here is the bridge setup:
+</P>
+
+<pre>[andy@curacao src]$ brctl show
+bridge name     bridge id               STP enabled     interfaces
+xen-br0         8000.00e081641d07       no              eth0
+                                                        vif-admin.0
+                                                        vif-cholet.0
+                                                        vif-outpostlo.0
+                                                        vif-ruminant.0
+                                                        vif-seinfeld.0
+                                                        vif-struggler.0
+[andy@curacao src]$ ip link
+1: eth0: &lt;BROADCAST,MULTICAST,UP&gt; mtu 1500 qdisc pfifo_fast qlen 1000
+    link/ether 00:e0:81:64:1d:07 brd ff:ff:ff:ff:ff:ff
+2: eth1: &lt;BROADCAST,MULTICAST&gt; mtu 1500 qdisc noop qlen 1000
+    link/ether 00:e0:81:64:1d:08 brd ff:ff:ff:ff:ff:ff
+3: lo: &lt;LOOPBACK,UP&gt; mtu 16436 qdisc noqueue
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+4: sit0: &lt;NOARP&gt; mtu 1480 qdisc noop
+    link/sit 0.0.0.0 brd 0.0.0.0
+5: xen-br0: &lt;BROADCAST,MULTICAST,UP&gt; mtu 1500 qdisc noqueue
+    link/ether 00:e0:81:64:1d:07 brd ff:ff:ff:ff:ff:ff
+6: vif-admin.0: &lt;BROADCAST,MULTICAST,UP&gt; mtu 1500 qdisc noqueue
+    link/ether fe:ff:ff:ff:ff:ff brd ff:ff:ff:ff:ff:ff
+7: vif-cholet.0: &lt;BROADCAST,MULTICAST,UP&gt; mtu 1500 qdisc noqueue
+    link/ether fe:ff:ff:ff:ff:ff brd ff:ff:ff:ff:ff:ff
+8: vif-outpostlo.0: &lt;BROADCAST,MULTICAST,UP&gt; mtu 1500 qdisc noqueue
+    link/ether fe:ff:ff:ff:ff:ff brd ff:ff:ff:ff:ff:ff
+9: vif-ruminant.0: &lt;BROADCAST,MULTICAST,UP&gt; mtu 1500 qdisc noqueue
+    link/ether fe:ff:ff:ff:ff:ff brd ff:ff:ff:ff:ff:ff
+10: vif-seinfeld.0: &lt;BROADCAST,MULTICAST,UP&gt; mtu 1500 qdisc noqueue
+    link/ether fe:ff:ff:ff:ff:ff brd ff:ff:ff:ff:ff:ff
+11: vif-struggler.0: &lt;BROADCAST,MULTICAST,UP&gt; mtu 1500 qdisc noqueue
+    link/ether fe:ff:ff:ff:ff:ff brd ff:ff:ff:ff:ff:ff
+</pre>
+<P>
+As I said above, I did a:
+</P>
+
+<pre>[andy@curacao src]$ sudo tcpdump -w /tmp/xen-br0.dump -i xen-br0 'host 212.13.198.70 and host 82.44.131.131'
+</pre>
+<P>
+just after ssh'ing in and left it running until just after my ssh client
+gave up.  That file (1.5MB) can be found here:
+</P>
+
+<blockquote><pre>http://strugglers.net/~andy/tmp/xen-br0.dump
+</pre></blockquote>
+<P>
+But I cannot see anything obviously wrong with it.
+</P>
+<P>
+Anyone have any ideas?  I can give up on connection tracking for my
+user domains but it's troubling that it doesn't work.  Is it an
+issue with using a bridge?
+</P>
+<P>
+Thanks,
+<BR>Andy
+</P>
+<P>
+<blockquote><font color="#000033">
+<A HREF="http://freebsdwiki.org"
+	>http://freebsdwiki.org</A> - Encrypted mail welcome - keyid 0xBF15490B
+'
+</P>
+
+<!-- end 1 -->
+<!--              . . . . . . . . . . . . . . . . . . .              -->
+<HR WIDTH="40%" ALIGN="center">
+
+<P><STRONG>
+Although having said that I haven't experienced the abrupt
+disconnection again yet either. Perhaps the connections increase
+dramatically at that time of day.
+</STRONG></P>
+<P>
+That is likely.  Mind you, I have experienced the same symptoms, even
+when my tracking table was full but not hitting the upper bound.  There
+could be any number of reasons for this -- iptables is a good firewall,
+but if it starts to have to deal with a large number of connections
+simultaneously, I have seen it keel-over and die -- or, at best, start
+dropping packets.
+</P>
+<P>
+I suppose it <EM>could</EM> be the result of your bridge, but I doubt it.  I
+can't offer any technical advice, Andy, but if you can afford a means to
+disconnect your xen connections, and reconnect them one-by-one, and
+monitor/log their process, that might help.
+</P>
+<P>
+-- Thomas Adam
+</P>
+
+<!-- end 1 -->
+
+<p align="center"><em>This <b>had</b> been a stumper, so we were going to
+present it in <b>Help Wanted</b>.  However, Andy reports:</em></p>
+
+<p><strong><img src="../../gx/dennis/bbub.gif" height="28" width="50" 
+	alt="(!)" border="0"
+>regarding netfilter, no, it was revealed to be 
+a bug in 2.6.11 regarding TCP SACK and connection 
+tracking.  I have the url for the email thread archive if you want:
+</strong></p>
+
+<blockquote><code>
+https://lists.netfilter.org/pipermail/netfilter/2005-June/061101.html
+</code></blockquote>
+
+<p><strong>
+turning off SACK support has worked around the problem, 
+so presumably upgrading the kernel would too
+</strong></p>
+
+<blockquote><img src="../../gx/dennis/bbub.gif" height="28" width="50" 
+	alt="(!)" border="0"
+>[Hugo, one of his fellow LUG members] Have you tried 2.6.12.2 yet?
+</blockquote>
+
+<p><strong><img src="../../gx/dennis/qbub.gif" height="28" width="50" 
+	alt="(?)" border="0"
+> not on that machine.. I don't want to reboot it unless I have to
+<IMG SRC="../../gx/dennis/smily.gif" ALT=":)"
+                height="24" width="20" align="middle">
+</strong></p>
+
+<!-- end 6 -->
+<hr>
+<p><CENTER><Font face="Helvetica"><STRONG>
+This page edited and maintained by the Editors of <I>Linux Gazette</I>
+<br>HTML script maintained by
+        <A HREF="mailto:star@starshine.org">Heather Stern</a> of
+        Starshine Technical Services,
+<A HREF="http://www.starshine.org/">http://www.starshine.org/</A></STRONG></Font></CENTER></p>
+<hr>
+
+<div id="articlefooter">
+<p>
+Each TAG thread <a href="http://linuxgazette.net/copying.html"
+        >Copyright &copy;</a> its authors, 2005
+</p>
+<p>
+Published in issue 116 of <I>Linux Gazette</I> July 2005
+</p>
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="../lg_tips.html" >&lt;-- 2c Tips</A> 
+| <A HREF="../lg_answer.html">TAG Index</a>
+| <A HREF="1.html">1</a> | <A HREF="2.html">2</a> | <A HREF="3.html">3</a>
+| <A HREF="4.html">4</a> | <A HREF="5.html">5</a> | <A HREF="6.html">6</a>
+| <a href="../../tag/kb.html">Knowledge Base</a>
+</div>
+</div>
+
+<div id="navigation">
+<a href="../../index.html">Home</a>
+<a href="../../faq/index.html">FAQ</a>
+<a href="../../lg_index.html">Site Map</a>
+<a href="../../mirrors.html">Mirrors</a>
+<a href="../../mirrors.html">Translations</a>
+<a href="http://linuxgazette.net/search.html">Search</a>
+<a href="../../archives.html">Archives</a>
+<a href="../../authors/index.html">Authors</a>
+<a href="../../contact.html">Contact Us</a>
+</div>
+
+<div id="breadcrumbs">
+<a href="../../index.html">Home</a> &gt; 
+<a href="../index.html">July 2005 (116)</a> &gt; 
+<a href="../lg_answer.html">The Answer Gang</a> &gt; 
+Thread
+</div>
+
+<img src="../../gx/2003/sit3-shine.7-2.gif" id="tux" alt="Tux"/>
+
+</body>
+</html>

@@ -1,0 +1,276 @@
+<!--startcut ==========================================================-->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML>
+<HEAD>
+<title>Searching a Web Site with Linux LG #32</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#A000A0"
+ALINK="#FF0000">
+<!--endcut ============================================================-->
+
+<H4>
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H1><font color="maroon">Searching a Web Site with Linux</font></H1>
+<H4>By <a href="mailto:brw@inetinc.net">Branden Williams</a></H4>
+</center>
+<P> <HR> <P>  
+
+As your website grows in size, so will the number of people that visit
+your site. Now most of these people are just like you and me in the
+sense that they want to go to your site, click a button, and get exactly
+what information they were looking for. To serve these kinds of users a
+bit better, the Internet community responded with the ``Site
+Search''. A way to search a single website for the information you are
+looking for. As a system administrator, I have been asked to provide search
+engines for people to use on their websites so that their clients can get to
+their information as fast as possible.
+<p>
+Now the trick to most search engines (Internet wide included) is that
+they index and search entire sites. So for instance, you are looking for
+used cars. You decide to look for an early 90s model Nissan Truck. You
+get on the web, and go to AltaVista. If you do a search for ``used Nissan
+truck'', you will most likely come up with a few pages that have listings
+of cars. Now the pain comes when you go to that link and see that 400K
+HTML file with text listings of used trucks. You have to either go line
+by line until you find your choice, or like most people, find it on your
+page using your browser's find command.
+<p>
+Now wouldn't it be nice if you could just search for your used truck and
+get the results you are looking for in one fail swoop?
+<p>
+A recent search CGI that I designed for a company called Resource
+Spectrum (http://www.spectrumm.com/) is what precipitated DocSearch.
+Resource Spectrum needed a solution similar to my truck analogy. They
+are a placement agency for high skilled jobs that needed another
+alternative to posting their job listing to newsgroups. What was proposed
+was a searchable Internet listing of the jobs on their new website.
+<p>
+Now as the job listing came to us, it was in a word document that had
+been exported to HTML. As I searched (no pun intended) long and hard for
+something that I could use, nothing turned up. All of the search
+engines I found <b>only</b> searched sites, not single documents.
+<p>
+This is where the idea for DocSearch came from.
+<p>
+I needed a simple, clean way to search that single HTML document so users
+could get the information they needed quickly and easily.
+<p>
+I got out the old Perl Reference and spent a few afternoons working out a
+solution to this problem. After a few updates, you see in front of you
+DocSearch 1.0.4. You can grab the latest version at
+ftp://ftp.inetinc.net/pub/docsearch/docsearch.tar.gz.
+<p>
+Let's go through the code here so we can see how this works. First
+before we really get into this though, you need to make sure you have the
+CGI Library (cgi-lib.pl) installed. If you do not, you can download it
+from http://www.bio.cam.ac.uk/cgi-lib/. This is simply a Perl library
+that contains several useful functions for CGIs. Place it in your
+cgi-bin directory and make it world readable and executable. (chmod a+rx
+cgi-lib.pl)
+<p>
+Now you can start to configure DocSearch. First off, there are a few
+constants that need to be set. They are in reference to the
+characteristics of the document you are searching. For instance...
+<p>
+<pre>
+# The Document you want to search.
+$doc = &quot;/path/to/my/list.html&quot;;
+</pre>
+Set this to the absolute path of the document you are searching.
+<p>
+<pre>
+# Document Title. The text to go inside the
+&lt;title>&lt;/title> HTML tags.
+$htmltitle = &quot;Nifty Search Results&quot;;
+</pre>
+Set this to what you want the results page title to be.
+<p>
+<pre>
+# Optional Back link. If you don't want one, make the string null.
+# i.e. $backlink = &quot;&quot;;
+$backlink = &quot;http://www.inetinc.net/some.html&quot;;
+</pre>
+If you want to provide a ``Go Back'' link, enter the URL of the file that
+we will be referencing.
+<p>
+<pre>
+# Record delimiter. The text which separates the records.
+$recdelim = &quot;&nbsp;&quot;;
+</pre>
+This part is one of the most important aspects of the search. The
+document you are searching must have something in between the "records"
+to delimit the html document. In English, you will need to place some
+HTML comment or something in between each possible result of the search.
+In my example, MS Word put the <tt>$nbsp;</tt> tag in between all of the
+records by default, so I just used that as a delimiter.
+<p>
+Next we <b>ReadParse()</b> our information from the HTML form that was
+used as a front end to our CGI. Then to simplify things later, we go
+ahead and set the variable <tt>$query</tt> to be the term we are
+searching for.
+<p>
+<pre>
+$query = $input{`term'};
+</pre>
+This step can be repeated for each query item you would like to use to
+narrow your search. If you want any of these items to be optional, just
+add a line like this in your code.
+<p>
+<pre>
+if ($query eq &quot;&quot;) {
+ $query = &quot; &quot;;
+}
+</pre>
+This will match relatively any record you search.
+<p>
+Now comes a very important step. We need to make sure that any meta
+characters are escaped. Perl's bind operator uses meta characters to
+modify and change search output. We want to make sure that any
+characters that are entered into the form are not going to change the
+output of our search in any way.
+<p>
+<pre>
+$query =~ s/([-+i.&lt;>&|^%=])/\\\1/g;
+</pre>
+Boy does that look messy! That is basically just a Regular Expression to
+escape all of the meta characters. Basically this will change a
+<tt>+</tt> into a <tt>\+</tt>.
+<p>
+Now we need to move right along and open up our target document. When we
+do this, we will need to read the entire file into one variable. Then we
+will work from there.
+<p>
+<pre>
+open (SEARCH, &quot;$doc&quot;);
+undef $/;
+$text = &lt;SEARCH>;
+close (SEARCH);
+</pre>
+The only thing you may not be familiar with is the <tt>undef $/;</tt>
+statement you see there. For our search to work correctly, we must
+undefine the Perl variable that separates the lines of our input file.
+The reason this is necessary is due to the fact that we must read the
+<b>entire</b> file into one variable. Unless this is undefined, only one
+line will be read.
+<p>
+Now we will start the output of the results page. It is good to
+customize it and make it appealing somehow to the user. This is free form
+HTML so all you HTML guys, go at it.
+<p>
+Now we will do the real searching job. Here is the meat of our search.
+You will notice there are two commented regular expressions in the search.
+If you want to not display any images or show any links, you should
+uncomment those lines.
+<p>
+<pre>
+@records = split(/$recdelim/,$text);
+</pre>
+We want to split up the file into an array of records. Each record is a
+valid search result, but is separate from the rest. This is where the
+record delimiter comes into play.
+<p>
+<pre>
+foreach $record (@records)
+{
+#	$record =~ s/&lt;a.*<\/a>//ig; # Do not print links inside this
+#	doc.
+#	$record =~ s/&lt;img.*>//ig; # Do not display images inside this
+#	doc.
+ if ( $record =~ /$query/i ) {
+ print $record;
+ $matches++;
+ }
+}
+</pre>
+This basically prints out every <tt>$record</tt> that matches our search
+criteria. Again you can change the number of search criterion you use by
+changing that if statement to something like this.
+<p>
+<pre>
+if ( ($record =~ /$query/i) && ($record =~ /$anotheritem/) ) {
+</pre>
+This will try to match both queries with <tt>$record</tt> and upon a
+successful match, it will dump that <tt>$record</tt> to our results
+page. Notice how we also increment a variable called <tt>$matches</tt>
+every time a match is made. This is not as much as to tell the user how many
+different records were found, but more of a count to tell us if <b>no</b>
+matches were found so we can tell the user that no, the system is not
+down, but in fact we did not match any records based upon that query.
+<p>
+Now that we are done searching and displaying the results of our search,
+we need to do a few administrative actions to ensure that we have fully
+completed our job.
+<p>
+First off, as I was mentioning before, we need to check for zero matches
+in our search and let the user know that we could not find anything to
+match his query.
+<p>
+<pre>
+if ($matches eq &quot;0&quot;) {
+ $query =~ s/\\//g;
+
+print &lt;&lt; &quot;End_Again&quot;;
+
+ &lt;center>
+ &lt;h2>Sorry! &quot;$query&quot; was not found!&lt;/h2>&lt;p>
+ &lt;/center>
+End_Again
+}
+</pre>
+Notice that lovely Regular Expression. Now that we had to take all of
+the trouble to escape those meta characters, we need to remove the
+escape chars. This way when they see that their <tt>$query</tt> was
+not found, they will not look at it and say ``But that is not what I
+entered!'' Then we want to dump the HTML to disappoint the user.
+<p>
+The only two things left to do is end the HTML document cleanly and allow
+for the back link.
+<p>
+<pre>
+if ( $backlink ne &quot;&quot; ) {
+ print &quot;&lt;center>&quot;;
+ print &quot;&lt;h3&gt;&lt;a href=\&quot;$backlink\&quot;>Go
+back&lt;/a&gt;&lt;/h3&gt;&quot;;
+ print &quot;&lt;/center&gt;&quot;;
+}
+
+print &lt;&lt; &quot;End_Of_Footer&quot;;
+
+&lt;/body&gt;
+&lt;/html&gt;
+
+End_Of_Footer
+</pre>
+All done. Now you are happy because the user is happy. Not only have
+you streamlined your website by allowing to search a single page, but you
+have increased the user's utility by giving them the results they want.
+The only result of this is <b>more hits</b>. By helping your user find the
+information he needs, he will tell his friends about your site. And his
+friends will tell their friends and so on. Putting the customer first
+sometimes <b>does</b> work!
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<center><H5>Copyright &copy; 1998, Branden Williams <BR> 
+Published in Issue 32 of <i>Linux Gazette</i>, September 1998</H5></center>
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<A HREF="./index.html"><IMG ALIGN=BOTTOM SRC="../gx/indexnew.gif" 
+ALT="[ TABLE OF CONTENTS ]"></A>
+<A HREF="../index.html"><IMG ALIGN=BOTTOM SRC="../gx/homenew.gif"
+ALT="[ FRONT PAGE ]"></A>
+<A HREF="./jenkins2.html"><IMG SRC="../gx/back2.gif"
+ALT=" Back "></A>
+<A HREF="./rogers.html"><IMG SRC="../gx/fwd.gif" ALT=" Next "></A>
+<P> <hr> <P> 
+<!--startcut ==========================================================-->
+</BODY>
+</HTML>
+<!--endcut ============================================================-->

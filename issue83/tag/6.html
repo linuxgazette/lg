@@ -1,0 +1,462 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<META NAME="generator" CONTENT="lgazmail v1.4F.x">
+<TITLE>The Answer Gang 83: How to kill a process in uninterruptible sleep state?</TITLE>
+</HEAD><BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+<!-- begin 6 -->
+<H3 align="left"><img src="../../gx/dennis/qbubble.gif" 
+	height="50" width="60" alt="(?) " border="0"
+	>How to kill a process in uninterruptible sleep state?</H3>
+
+
+<p><strong>From Carlos Garada 
+</strong></p> 
+
+
+<p align="right"><strong>Answered By  John Karns, Ben Okopnik, Karl-Heinz Herrmann, Jay R. Ashworth, Robos,
+ Jim Dennis, Ashwin N
+</strong></p>
+<P><STRONG>
+Dear answer gang:
+</STRONG></P>
+<P><STRONG><BLOCKQuote>
+Sometimes when I mount a CD, mount hangs. ps shows it is
+in an "uninterruptible sleep", and kill won't kill it. As a
+result, I can not access my CD drive until I restart my computer.
+</BLOCKQuote></STRONG></P>
+<P><STRONG>
+Is there a way to kill a process in uninterruptible sleep?
+</STRONG></P>
+<P><STRONG>
+Thanks!
+</STRONG></P>
+<P><STRONG>
+C. Garada
+</STRONG></P>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [John K.] 
+What I usually do is to kill the parent process, which is usually a bash
+shell.  In many <TT>/</TT> most cases this allows killing of the errant process.
+However, you may run into the situation where the driver or a port is
+hung.  In those cases, you may have no choice but to reboot.
+</blockQuote>
+<P><STRONG>
+<IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> 
+Sometimes the parent process is apt-get. I kill it, but the spawned
+mount remains in state "D" and I can not kill it.
+</STRONG></P>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [Ben] 
+Have you tried "kill -9"? This is not a good thing to do by default. but
+if you've already tried a plain "kill" (which issues a "-15"), that's
+what's left. See "man kill" for more details.
+</blockQuote>
+<P><STRONG>
+<IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> 
+Yes, I tried kill -9 and fuser -k <TT>/cdrom/...</TT> Nothing works.
+</STRONG></P>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [jra] 
+Nope, they won't.  They only work on processes sleeping above priority
+PZERO (if I remember the terminology correctly).  The problem your
+having is almost certainly coming from a process sleeping <EM>below</EM> PZERO
+-- which is almost always a device driver with either bad hardware, or
+a bug.
+</blockQuote>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [Ben] 
+Yep, those are the correct terms; however, I believe that the only
+processes below PZERO are zombies. I think what happens with fast
+devices is simply a loop that's too "tight" to break into, fast and
+straight to hardware without any intervening layers that would allow a
+signal to "break in".
+</blockQuote>
+<P><STRONG>
+<IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> 
+I suppose the mount(2) syscall is having a problem... but shouldn't I
+be able to interrupt a system call in some way?
+</STRONG></P>
+<P><STRONG>
+Thank you for your answers.
+</STRONG></P>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [jra] 
+A system call, yes.  But not necessarily inside a driver call.
+</blockQuote>
+<blockQuote>
+Tape drives are famous for this... they seem to be implemented as fast
+devices, even though they manifestly are not.
+</blockQuote>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [John K.] 
+And that is the one situation that comes to mind where I experienced the
+problem - using a SCSI tape drive and encountering a read or write error,
+the process would hang.  I was unable to kill the process directly, but
+was more successful in killing the parent process.  But I also encountered
+situations where the SCSI driver for the PCMCIA card hung, and the only
+way I could clear it was a reboot.
+</blockQuote>
+<P><STRONG>
+<IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> 
+So reboot is the
+only answer? The almighty root can not do anything? 
+<IMG SRC="../../gx/dennis/unsmily.gif" ALT=":(" 
+		height="24" width="20" align="middle">
+</STRONG></P>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [jra] 
+Nope.  There are some things even root can't do.  There's fairly
+extensive discussion of this in a couple of the kernel design books,
+and I <EM>think</EM> in Nemeth, Snyder and Seebass: the problem stems from the
+fact that there are two types of device drivers -- those for "fast"
+devices and those for "slow" devices.
+</blockQuote>
+<blockQuote>
+Slow-device drivers -- for things like terminals, and such -- are
+usually split in two pieces, and can therefore be interrupted while
+they're in the middle of something.
+</blockQuote>
+<blockQuote>
+Fast-device drivers -- which service things like hard drives and
+(I think) ethernet cards -- are designed to expect that when they call
+out to hardware, it will respond instantly (in human terms), and that
+they won't have to wait on anything.  Such drivers have, as a rule,
+proven extremely intolerant of hardware trouble -- if your hard drive
+start having to do hardware retries to read a sector, your system
+perfromance is going int he toilet, even if you have more than one
+drive...
+</blockQuote>
+<P><STRONG>
+<IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> 
+Thank you for your explanation, Jay. So I suppose I should either resign
+myself to rebooting every time it happens, or rewrite the driver...
+</STRONG></P>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [Robos] 
+Have you ever tried to wait really long (in human terms 
+<IMG SRC="../../gx/dennis/smily.gif" ALT=";-)" 
+		height="24" width="20" align="middle">, something in
+the range of 30mins or so? I think I had a case when my cd hung and I simply
+continued with something else and - yo and behold - after that the cd worked
+again. But I'm not sure anymore.
+</blockQuote>
+<blockQuote>
+Hope this helps.
+</blockQuote>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [Ben] 
+Oh - good point, Robos. I've had things like that happen... Midnight
+Commander trying to read "<TT>/dev/fd0</TT>" with a bad floppy from an LS120
+drive comes to mind, but that was way back when. Took about 10 minutes
+to stop generating console errors (about two per minute), even after MC
+(<EM>and</EM> the parent shell!) were killed; it had to have been from the
+kernel is my guess. Rare, but I've seen it.
+</blockQuote>
+<P><STRONG>
+<IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> 
+A day and a half... and then lost my patience 
+<IMG SRC="../../gx/dennis/smily.gif" ALT=":)" 
+		height="24" width="20" align="middle">.
+</STRONG></P>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [Robos] 
+THAT short ? Sissy 
+<IMG SRC="../../gx/dennis/smily.gif" ALT=";-)" 
+		height="24" width="20" align="middle">)
+</blockQuote>
+
+<blockquote><em><font color="#000066">Hunh. Robos may not be impressed, but <EM>I</EM> am.
+ -- Heather</font></em></blockquote>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [jra] 
+
+<IMG SRC="../../gx/dennis/smily.gif" ALT=":-)" 
+		height="24" width="20" align="middle">
+</blockQuote>
+<blockQuote>
+One thing we haven't mentioned here...
+</blockQuote>
+<blockQuote>
+Occasionally, you'll get lucky, and rmmod will permit you to remove
+whichever module supports the device you're having trouble with... and
+then your stuck process will go away.  I've had luck with this,
+particularly, on the SCSI CD-R attached to my laptop with an Adaptec
+APA-1460 PCMCIA card...
+</blockQuote>
+<blockQuote>
+Now, that <EM>could</EM> be because PCMCIA busses are natively hot-pluggable,
+but...
+</blockQuote>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [JimD] 
+A process which ends up in "D" state for any measurable length of
+time is trapped in the midst of a system call (usually an I/O
+operation on a device --- thus the initial in the ps output).
+</blockQuote>
+<blockQuote>
+Such a process cannot be killed --- it would risk leaving the
+kernel in an inconsistent state, leading to a panic.  In general
+you can consider this to be a bug in the device driver that the
+process is accessing.
+</blockQuote>
+<blockQuote>
+Once case that I can't consider to be a Linux bug occurs when
+one is attempting to access a hard mounted NFS exported share
+without the intr (mount(
+<IMG SRC="../../gx/dennis/smily.gif" ALT="8)" 
+		height="24" width="20" align="middle">) flag.  If the NFS server (or the network
+connection thereto) becomes unavailable all processes that try to
+access any part of that share will be set into D state.  (Use intr or
+soft mount options on NFS to avoid all that).  I might consider that to
+be a design bug in the NFS protocol --- but that might be contentious.
+That particular NFS behavior can actually be a feature in some cases;
+I think it should NOT be the default, though.
+</blockQuote>
+<blockQuote>
+When it comes to scsi and similarly local device drivers --- I would
+report cases of "D" state as bugs (after due diligence of checking
+for prior reports, updates, and perhaps trying to troubleshoot it a
+bit).
+</blockQuote>
+<P><STRONG>
+<IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> 
+Where? In the linux kernel mailing list?
+</STRONG></P>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [jra] 
+You're welcome.  Could you recap one more time, in about a sentence,
+exactly what's hanging and when?  Jim's right: if this is repeatable,
+the kernel wonks would like to hear about it.
+</blockQuote>
+<P><STRONG>
+<IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> 
+Sometimes, when I mount the cdrom, mount hangs and I can not kill
+it; and I can not access the cdrom either. Ah, and the door remains
+closed and I can not open it.
+</STRONG></P>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [Ben] 
+I'll back Carlos' report; I've seen this before, although not in the
+past... erm, for sure since I've been using 2.4.18 and maybe even well
+before that, but my memory refuses to pony up. Seems like it was in the
+past three years, though.
+</blockQuote>
+<P><STRONG>
+<IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> 
+How to reproduce it: I don't know 
+<IMG SRC="../../gx/dennis/unsmily.gif" ALT=":(" 
+		height="24" width="20" align="middle">. I tried hard yesterday but this
+bug won't show when I want it to.
+</STRONG></P>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [Ben] 
+ISTR that a damaged (boot/signature sector damage) CD would do it pretty
+much every time. I've got about 50% confidence in this memory, but
+there's something in the back of my brain that's hinting thataway.
+</blockQuote>
+<P><STRONG>
+<IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> 
+Kernel 2.4.17.
+</STRONG></P>
+<P><STRONG>
+Ah, and maybe important (I only thought of this now, sorry): I have
+a binary kernel module and a binary X server (not source available) for
+my nVidia graphics card. Maybe they are corrupting the memory and this
+affects the driver(?)? I know these binary components are not very good
+because the computer hangs on some GL screensavers... but I never
+thought they could make the ide/cdrom/whatever drive go wrong.
+</STRONG></P>
+<P><STRONG>
+Could that be the problem?
+</STRONG></P>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [Ben] 
+FTR, neither of the above apply to me.
+</blockQuote>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [Ashwin N] 
+Similar things used to happen to me with a faulty CDROM drive.
+</blockQuote>
+<blockQuote>
+If this problem happens only with the CDROM drive, then <em> _maybe</em> the
+drive is faulty. If you have 'the other OS' you could boot it up and put
+in a CD and check for similar symptoms.
+</blockQuote>
+
+<blockquote><em><font color="#000066">I don't believe I've ever seen this sort of wedge on a CD-ROM drive but
+I have seen it happen to a PCMCIA card -- a NIC interface that was too
+new, and being spotted as the wrong card.  Luckily I could ignore that
+until I felt inclined for a reboot for some other reason.
+</font></em></blockquote>
+<blockquote><em><font color="#000066">Oh yeah,
+since your troubles include a mountpoint -- walk through your shutdown
+sequence by hand.  You'll find 'umount -a' is not going to behave itself
+
+<IMG SRC="../../gx/dennis/unsmily.gif" ALT=":(" 
+		height="24" width="20" align="middle">
+ -- Heather</font></em></blockquote>
+<HR width="10%" align="left"><P><STRONG>
+<IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [John K.] 
+I have a related problem when resuming from APM suspend on my laptop.
+Since I updated the BIOS it resumes without hanging as it used to do, but
+the NIC (eepro100) doesn't get reset; and unloading <TT>/</TT> reloading the NIC
+driver doesn't help, so I'm stuck with rebooting if I want to connect to a
+LAN after suspending.
+</STRONG></P>
+<P><STRONG>
+{{{
+John, have you tried unplugging/reinserting the card (I'm assuming it's
+PCMCIA)? That's what used to work for me when this happened back in the
+2.2 kernel.
+{{{{
+</STRONG></P>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [John K.] 
+No, unfortunately it's integrated - never thought that there would be an
+advantage to PCMCIA vs integrated, but I guess that's one.  I have three
+PCMCIA cards that I bought to use with previous machines - two Xircom
+ether <TT>/</TT> modem combos and a 3Com ether only.  One of the Xircoms is 10/100
+ether the other 10.  Both really heat up, which exacerbates the internal
+heat problem considerably especially in warmer climates.  I get nervous
+when the bottom of the CD/DVD drawer gets too hot to touch.  OTOH the 3Com
+stays pretty cool most of the time.
+</blockQuote>
+<blockQuote>
+A while ago someone told me that there was talk of the eepro100 reset
+problem on the kernel dev list, and that there may a patch or fix for it -
+maybe in the 2.4 kernel.  I'm still using 2.2 kernel, mainly because of
+VMWare - will have to re-install the MSW I have setup in virtual
+partitions - something that I've been putting off until I have enough time
+to deal with it all.
+</blockQuote>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [K.-H.] 
+If Vmware is what's keeping you from going to 2.4 and you would like to
+switch -- there is at least a patch for vmware 2.x to make it work beyond
+kernel 2.4.6.
+</blockQuote>
+<blockQuote>
+<A HREF="http://volker.orcon.net.nz/linux/vmware/vmware2.0.4-SuSE7.3.txt"
+	>http://volker.orcon.net.nz/linux/vmware/vmware2.0.4-SuSE7.3.txt</A>
+</blockQuote>
+
+<!-- end 6 -->
+<P> <hr> </p>
+<!-- *** BEGIN copyright *** -->
+<hr>
+<CENTER><SMALL><STRONG>
+<h5>
+<br>Copyright &copy; 2002
+<br>Copying license <A HREF="">http://www.linuxgazette.net/copying.html</A>
+<BR>Published in Issue 83 of <i>Linux Gazette</i>, October 2002</H5>
+</STRONG></SMALL></CENTER>
+<!-- *** END copyright *** -->
+<HR>
+
+<!--startcut ======================================================= -->
+<P> <hr> 
+<!-- begin tagnav ::::::::::::::::::::::::::::::::::::::::::::::::::-->
+<p align="center">
+<table width="100%" border="0"><tr>
+<td align="right" valign="center"
+	><IMG ALT="" SRC="../../gx/navbar/left.jpg"
+        WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="middle" border="0"
+><A HREF="../index.html"
+	><IMG SRC="../../gx/navbar/toc.jpg" align="middle"
+              ALT="[ Table Of Contents ]" border="0"></A
+><A HREF="../lg_answer.html"
+	><IMG SRC="../../gx/dennis/answertoc.jpg" align="middle"
+              ALT="[ Answer Guy Current Index ]" border="0"></A></td>
+<td align="center" valign="center"><A HREF="../lg_answer.html#greeting"><img align="middle"
+	src="../../gx/dennis/smily.gif" alt="greetings" border="0"></A> &nbsp;
+  <A HREF="../../tag/bios.html">Meet&nbsp;the&nbsp;Gang</A> &nbsp;
+  <A HREF="1.html">1</A> &nbsp;
+  <A HREF="2.html">2</A> &nbsp;
+  <A HREF="3.html">3</A> &nbsp;
+  <A HREF="4.html">4</A> &nbsp;
+  <A HREF="5.html">5</A> &nbsp;
+  <A HREF="6.html">6</A> 
+  </td>
+<td align="left" valign="center"><A HREF="../../tag/kb.html"
+	><IMG SRC="../../gx/dennis/answerpast.jpg" align="middle"
+              ALT="[ Index of Past Answers ]" border="0"></A
+><IMG ALT="" SRC="../../gx/navbar/right.jpg" align="middle"
+        WIDTH="14" HEIGHT="45" BORDER="0"></td></tr></table>
+</p>
+<!-- end tagnav ::::::::::::::::::::::::::::::::::::::::::::::::::::-->
+<!--endcut ========================================================= -->
+<P> <hr> 
+<!--startcut ======================================================= -->
+<CENTER>
+<!-- *** BEGIN navbar *** -->
+<!-- *** END navbar *** -->
+</CENTER>
+</p>
+<!--endcut ========================================================= -->
+<!--startcut ======================================================= -->
+</BODY></HTML>
+<!--endcut ========================================================= -->

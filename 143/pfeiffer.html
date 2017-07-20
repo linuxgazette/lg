@@ -1,0 +1,560 @@
+<!DOCTYPE html
+	PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+	 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en-US" xml:lang="en-US">
+<head>
+<title>Securing Apache Web Server with mod_security LG #143</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link rel="stylesheet" href="../lg.css" type="text/css" media="screen, projection"  />
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+<link rel="shortcut icon" href="../favicon.ico" />
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+</head>
+<body>
+
+<a href="../">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+<div id="navigation">
+<table summary="masthead" width="100%">
+<tr>
+<td align="center" colspan="3" style="font-size: 10px; font-weight: bold">
+<a href="../index.html">Home</a>
+<a href="http://linuxgazette.net">Main Site</a>
+<a href="../faq/index.html">FAQ</a>
+
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/mailman/listinfo/">Mailing Lists</a>
+<a href="../jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+<hr width="99%" style="border: 1px inset #000033">
+</td>
+</tr>
+<tr>
+<td width="40%" align="left" style="font-size: 10px; font-weight: bold">
+The Free International Online Linux Monthly
+</td>
+<td width="20%" align="center" style="font-size: 10px; font-weight: bold">
+ISSN: 1934-371X
+</td>
+<td width="40%" align="right" style="font-size: 10px; font-weight: bold">
+Main site: <a href="http://linuxgazette.net">http://linuxgazette.net</a> 
+</td>
+</table>
+</div>
+
+
+<div id="breadcrumbs1">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">October 2007 (#143)</a> &gt; 
+Article
+
+</div>
+
+<div class="articlecontent1">
+<div class="content">
+
+<div id="previousnexttop">
+<A HREF="anonymous.html" >&lt;-- prev</A> | <A HREF="saha.html" >next --&gt;</A>
+</div>
+
+<h1>Securing Apache Web Server with mod_security</h1>
+<p id="by"><b>By <a href="../authors/pfeiffer.html">Ren&eacute; Pfeiffer</a></b></p>
+
+<p>
+The Internet has its share of packet filters and proxy servers in order to
+increase the security for clients and servers alike. Filtering network
+traffic is never a bad idea since it provides a basic level of protection.
+When it comes down to protecting web servers your packet filter will most
+probably allow HTTP and HTTPS traffic to your server application. Unless
+you deploy an application proxy that inspects HTTP you can't do more.
+But you can equip your Apache web server with <tt>mod_security</tt> which in
+turns helps you to analyse any request thrown at it.
+</p>
+
+<h2>
+Application Layer Inspection
+</h2>
+
+<p>
+When you do any network traffic filtering or inspection you have to keep in mind
+that usually nothing understand the things that should be inspected better than
+the application in question. This is one of the reasons why proxy filters are
+"better" suited for this job. They know the protocol and can normalise fancily
+encoded requests. <tt>mod_security</tt> is in a very similar position. It sits
+right inside the Appache <tt>httpd</tt> process and inspects the HTTP requests.
+This is an important advantage over proxies since it can also see compressed or
+even encrypted content without difficulties.
+</p>
+<p>
+So, what needs to be inspected? Apache's <tt>httpd</tt> surely does inspect HTTP
+requests. What do I need more? Well, there are some things <tt>mod_security</tt>
+can do for you.
+<ul>
+<li> <strong>Better logging</strong><br>
+     The module can log the content of HTTP POST requests. Apache usually doesn't log
+     that. Furthermore you can log complete HTTP transactions. This makes the job
+     of a potential attacker harder. In addition to that you have a very fine
+     control on what and when to log.</li>
+<li> <strong>Real time operation</strong><br>
+     <tt>mod_security</tt> sees the requests directly and can act immediately.</li>
+<li> <strong>Anomalies</strong><br>
+     The security module can act on anomalies in the web server operation by
+     looking at request rates, IP addresses, HTTP sessions and user account.</li>
+<li> <strong>Black-/whitelisting</strong><br>
+     You can use a signature-based approach and define what you want to allow and
+     what you want to block.</li>
+<li> <strong>Protects other web servers</strong><br>
+     You can even protect other web server software by combining it with <tt>mod_proxy</tt>.
+     The Apache server can act as reverse proxy thus seeing all HTTP requests and applying
+     rule sets.</li>
+</ul>
+Sounds pretty impressive if you ask me. 
+Now we only need to know how to add it to an existing Apache deployment.
+</p>
+
+<h2>
+Installation
+</h2>
+
+<p>
+The current released version is 2.x. It works well with Apache 2.0.x and 2.2.x. Apache 1.3.x is not
+supported anymore (you should really upgrade your Apache servers, seriously). <tt>mod_security</tt>
+has some more requirements.
+<ul>
+<li> You'll need the module <tt>mod_unique_id</tt> installed.</li>
+<li> libxml2 and its development package is needed since the module can inspect XML and has to
+     parse it.</li>
+<li> If you use an Apache web server from your distribution, make sure the development packages
+     are installed as well.</li>
+<li> You'll need either the PCRE library for parsing regular expressions from your operating
+     system or bundled with your Apache. <tt>mod_security</tt>'s documentation has a special
+     note in case the compilation goes wrong.</li>
+</ul>
+<tt>mod_security</tt> doesn't use <tt>autoconf</tt>. You have to check its Makefile and
+tell it where the <tt>ServerRoot</tt> directory of your Apache installation is. Then you can
+try <tt>make</tt> and see if everything compiles. If you get compilation errors, make sure
+your compiler environment and your development packages are complete. After the <tt>make</tt>
+command finishes, stop your Apache server and issue a <tt>make install</tt>. The Makefile
+will copy the module into the Apache server modules directory (usually
+<tt>/usr/local/apach2/modules/</tt> for a compiled web server, your distribution may put the
+modules elsewhere). Now you only need to active the module by adding the following lines to
+your Apache configuration.
+<pre class="code">
+LoadFile /usr/lib/libxml2.so # optional
+LoadModule security2_module modules/mod_security2.so
+</pre>
+There we go. The only thing we need is to configure the module and the rule sets.
+</p>
+
+<h2>
+Configuration
+</h2>
+
+<p>
+<i>One word of caution:</i> Every security measure must be applied with a specific purpose.
+You can't just add filters without thinking about the consequences for applications. You or
+your users may have web applications running that break when special security measures are
+activated. If you are not sure about not breaking something you can use all rule sets and
+actions in "audit mode". Then <tt>mod_security</tt> will only log but not block. This is a good
+idea to test everything until you are sure to switch to "live mode". It also keeps your users
+happy.
+</p>
+<p>
+A very simple test is to add a single rule by using the following two lines:
+<pre class="code">
+SecRuleEngine On
+SecRule REQUEST_URI attack
+</pre>
+Now send your web server a request with the word <i>attack</i> in it. You should get the
+error code <i>403 Forbidden</i> and the blocked request should generate an entry in
+Apache's error log file. If you set the first option to
+<pre class="code">
+SecRuleEngine DetectionOnly
+</pre>
+then the module will only detect and block nothing. We will now take a look at the classes
+of different options available. Please make sure you take a look at <tt>mod_security</tt>'s
+documentation and at the file in the sample core rules archive that can be downloaded.
+</p>
+
+<h3>
+General Options
+</h3>
+
+<p>
+<tt>mod_security</tt> has several groups of options. Here are some of the basic configuration
+directives.
+<pre class="code">
+SecRuleEngine On
+SecRequestBodyAccess On
+SecResponseBodyAccess On
+</pre>
+The first line switches request inspection on or off. The other two lines control whether
+request and response body data will be inspected by the module. Keep in mind that the data
+has to be buffered. This means that it is required for inspecting HTTP POST requests, but
+it has to be buffered and thus needs memory. You can reduce the amount of memory used by
+this directive.
+<pre class="code">
+SecRequestBodyInMemoryLimit 131072
+</pre>
+You can also limit the size of the HTTP request body data. This is very handy for disabling
+large data in HTTP POST requests.
+<pre class="code">
+SecRequestBodyLimit 10485760
+</pre>
+Every request bigger than 10485760 byte will be answered by the error code 
+<i>413 Request Entity Too Large</i>. The default is 134217728 bytes (131072 KB).
+</p>
+<p>
+Web servers typically include the MIME type of data they put into responses. You can control
+the types you want to inspect. Usually you will not want to parse JPEG or PDF data.
+<pre class="code">
+SecResponseBodyMimeTypesClear
+SecResponseBodyMimeType (null) text/plain text/html text/css text/xml
+</pre>
+The first statement clears the list of types to be checked. The second line sets the types
+we are interested in. File uploads may be something you wish to control. You can redirect
+every file upload to a seperate directory. In addition you can collect all
+uploaded files to your server provided you have the disk space. This may be useful for forensic
+activities after something has gone wrong.
+<pre class="code">
+SecUploadDir /var/spool/apache/private
+SecUploadKeepFiles Off
+</pre>
+It is good practice not to use the usual directories for temporary files for storing uploads.
+Create a directory for this purpose and set the permissions accordingly. Only Apache needs
+to access this space.
+</p>
+
+<h3>
+Logging
+</h3>
+
+<p>
+You can enable audit logging which can help you a lot during debugging or worse situations.
+You have the choice of logging everything or only events that triggered one of <tt>mod_security</tt>'s
+internal checks. This includes the rule sets.
+<pre class="code">
+SecAuditEngine RelevantOnly
+SecAuditLogRelevantStatus "^[45]"
+</pre>
+We want to log only relevant events and concentrate on responses that generate 4xx or 5xx
+status codes. That's what the regular expression is for. You can do a full logging if you need to.
+The log can be written into a single file or into a directory with one file per log event. The latter
+is usually only for high volume sites. 
+<pre class="code">
+SecAuditLogType Serial
+SecAuditLog /var/log/www/modsec_audit.log
+# SecAuditLogStorageDir /var/log/www/modsec_audit
+</pre>
+As mentioned before the content that can be logged is extended. You can log portions of the original
+HTTP request along with the response. 
+<pre class="code">
+SecAuditLogParts "ABEIFHZ"
+</pre>
+This means we want to log the audit header and trailer (options A and H), the original request (option
+B), an intermediate response body (option E), the modified request body (option I), the final response 
+header (option F) and the final
+boundary of the log event (option Z, which is mandatory). The intermediate response body is either
+the original response or the modified response by <tt>mod_security</tt>. The modified request body
+is either the original request body or a shortened variant whenever <i>multipart/form-data</i>
+encoding was used. The default options are "ABIFHZ".
+</p>
+
+<h3>
+Rules
+</h3>
+
+<p>
+The security module uses five distinct phases for processing requests to and responses from the
+web server.
+<ol>
+<li> Parse request headers</li>
+<li> Parse request body</li>
+<li> Parse response headers</li>
+<li> Parse response body</li>
+<li> Do logging</li>
+</ol>
+It is important to keep this in mind when designing rule sets, almost just as in designing 
+packet filters. The directive <tt>SecRule</tt> describes a rule.
+<pre class="code">
+SecRule VARIABLES [OPERATOR] ACTIONS
+</pre>
+When written in this form <tt>mod_security</tt> will
+<ol>
+<li> expand the variables,</li>
+<li> apply the operator if present,</li>
+<li> trigger once for a match in every variable,</li>
+<li> and execute
+     <ol>
+     <li> the default action or</li>
+     <li> the actions described in the rule.</li>
+     </ol>
+     </li>
+</ol>
+Remember the test rule with the string "attack". We told the module to check the variable
+<tt>REQUEST_URI</tt> of the HTTP request and apply the regular expression operator consisting
+of the desired string to look for. We didn't give any action, so the default action applies.
+You can combine variables by using logical operators.
+<pre class="code">
+SecRule "REQUEST_URI|QUERY_STRING" attack
+</pre>
+This does the same but with two different variables. The action will be triggered if the 
+string fragment is found in either variable. You can use well known operators inside rules.
+Matching of regular expressions is done by the PCRE library, so you can use any constructs
+PCRE understands (which is basically everything you can do in Perl's pattern matching).
+Long lines can be split by using "\" just as in Bash shell scripts.
+</p>
+<p>
+Keep in mind that the <tt>VARIABLES</tt> section contains variables. Their content changes.
+If the variable is empty or not present, the rule doesn't match. This is importent and 
+desired for parameter checking. Variables can be <tt>ARGS</tt>, <tt>FILES</tt>, <tt>FILES_TMPNAMES</tt>,
+<tt>ENV</tt>, <tt>REMOTE_PORT</tt>, <tt>QUERY_STRING</tt>, <tt>SCRIPT_BASENAME</tt>,
+<tt>AUTH_TYPE</tt>, <tt>REQUEST_COOKIES</tt>, <tt>SESSIONID</tt>, <tt>TIME</tt> and many more. 
+The reference has a complete list. 
+</p>
+
+<h3>
+Operators
+</h3>
+
+<p>
+<tt>mod_security</tt> rules can contain operators. They are used to validate the request
+or look for special anomalies. The "@" indicates that an operator follows.
+<pre class="code">
+SecRule ARGS "@validateUtf8Encoding"
+SecRule ARGS "@validateByteRange" 10,13,32-126
+</pre>
+The first rule checks the request for valid UTF-8 encoding. The second example checks for
+a specific range of characters in the request. If the request contains other characters
+than linefeed, carriage return or the US ASCII characters then the action is triggered.
+You can also invoke additional scripts.
+<pre class="code">
+SecRule FILES_TMPNAMES "@inspectFile /usr/local/bin/check_file.pl" 
+</pre>
+This redirects any uploaded files to the Perl script for further checks. The exit code
+of the script tells <tt>mod_security</tt> whether to invoke the action or not. You can even
+use realtime blacklists for your rules.
+<pre class="code">
+SecRule REMOTE_ADDR "@rbl bad.guys.and.girls.example.net"
+</pre>
+</p>
+
+<h3>
+Actions
+</h3>
+
+<p>
+There are five general types of actions.
+<ol>
+<li> Disruptive actions - abort current transaction.<br>
+     <ul>
+     <li> deny - stops transaction and generates an error.</li>
+     <li> drop - drops transaction without error.</li>
+     <li> redirect - responds with a redirection (such as 301 or 302).</li>
+     <li> proxy - forwards the request to another server.</li>
+     <li> pause - slows down the execution of the request.</li>
+     </ul>
+     </li>
+<li> Non-disruptive actions - change the state of the current transaction.</li>
+<li> Flow actions - change the flow of the rules.<br>
+     <ul>
+     <li> allow - stops processing of subsequent rules.</li>
+     <li> chain - combines the active rule with the next one.</li>
+     <li> pass - ignores a match in the current rule; useful for commenting rules out, but leave them
+          still active.</li>
+     <li> skip - skip the next or more rules.</li>
+     </ul>
+     </li>
+<li> Meta-data actions - contain meta data for rules as additional information; useful for
+     logging.</li>
+<li> Data actions - are placeholders for other actions.</li>
+</ol>
+The default action can be set with the directive <tt>SecDefaultAction</tt>. It can be changed
+whenever you need it, so you can define blocks of rules with different default actions.
+The actions are very similar to the ones used by the intrusion detection/prevention software
+<a href="http://www.snort.org/">Snort</a>. They give you a lot of flexibility and allow for 
+quite complex coverage of tests. Here's is one example from the core rules that look for
+attempts to inject an email message into the request.
+<pre class="code">
+SecRule REQUEST_FILENAME|ARGS|ARGS_NAMES|REQUEST_HEADERS|XML:/* "[\n\r]\s*(?:to|bcc|cc)\s*:.*?\@" \
+  "t:none,t:lowercase,t:urlDecode,capture,ctl:auditLogParts=+E,log,auditlog,msg:'Email Injection Attack.
+  Matched signature &lt;%{TX.0}&gt;',,id:'950019',severity:'2'"&lt;/%{TX.0}&gt;
+</pre>
+Note that I inserted a line break for better readability. The action parameter is a single string
+and tell the module to log every match to the normal log and the audit log with the message
+text <i>Email Injection Attack</i> along with some parameters of the request. The core rules
+have more examples for other attacks such as cross-site scripting, SQL injection, HTTP anomalies
+and the like.
+</p>
+
+<h3>
+Rule Management
+</h3>
+
+<p>
+Make sure that you keep your rule files in good order and make sure that you document every
+change. This is very important. Any kind of filter can break whole applications and protocols.
+Therefore you need to now what changes caused which effects. You will also need this information
+when developing your own rules. Bear in mind that custom web applications need custom rules.
+Some attacks may be the same, but customised applications have their peculiarities that have
+to be considered. A good place to start are the core rule sets. You can disable rules without
+deleting them from the configuration. This is extremely useful in case you wish to distribute
+rules to multiple servers. You can do that by splitting your rule into multiple files and have
+a master configuration that enables or disables selected sets.
+</p>
+
+<h2>
+Performance and Deployment
+</h2>
+
+<p>
+Everything has a price and so does filtering HTTP requests. <tt>mod_security</tt> needs to holds
+the request in a buffer or has to store it to a temporary file. You have to take this into account.
+The parsing add a little overhead in terms of CPU cycles to the web server as well. If you install
+the module on a server that already has performance issues things won't get better. That's what
+the reverse proxy method is for. Hard hit sites probably won't go anywhere without additional
+proxies.
+</p>
+<p>
+One last thing to keep in mind are your own web applications. Don't just set up the core rules
+and accept all defaults. Inspect the rule sets and decide for yourself if you need all the rules.
+Things can break if you are not careful enough. No one knows your web apps better than you.
+Use this knowledge to your advantage.
+</p>
+
+<h2>
+Useful resources
+</h2>
+
+<p>
+<ul>
+<li> <a href="http://www.modsecurity.org/"><tt>mod_security web site</tt></a></li>
+<li> <a href="http://www.apachesecurity.net/">Apache Security</a></li>
+<li> <a href="http://www.hardened-php.net/suhosin/">Hardened PHP Project - Suhosin</a></li>
+<li> <a href="http://l7-filter.sourceforge.net/">Application Layer Packet Classifier for Linux</a></li>
+<li> <a href="http://www.visolve.com/squid/whitepapers/reverseproxy.php">Squid reverse proxy</a></li>
+<li> <a href="http://www.snort.org/">Snort</a></li>
+</ul>
+</p>
+
+<script type="text/javascript">
+digg_url = 'http://linuxgazette.net/143/pfeiffer.html';
+digg_title = 'Securing Apache Web Server with mod_security';
+digg_bodytext = 'Apache's <tt>httpd</tt> surely does inspect HTTP
+requests. What do I need more? Well, there are some things <tt>mod_security</tt>
+can do for you.';
+digg_topic = 'linux_unix';
+</script>
+<script src="http://digg.com/tools/diggthis.js" type="text/javascript"></script> 
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:143/pfeiffer.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<!-- *** BEGIN bio *** -->
+<hr>
+<p>
+
+<img align="left" alt="Bio picture" src="../gx/authors/pfeiffer.jpg" class="bio">
+
+</p>
+<em>
+
+<p>
+Ren&eacute; was born in the year of Atari's founding and the release of the game Pong.
+Since his early youth he started taking things apart to see how they work. He
+couldn't even pass construction sites without looking for electrical wires that
+might seem interesting. The interest in computing began when his grandfather
+bought him a 4-bit microcontroller with 256 byte RAM and a 4096 byte operating
+system, forcing him to learn assembler before any other language.
+</p>
+
+<p>
+After finishing school he went to university in order to study physics. He then
+collected experiences with a C64, a C128, two Amigas, DEC's Ultrix, OpenVMS and
+finally GNU/Linux on a PC in 1997. He is using Linux since this day and still
+likes to take things apart und put them together again. Freedom of tinkering
+brought him close to the Free Software movement, where he puts some effort into
+the right to understand how things work. He is also involved with civil liberty
+groups focusing on digital rights.
+</p>
+
+<p>
+Since 1999 he is offering his skills as a freelancer. His main activities
+include system/network administration, scripting and consulting. In 2001 he
+started to give lectures on computer security at the Technikum Wien. Apart from
+staring into computer monitors, inspecting hardware and talking to network
+equipment he is fond of scuba diving, writing, or photographing with his digital
+camera. He would like to have a go at storytelling and roleplaying again as soon
+as he finds some more spare time on his backup devices.
+</p>
+
+</em>
+</p>
+<br clear="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2007, Ren&eacute; Pfeiffer. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication License</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 143 of Linux Gazette, October 2007
+</p>
+
+</div>
+
+<div id="previousnextbottom">
+<A HREF="anonymous.html" >&lt;-- prev</A> | <A HREF="saha.html" >next --&gt;</A>
+</div>
+
+</div>
+</div>
+
+<script src="http://www.google-analytics.com/urchin.js"
+type="text/javascript">
+</script>
+<script type="text/javascript">
+_uacct = "UA-1204316-1";
+urchinTracker();
+</script>
+
+
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+</body>
+</html>
+

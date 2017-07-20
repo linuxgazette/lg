@@ -1,0 +1,92 @@
+#! /usr/bin/perl
+# Gimp-perl script creating etched buttons
+
+use Gimp;
+use Gimp::Fu;
+
+register "etched_button",
+         "Create etched buttons",
+         "Creates a button with an etched-looking borderline. " .
+         "The button's size is adjusted according to the text size.",
+         "Wolfgang Mauerer",
+         "wolfgang\@mynetix.de",
+         "21-Jul-1999",
+         "<Toolbox>/Xtns/Script-Fu/Buttons/Etched",
+         "",
+         [
+          [PF_STRING, 'text', 'Button text', ''],
+          [PF_FONT, 'font', 'Text font', 
+           '-adobe-helvetica-medium-r-normal-*-*-120-*-*-p-*-iso8859-1'],
+          [PF_BOOL, 'flat', 'Flatten the image and convert it to indexed']
+	 ],
+         \&create_etched_button;
+
+exit main;
+
+sub create_etched_button {
+    # get the use customizable parameters
+    my $text = shift;
+    my $font = shift;
+    my $flatten = shift;
+
+    # Uncomment this to see debugging messages
+    # Gimp::set_trace(TRACE_NAME);
+
+    # Save the old bg/fg-color
+    my $old_fg = Palette->get_foreground;
+    my $old_bg = Palette->get_background;
+
+    my $image = new Image(640, 480, RGB);
+    Palette->set_foreground('black');
+    my $text_layer = Gimp->gimp_text_fontname($image, -1, 0, 0, $text, 1, 1, 
+                                              xlfd_size($font), $font); 
+    $image->resize($text_layer->width + 10, $text_layer->height + 10, 5, 5);
+    my $background = $image->layer_new($image->width, $image->height, 
+                                       RGB_IMAGE, "Background", 100, 
+                                       NORMAL_MODE);
+    Palette->set_background([192, 192, 192]);
+    $background->fill(BG_IMAGE_FILL);
+    $image->add_layer($background, 0);
+    $image->raise_layer_to_top($text_layer);
+
+    Brushes->set_brush("Circle (01)");
+
+    my $frame_layer = $image->layer_new($image->width, $image->height, 
+                                        RGB_IMAGE, "Frame Layer", 100, 
+                                        NORMAL_MODE);
+    $frame_layer->add_alpha();
+    $frame_layer->drawable_fill(3);
+    $image->add_layer($frame_layer, -1);
+
+    # Zeichnen des Rahmens
+    Palette->set_foreground('black');
+    &create_frame($frame_layer, 0, 0, $image->width - 2, $image->height - 2);
+
+    Palette->set_foreground('white');
+    &create_frame($frame_layer, 1, 1, $image->width - 1, $image->height - 1);
+
+    if ($flatten == 1) {
+        # Flatten the image and convert it to indexed
+        $image->merge_visible_layers(EXPAND_AS_NECESSARY);
+        $image->convert_indexed(1, 0, 256, 1, 1, "");
+    }
+
+    # restore the old palette settings
+    Palette->set_foreground($old_fg);
+    Palette->set_background($old_bg);
+    
+    # Return the generated image
+    return $image;
+}
+
+sub create_frame {
+    # Creates a pencil-drawn frame in the layer specified by parameter 1 with 
+    # the dimensions set by the following params (x1, y1, x2, y2).
+    my $frame_layer = shift;
+    my ($x1, $y1, $x2, $y2) = @_;
+
+    Gimp->gimp_pencil($frame_layer, 4, [$x1, $y1, $x2, $y1]);
+    Gimp->gimp_pencil($frame_layer, 4, [$x1, $y1, $x1, $y2]);
+    Gimp->gimp_pencil($frame_layer, 4, [$x2, $y1, $x2, $y2]);
+    Gimp->gimp_pencil($frame_layer, 4, [$x1, $y2, $x2, $y2]);
+}

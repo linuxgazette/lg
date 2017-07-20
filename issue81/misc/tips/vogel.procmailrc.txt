@@ -1,0 +1,135 @@
+#
+# $Id: vogel.procmailrc.txt,v 1.1.1.1 2002/08/14 22:28:22 dan Exp $
+# $Source: /home/cvs/lg/www/issue81/misc/tips/vogel.procmailrc.txt,v $
+#
+# NAME:
+#    $HOME/.procmailrc
+#
+# DESCRIPTION:
+#    "procmail" handles local mail delivery, and you can use this file
+#    to tell it to
+#         - store your mail in a given folder,
+#         - forward or discard mail depending on the contents, or
+#         - run your mail through a program automatically.
+#
+# TESTING CHANGES:
+#    If you want to mess with your setup, the safest way is:
+#
+#    1.  copy an existing mail message to /tmp/msg,
+#    2.  copy $HOME/.procmailrc to $HOME/.procmailrc.new,
+#    3.  only make your changes to $HOME/.procmailrc.new, and
+#    4.  run "procmail -m $HOME/.procmailrc.new < /tmp/msg" to test.
+#
+# AUTHOR:
+#    Karl Vogel <vogelke@dnaco.net>
+#    Sumaria Systems, Inc.
+
+# Search path.
+PATH=/usr/local/bin:/bin:/usr/bin:$HOME/bin
+
+# Default mail folder.
+DEFAULT=/var/mail/vogelke
+
+# Current directory while procmail is executing.
+# All pathnames are relative to this directory.
+MAILDIR=$HOME/mail
+
+# File containing error messages or diagnostics.  If this
+# file does not exist, then said messages will be bounced
+# back to the message sender.
+LOGFILE=$MAILDIR/MAILLOG
+
+# If yes, keep an abstract of the From and Subject lines of
+# each delivered message, the folder it was delivered to,
+# and the size of the message.  If no, skip this abstract.
+LOGABSTRACT=yes
+
+# If on, describe actions of procmail in detail.
+#VERBOSE=on
+
+# Number of seconds before procmail zaps a lockfile by force.
+LOCKTIMEOUT=1
+
+# Default shell and umask value.
+SHELL=/bin/sh
+UMASK=022
+
+# Frequently-used variables.
+WEEK="`/bin/date +%Yw%W`"
+
+# Rules section.
+#--------------------------------------------------------------------
+# RULE:	Save a copy of all incoming headers in a file called
+#		$HOME/mail/HEADERS.YYYYwNN
+#	where YYYY = year
+#	NN = the week number starting on Monday.
+
+:0 chw: $HOME/hdr.lck
+| /bin/cat - >> $HOME/mail/HEADERS.$WEEK;
+
+#--------------------------------------------------------------------
+# RULE: Check if the Message-ID: header has been seen.
+#       Discard the message if so, otherwise continue.
+
+:0 Wh: msgid.lock
+| formail -D 65536 msgid.cache
+
+#====================================================================
+# SPAM:	dump message if the message contains a few 8-bit characters.
+#       Simple check for encoded characters (=[0-9A-F][0-9A-F])
+#       will fail for messages containing "dd xxx=yyy" commands.
+#
+#       If you want to check the header only, use ":0 HD" instead.
+
+### This has 8-bit characters, so I uuencoded it.
+
+begin 644 8bit-rule
+M"CHP($A"1`HJ("TQ,%XQ(%-U8FIE8W0Z"BH@("`Q7C$@/5LP+3E!+49=6S`M
+M.4$M1ET]6S`M.4$M1EU;,"TY02U&70HJ("`@,5XQ(%N@H:*CI*6FIZBIJJNL
+MK:ZOL+&RL[2UMK>XN;J[O+V^OUT**B`@(#%>,2!;P,'"P\3%QL?(R<K+S,W.
+MS]#1TM/4U=;7V-G:V]S=WM]="BH@("`Q7C$@6^#AXN/DY>;GZ.GJZ^SM[N_P
+M\?+S]/7V]_CY^OO\_?[_70HJ("`@,5XQ(#U;02U&75LP+3E!+49=/5M!+49=
+46S`M.4$M1ET*<W!A;2TX8FET"@H`
+`
+end
+
+### End of 8-bit characters
+
+#--------------------------------------------------------------------
+# SPAM:	All-numeric "email addresses" of the form *@67890.com
+#       Messages to "friend*@someplace" or "you@".
+
+:0 H
+* ^(From|To|Reply-To): .*@[0-9]+\.
+* ^(From|To|Cc): friend[0-9a-zA-Z]*@
+* ^(From|To|Cc): you@
+spam-friend
+
+#--------------------------------------------------------------------
+# SPAM:	pass anything in the whitelist.
+#       http://www.mindrape.org/caffeine/squashing_spam.html
+
+:0:
+* ? formail -x"From:" -x"From" -x"To:" -x"Reply-To:" -x"Cc:" \
+     | egrep -is -f $HOME/.whitelist
+$DEFAULT
+
+#--------------------------------------------------------------------
+# SPAM:	Same from and to: happens legitimately only when sending
+#       mail to oneself.  Put this *after* whitelist filtering;
+#       some people on whitelist send to themselves.
+:0 H
+* ^From: \/.*
+* $^To: $MATCH
+spam-tofrom
+
+#--------------------------------------------------------------------
+# SPAM:	Set HINT to "spam" if ifile matches against spam db.
+
+HINT=`ifile -v 0 -h -q | head -1 | cut -f1 -d' '`
+:0 :
+* HINT ?? ^spam
+spam-folder
+
+:0 :
+$DEFAULT

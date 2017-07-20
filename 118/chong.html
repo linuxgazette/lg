@@ -1,0 +1,498 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Linux Analog to Digital Converter LG #118</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="lg_answer.html" >&lt;-- prev</A> | <A HREF="deak.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Linux Analog to Digital Converter</h1>
+<p id="by"><b>By <A HREF="../authors/dchong.html">David Chong</A> and <A HREF="../authors/pchong.html">Philip Chong</A></b></p>
+
+<p>
+<p><b><a href="#Introduction">1. Introduction</a><br>
+<a href="#Interfacing1">2. Interfacing Your Computer to an ADC via
+the Parallel Port</a><br></b> &nbsp;&nbsp;&nbsp;&nbsp;<a href=
+"#Interfacing1.1">2.1 Building a Basic ADC Circuit</a><br>
+&nbsp;&nbsp;&nbsp;&nbsp;<a href="#Interfacing1.2">2.2 Reading From
+and Writing To the Parallel Port</a><br>
+&nbsp;&nbsp;&nbsp;&nbsp;<a href="#Interfacing1.3">2.3 Communicating
+Between the ADC and the Parallel Port</a><br>
+<b><a href="#About_ECS">3. About the Extreme Comfort System</a><br>
+<a href="#Code_examples">4. Code examples</a><br>
+<a href="#Appendix">5. Appendix</a></b></p>
+
+<h2><a name="Introduction" id="Introduction">Introduction</a>
+</h2>
+
+<h3>Why read this article?</h3>
+
+<p>It can be a little expensive to read analog signals, for example
+temperature readings or light levels, into your computer. In this
+article we will show you
+(1) how Linux can use a computer parallel port and a $10 integrated
+circuit to read 8 analog channels at 12 bit accuracy, and
+(2) how we used this to build the Extreme Comfort System (ECS.)</p>
+
+<p>Analog to digital conversion (ADC) can measure:</p>
+
+<pre>
+&bull; Temperature, using thermistors
+&bull; Light intensity, using Light Dependent Resistors (LDR)
+&bull; Pressure
+</pre>
+
+<p>We can use the acquired data for applications such as:</p>
+
+<pre>
+&bull; Data acquisition
+&bull; Data logging
+&bull; High-accuracy process control
+</pre>
+
+<p>The ECS project is an example of these applications.</p>
+<a name="Interfacing1" id="Interfacing1"></a>
+<h2>Interfacing Your Computer to an ADC via the Parallel Port</h2>
+
+<p>Interfacing an Analog-to-Digital Converter (ADC) with Linux via
+the parallel port is fairly simple. There two major areas that need
+to be addressed - hardware and software. The hardware consists of
+the parallel port, an ADC, and an analog signal source. The
+software we programmed in 'C' language.</p>
+
+<p>Below I have outlined three steps that explain how to develop
+and integrate both components of this useful tool.</p>
+
+
+<a name="Interfacing1.1" id="Interfacing1.1"></a>
+<h3>1. Building a Basic ADC Circuit</h3>
+
+<p>The first step is to build the hardware. As mentioned before our
+hardware consists of the parallel port, an ADC, and a analog
+source. For my project I used a MAX186 as the ADC and an NTC
+Thermistor as the analog source. The MAX186 is a data-acquisition
+system that combines an 8-channel multiplexer and a 12 bit ADC.
+Refer to the <a href=
+"http://www.maxim-ic.com/quick_view2.cfm/qv_pk/1070/ln/en">MAX186
+datasheet</a> for more information. NTC Thermistors (5MMDIA 47KR)
+are readily available at <a href=
+"http://www.jaycar.com.au">Jaycar</a> - CAT. NO. RN3442.</p>
+
+<p class="editorial">(Editor's note: A similar thermistor with a
+slightly different temperature coefficient from Digi-Key is
+<a href="http://www.digikey.com/scripts/DkSearch/dksus.dll?Detail?Ref=319536&amp;Row=263407&amp;Site=US">
+BC1487-ND</a> - Dave)<!-- For our US readers. --></p>
+
+<p>Figure 1 below shows a simple circuit diagram that converts the
+analog signal produced by the thermistor to a digital BCD signal,
+which is read by the computer via the parallel port. Figure 2 shows
+an example circuit I constructed using the circuit diagram in
+Figure 1.</p>
+<a name="Figure1" id="Figure1"></a><img src=
+"misc/chong/simple_ADC.jpg" alt=
+"Figure 1: Simple ADC-to-Parallel Port circuit diagram" height=
+"288">
+<h5>Figure 1: Simple ADC-to-Parallel Port circuit diagram</h5>
+<img src="misc/chong/ADC_hw.jpg" alt="Figure 2: Hardware Example"
+height="288">
+<h5>Figure 2: ADC Hardware Example</h5>
+
+<p>See ADC_driver.c in the <a href="#Code_examples">Code
+Examples</a> section for the actual program to operate this
+circuit.</p>
+
+
+<a name="Interfacing1.2" id="Interfacing1.2"></a>
+<h3>2. Reading from and Writing To the Parallel Port.</h3>
+
+<p>Now that that hardware is built, it is time to develop the
+software. However before you begin to write code or even start up
+Linux you must gain access to the parallel port. Without this there
+is no way you can read or write to the ADC. Refer to "Information
+about the Parallel Port and SPI" in the <a href=
+"#Appendix">Appendix</a> for a brief overview on the Parallel port
+and how it communications to the ADC.</p>
+
+<p>To gain access to the parallel port in Linux you have to setup
+the BIOS to support the Simple Parallel Port mode, which
+corresponds to the old Centronics standard. This is done by
+selecting the SPP or Bidirectional mode in BIOS. With the BIOS set
+we enable I/O using the lp_tty_start program, see the <a href=
+"http://linuxgazette.net/112/radcliffe.html">&ldquo;Linux: A Clear
+Winner for Hardware I/O&rdquo;</a> written by Peter Radcliffe.</p>
+
+<p>In addition to running the lp_tty_start program, you also need
+the following code snippets below. Both these code snippets are
+used in my <a href="misc/chong/ADC_driver.c.txt">ADC_driver.c</a> code
+example.</p>
+
+<pre>
+-------- lp_init() --------------------------------------------
+ PURPOSE - given lp number 0-2, get lp base address,
+           save registers, disable interrupts.
+void lp_init(short lp_num)
+ { switch ( lp_num)
+    { case 2 : lp_base_addr = 0x3BC ; break ;
+      case 1 : lp_base_addr = 0x278 ; break ;
+      default: lp_base_addr = 0x378 ; break ;
+    }
+   image_data    = save_data    = inb( lp_base_addr) ;
+   image_control = save_control = inb( lp_base_addr+2) ;
+   outb( (image_control &amp;= 0xEF),  lp_base_addr + control_offset) ;
+ }
+---------------------------------------------------------------
+--------- lp_restore() ----------------------------------------
+
+ PURPOSE - restore lp port to previous state.
+
+void lp_restore()
+{  outb( save_data,    lp_base_addr) ;
+   outb( save_control, lp_base_addr + control_offset) ;
+}
+---------------------------------------------------------------
+</pre>
+
+<h6>source: &ldquo;Linux: A Clear Winner for Hardware I/O,&rdquo;
+Peter Radcliffe</h6>
+
+<p>Function <tt>lp_init()</tt> saves the current parallel port
+state , including register values. <tt>lp_restore()</tt> restores
+the parallel port to the previous state as saved by
+<tt>lp_init()</tt>. Normally <tt>lp_init()</tt> would be run at the
+beginning of <tt>main()</tt> and <tt>lp_restore()</tt> would be
+used at the end. To read and write from the parallel port use
+library functions 
+<!-- Originally intb(), could not locate intb, but found inb() used -->
+<tt>inb()</tt> and <tt>outb()</tt> from <tt>#include
+asm/io.h</tt>.</p>
+
+<p>To test a whether the I/O is working, write a simple program
+that toggles the output on a pin on the parallel port and use a
+multimeter or CRO to read the output. If the pin output toggles
+correctly, then the I/O works.</p>
+<a name="Interfacing1.3" id="Interfacing1.3"></a>
+<h3>3. Communicating Between the ADC and the Parallel Port</h3>
+
+<p>Once the circuit in Figure 1 is constructed and communication
+between the parallel ports is established we can begin to program a
+simple conversion. The file 'ADC_driver.c' (see <a href=
+"#Code_examples">Code examples</a> below) contains the C code that
+performs the conversions. However if you like to develop your own
+software the following paragraphs briefly describe how to initiate
+and read a conversion.</p>
+<img src="misc/chong/timing_diagram.jpg" alt=
+"Figure 3: Internal Clock Mode Timing">
+<h5>Figure 3: Internal Clock Mode Timing</h5>
+<img src="misc/chong/control_byte.jpg" alt=
+"Table 2: Control Byte Configuration">
+<h5>Table 2: Control Byte Configuration</h5>
+
+<p>As shown in Figure 3, a conversion is initiated by clocking a
+control byte into DIN. The format for the Control Byte is outlined
+in the <a href=
+"http://www.maxim-ic.com/quick_view2.cfm/qv_pk/1070/ln/en">MAX186
+datasheet</a>. For our purposes we will use the Control Byte
+configuration outlined in Table 2.</p>
+
+<p>Once the control byte is clocked in, the SSTRB will go low which
+indicates the start of the conversion and then goes high when the
+conversion is complete. After the SSTRB goes high, the next falling
+clock edge will produce MSB of the conversion at DOUT, followed by
+the remaining bits in the MSB-first format (refer to Figure 3). If
+everything works correctly DOUT should clock out a 12 bit BCD which
+corresponds to the voltage reading at the temperature sensor. To
+convert the BCD to a decimal I used the following code snippet:</p>
+
+<pre>
+---------------------------------------------------------------
+  int dec = 0;
+  for(count=0; count&lt;=11; count++)
+  {     dec = ((tempOut[11-count])*(twopowerof(count)))+dec;
+  }
+---------------------------------------------------------------
+</pre>
+* tempOut[] is a 12 integer array which contains 12 bit BCD (where
+tempOut[0] = MSB and tempOut[11] = LSB).
+
+<p>If your DOUT outputs strange results, such as all zeros or
+erratic readings, (I had these problems) check your circuit wiring
+and make sure they follow the circuit diagram outlined in Figure 1.
+If you still have problems you can use a CRO to check your parallel
+port output to make sure they match the timing outlined in Figure
+3.</p>
+<a name="About_ECS" id="About_ECS"></a>
+<h2>About the Extreme Comfort System</h2>
+
+<p>My first encounter with Linux, parallel ports and ADCs occurred
+during my 4th year at University. The project objective was to
+interface to a piece of hardware via the parallel port. I decide to build an
+<a href=
+"http://www.users.bigpond.net.au/tmchong/ECS_webpage/index.html">
+<!-- Previous link gives 404 error 29 August 2005 21:00 EDT -->Extreme
+Comfort System</a> or <b>ECS</b> for our project. The idea for this
+project occurred during one cold night at my computer desk when I
+noticed my hands were freezing and my eyes were strained from the
+poor lighting conditions. From this three main functions were
+developed:</p>
+
+<p><strong>1. Thermostat</strong> - Three temperature sensors
+monitor the ambient temperature near the keyboard and a fan or
+heater is activated depending on the user settings. A GUI interface
+displays and controls the function of the thermostat.</p>
+
+<p><strong>2. Automatic light Controller</strong> - A light sensor
+monitors the light level near the keyboard and computer monitor and
+a variable light source changes its intensity according to user
+settings. A GUI interface displays and controls the functions on
+the automatic light source.</p>
+
+<p><strong>3. Data logger</strong> - All the readings from the
+temperature and light sensors are stored into separate files with
+statistical analysis. These files can be displayed on the GUI
+interface.</p>
+
+<p>To develop this project we used <a href=
+"http://www.trolltech.com/products/qt/designer.html">QT
+designer</a> for the GUI development and the MAX186 for the ADC. We
+only needed to use one ADC, which converted the analog voltage
+signals from the temperature and light variable resistors to
+digital signals. The circuit design was very similar to the ADC
+circuit in Figure 1, except a bit more complex.</p>
+<img src="misc/chong/ECS_gui+pics.jpg" alt=
+"ECS GUI and Hardware Pictures " height="430">
+<h5>Pictures of ECS hardware and GUI</h5>
+
+<p>For more information about the ECS refer to my <a href=
+"http://www.users.bigpond.net.au/tmchong/ECS_webpage/index.html">ECS
+website</a>.
+<!-- Previous link gives 404 error 29 August 2005 21:00 EDT --></p>
+<a name="Code_examples" id="Code_examples"></a>
+<h2>Code examples</h2>
+
+<p>Here are some real code examples.</p>
+
+<p><!--
+20050816 dsrich - Changed href to point at the original article's code 
+Original href <a href="misc/chong/lp_tty_start"> pointed at an ELF executable
+-->
+<a href=
+"../112/misc/radcliffe/lp_tty_start.c.txt">lp_tty_start.c</a>: this
+file was written by Peter Radcliffe and can be found in his article
+&ldquo;Linux: A Clear Winner for Hardware I/O.&rdquo; This I/O
+enabler allows access to the standard three printer ports and four
+serial ports but nothing else. Ensure it is owned by root with the
+SUID bit set (refer to Peter Radcliffe's article). To compile, type
+<tt>gcc -o lp_tty_start lp_tty_start.c</tt>. To run, type
+<tt>./lp_tty_start ./your_program</tt>.</p>
+
+<!--
+The original href'd file misc/chong/ADC_all.tar.gz contains ADC_driver.c
+and two ELF executables. Why the executables?  Pulled out the .c file and
+pointed the href at it per usual practice
+-->
+<p><a href="misc/chong/ADC_driver.c.txt">ADC_driver.c</a>: will run in collaboration with the &ldquo;Simple
+ADC-to-Parallel Port circuit&rdquo; (Figure 1). Once in operation
+it will output the current voltage of the NTC Thermistor every
+second. To compile, type <tt>gcc -o ADC_driver ADC_driver.c</tt>.
+To run, type <tt>./lp_tty_start ./ADC_driver</tt>.</p>
+
+<p>The ECS program (complete tarball can be downloaded <a href="misc/chong/ECS_all.tar.gz">here</a>) will
+perform the tasks described in the section <a href=
+"#About_ECS">About the Extreme Control System</a>. This includes
+the thermostat, automatic light control, data logger and the GUI
+involved. To compile, type <tt>qmake -o makefile ecs.pro -&gt;
+make</tt>. To run, type <tt>./lp_tty_start ./ecs</tt>.</p>
+<a name="Appendix" id="Appendix"></a>
+<h2>Appendix</h2>
+
+<h3>Information about the Parallel Port and SPI</h3>
+
+<p>The original IBM-PC's Parallel Printer Port had a total of 12
+digital outputs and 5 digital inputs accessed via 3 consecutive
+8-bit ports in the processor's I/O space.</p>
+<img src="misc/chong/parallel_port_diagram.jpg" alt=
+"25-way Female D-Type Connector " height="214">
+<h5>25-pin Female D-Type Connector</h5>
+
+<pre>
+&bull; Pins 9-2 (D7-0) are output pins accessed via the DATA Port.
+&bull; Pins 17, 16, 14, 1 (C3-0) are output pins, three inverted, accessed via the CONTROL Port.
+&bull; Pins 10-13, 15 (S7-0) are input pins accessed via the STATUS Port.
+&bull; The remaining pins (25-18) are grounded. 
+</pre>
+
+<p>The ADC communicates with the parallel port using the SPI
+(Serial Peripheral Interface) 
+<!-- Motorola's name, corrected from original text
+"Serial Parallel Interface" --> protocol. SPI can be used to talk
+to a whole range of integrated circuits such as EEPROMs and
+microprocessors, so you may find the SPI part useful for other
+projects. In our simple ADC-to-Parallel Port circuit, shown in
+<a href="#Figure1">Figure 1</a>, there are five wires connecting
+the ADC to the parallel port. They include DIN, SCLK, DOUT, SSTRB,
+and CS. Together they are used to to establish fast and flexible
+communication. For more information about SPI refer to the <a href=
+"http://www.maxim-ic.com/quick_view2.cfm/qv_pk/1070/ln/en">MAX186
+datasheet</a>.</p>
+
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<H4>David Chong</H4>
+<!-- *** BEGIN bio *** -->
+<hr>
+<p>
+
+<img align="left" alt="[BIO]" src="../gx/authors/dchong.jpg" class="bio">
+
+<em>
+<p>David Chong is a final year student at RMIT University in Melbourne
+Australia.  Nearing completion of a double degree in Computer Systems
+Engineering and Business Administration, his interest in Linux,
+microprocessors and integrated circuit was not apparent until about his 3rd
+year at the university. Prompted by his senior lecturer, <a
+href="../authors/radcliffe.html">P.J. Radcliffe</a> (also an author of LG)
+whose relentless enthusiasm for Linux and electronics revealed how robust
+and powerful the Linux operating system can be.</p>
+
+<p>Also a 12-week vacation employment at ANSTO at Lucas Height, NSW
+introduced me to the wonderful world of microprocessors and their amazing
+applications.</p>
+
+<p>Excited about entering into the workforce and working on some large-scale 
+projects, David is also interested in Wing Chun Kung Fu and music, in particular
+ the guitar, and hopes to create a rock band one day. </p>
+
+</em>
+<br clear="all">
+<!-- *** END bio *** -->
+
+
+<H4>Philip Chong</H4>
+<!-- *** BEGIN bio *** -->
+<hr>
+<p>
+
+<img align="left" alt="[BIO]" src="../gx/authors/pchong.jpg" class="bio">
+
+<em>
+
+<p>Philip Chong is a 5th (final) year student studying Computer System
+Engineer and Business Administration at RMIT Univeristy in Melbourne
+Australia. </p>
+
+<p>
+He developed a interest in electronics and gadgets at a young age due to
+fictional characters such as Batman, Robocop, and Inspector Gadget.  However,
+it was early in the university where he developed a keen interest in software
+and hardware largely due to influence of certain lecturers including <a
+href="http://linuxgazette.net/authors/radcliffe.html">P.J. Radcliffe</a>,
+who is also an author for LG. </p>
+
+<p> Philip has worked with Linux for the past 3 years and his skills range
+from software GUI development to programming assembly code for
+microprocessors.  In this free time he enjoys practicing kung fu, playing
+piano and guitar, woodwork, and rock'n roll.</p> 
+
+</em>
+<br clear="all">
+<!-- *** END bio *** -->
+
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2005, David Chong and Philip Chong. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 118 of Linux Gazette, September 2005
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="lg_answer.html" >&lt;-- prev</A> | <A HREF="deak.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">September 2005 (#118)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

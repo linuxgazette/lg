@@ -1,0 +1,185 @@
+#!/usr/bin/expect --
+#
+# Original idea and code by noconflic
+# nocon@darkflame.net
+# http://nocon.darkflame.net
+# Wed Mar 12 16:01:47 CST 2003
+#
+# Modified Sat Dec 13 16:04:08 EST 2003 by Ben Okopnik <ben@callahans.org>
+#	- Added the "no password" options for "authorized_keys" logins
+#	- Set "hosts" list to read the contents of the "pushlist" file
+#		(this makes it easy to use different sets of hosts)
+
+
+# Set the path to your local scp/ssh commands
+set sshcmd /usr/bin/ssh
+set sshcpy /usr/bin/scp
+set timeout "-1"
+
+# Read in the list of hosts
+if { [catch "open pushlist" FID] == 0 } {
+  set hosts [read $FID]
+  close $FID
+}
+
+
+proc usage {} {
+	send_user "Usage: sshtool \[option\] <username>\n\n"
+	send_user "Option:    (one of the following)\n"
+	send_user "     -u    execute command on hosts as a normal user.\n"
+	send_user "     -U    execute command on hosts as a normal user WITHOUT a password.\n"
+	send_user "     -r    execute command on hosts as root (uses sudo).\n"
+	send_user "     -c    copy file(s) or directory to hosts.\n"
+	send_user "     -C    copy file(s) or directory to hosts WITHOUT a password.\n"
+	send_user "     -h    this help\n\n"
+        send_user "<username> username of login account.\n\n"
+	exit
+}
+
+proc getpass {} {
+       stty -echo
+       send_user "SSH Password: "
+       expect_user -re "(.*)\n"
+       set password(pass) $expect_out(1,string)
+       send_user "\n"
+       stty echo
+   return $password(pass)
+}
+
+proc getcommand {} {
+       send_user "Enter Command: "
+       expect_user -re "(.*)\n"
+       set command(cmd) $expect_out(1,string)
+   return $command(cmd)
+}
+
+proc getfiledir {} {
+        send_user "Local directory or file: "
+        expect_user -re "(.*)\n"
+        set dirfile(dfile) $expect_out(1,string)
+    return $dirfile(dfile)
+}
+
+
+proc doit {user pass cmmnd files su f} {
+global hosts sshcmd sshcpy sucmd
+
+  foreach host [set hosts] {
+     send_user "Connecting to: $host...\n"
+
+          if {$su == 1} {
+              spawn $sshcmd $user@$host $cmmnd
+              expect "password:"
+              send $pass\r
+              interact
+          }
+
+          if {$su == 2} {
+              spawn $sshcmd $user@$host $sucmd $cmmnd
+              expect "password:"
+              send $pass\r
+              expect "Password:"
+              send $pass\r
+              interact
+          }
+
+          if {$f == 1} {
+              spawn $sshcpy -r $files $user@$host:~/
+              expect "password:"
+              send $pass\r
+              interact
+          }
+
+    sleep 1
+  }
+}
+
+proc doit_nopass {user cmmnd files su f} {
+global hosts sshcmd sshcpy sucmd
+
+  foreach host [set hosts] {
+     send_user "Connecting to: $host...\n"
+
+          if {$su == 1} {
+              spawn $sshcmd $user@$host $cmmnd
+              interact
+          }
+
+          if {$su == 2} {
+              spawn $sshcmd $user@$host $sucmd $cmmnd
+              interact
+          }
+
+          if {$f == 1} {
+              spawn $sshcpy -r $files $user@$host:~/
+              interact
+          }
+
+    sleep 1
+  }
+}
+
+
+# Program body
+if {[llength $argv]!=2} usage
+
+set sucmd sudo
+set user [lindex $argv 1]
+set su 0
+set files 0
+set f 0
+set cmmnd 0
+
+while {[llength $argv]>0} {
+   set flag [lindex $argv 0]
+   switch -- $flag "-u" {
+              send_user "Running command(s) on hosts as a normal user...\n"
+              set su 1
+              set pass [getpass]
+              set cmmnd [getcommand]
+              doit $user $pass $cmmnd $files $su $f
+              set argv [lrange $argv 2 end]
+
+      } "-U" {
+              send_user "Running command(s) on hosts as a normal user WITHOUT a password...\n"
+              set su 1
+              set cmmnd [getcommand]
+              doit_nopass $user $cmmnd $files $su $f
+              set argv [lrange $argv 2 end]
+
+      } "-r" {
+              send_user "Running command(s) on hosts as root...\n"
+              set su 2
+              set pass [getpass]
+              set cmmnd [getcommand]
+              doit $user $pass $cmmnd $files $su $f
+              set argv [lrange $argv 2 end]
+
+      } "-C" {
+              send_user "Sending file(s) to hosts WITHOUT a password...\n"
+              set f 1
+              set files [getfiledir]
+              doit_nopass $user $cmmnd $files $su $f
+              set argv [lrange $argv 2 end]
+
+      } "-c" {
+              send_user "Sending file(s) to hosts...\n"
+              set f 1
+              set pass [getpass]
+              set files [getfiledir]
+              doit $user $pass $cmmnd $files $su $f
+              set argv [lrange $argv 2 end]
+
+      } "-h" {
+              usage
+              set argv [lrange $argv 2 end]
+
+      } default {
+	      usage
+
+      }
+}
+
+ send_user "SSHTool Finished.\n"
+
+exit

@@ -1,0 +1,291 @@
+<!DOCTYPE html
+	PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+	 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="utf-8" xml:lang="utf-8">
+<head>
+<title>Unattended stream recording with MPlayer LG #183</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link rel="stylesheet" href="../lg.css" type="text/css" media="screen, projection"  />
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="../lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="../lg.rdf" />
+<!-- link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" / -->
+<link rel="shortcut icon" href="../favicon.ico" />
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+</head>
+<body>
+
+<a href="../">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+<div id="navigation">
+<table summary="masthead" width="100%">
+<tr>
+<td align="center" colspan="3" style="font-size: 10px; font-weight: bold">
+<a href="../index.html">Home</a>
+<a href="http://linuxgazette.net">Main Site</a>
+<a href="../faq/index.html">FAQ</a>
+
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/listinfo.cgi">Mailing Lists</a>
+<a href="../jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+<hr width="99%" style="border: 1px inset #000033">
+</td>
+</tr>
+<tr>
+<td width="40%" align="left" style="font-size: 10px; font-weight: bold">
+The Free International Online Linux Monthly
+</td>
+<td width="20%" align="center" style="font-size: 10px; font-weight: bold">
+ISSN: 1934-371X
+</td>
+<td width="40%" align="right" style="font-size: 10px; font-weight: bold">
+Main site: <a href="http://linuxgazette.net">http://linuxgazette.net</a> 
+</td>
+</table>
+</div>
+
+
+<div id="breadcrumbs1">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">February 2011 (#183)</a> &gt; 
+Article
+
+</div>
+
+<div class="articlecontent1">
+<div class="content">
+
+<div id="previousnexttop">
+<A HREF="lg_bytes.html" >&lt;-- prev</A> | <A HREF="dyckoff.html" >next --&gt;</A>
+</div>
+
+<h1>Unattended stream recording with MPlayer</h1>
+<p id="by"><b>By <a href="../authors/brownss.html">Silas Brown</a></b></p>
+
+<p>The Linux movie player program MPlayer has an option to
+record an Internet-broadcast video stream for playing later. 
+The recording can be done from the command line.  This is useful
+for two reasons: (1) you can record at a time when you are too
+busy to watch, (2) if your Internet connection is poor for
+realtime video but reasonable for non-realtime bandwidth (some
+low-end cable connections are like this), then you might get
+better results by using <tt>ssh</tt> to log into a
+well-connected remote box, record the broadcast from there, and
+then download the resulting file in non-realtime (assuming the
+broadcast is short, otherwise this might not be practical).</p>
+
+<p>However, many versions of MPlayer have trouble doing this
+unattended.  Firstly, if the connection to the stream goes down
+for whatever reason, MPlayer makes no attempt to re-establish
+it, and secondly it's difficult to tell MPlayer when to stop
+recording (there are command-line timing options but they don't
+always work, and interrupt signals can be ignored).</p>
+
+<p>One workaround is to write a script in Python (or some other
+language) that runs MPlayer inside a "pseudo-terminal" and
+control it via this terminal.  The script can then take
+responsibility of restarting MPlayer if necessary, and sending a
+keystroke to close it down at the end.</p>
+
+<p>The script below will do this.  You will need to change the
+variables at the beginning (unless you want to record an episode
+of <a href="http://en.wikipedia.org/wiki/Shuowen_Jiezi_%28television_program%29">Shuowen
+Jiezi</A>); it's probably a good idea to set the recording to
+start slightly before the scheduled start time and to finish
+slightly after the scheduled finishing time, just in case the
+studio doesn't keep perfect timing.</p>
+
+<pre class="code">
+stream = "mms://65.49.26.231/suntv"
+prefix = "/tmp/shuowenjiezi"
+program_time = (20,05) # in your timezone
+program_length_mins = 8
+
+import pty, time, os, signal
+
+t=time.localtime()
+t = t[:3] + program_time + (0,) + t[6:]
+startTime = time.mktime(t)
+if time.time() &gt; startTime:
+    # missed today's program_time, wait for tomorrow
+    startTime += 24*3600
+endTime = startTime + program_length_mins*60
+
+os.system("rm -f "+prefix+"*") # delete any previous recording
+fileNo = 0
+
+class TimeoutException: pass
+handlingTimeout = False
+def alarm(*args):
+    if handlingTimeout: raise TimeoutException()
+signal.signal(signal.SIGALRM, alarm)
+
+print "Waiting to record %d minutes at %d:%02d" % ((program_length_mins,)+program_time)
+time.sleep(max(0,startTime - time.time()))
+while endTime &gt; time.time():
+    pid,fd = pty.fork()
+    if pid==0: # child
+        pty.spawn(["/bin/bash","-c","mplayer \"%s\" -dumpstream -dumpfile \"%s%02d.asf\"" % (stream,prefix,fileNo)])
+        raise SystemExit # shouldn't get here
+    print "mplayer started in background pty, monitoring"
+    
+    # Monitor the process, restarting if necessary, until time to finish:
+    while os.waitpid(pid,os.WNOHANG)==(0,0) and endTime &gt; time.time():
+        # Need to read from fd to ensure its buffer is clear
+        # but don't block on the reading - use signal to time out
+        # (otherwise we might fail to stop the recording on time)
+        signal.alarm(1)
+        try:
+            handlingTimeout = True
+            os.read(fd,1024)
+            handlingTimeout = False
+        except TimeoutException: continue
+        except OSError: continue
+        time.sleep(1)
+    fileNo += 1
+
+print "Time to finish"
+# Send it a Ctrl-C on the terminal
+# (SIGINT doesn't always work, neither does -endpos)
+os.write(fd,chr(3))
+time.sleep(1) # just in case
+os.close(fd)
+</pre>
+
+<h2>Legal and traffic-flow issues</h2>
+
+<p>In countries that have television licensing, a license is
+usually needed to view or record any television broadcasts in
+<em>any</em> form, including over the Internet, provided that
+your reception occurs at the same time as the broadcast is being
+shown on air i.e. it is "live".  (If the Internet stream is a
+second or two behind due to various packet delays, I think that
+would still count as "live".) The license is usually needed for
+the premises where the recording computer operates, which might
+be different from the premises where you will watch the result.
+The fact that the broadcast is coming from outside your country
+does not usually let you off (after all, people with normal televisions
+can't get out of it by promising to tune to foreign channels);
+however, it's <em>possible</em> that a license is not required
+if the on-air broadcast is <em>completely unavailable</em> in your country
+i.e. it cannot possibly be received even via satellite (so if it
+<em>is</em> carried by a satellite then that satellite had better not
+serve your side of the planet).  This does not constitute legal advice;
+you need to check your local laws, and they might change.</p>
+
+<p>You should also consider any network bandwidth regulations
+that you are subject to (some universities forbid unauthorized
+television downloads; you would need to ask permission).  If you
+are using a remote computer to record the broadcast, you need to
+consider any relevant bandwidth restrictions from that computer
+also.  Double-check the size of the stream's output files to
+make sure they are within reason.</p>
+
+<p>Finally, remember that the recorded broadcast is almost
+certainly copyright and would be illegal to redistribute.  The
+recording should be for yourself only.</p>
+
+<br clear="all" />
+
+<table align='center' cellspacing='10'>
+<tr>
+<td>
+<script type='text/javascript'>
+digg_url = 'http://linuxgazette.net/183/brownss.html';
+digg_title = 'Unattended stream recording with MPlayer';
+digg_bodytext = '<p>The Linux movie player program MPlayer has an option to record an Internet-broadcast video stream for playing later.  The recording can be done from the command line.  This is useful for two reasons: (1) you can record at a time when you are too busy to watch, (2) if your Internet connection is poor for realtime video but reasonable for non-realtime bandwidth (some low-end cable connections are like this), then you might get better results by using <tt>ssh</tt> to log into a well-connected remote box, record the broadcast from there, and then download the resulting file in non-realtime (assuming the broadcast is short, otherwise this might not be practical).</p> ';
+digg_topic = 'linux_unix';
+</script>
+<script src="http://digg.com/tools/diggthis.js" type="text/javascript"></script>
+</td>
+<td>
+<a name="fb_share" type="box_count" href="http://www.facebook.com/sharer.php">Share</a>
+<script src="http://static.ak.fbcdn.net/connect.php/js/FB.Share" type="text/javascript"></script>
+</td>
+<td>
+<a href="http://twitter.com/home?status=Currently%20reading:%20http://linuxgazette.net/183/brownss.html%20at%20Linux%20Gazette%20%23linuxgazette" title="Click to share this post on Twitter"><img src="../gx/twitter.png" width="50" height="85" border="0"></a>
+</td>
+</tr>
+</table>
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:183/brownss.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/authors/brownss.jpg" class="bio">
+
+<em>
+Silas Brown is a legally blind computer scientist based in Cambridge UK.
+ He has been using heavily-customised versions of Debian Linux since
+ 1999.
+</p>
+</em>
+
+<br clear="all">
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2011, Silas Brown. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication License</a>
+unless otherwise noted in the body of the article.
+<!-- Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc. -->
+</p>
+
+<p>
+Published in Issue 183 of Linux Gazette, February 2011
+</p>
+
+</div>
+
+<div id="previousnextbottom">
+<A HREF="lg_bytes.html" >&lt;-- prev</A> | <A HREF="dyckoff.html" >next --&gt;</A>
+</div>
+
+</div>
+</div>
+
+<script src="http://www.google-analytics.com/urchin.js"
+type="text/javascript">
+</script>
+<script type="text/javascript">
+_uacct = "UA-1204316-1";
+urchinTracker();
+</script>
+
+
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+</body>
+</html>
+

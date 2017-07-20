@@ -1,0 +1,402 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Bash Shell and Beyond LG #108</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="oregan2.html" >&lt;-- prev</A> | <A HREF="park1.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Bash Shell and Beyond</h1>
+<p id="by"><b>By <A HREF="../authors/park.html">William Park</A></b></p>
+
+<p>
+
+<h2>Series Introduction</h2>
+
+<p> In this monthly series, I will try to expose the power of the Bash shell.  In
+particular, the readers will be introduced to <a
+    href="http://freshmeat.net/projects/bashdiff/">Bash.Diff</a>
+which is a collection of my patches incorporating many ideas from Ksh, Zsh, Awk,
+Python, and other languages.
+
+<p> Each article will focus on one theme or feature, which is not normally
+thought of in shell context.  I will also make liberal use of shell functions,
+standard builtins, dynamically loadable builtins, and advanced features patched
+into Bash, in a format that can be easily sourced and maintained.
+
+
+<h2>string.sh</h2>
+
+<p> In C, &lt;string.h&gt; defines strcat(3), strcpy(3), strlen(3), and
+strcmp(3) for string concatenation, copy, size, and test operations
+respectively.  Such basic operations are needed constantly when programming in
+any language, and shell scripting is no exception.
+
+
+<h3>strcat() and strcpy()</h3>
+
+For string copy and concatenation, you would do something like
+<pre>
+    a=abc
+    a=${a}'123'			# a=abc123
+</pre>
+in shell.  This is simple variable assignment.  However, you can't have variable
+reference on the left-hand side (LHS) of '='.  You have to either type the
+LHS variable name explicitly as above, or use <tt>eval</tt>, as in
+<pre>
+    x=a
+    eval "$x=abc"
+    eval "$x=\${$x}'123'"
+</pre>
+to parse the "..." expressions twice.  It quickly becomes painful to call
+<tt>eval</tt> all the time, especially when the variable names are parsed from a
+file or a string.
+
+<p> What is needed is a shell version of C functions strcat(3) and strcpy(3) which
+can be called with equal ease and simplicity.  So, here they are:
+<pre>
+    strcat ()		# var+=string
+    {
+	local _VAR=$1 _STRING=$2 _a _b
+
+	case $#.$3 in
+	    2.) ;;
+	    3.*:*) _a=${3%:*} _b=${3#*:}
+		set -- `python_to_shell_range "$_a" "$_b" ${#_STRING}`
+		_STRING=${_STRING:$1:$2}
+		;;
+	    *)  echo "Usage: strcat var string [a:b]"
+		return 2
+		;;
+	esac
+	eval "$_VAR=\${$_VAR}\$_STRING"
+    }
+
+    strcpy ()		# var=string
+    {
+	local _VAR=$1 _STRING=$2 _a _b
+
+	case $#.$3 in
+	    2.) ;;
+	    3.*:*) _a=${3%:*} _b=${3#*:}
+		set -- `python_to_shell_range "$_a" "$_b" ${#_STRING}`
+		_STRING=${_STRING:$1:$2}
+		;;
+	    *)  echo "Usage: strcpy var string [a:b]"
+		return 2
+		;;
+	esac
+	eval "$_VAR=\$_STRING"
+    }
+</pre>
+where 'var' is the name of variable you want to use to store the result.  The
+above example, then, becomes
+<pre>
+    x=a
+    strcpy $x abc		# a=abc
+    strcat $x 123		# a+=123
+</pre>
+
+
+<h3>strlen()</h3>
+
+<p> In C, strlen(3) gives you the size of a string.  In the shell, you would use
+parameter expansion (i.e., <code>${#var}</code>):
+<pre>
+    a=abc123
+    echo ${#a}			# 6
+</pre>
+Here is a shell version of C function strlen(3):
+<pre>
+    strlen ()		# echo ${#string} ...
+    {
+	for i in "$@"; do
+	    echo ${#i}
+	done
+    }
+</pre>
+which has the additional ability of accepting multiple strings, e.g.
+<pre>
+    strlen abc123 0123456789		# 6 10
+</pre>
+
+
+<h3>strcmp()</h3>
+
+<p> To compare two strings for equality, you use strcmp(3) in C.  In shell, you
+would do something like
+<pre>
+    [ $a = abc123 ]
+</pre>
+Here is a shell version of C function strcmp(3):
+<pre>
+    strcmp ()		# string == string
+    {
+	local _STRING1=$1 _STRING2=$2 _a _b
+      
+	case $#.$3 in
+	    2.) ;;
+	    3.*:*) _a=${3%:*} _b=${3#*:}
+		set -- `python_to_shell_range "$_a" "$_b" ${#_STRING1}`
+		_STRING1=${_STRING1:$1:$2}
+		set -- `python_to_shell_range "$_a" "$_b" ${#_STRING2}`
+		_STRING2=${_STRING2:$1:$2}
+		;;
+	    *)  echo "Usage: strcmp string1 string2 [a:b]"
+		return 2
+		;;
+	esac
+	[ "$_STRING1" == "$_STRING2" ]
+    }
+</pre>
+so that the above example becomes
+<pre>
+    strcmp $a abc123
+</pre>
+
+
+<h3>Python-style [a:b] substring</h3>
+
+<p> Extracting substrings is another common operation.  In the shell, you would use
+parameter expansion (i.e., <code>${var:a:n}</code>), where 'a' is starting index and 'n' is the
+number of characters to extract.  So,
+<pre>
+    b=0123456789
+    echo ${b:0:3} ${b: -3} ${b:1:${#b}-2}
+</pre>
+will print the first 3 chars, the last 3 chars, and all chars except the first and
+the last, respectively.
+
+<p> The main problem with this syntax is that 'n' is a relative number starting at
+index 'a'.  Usually, absolute index is more convenient, not only because it's
+more natural, but also because that's the way it is in C. Python has syntax
+var[a:b], where 'a' and 'b' are indexes which can be positive, negative, or
+omitted.  Although it's roughly equivalent to ${var:a:b-a} in shell, missing 'a'
+and 'b' means the beginning and the end of string, and negative index means
+offset from the end of string.
+
+<p> The above shell functions strcat(), strcpy(), and strcmp() already support
+Python-style [a:b] format, provided you source an internal function.
+<pre>
+    # string[a:b] --&gt; ${string:a:n}
+    #
+    # Convert Python-style string[a:b] range into Shell-style ${string:a:n} range,
+    # where
+    #	0 &lt;= a &lt;= b &lt;= size  and  a + n = b
+    #
+    python_to_shell_range ()
+    {
+	local -i size=$3
+	local -i b=${2:-$size}
+	local -i a=${1:-0}
+
+	if [ $# -ne 3 ]; then
+	    echo "Usage: python_to_shell_range a b size"
+	    return 2
+	fi
+
+	[[ a -lt 0 ]] &amp;&amp; a=$((a+size))
+	[[ a -lt 0 ]] &amp;&amp; a=0
+	[[ a -gt size ]] &amp;&amp; a=$size
+
+	[[ b -lt 0 ]] &amp;&amp; b=$((b+size))
+	[[ b -lt 0 ]] &amp;&amp; b=0
+	[[ b -gt size ]] &amp;&amp; b=$size
+	[[ b -lt a ]] &amp;&amp; b=$a
+
+	echo $a $((b-a))
+    }
+</pre>
+to convert Python range to shell range.  It's not user-serviceable, but you can
+try it out:
+<pre>
+    python_to_shell_range '' 3 10		# 0 3
+    python_to_shell_range -3 '' 10		# 7 3
+    python_to_shell_range 1 -1 10		# 1 8
+</pre>
+Now, you can specify a substring for strcat(), strcpy(), and strcmp() using
+Python-style [a:b] range as the third parameter, like this:
+<pre>
+    b=0123456789
+    strcpy x $b :3		# x=012
+    strcpy y $b -3:		# y=789
+    strcpy z $b 1:-1		# z=12345678
+    echo $x $y $z
+</pre>
+
+
+<h3>Chaining of tests</h3>
+
+<p> strcmp() tests two strings for equality.  When there is a chain of 2 or more
+binary tests, like 'a &lt; c &gt; b' or '1 -lt 3 -gt 2', you have to break it up
+and test each pair:
+<pre>
+    [[ a &lt; c ]] &amp;&amp; [[ c &gt; b ]]
+    [ 1 -lt 3 ] &amp;&amp; [ 3 -gt 2 ]
+</pre>
+This breaks up the flow of your code, not to mention being error-prone.  Here is
+a shell function which enables you to simply write down the chains on
+command-line:
+<pre>
+    testchain ()		# string OP string OP string ...
+    {
+	if [ $# -lt 3 ]; then
+	    echo "Usage: testchain string OP string [OP string ...]"
+	    return 2
+	fi
+	while [ $# -ge 3 ]; do
+	    test "$1" "$2" "$3" || return 1
+	    shift 2
+	done
+    }
+</pre>
+where 'OP' is any binary operator accepted by <tt>test</tt> command.  You use it
+much like <tt>test</tt> command:
+<pre>
+    testchain a '&lt;' c '&gt;' b
+    testchain 1 -lt 3 -gt 2
+</pre>
+
+
+<h3>Summary</h3>
+
+The source code for the 6 shell functions listed in this article is also available
+from <a href="http://home.eol.ca/~parkw/string.sh">string.sh</a>.  To use it,
+just source it,
+<pre>
+    . string.sh
+</pre>
+
+In the next article, we'll see how strcat(), strcpy(), strlen(), and strcmp()
+shell functions can be written in C and compiled as builtin commands.
+And <em>that</em> will be the first introduction to my patched Bash shell.
+:-)
+
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/2002/note.png" class="bio">
+
+<!-- 
+If the author has sent his pic, save it to the right directory
+and enable the line below.
+
+<img align="left" alt="[BIO]" src="../gx/authors/pic.jpg" class="bio">
+
+-->
+
+<em>
+
+I learned Unix using the original Bourne shell.  And, after my
+journey through language wilderness, I have come full-circle
+back to shell.  Recently, I've been patching features into Bash,
+giving other scripting languages a run for their money.
+
+Slackware has been my primary distribution since the beginning,
+because I can type.  In my toolbox, I have Vim, Bash, Mutt, Tin,
+TeX/LaTeX, Python, Awk, Sed.  Even my shell command line is in
+Vi-mode.
+
+</em>
+<br clear="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2004, William Park. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 108 of Linux Gazette, November 2004
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="oregan2.html" >&lt;-- prev</A> | <A HREF="park1.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">November 2004 (#108)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/2003/sit3-shine.7-2.gif" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

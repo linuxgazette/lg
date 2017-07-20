@@ -1,0 +1,48 @@
+#!/usr/local/bin/perl -w
+# @(#) SplitSend.pl	Splits and sends an email message (Ref: RFC 1521, 2046).
+#			Graham Jenkins, IBM GSA, Dec. 2001.  [Rev'd: 2002/01/02]
+
+use strict;
+use File::Basename;
+use MIME::Lite;
+use Net::Domain;
+my ($Id,$j,$Dest,$Subj,$part,$InpBuf,$OutBuf,$Number,$Total);
+
+die "Usage: ".basename($0)." kb-per-part\n".
+    "       Part-size must be >= 1\n" if ( ($#ARGV != 0) or ($ARGV[0] < 1) );
+
+$Id=(getlogin."\@".Net::Domain::hostfqdn().time) or $Id="unknown_user".time;
+$Number = 0; $Total = ""; $OutBuf=""; $InpBuf=""; print STDERR "\n";
+
+sub do_output {				# Output subroutine.
+  die basename($0)." .. destination undefined!\n" if ! defined($Dest);
+  $Subj = ""                                      if ! defined($Subj);
+  if ($OutBuf ne "") {			# If output buffer contains data, 
+    $Number++;				# increment Number, and check whether
+    $Total=$Number if $InpBuf eq "";	# it is the last buffer.
+    print STDERR "Sending part: ", $Number,"/",$Total,"\n";
+    $part = MIME::Lite->new(
+              To      => $Dest,		# Construct a message containing the
+              Subject => $Subj,		# output buffer contents.
+              Type    => 'message/partial',
+              Encoding=> '7bit',
+              Data    => $OutBuf);
+    $part->attr("content-type.id"     => "$Id");
+    $part->attr("content-type.number" => "$Number");
+    $part->attr("content-type.total"  => "$Total") if ($Number eq $Total);
+    $part->send;			# Send the message.
+  }
+  $OutBuf = $InpBuf;			# Move input buffer contents to
+  $InpBuf = ""				# output buffer and exit.
+}
+
+while (<STDIN>) {			# Main loop.
+  if ( (substr($_, 0, 3) eq "To:")      && (! defined($Dest)) ) {
+    $Dest = substr($_, 4, length($_) - 4); chomp $Dest; next }
+  if ( (substr($_, 0, 8) eq "Subject:") && (! defined($Subj)) ) {
+    $Subj = substr($_, 9, length($_) - 9); chomp $Subj; next }
+  if ( (length($InpBuf . $_)) > ($ARGV[0] * 1024) ) {do_output}
+  $InpBuf = $InpBuf . $_
+}
+foreach $j (1,2) {do_output}		# Flush both buffers and exit.
+__END__

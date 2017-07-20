@@ -1,0 +1,245 @@
+<!--startcut ======================================================= -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<html>
+<head>
+<META NAME="generator" CONTENT="lgazmail v1.1H.i">
+<TITLE>The Answer Guy 37: Securing a modem dial-out line.</TITLE>
+</HEAD><BODY BGCOLOR="#FFFFFF" TEXT="#000000"
+	LINK="#3366FF" VLINK="#A000A0">
+<!-- ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::: -->
+<H4>"The Linux Gazette...<I>making Linux just a little more fun!</I>"</H4>
+<P> <hr> <P>
+<!-- ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::: -->
+<center>
+<H1><A NAME="answer">
+	<img src="../../gx/dennis/qbubble.gif" alt="(?)" 
+		border="0" align="middle">
+	<font color="#B03060">The Answer Guy</font>
+	<img src="../../gx/dennis/bbubble.gif" alt="(!)" 
+		border="0" align="middle">
+</A></H1> 
+<BR>
+<H4>By James T. Dennis,
+	<a href="mailto:tag@lists.linuxgazette.net">tag@lists.linuxgazette.net</a><BR>
+	Starshine Technical Services,
+	<A HREF="http://www.starshine.org/">http://www.starshine.org/</A> 
+</H4>
+</center>
+
+<p><hr><p>
+<!--  endcut ======================================================= -->
+<!-- begin 45 -->
+<H3 align="left"><img src="../../gx/dennis/qbubble.gif" 
+	height="50" width="60" alt="(?) " border="0"
+	>Securing a modem dial-out line.</H3>
+
+
+<p><strong>From Scott Bulau  on Tue, 26 Jan 1999  
+</strong></p>
+<P><STRONG>
+Dear Jim,
+</STRONG></P>
+<P><STRONG>
+I am in need of a way to secure a modem line (serial) of an
+assigned tty port, from dial out. This seems like an impossible
+task. Do you have any suggestions, words of wisdom?  I'm running
+2.0.35 currently, a <A HREF="http://www.slackware.org/">Slackware</A> 3.5 distribution.
+</STRONG></P>
+<BLOCKQUOTE><IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	>
+You want to prevent some or all of your users from
+dialing out a modem that's on one of your serial ports?
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+That's easy.  Just change the ownership on the device
+node (/dev/ttyS* and/or the deprecated <TT>/dev/cua*)</TT> and
+(possibly) on every installed program that uses the modem
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+Actually there is a minor complication here.  Conventionally
+modem using programs are SGID to the "uucp" or "modem"
+group.  That is to say that these programs execute as
+members of that group regardless of whether the user that
+started them was in the group or not.  So the question
+becomes:
+</BLOCKQUOTE>
+<BLOCKQUOTE><BlockQuote>
+"How does one limit execution of SGID" programs?
+</BlockQuote></BLOCKQUOTE>
+<BLOCKQUOTE>
+If you strip off the world-execute bit with a command like
+chmod o-x, then you'd have to add the users who <EM>do</EM> need
+access to this program to the "modem" group.  But then they
+wouldn't need to access your modem <EM>using</EM> the SGID program
+--- and they wouldn't have to respect the modem lock files
+or any other restrictions on the use of the device.  So,
+we can't limit it that way.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+We could make these programs SUID and change the ownership
+(rather than just the group assignment) of the device node.
+Then the devices wouldn't have to be group writable, and
+we could create a special group of modem users, assign
+our  modem programs to that and add our authorized modem
+users to that group.  However this poses a greater security
+risk.  If someone subverts (tricks) an SGID program they
+can only do relatively limited damage.  If they subvert
+an SUID program they can change the permissions and
+executable files owned by that program's account.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+Hmm.  Such a conundrum.  The answer is pretty easy ---
+but I had to invent it myself.  I've never seen it written
+up in any book or article (other than the ones that I've
+written).
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+THE WHOLE PATCH IS A SET OF ACCESS CONTROL POLICIES!
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+So, you create a directory full of your SGID programs.  you
+can asign it to any arbitrary group.  Make the directory
+inaccessible to "others" (mode 550 or 750 for example).
+Now, only the owner of the directory and members of the
+associated group can access any of the links (filenames) in
+that directory.  You can replace the original file link
+(under <TT>/usr/bin</TT> or wherever) with a symlink to the
+restricted directory.  That symbolic link can only be
+followed by members of the associated group.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+You can even make two different "group restricted"
+directories --- associated with different groups.  Each can
+contain HARD links to the same SGID world executable file.
+Members of either group can then access their link to the
+program, and thus execute it.  Other users can "see" (or
+access or execute) the program.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+You could also require that a user concurrently be a member
+of multiple different groups to access a program or other
+file. You just put one group limited directory under
+another.  The whole path is a set of access controls.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+Of course there is a downside to this.  Let's say that you
+wanted to grant 'minicom' access to members of "staff" and
+of "wheel."  So you create a <TT>/usr/bin/staff/</TT> and a
+<TT>/usr/bin/wheel.</TT>  Each is set to mode 750 and each as a hard
+link to the minicom program.  You ensure that now other
+(world accessible) links exist to the program).  Now these
+users have to use different paths to access the same
+program.  This suggests that members of each group needs
+additional entries on their $PATH environment string.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+Even though its not explicitly covered in any of the books
+I've read I'm sure some sysadmins sometimes use a scheme
+such as I've described.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+That's not so bad.  It's a bit confusing --- but then, so
+are "access control lists" (ACLs) as supported by Netware,
+NT, and some other versions of Unix.  I note that the
+versions of Unix which support ACLs (Solaris, HP-UX, AIX,
+etc) make no use of them by default.  Professional sysadmins
+almost never use them.  This suggests that the stock Unix
+"permissions" scheme is enough for almost all practical
+purposes.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+You have to do this for every program which is SUID or SGID
+to the "modem" group (or whatever group you assigned your
+<TT>/dev/ttyS</TT> node to).  Many sites use the "uucp" group for
+this (since the 'uucico' command, from the UUCP subsystem
+was one of the first commands used for this sort of thing).
+</BLOCKQUOTE>
+<P><STRONG><IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	>
+Thanks for a response, I know how popular you are.
+</STRONG></P>
+<P><STRONG>
+Scott
+</STRONG></P>
+<!-- sig -->
+
+<!-- end 45 -->
+<!--startcut ======================================================= -->
+<P> <hr> <P>
+<H5 align="center"><a href="http://www.linuxgazette.net/copying.html"
+	>Copyright &copy;</a> 1999, James T. Dennis 
+<BR>Published in <I>The Linux Gazette</I> Issue 37 February 1999</H5>
+<P> <hr> <P>
+<!-- ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::: -->
+<P align="center">
+<table width="98%"><tr valign="center" align="center">
+<td rowspan="3" colspan="4"><A HREF="../lg_answer37.html"><IMG
+        SRC="../../gx/dennis/answernew.gif"
+        ALT="[ Answer Guy Index ]"></A></td>
+  <TD width="8%"><A HREF="./1.html">1</A></TD>
+  <TD width="8%"><A HREF="./2.html">2</A></TD>
+  <TD width="8%"><A HREF="./3.html">3</A></TD>
+  <TD width="8%"><A HREF="./4.html">4</A></TD>
+  <TD width="8%"><A HREF="./5.html">5</A></TD>
+  <TD width="8%"><A HREF="./6.html">6</A></TD>
+  <TD width="8%"><A HREF="./7.html">7</A></TD>
+  <TD width="8%"><A HREF="./8.html">8</A></TD>
+  <TD width="8%"><A HREF="./9.html">9</A></TD>
+  <TD width="8%"><A HREF="./10.html">10</A></TD>
+
+</tr><tr valign="center" align="center">
+  <TD><A HREF="./11.html">11</A></TD>
+  <TD><A HREF="./12.html">12</A></TD>
+  <TD><A HREF="./14.html">14</A></TD>
+  <TD><A HREF="./15.html">15</A></TD>
+  <TD><A HREF="./16.html">16</A></TD>
+  <TD><A HREF="./17.html">17</A></TD>
+  <TD><A HREF="./18.html">18</A></TD>
+  <TD><A HREF="./19.html">19</A></TD>
+  <TD><A HREF="./21.html">21</A></TD>
+  <TD><A HREF="./22.html">22</A></TD>
+
+</tr><tr valign="center" align="center">
+  <TD><A HREF="./23.html">23</A></TD>
+  <TD><A HREF="./28.html">28</A></TD>
+  <TD><A HREF="./29.html">29</A></TD>
+  <TD><A HREF="./30.html">30</A></TD>
+  <TD><A HREF="./31.html">31</A></TD>
+  <TD><A HREF="./32.html">32</A></TD>
+  <TD><A HREF="./33.html">33</A></TD>
+  <TD><A HREF="./34.html">34</A></TD>
+  <TD><A HREF="./37.html">37</A></TD>
+  <TD><A HREF="./38.html">38</A></TD>
+
+</tr><tr valign="center" align="center">
+  <TD><A HREF="./39.html">39</A></TD>
+  <TD><A HREF="./41.html">41</A></TD>
+  <TD><A HREF="./42.html">42</A></TD>
+  <TD><A HREF="./43.html">43</A></TD>
+  <TD><A HREF="./44.html">44</A></TD>
+  <TD><A HREF="./45.html">45</A></TD>
+  <TD><A HREF="./46.html">46</A></TD>
+  <TD><A HREF="./47.html">47</A></TD>
+  <TD><A HREF="./48.html">48</A></TD>
+  <TD><A HREF="./49.html">49</A></TD>
+
+</tr></table>
+	</P>
+<P> <hr> <P>
+<!-- ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::: -->
+<P> <hr> <P>
+<!-- begin lgnav ::::::::::::::::::::::::::::::::::::::::::::::::::: -->
+<A HREF="../index.html"
+	><IMG SRC="../../gx/indexnew.gif" ALT="[ Table Of Contents ]"></A>
+<A HREF="../../index.html"
+	><IMG SRC="../../gx/homenew.gif" ALT="[ Front Page ]"></A>
+<A HREF="../lg_bytes37.html"
+	><IMG SRC="../../gx/back2.gif" ALT="[ Previous Section ]"></A>
+<A HREF="../york.html"
+	><IMG SRC="../../gx/fwd.gif" ALT="[ Next Section ]"></A>
+<!-- end lgnav ::::::::::::::::::::::::::::::::::::::::::::::::::::: -->
+<!-- ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::: -->
+</BODY></HTML>
+<!--endcut ========================================================= -->

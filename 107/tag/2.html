@@ -1,0 +1,217 @@
+<html>
+<head>
+<link href="../../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<title>The Answer Gang: LG 107: Reading/writing large buffers to Fibre Channel</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+.articlecontent {
+        position:absolute;
+        top:143px;
+}
+-->
+</style>
+</head>
+<body>
+<img src="../../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="../lg_tips.html" >&lt;-- 2c Tips</A> 
+| <A HREF="../lg_answer.html">TAG Index</a> | <A HREF="1.html">1</a> | <A HREF="2.html">2</a> | <A HREF="3.html">3</a> | <A HREF="4.html">4</a>
+| <a href="../../tag/kb.html">Knowledge Base</a>
+| <A HREF="../lg_bytes.html" >News Bytes --&gt;</A>
+</div>
+
+
+
+<h1 align="center"><IMG SRC="../../gx/dennis/qbubble.gif" align="left"> The Answer Gang <IMG SRC="../../gx/dennis/bbubble.gif" align="right"></h1>
+
+<p align="center">By Jim Dennis, Karl-Heinz Herrmann, Breen, Chris, and... 
+	(<A HREF="../../tag/bios.html">meet the Gang</A>) ... 
+	the Editors of <I>Linux Gazette</I>... and 
+	<a href="../../tag/members-faq.html">You</a>!</p>
+<br clear="both">
+<HR>
+<!-- begin 2 -->
+<H3 align="left"><img src="../../gx/dennis/qbubble.gif" 
+	height="50" width="60" alt="(?) " border="0"
+	>Reading/writing large buffers to Fibre Channel</H3>
+
+
+<p><strong>From Jimen Ching 
+</strong></p> 
+<p></strong></p>
+
+<p align="right"><strong>Answered By:  Jimmy O'Regan
+</strong></p>
+<P><STRONG>
+Hi TAG,
+</STRONG></P>
+<P><STRONG>
+I have a problem of reading and writing very large (4MB) buffers to a disk
+via Fibre Channel.  Fibre Channel works best when you send large amounts
+of data over the wire (light).
+</STRONG></P>
+<P><STRONG>
+I've done google searches and found approaches like O_DIRECT and mmap.
+Mmap doesn't sound like what I'm looking for, because it still uses the
+buffer cache.  And with 4MB of data, I don't want the extra copy.  Also, I
+won't be reading the data back from the disk.  So the buffer cache doesn't
+buy me anything...
+</STRONG></P>
+<P><STRONG>
+The O_DIRECT approach sounds better.  But it requires aligned buffers, and
+some people say the throughput is worst than non-O_DIRECT.  My target
+throughput is 95MB/s.  This shouldn't be a problem for the hardware since
+I'm using the CompactPCI bus and SCSI RAID over Fibre Channel with
+theoretical throughput of 150MB/s.  The aligned buffers issue is only a
+problem because of the file header that I must prefix to the 4MB raw data.
+It would be preferable if I didn't have to align my buffers.  But I can
+work around it if it is absolutely necessary.
+</STRONG></P>
+<P><STRONG>
+I've done some basic benchmarks using regular fopen/fread/fwrite, and I'm
+only getting 50MB/s with ext3fs.  This is half the throughput I need and
+1/3th the theoretical throughput of the hardware.  So I was wondering if
+your team has come across any ideas on how to solve this problem.  Note,
+I'm not setting any special options.  So this benchmark is just the
+baseline.  I'm looking for ways to optimize the reading and writing of
+this 4MB data buffer.
+</STRONG></P>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [Jimmy] 
+If you have enough RAM, try using a ramdisk - create a filesystem as
+usual, but on one of the ramdisk devices - <TT>/dev/ram*</TT> or <TT>/dev/rd/*</TT>
+</blockQuote>
+<blockQuote>
+The ramdisk will be 4M by default, but if you have it compiled as a
+module you can specify the size as an option to insmod:
+</blockQuote>
+
+<blockquote><pre>insmod rd rd_size=20000
+</pre></blockquote>
+<blockQuote>
+(which sets it as 20M) or as an option in <TT>/etc/conf.modules</TT>
+</blockQuote>
+
+<blockquote><pre>options rd rd_size=20000
+</pre></blockquote>
+
+<font color="#660000"><blockquote><IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [Thomas] Note that it used to be the case that /etc/conf.modules was synmlinked to
+/etc/modules.conf . On many systems this is not usually the case anymore, and
+so /etc/modules.conf is generally the prefered location.
+</blockquote></font>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [Jimmy] 
+If your ramdisk support is compiled into the kernel, you'll need to set
+the size at boot. You can append the option (in LILO, or as a boot
+option) like this:
+</blockQuote>
+
+<blockquote><pre>ramdisk_size=20000
+</pre></blockquote>
+<P><STRONG>
+<IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> 
+I'm not sure I understand the answer.  Or maybe I didn't explain my
+question clearly.
+</STRONG></P>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [Jimmy] 
+No, I the misunderstanding was on my part. I was simply answering this:
+"I'm looking for ways to optimize the reading and writing of
+this 4MB data buffer."
+</blockQuote>
+<P><STRONG>
+<IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> 
+I want to write raw data to a disk via Fibre Channel.  Each block of raw
+data is 4MB large.  I need to write 95MB/s of data for about half an hour
+or so.  95MB/s, at 60 sec per minute, and 30 minutes equals 171Gig.
+</STRONG></P>
+<P><STRONG>
+I guess I could put one second worth of raw data into ramdisk, and do a
+copy to the Fibre Channel SCSI RAID.  Then write the next second of raw
+data to another ramdisk and switch back-and-forth.  But I'm not sure if a
+cp is any faster than a fwrite.  Is this what you're suggesting?
+</STRONG></P>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [Jimmy] 
+No, I was placing more importance on the step where you add a file
+header to the data in the buffer.
+</blockQuote>
+<blockQuote>
+Going by this: <A HREF="../../102/piszcz.html"
+	>http://linuxgazette.net/102/piszcz.html</A> you'd be much
+better off accessing the disk as ext2 instead of ext3 - the journal is
+probably what's slowing you down.
+</blockQuote>
+
+<!-- end 2 -->
+<hr>
+<p><CENTER><Font face="Helvetica"><STRONG>
+This page edited and maintained by the Editors of <I>Linux Gazette</I>
+<br>HTML script maintained by
+        <A HREF="mailto:star@starshine.org">Heather Stern</a> of
+        Starshine Technical Services,
+<A HREF="http://www.starshine.org/">http://www.starshine.org/</A></STRONG></Font></CENTER></p>
+<hr>
+
+<div id="articlefooter">
+<p>
+Each TAG thread <a href="http://linuxgazette.net/copying.html"
+        >Copyright &copy;</a> its authors, 2004
+</p>
+<p>
+Published in issue 107 of <I>Linux Gazette</I> October 2004
+</p>
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="../lg_tips.html" >&lt;-- 2c Tips</A> 
+| <A HREF="../lg_answer.html">TAG Index</a> | <A HREF="1.html">1</a> | <A HREF="2.html">2</a> | <A HREF="3.html">3</a> | <A HREF="4.html">4</a>
+| <a href="../../tag/kb.html">Knowledge Base</a>
+| <A HREF="../lg_bytes.html" >News Bytes --&gt;</A>
+</div>
+</div>
+
+<div id="navigation">
+<a href="../../index.html">Home</a>
+<a href="../../faq/index.html">FAQ</a>
+<a href="../../lg_index.html">Site Map</a>
+<a href="../../mirrors.html">Mirrors</a>
+<a href="../../mirrors.html">Translations</a>
+<a href="http://linuxgazette.net/search.html">Search</a>
+<a href="../../archives.html">Archives</a>
+<a href="../../authors/index.html">Authors</a>
+<a href="../../contact.html">Contact Us</a>
+</div>
+
+<div id="breadcrumbs">
+<a href="../../index.html">Home</a> &gt; 
+<a href="../index.html">October 2004 (107)</a> &gt; 
+<a href="../lg_answer.html">The Answer Gang</a> &gt; 
+Thread
+</div>
+
+<img src="../../gx/2003/sit3-shine.7-2.gif" id="tux" alt="Tux"/>
+
+</body>
+</html>

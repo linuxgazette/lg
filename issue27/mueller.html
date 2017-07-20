@@ -1,0 +1,468 @@
+<!--startcut ==========================================================-->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML>
+<HEAD>
+<title>Pattern Matching with Regular Expressions in C++ LG #27</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#A000A0"
+ALINK="#FF0000">
+<!--endcut ============================================================-->
+
+<H4>
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H2>Pattern Matching with Regular Expressions in C++</H2>
+<H4>By <a href="mailto:ogmueller@t-online.de">Oliver M&uuml;ller</a></H4>
+</center>
+<P> <HR> <P>  
+
+Regular expressions are the most flexible way to search for text
+patterns. Since over twenty years they were used in several Unix tools
+and utilities such as grep, sed, or awk. This article guides you to
+implement this Unix base search technique in C++.
+<P>
+Everybody who has worked with a Unix system knows the useful regular
+expressions. You find them in grep, awk, or emacs for example and they
+are the most flexible way to specify search patterns. Everybody who has
+ever used a tool like grep wants never miss its flexibility--or is there
+anybody who wants?
+<P>
+The great usability of search tools such as grep is a result of regular
+expressions. Remove these pattern matching technique from grep, substitute
+it by another search algorithm, e.g., Boyer-Moore, and the resulting tool
+is a toy--a fast toy, but a toy! (Do you know a DOS tool called <B>find</B>
+which is a result like this...)
+<P>
+But joking apart. Pattern matching with regular expressions is the basis
+of many search algorithms in many tools under Unix and so under Linux,
+too. The power of this search technique is undisputed.
+<P>
+The target of this article shall be the implementation of regular
+expressions in a reusable C++ class. This article shall be your guide
+and introduction to the fascinating world of "pattern matching".
+<P>
+<H4>Principles</H4> 
+<P>
+First of all a few principles about pattern matching with regular
+expressions.
+<P>
+To specify a pattern you have to use a computer processable notation. This
+notation, or language, is in our case the regular expression syntax.
+<P>
+The regular expression language consists of symbols and operators. The
+symbols are simply the characters of the pattern. To describe the
+relations between this symbols the following operators are used (listed
+in descending priority): 
+<ul>
+<li>Closure: A string of equal symbols
+with variable length or an optional symbol. (This is the true heart of
+pattern matching.)  
+<li>Concatenation: If there are two symbols in the
+pattern successive, the corresponding characters in the text will have
+to be successive, too.  
+<li>Alternation: One of the alternative symbols
+must occur in the text in which the pattern is searched.
+</ul>
+In addition to these left associative operators brackets can be used to
+modify the operation priorities.
+<P>
+The closure operators in most regular expression implementations
+are: 
+<ul>
+<li>the asterisk (*) which means a repetition of zero or more
+occurrences of a symbol 
+<li>the plus (+) which means a repetition of one or
+more occurrences of a symbol the question mark 
+<li>(?) which means a optional occurrence of a symbol
+</ul>
+Examples: A* matches empty string, "A", "AA",
+"AAA", etc.  A+ matches "A",
+"AA", "AAA", etc.  A? matches empty string or
+"A".
+<P>
+To specify a concatenation no special operator character must be used. A
+string consisting of each other following symbols are a concatenation. ABC
+matches "ABC" for example.
+<P>
+An alternation is described with a "|" between the alternative 
+regular expressions. A|B matches either "A" or "B".
+<P>
+In extended regular expression implementations a few other operators used
+to describe complex patterns more efficient. But this article shall be
+only a little introduction into the syntactical possibilities and not
+a detailed reference.
+<P>
+<H4>The Automaton</H4> 
+<P>
+To search for a pattern which is specified by a regular expression you
+cannot compare each character of the pattern and the text. Caused by the
+closure and the alternation there are so many possible ways in complex
+patterns that they cannot all proved by a "conventional" algorithm.
+A more efficient technique must be applied. The best way is to build
+and simulate an automaton for the pattern. To describe a search pattern
+specified by a regular expression you can use non-deterministic or
+deterministic finite state automata.
+<P>
+An automaton can assume several states. It can pass from one state into
+an other depending on a specific input event which is in our case the
+next input symbol respectively character. And here is the difference
+between deterministic and non-deterministic finite state automata. A
+deterministic automaton has only <B>one</B> next state for a specific
+input symbol. A non-deterministic automaton can have <B>several</B>
+next states for the same input symbol.
+<P>
+Both kinds of automata can be used for every imaginable regular
+expression. The two types of automata have there own advantages
+and disadvantages. For everybody who wants to know more about these
+automata types in context with regular expressions the book /1/ can
+be recommended. In our implementation we will use non-deterministic
+automata. It's the most used strategy to implement a pattern matching
+algorithm and it's a bit easier to construct a non-deterministic than
+a deterministic automaton basing on a regular expression.
+<P>
+Figure 1 shows a state transition diagram of a non-deterministic
+finite state automaton for the pattern a*(cb|c*)d. It contains all
+types of operations--an alternation, two closures and tree concatenated
+symbols. Note that the bracket which contains the alternative symbols
+is one symbol for the concatenation. The start state is the rectangle
+at the left side. The finite state is shown at the right side--rectangle
+with diagonal line.
+<P>
+<center>
+<img src="./gx/mueller/2462f1.gif">
+<P>
+<H4>Figure 1. Non-deterministic finite state automaton for pattern a*(cd|c*)d.</H4> 
+</center>
+<P> 
+This little pattern and its automaton demonstrates the problems of pattern
+matching very well. At state No. 7 it is not sure which state will be
+the next for a input character "c". The states 4 and 9 are possible
+ways. The automaton has to find out--to guess--the right way.
+<P>
+If the text string "aaccd" shall be matched for example the automaton
+will start at state No. 0--the start state. The next state, No. 2, is
+a zero state. This means that there is no character which must match to
+enter this state.
+<P>
+The first input symbol is a "a". The automaton goes to state 
+No. 1 which is the only way. After matching the "a" the next input 
+character will be read and the next state is No. 2 again. For the next input 
+character which is also a "a". the last two steps are repeated. 
+After this the only possible way is to go to state No. 3 and 7.
+<P>
+Here we are in the state which may cause problems. The next input is
+a "c". Here we see the true power of the automaton. It can guess the
+right way which will be state No. 9 and not No. 4. This is the soul of
+a non-deterministic strategy: the possible solutions are found out. They
+are not described by an algorithm which works "step by step".
+<P>
+In the real world of programming we have to prove all possible ways,
+of course. But more about the practical side a bit later.
+<P>
+After the decision pro No. 9 the automaton goes over 9, 8 (1st c matches),
+9, 8 (2nd c matches), 10 and 11 (d matches) to state No. 12. The end
+state was reached and the result is that the text "aaccd" matches to
+pattern "a*(cb|c*)d".
+<P>
+<H4>Design</H4> 
+<P>
+A regular expression implementation can always be split into a compiler,
+which generates a automaton from the given pattern, and an interpreter
+or simulator, which simulates the automaton and searches for the pattern.
+<P>
+The heart of the compiler is the parser which bases on the following
+context free grammar: 
+<pre>list    ::=	   element | element "|" list
+element ::=	( "(" list ")" | v ) ["*"] [element] 
+</PRE> 
+This EBNF diagram (=Extended Backus-Naur Form) describes the (reduced)
+regular expression grammar. It is not possible to explain context free
+grammars or the EBNF in this article. If you are not familiar with these
+topics I can recommend /1/ and /3/ for example.
+<P>
+In our sample implementation we will only implement the basic operators
+| and *. The other closure operators + and ? we will not implement. But
+with the help of Figure 2 it will no problem for you to implement it, too.
+<P>
+The complete regular expression functionality will be encapsulated
+in the object class RegExpr. It contains the compiler and the
+interpreter/simulator. The user is only confronted with the two
+constructors, one overloaded operator and four methods for compiling,
+searching, and error handling.
+<P>
+The pattern can be specified by calling the constructor RegExpr(const
+char *pattern), by using the assign operator = or the compile(const char
+*pattern) method. If re is an object of RegExpr the following lines
+will set the pattern "a*(cb|c*)d": 
+<pre>RegExpr re("a*(cb|c*)d");
+<B>or</B> RegExpr re; re = "a*(cb|c*)d"; 
+<B>or</B> RegExpr re; re.compile("a*(cb|c*)d"); 
+</PRE> 
+To search in a text buffer or string you can use the methods search()
+and searchLen(). The difference between these methods is that searchLen()
+expects a reference to a unsigned integer variable as an additional
+parameter. In this variable the length of the matching substring is
+return. Note that the closures, but also the alternation, cause that
+the length of the found substring can vary, e.g., a* matches
+"", "a",
+"aa", etc.
+<P>
+In tools, such as grep, you won't need this additional information. Here
+you can use search instead of searchLen(). This method is a simple inline
+which calls searchLen() with a "dummy" variable.
+<P>
+<center>
+<img src="./gx/mueller/2462f2.gif">
+<P>
+<H4>Figure 2. These are the automata for the closure implementation.</H4> 
+</center>
+<P>
+The error handling is complete exception based. If the compiler indicates
+a syntax error in the currently processed regular expression it will
+throw an exception of type xsyntax. You can catch this exception in your
+program and call the method getErrorPos() which returns the character
+position at which the error occurred. This may look like this: 
+<pre>try {
+	re.compile("a*(cb|c*)d");
+} catch(xsyntax &X) {
+	cout << "error near character position "
+<<
+	X.getErrorPos() << endl;
+} 
+</PRE> 
+Another error which can occur is "out of memory". This
+error--caused by
+the new operator--isn't uniform processed by current C++ compilers. gcc
+for example handle such an error with a program termination. Some
+compiles throw exceptions. The rest does absolutely nothing and waits
+for other errors which will definitely occur.  You solve this problem
+in every ANSI C++ compiler by using the function set_new_errorhandler()
+(declared in new.h) to set a routine to handle this error. In most cases
+I write a little routine to throw an exception which indicates this error
+type and set this routine as error handler for the new operator. This is
+by the way an easy solution to program a portable error handling which
+can be used by all ANSI C++ compilers and under every operating system.
+<P>
+A RegExpr object contains a method called clear_after_error() to clear
+itself when a error occurred respectively a exception was thrown. A
+call of this method is necessary because an error leaves the compiler or
+simulator in a indefinable state which can cause fatal errors at other
+method calls.
+<P>
+<H4>The Compiler</H4> 
+<P>
+The grammar which was previously shown in an EBNF diagram is implemented
+in the methods list, element and v. list and element represent the
+productions of the EBNF. v is a method which implements the special
+symbol v. This symbols means in the grammar a character which is not a
+metacharacter (|, *, etc.). It can also be a backslash sequence like \c
+where c is any character. By using the backslash the special significance
+of a metacharacter can be removed.
+<P>
+This three methods operate on a array called automaton. The array
+consists of struct variables which contain information of the states
+of the automaton. Every state entry contains the indices of the next
+state(s) and the character which have to match. If the state is a zero
+state this information will be a zero byte ("\0").
+<P>
+<center>
+<img src="./gx/mueller/2462f3.gif">
+<P>
+<H4>Figure 3. The parse tree of "a*|b".</H4> 
+</center>
+<P>
+Our implementation is a top down parser. It uses directly the recursive
+strategy of the context free grammar--every production is coded as
+a function. The parser splits the who pattern respectively regular
+expression into lower parts until it reaches a terminate symbol. Figure
+3 shows the parse tree for "a*|b". First list is entered which 
+branches into non-terminate element, terminal "|" and non-
+terminate list. element detects v and "*" and goes down to
+"a". The other list 
+part goes directly down to "b" by passing element and v. The parse 
+tree of our sample regular expression can be seen in Figure 4.
+<P>
+<center>
+<img src="./gx/mueller/2462f4.gif">
+<P>
+<H4>Figure 4. The parse tree of "a*(cb|c*)d"</H4> 
+</center>
+<P>
+Every non-terminate symbol represents a function call in our parser. The
+top down strategy is the easiest way to implement a parser from a context
+free grammar respectively EBNF diagram. You see the most important thing
+here is an error free grammar specification!
+<P>
+Inside this methods the states of the automaton are generated. For every
+character of the regular expression a state will be created. The only
+exception is the operator | which will be compiled to two states.
+<P>
+The methods return to its caller always the entry point (index of state)
+to the generated part automaton. The end of the part automaton is always
+the last current state which index is stored in the attribute state of
+RegExpr. You see the several part automata in Figure 5.
+<center>
+<img src="./gx/mueller/2462f5.gif">
+<P>
+<H4>Figure 5. A Several Part Automata</H4> 
+</center>
+<P>
+The red numbers indicate the new generated states for the operation. The
+succession of the numbers is defined by the parser which reads a string
+from left to right. The returned entry point or state is marked, too. You
+realize that it is very important to tell the calling function where
+the entry point is because it isn't always the one with the lowest index!
+<P>
+The states--and so the whole automaton--are generated in this way step
+by step by a top down parser. It isn't very helpful for you to write
+more about this automaton creation. It's better you type in the sources,
+compile it and watch the algorithm in action by using a debugger.
+<P>
+A little annotation to the automaton. It is implemented by the static
+array automaton in RegExpr. This is definitely a poor rudimentary
+implementation. In a practical and useful program you have to use a
+better strategy, e.g. an aggregate object class in RegExpr which works
+with a dynamic array.
+<P>
+Note that this implementation of the automaton can cause fatal errors
+if the pattern is to large! It has no checking function which breaks
+pattern compilation if there are no more states.
+<P>
+But it is not difficult to implement the automaton as class which
+administrates it in a dynamic array or a linked list.
+<P>
+<H4>The Automaton Simulation</H4> 
+<P>
+After the compilation of the pattern we can execute the generated code
+respectively simulate the automaton. The complete intelligence of the
+search algorithm is implemented in the method simulate().
+<P>
+It was previously hinted that the automaton guesses the right answer but
+this a theoretical view. A computer simulation of a non-deterministic
+finite state automaton must prove every possible matching way through
+this automaton. Sedgewick (/3/) has implemented a interesting algorithm
+to do this. Our algorithm shall base on this technique.
+<P>
+Sedgewick's system has some disadvantages for practical application. The
+First disadvantage is that its grammar needs a character after a closure
+otherwise it can't find it. But this is a problem which can be solved by
+a patch very soon--and our implementation has already solved this. The
+second problem is a bit more complex. Sedgewick's implementation quits
+after the first match. This means that it doesn't find the longest
+matching string. For example: If you search for "a*a" in
+"xxaaaaaxx"
+it will find only "a" instead of "aaaaa". Our 
+implementation will solve this problem.
+<P>
+The idea that a program can guess the right way might sound
+ridiculous. But the heart of such a software is to prove all possible way
+and accept the last matching as the right. Here is a parallel proceeding
+the decisive key.
+<P>
+Every branch of the automaton will be tested and if not fitting
+removed. It's a bit a "trial and error" method. Every possible way will
+be tested parallel with the others and removed when not matching the
+current processed character of the search through text.
+<P>
+The basic element of this algorithm is a deque. A deque is a double ended
+queue. It's a hybrid between stack and buffer. You can push and pop data
+(stack) but also put (buffer). In other words: You can add data to the
+head and to the tail of this data structure.
+<P>
+This behavior is important for our algorithm. The deque is split into
+two parts: 
+<ol>
+<li>top part for the current processed character of the
+search through text 
+<li>bottom part for the next character
+</ol>
+The next state values of zero states are stored on the top part because
+they implement the structure which is necessary to detect a match
+of the current character. The next state values of non-zero states
+(<tt>the_char != '\0'</tt>) are put to the bottom part because they point to the
+next character. Between these part is a special value stored--next_char
+(-1). It indicates that the next character of the text shall be processed.
+<P>
+The main loop in simulate gets a state from this deque and tests the
+conditions. If the character in the_char of this state matches the
+current processed character in the searched through text the indexes of
+the next states (next1 and next2) will be put at the end of the deque. If
+the read state is a zero state the next state values will be put on the
+start of the queue. If the state is next_char (-1) the next character
+in the searched through text will be processed. In this case next_char
+is put at the end of the deque.
+<P>
+The loop will be terminated if the end of the text is reached or the deque
+is empty.  The last case arises when no more matching parts are found.
+<P>
+As so far it sound like the version of Sedgewick but the difference is
+that when state becomes zero the loop won't terminate. It is accepted
+as a matching part and this information is stored but the loop will go
+ahead! It will search for possible other matches.
+<P>
+After the termination of the loop I returns the last matching result
+or--if the pattern wasn't found--the start position of the search
+minus one.
+<P>
+<H4>A Little Sample Application</H4> 
+<P>
+To download the listings and makefile, click
+<A HREF="./mueller.tar.gz">here</A>.
+<P> 
+<B>eg.cc</B> is a little egrep implementation. It shall demonstrate the usage
+and the power of RegExpr. eg reads from standard input or from a optional
+specified file and print every line which contains the pattern:
+<pre>Usage: eg pattern [file]
+</PRE> 
+RegExpr is in this (minimal) implementation not perfect of course but it
+will be a good basis for experiments. A few things which can be changed
+or implemented are: 
+<ul>
+<li>The closures ? and + 
+<li>Implementation of automaton as object with dynamic array or 
+linked list as state administration 
+<li>Character classes [...]  
+<li>Metacharacter . for any character 
+<li>Other operators known from sed or ed {...} 
+<li>Start and end line metacharacters--^ and $ 
+</ul>
+Last but not least I hope that you will have a bit fun with this
+implementation. If you have some suggestions, questions, or ideas please
+let me know.
+
+<H4>Resources</H4> 
+<ul>
+<li>Aho, Alfred V. / Sethi, Ravi / Ullman, Jeffrey
+D.: COMPILERS Principles, Techniques and Tools. Reading (Mass.): Addison
+Wesley 1986 
+<li>M&uuml;ller, Oliver: Mustererkennung mit Delphi-Suchen
+und Ersetzen von regulaeren Ausdruecken. mc extra (DOS International)
+7/96 
+<li>Sedgewick, Robert: Algorithms. Reading (Mass.): Addison
+Wesley 2nd Ed. 1992 
+</ul>
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<center><H5>Copyright &copy; 1998, Oliver M&uuml;ller <BR> 
+Published in Issue 27 of <i>Linux Gazette</i>, April 1998</H5></center>
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<A HREF="./index.html"><IMG ALIGN=BOTTOM SRC="../gx/indexnew.gif" 
+ALT="[ TABLE OF CONTENTS ]"></A>
+<A HREF="../index.html"><IMG ALIGN=BOTTOM SRC="../gx/homenew.gif"
+ALT="[ FRONT PAGE ]"></A>
+<A HREF="./ayers3.html"><IMG SRC="../gx/back2.gif"
+ALT=" Back "></A>
+<A HREF="./petersen.html"><IMG SRC="../gx/fwd.gif" ALT=" Next "></A>
+<P> <hr> <P> 
+<!--startcut ==========================================================-->
+</BODY>
+</HTML>
+<!--endcut ============================================================-->

@@ -1,0 +1,488 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<html>
+<head>
+<META NAME="generator" CONTENT="lgazmail v1.1G.e">
+<TITLE>The Answer Guy 36: 
+Proxyarp
+</TITLE>
+</HEAD><BODY BGCOLOR="#FFFFFF" TEXT="#000000"
+	LINK="#3366FF" VLINK="#A000A0">
+<!-- ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::: -->
+<H4>"The Linux Gazette...<I>making Linux just a little more fun!</I>"</H4>
+<P> <hr> <P>
+<!-- ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::: -->
+<center>
+<H1><A NAME="answer">
+	<img src="../../gx/dennis/qbubble.gif" alt="(?)" border="0" align="middle">
+	<font color="#B03060">The Answer Guy</font>
+	<img src="../../gx/dennis/bbubble.gif" alt="(!)" border="0" align="middle">
+</A></H1> 
+<BR>
+<H4>By James T. Dennis,
+	<a href="mailto:tag@lists.linuxgazette.net">tag@lists.linuxgazette.net</a><BR>
+	Starshine Technical Services,
+	<A HREF="http://www.starshine.org/">http://www.starshine.org/</A> 
+</H4>
+</center>
+
+<p><hr><p>
+<!-- ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::: -->
+<!-- begin 72 -->
+<H3 align="left"><img src="../../gx/dennis/qbubble.gif" height="50" width="60"
+	  alt="(?) " border="0">
+Proxyarp
+</H3>
+
+<p><strong>From cly on Fri, 25 Dec 1998  
+</strong></p>
+<!-- ::
+Proxyarp
+~~~~~~~~
+:: -->
+<BLOCKQUOTE>
+
+</BLOCKQUOTE>
+<P><STRONG><IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	>
+My problem is, that I should route between to nets with linux, but
+it doesnt work.
+</STRONG></P>
+<P><STRONG>
+I think, the problem is, that the routers sitting on the outer
+network dont know me as a router.
+</STRONG></P>
+<P><STRONG>
+How can I solve this ?
+</STRONG></P>
+<P><STRONG>
+Cly
+</STRONG></P>
+<P><STRONG>
+
+</STRONG></P>
+<BLOCKQUOTE><IMG SRC="../../gx/dennis/bbub.gif" alt="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	>
+Well, you're probably correct.  If your host is a route
+to a block of machines, and other routers on your LAN don't
+know that you are the route, then they won't forward the
+packets to your --- and you won't get the opportunity to
+route them.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+There are three solutions to the problem:
+</BLOCKQUOTE>
+<BLOCKQUOTE><ol>
+<li>Add a static route to the other routers
+<li>Publish your routes via RIP, OSPF, or some
+    other routing update protocol that's supported
+    by your routers (running 'routed' or 'gated'
+    on your host as appropriate).  Note: this may
+    require changes to the configurations on these
+    other local routers --- since they may be
+    configured to filter routing updates except
+    from a well defined list of peers.
+<li>Use "proxyarp"
+</ol></BLOCKQUOTE>
+
+<BLOCKQUOTE>
+... The "proxyarp" trick will <EM>only</EM> work if the
+systems to which you are trying to route are using addresses
+that would normally be local to your other routers.  I
+realize that that sentence didn't make any sense.  So let's
+use an example:
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+(complete with ugly ASCII art)
+</BLOCKQUOTE>
+
+<blockquote><pre>              +--------+                 +----------+ 222.123.45.48/28
+ (Internet) --| router |-----------------| proxyarp |------+
+              +--------+                 +----------+      |
+                          222.123.45.32/27                 |  +-----+
+                                                           +--| cow |
+                                                              +-----+
+</pre></blockquote>
+<BLOCKQUOTE>
+... in this example (which is similar to one I'm using
+at home --- though the IP addresses have been changed to
+discourage people from probing my network more than they
+already have) we have a router. In my case it's a DSL ---
+provided by my ISP and configured to give me a block of
+30 addresses from <tt>222.123.45.32</tt> through 
+<tt>222.123.45.63</tt>, minus the network and broadcast address, 
+of course).  This is a "5 bit" subnet --- that is to say that 
+it uses a netmask of <tt>255.255.255.224</tt> or 32-27=5.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+I want to hide my systems behind a home brewed Linux firewall
+--- especially after I noticed three IMAP and one mountd scans
+within the first month of getting the line --- before I've
+even published any DNS entries pointing to these addresses!
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+So I put up a Linux system with two ethernet interfaces
+and a copy of the 2.0.36 kernel on it.  The router is
+at <tt>222.123.45.33</tt> (the first address in the block).  The
+"outer" interface on my "proxyarp" (firewall) is at
+<tt>222.123.45.46</tt> (the last usable address in the lower half of
+that range --- if I want to subnet the block into two
+grougs of fourteen addresses for a 4 bit subnet using a
+mask of <tt>255.255.255.240</tt>).  The inner interfaces (further
+away from my DSL router) is assigned <tt>22.123.45.62</tt> (the last
+usable address in the upper 4-bit subnet of my original
+5-bit subnet.  These are arbitrary choices that I make
+for my own convenience.  They allow me to have simpler
+routing tables and packet filters on the inner LAN.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+The problem here is that the DSL router doesn't know
+that it should forward packets to "cow" (at <tt>222.123.45.49</tt>,
+for example) to my firewall system.  So I issue the following
+command:
+</BLOCKQUOTE>
+
+<BLOCKQUOTE><BLOCKQUOTE><CODE>
+<BR>#!/bin/sh
+<BR><TT>/sbin/arp</TT> -s 222.123.45.48 -i eth0 -D eth1 netmask 255.255.255.240 pub
+</CODE></BLOCKQUOTE></BLOCKQUOTE>
+<BLOCKQUOTE>
+... on the firewall (proxyarp host).
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+Now, when the DSL router gets a packet for <EM>anything</EM> in
+the <tt>222.123.45.32/27</tt> range it does an ARP (address resolution
+protocol) transaction to determine which ethernet card
+the data frame should be addressed to.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+This is a source of confusion in advanced routing. "Packets"
+are transport layer constructs.  "Frames" are network layer
+constructs which encapsulate packets.  Packets are addressed
+by IP addresses (the familiar sets of four "octets" or
+dotted decimal numbers).  Frames are addressed differently
+according to the media over which they are sent.  Ethernet
+frames addressed by their "MAC" (media access control)
+addresses --- a 48 bit number which is either from the
+card's "BIA" (burned in address) or set by ethernet driver
+(look at the "<tt>hw</tt>" option on your '<tt>ifconfig</tt>' 
+command's man page).
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+You can see your ethernet card's MAC address by reading
+the output of the '<tt>ifcommand</tt>'  They are usually represented
+something like:
+</BLOCKQUOTE>
+
+<blockquote><pre>		HWaddr 0A:60:B7:0F:F1:6E  Int:10 addr:0x300
+</pre></blockquote>
+<BLOCKQUOTE>
+Here's how ARP works.  By addressing frames to the proper
+ethernet card --- all of the other ether cards on all of
+the other systems on a given LAN segment can filter out
+frames that aren't intended for them.  This allows the
+host in which they are installed to work more efficiently
+--- since the driver software doesn't have to "look at"
+those frames (unless that card is in "promiscous mode"
+running '<tt>sniffit</tt>' or '<tt>tcpdump</tt>' for example).  However,
+the routers and other local systems much find a way to
+map between the IP addresses and the corresponding MAC
+addresses.  (We're only talking about ethernet here ---
+though similar mechanism exists for ARCnet and token ring;
+ATM is <EM>completely</EM> different)
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+ARP is that method.  Any system on an ethernet segment that
+has a packet that appears to be destined for the local segment
+(according to its routing table) will send out an ethernet
+broadcast frame essentially yelling out:  "Will the owner of
+IP address <tt>222.123.45.61</tt> please speak up!"  Every host on
+that segment then must process an interrupt to filter that
+ARP request.  The system that actually "owns" this IP address
+(has it assigned to their interface, or is acting as the
+proxyarp host for it) will send a response packet addressed
+just to the original requestor.  The requestor will then
+cache this ARP entry (so the one ARP broadcast will
+normally occur at the beginning of the first TCP connection
+or UDP transaction and stay valid for a long time).
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+... The idea of "proxyarp" is that this '<tt>arp</tt>' command,
+with the "pub" option tells the Linux kernel to respond
+to ARP requests for any of the addresses in the specified
+subnet.  (It's also possible to publish an ARP for a
+single address, of course).
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+When the kernel gets a copy of the frames that
+are addressed to it's ethernet MAC it will process them.
+When it discovers that the packet encapsulated in this frame
+is not one of <EM>its</EM> addresses it will attempt to forward it.
+Actually in recent kernels it will refer to the value of the
+<TT>/proc/sys/net/ipv4/ip_forward</TT> flag and <EM>only</EM> forward the
+packet <EM>if</EM> that is set to one.  So, you must use a command
+like:
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+echo 1 &gt; <TT>/proc/sys/net/ipv4/ip_forward</TT>
+</BLOCKQUOTE>
+
+<BLOCKQUOTE>
+... to do any packet routing --- proxyarp or otherwise.
+If the ip_forward flag is set to 0 then only those packets
+which originated from the kernel and from locally running
+processes will be forwarded.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+Assuming that you have ip_forward set to 1, Linux will
+then look for a route to these addresses.  So we must have
+valid routes on the firewall/proxyarp host for both of
+these networks.  In our example the firewall machine
+has a routing table that looks something like:
+</BLOCKQUOTE>
+
+<blockquote><pre>Kernel IP routing table
+Destination     Gateway         Genmask         Flags Metric Ref    Use Iface
+127.0.0.0       0.0.0.0         255.0.0.0       U     0      0        9 lo
+222.123.45.32   0.0.0.0         255.255.255.240 U     0      0        9 eth0
+222.123.45.48   0.0.0.0         255.255.255.240 U     0      0        9 eth1
+0.0.0.0         222.123.45.33   0.0.0.0         UG    0      0      166 eth0
+</pre></blockquote>
+<BLOCKQUOTE>
+While the routing table on the DSL router probably
+looks something like:
+</BLOCKQUOTE>
+
+<blockquote><pre>Kernel IP routing table
+Destination     Gateway         Genmask         Flags Metric Ref    Use Iface
+127.0.0.0       0.0.0.0         255.0.0.0       U     0      0        9 lo
+222.123.45.32   0.0.0.0         255.255.255.224 U     0      0        9 eth0
+0.0.0.0         RT.TO.MY.ISP    0.0.0.0         UG    0      0      166 ppp0
+</pre></blockquote>
+<BLOCKQUOTE>
+(where RT.TO.MY.ISP  is address to my ISP's routers and thus
+to the Internet as a whole).
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+The routes on "cow" and system clients on that segment
+would look like:
+</BLOCKQUOTE>
+
+<blockquote><pre>Kernel IP routing table
+Destination     Gateway         Genmask         Flags Metric Ref    Use Iface
+127.0.0.0       0.0.0.0         255.0.0.0       U     0      0        9 lo
+222.123.45.48   0.0.0.0         255.255.255.240 U     0      0        9 eth0
+0.0.0.0.0       222.123.45.63   255.255.255.240 UGH   0      0        9 eth0
+</pre></blockquote><BLOCKQUOTE>
+... which shows that the addresses between <tt>222.123.45.49</tt>
+and  <tt>222.123.45.62</tt> are all "Local" and that any other packets
+should be relayed to the firewall.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+For any hosts that I put <EM>between</EM> the router and
+the firewall I'd have routes that looked like:
+</BLOCKQUOTE>
+
+<blockquote><pre>Kernel IP routing table
+Destination     Gateway         Genmask         Flags Metric Ref    Use Iface
+127.0.0.0       0.0.0.0         255.0.0.0       U     0      0        9 lo
+222.123.45.32   0.0.0.0         255.255.255.240 U     0      0        9 eth0
+222.123.45.48   222.123.45.46   255.255.255.240 UGH   0      0        9 eth0
+0.0.0.0.0       222.123.45.33   255.255.255.240 UGH   0      0        9 eth0
+</pre></blockquote>
+<BLOCKQUOTE>
+... which tells those systems that the <tt>222.123.45.33</tt>
+through <tt>222.123.45.46</tt> addresses on on the local segment,
+that DSL router is the gateway to the Internet (the default
+route), and that the "outer" interface on the firewall
+is the gateway to the <tt>222.123.45.48</tt> subnet.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+It's also possible to act as a proxyarp for PPP, SLIP, and
+PLIP connections.  In other words I can proxyarp/route
+between other types and combinations of interfaces besides the
+two ethernet cards I'm showing in this example.    For PPP
+you can simply add the "proxyarp" directive to the appropriate
+'<tt>options</tt>' file or command line.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+There is a mini-HOWTO on ProxyARP by Bob Edwards of the
+Australian National University (home of Samba, and '<tt>rsync</tt>'
+among other projects) at:
+</BLOCKQUOTE>
+<BLOCKQUOTE> <BLOCKQUOTE> <CODE>
+<A HREF="http://metalab.unc.edu/LDP/HOWTO/mini/Proxy-ARP-Subnet.html"
+	>http://metalab.unc.edu/LDP/HOWTO/mini/Proxy-ARP-Subnet.html</A>
+</CODE> </BLOCKQUOTE> </BLOCKQUOTE>
+<BLOCKQUOTE>
+I've copied the author on this message --- in case he'd
+like to make any corrections or it he finds my examples
+of use in updates to his HOWTO.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+I hope that helps.  When I dug up a link to that
+mini-HOWTO I found that Bob has added quite a bit to it.
+I seem to recall that it used to cover the PPP case pretty
+well and didn't describe the case between a couple of
+ethernet segments --- but I may be just hallucinating.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+Now that I'm looking at it again I see that most of
+my message is duplicated effort.  Oh well.  Hopefully
+this message will offer an alternative to anyone who
+just doesn't "get it" from Bob's explanation.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+I've probably flubbed some of the numbers in my example when
+I "sanitized" them.  My address block is actually in the
+0-31 range rather than the 32-63 range that I've described
+here.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+Last month I also wrote a lengthy treatise on subnetting
+and routing.  Heather tells me it will get 
+<a href="a.html">published this month</a>, along with many 
+other messages.   Please
+take a look at it since using proxyarp requires an
+understanding of general routing and subnetting issues.
+You'll understand proxyarp better if you compare it to
+"normal" subnetting.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+As you can see from my message the arp command is
+easy.  It's just understanding the rest of the routing
+that takes all the explanation.
+</BLOCKQUOTE>
+
+<!-- sig -->
+
+<!-- end 72 -->
+<!--startcut ======================================================= -->
+<P> <hr> <P>
+<H5 align="center"><a href="http://www.linuxgazette.net/copying.html"
+        >Copyright &copy;</a> 1999, James T. Dennis
+<BR>Published in <I>The Linux Gazette</I> Issue 36 January 1999</H5>
+<P> <hr> <P>
+<!-- ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::: -->
+<P align="center">
+<table width="98%"><tr valign="center" align="center">
+<td rowspan="3" colspan="6"><A HREF="../lg_answer36.html"><IMG
+        SRC="../../gx/dennis/answernew.gif"
+        ALT="[ Answer Guy Index ]"></A></td>
+  <TD><A HREF="./a.html">a</A></TD>
+  <TD><A HREF="./b.html">b</A></TD>
+  <TD><A HREF="./c.html">c</A></TD>
+  <TD><A HREF="./1.html">1</A></TD>
+  <TD><A HREF="./2.html">2</A></TD>
+
+  <TD><A HREF="./3.html">3</A></TD>
+  <TD><A HREF="./4.html">4</A></TD>
+  <TD><A HREF="./5.html">5</A></TD>
+  <TD><A HREF="./6.html">6</A></TD>
+  <TD><A HREF="./7.html">7</A></TD>
+
+  <TD><A HREF="./9.html">9</A></TD>
+  <TD><A HREF="./10.html">10</A></TD>
+  <TD><A HREF="./11.html">11</A></TD>
+  <TD><A HREF="./12.html">12</A></TD>
+
+</tr><tr valign="center" align="center">
+  <TD><A HREF="./15.html">15</A></TD>
+  <TD><A HREF="./16.html">16</A></TD>
+  <TD><A HREF="./18.html">18</A></TD>
+  <TD><A HREF="./19.html">19</A></TD>
+
+  <TD><A HREF="./20.html">20</A></TD>
+  <TD><A HREF="./21.html">21</A></TD>
+  <TD><A HREF="./22.html">22</A></TD>
+  <TD><A HREF="./23.html">23</A></TD>
+  <TD><A HREF="./24.html">24</A></TD>
+
+  <TD><A HREF="./25.html">25</A></TD>
+  <TD><A HREF="./26.html">26</A></TD>
+  <TD><A HREF="./27.html">27</A></TD>
+  <TD><A HREF="./28.html">28</A></TD>
+
+</tr><tr valign="center" align="center">
+  <TD><A HREF="./29.html">29</A></TD>
+  <TD><A HREF="./31.html">31</A></TD>
+  <TD><A HREF="./32.html">32</A></TD>
+  <TD><A HREF="./33.html">33</A></TD>
+  <TD><A HREF="./34.html">34</A></TD>
+
+  <TD><A HREF="./35.html">35</A></TD>
+  <TD><A HREF="./36.html">36</A></TD>
+  <TD><A HREF="./37.html">37</A></TD>
+  <TD><A HREF="./38.html">38</A></TD>
+  <TD><A HREF="./39.html">39</A></TD>
+
+  <TD><A HREF="./40.html">40</A></TD>
+  <TD><A HREF="./41.html">41</A></TD>
+  <TD><A HREF="./42.html">42</A></TD>
+  <TD><A HREF="./44.html">44</A></TD>
+
+</tr><tr valign="center" align="center">
+  <TD><A HREF="./45.html">45</A></TD>
+  <TD><A HREF="./46.html">46</A></TD>
+  <TD><A HREF="./47.html">47</A></TD>
+  <TD><A HREF="./48.html">48</A></TD>
+  <TD><A HREF="./49.html">49</A></TD>
+  <TD><A HREF="./50.html">50</A></TD>
+
+  <TD><A HREF="./51.html">51</A></TD>
+  <TD><A HREF="./52.html">52</A></TD>
+  <TD><A HREF="./53.html">53</A></TD>
+  <TD><A HREF="./54.html">54</A></TD>
+  <TD><A HREF="./55.html">55</A></TD>
+
+  <TD><A HREF="./56.html">56</A></TD>
+  <TD><A HREF="./57.html">57</A></TD>
+  <TD><A HREF="./60.html">60</A></TD>
+  <TD><A HREF="./61.html">61</A></TD>
+  <TD><A HREF="./62.html">62</A></TD>
+
+  <TD><A HREF="./63.html">63</A></TD>
+  <TD><A HREF="./64.html">64</A></TD>
+  <TD><A HREF="./65.html">65</A></TD>
+  <TD><A HREF="./66.html">66</A></TD>
+
+</tr><tr valign="center" align="center">
+  <TD><A HREF="./67.html">67</A></TD>
+  <TD><A HREF="./69.html">69</A></TD>
+  <TD><A HREF="./72.html">72</A></TD>
+  <TD><A HREF="./76.html">76</A></TD>
+  <TD><A HREF="./77.html">77</A></TD>
+  <TD><A HREF="./78.html">78</A></TD>
+
+  <TD><A HREF="./79.html">79</A></TD>
+  <TD><A HREF="./80.html">80</A></TD>
+  <TD><A HREF="./81.html">81</A></TD>
+  <TD><A HREF="./82.html">82</A></TD>
+  <TD><A HREF="./84.html">84</A></TD>
+
+  <TD><A HREF="./85.html">85</A></TD>
+  <TD><A HREF="./86.html">86</A></TD>
+  <TD><A HREF="./87.html">87</A></TD>
+  <TD><A HREF="./91.html">91</A></TD>
+  <TD><A HREF="./94.html">94</A></TD>
+
+  <TD><A HREF="./95.html">95</A></TD>
+  <TD><A HREF="./96.html">96</A></TD>
+  <TD><A HREF="./97.html">97</A></TD>
+  <TD><A HREF="./98.html">98</A></TD>
+</tr></table>
+	</P>
+<P> <hr> <P>
+<!-- ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::: -->
+<A HREF="../index.html"
+        ><IMG SRC="../../gx/indexnew.gif" ALT="[ Table Of Contents ]"></A>
+<A HREF="../../index.html"
+        ><IMG SRC="../../gx/homenew.gif" ALT="[ Front Page ]"></A>
+<A HREF="../lg_bytes36.html"
+        ><IMG SRC="../../gx/back2.gif" ALT="[ Previous Section ]"></A>
+<A HREF="../larriera.html"
+        ><IMG SRC="../../gx/fwd.gif" ALT="[ Next Section ]"></A>
+<!-- ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::: -->
+</BODY></HTML>
+<!--endcut ========================================================= -->

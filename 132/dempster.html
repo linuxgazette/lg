@@ -1,0 +1,651 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Deploying IPCop LG #132</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+<a href="../">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="lg_tips.html" >&lt;-- prev</A> | <A HREF="pfeiffer.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Deploying IPCop</h1>
+<p id="by"><b>By <A HREF="../authors/dempster.html">Barrie Dempster</A> and <A HREF="../authors/eaton-lee.html">James Eaton-Lee</A></b></p>
+
+<!-- I ran this file through tidy prior to reviewing because
+     it contained non-ISO ASCII characters. I'm not sure what to do
+	 about the CSS in the table. The article seems to be submitted
+	 via cut & paste.
+
+	 I also rearranged the URLs inside the text and replaced the with
+	 proper <a></a> tags. And I deleted the additional <br> tags.
+
+	 I added two visible comments regarding best practices from my 
+	 experience with system administration. Opinions on this matter
+	 may differ, though.
+
+	 - Lynx.
+
+-->
+<p>IPCop is a firewall for the Small Office/Home Office (SOHO)
+network, which is extremely easy to use. It provides most of the
+basic features that you would expect a modern firewall to have, and
+what is most important is that it sets this all up for you in a
+highly automated and simplified way. It's very easy to get an IPCop
+system up and running and takes hardly any time.
+</p>
+
+<h3>Trust Relationships between the Interfaces</h3>
+
+<p>The four types of network interface&mdash;Green, Red, Blue, and
+Orange&mdash;supported by IPCop have differing levels of trust
+associated with them. Here is a simple table outlining what traffic
+is allowed to go to and from which interfaces. This table, and the
+knowledge contained within it, should form the basis of our
+planning when considering how many interfaces to use and what to
+use them for. This is basically the Traffic Flow diagram from the
+<a href="http://www.ipcop.org/1.4.0/en/admin/html/section-firewall.html">IPCop administrative guide</a>.
+</p>
+
+<p>
+<table border="1" width="700">
+<tr>
+<td valign="top">
+Interface From</td>
+<td valign="top">
+Interface To</td>
+<td valign="top">
+Status</td>
+<td valign="top">
+How To Access</td>
+</tr>
+<tr>
+<td valign="top">
+<p>Red</p>
+<p>Red</p>
+<p>Red</p>
+<p>Red</p>
+</td>
+<td valign="top">
+<p>Firewall</p>
+<p>Orange</p>
+<p>Blue</p>
+<p>Green</p>
+</td>
+<td valign="top">
+<p>CLOSED</p>
+<p>CLOSED</p>
+<p>CLOSED</p>
+<p>CLOSED</p>
+</td>
+<td valign="top">
+<p>External Access</p>
+<p>Port Forwarding</p>
+<p>Port Forwarding / VPN</p>
+<p>Port Forwarding / VPN</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>Orange</p>
+<p>Orange</p>
+<p>Orange</p>
+<p>Orange</p>
+</td>
+<td valign="top">
+<p>Firewall</p>
+<p>Red</p>
+<p>Blue</p>
+<p>Green</p>
+</td>
+<td valign="top">
+<p>CLOSED</p>
+<p>OPEN</p>
+<p>CLOSED</p>
+<p>CLOSED</p>
+</td>
+<td valign="top">
+<p>&nbsp;</p>
+<p>&nbsp;</p>
+<p>DMZ Pinholes</p>
+<p>DMZ Pinholes</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>Blue</p>
+<p>Blue</p>
+<p>Blue</p>
+<p>Blue</p>
+</td>
+<td valign="top">
+<p>Firewall</p>
+<p>Red</p>
+<p>Orange</p>
+<p>Green</p>
+</td>
+<td valign="top">
+<p>CLOSED</p>
+<p>CLOSED</p>
+<p>CLOSED</p>
+<p>CLOSED</p>
+</td>
+<td valign="top">
+<p>Blue Access</p>
+<p>Blue Access</p>
+<p>Blue Access</p>
+<p>DMZ Pinholes / VPN</p>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<p>Green</p>
+<p>Green</p>
+<p>Green</p>
+<p>Green</p>
+</td>
+<td valign="top">
+<p>Firewall</p>
+<p>Red</p>
+<p>Orange</p>
+<p>Blue</p>
+</td>
+<td valign="top">
+<p>OPEN</p>
+<p>OPEN</p>
+<p>OPEN</p>
+<p>OPEN</p>
+</td>
+<td valign="top">
+<p>&nbsp;</p>
+</td>
+</tr>
+</table>
+</p>
+
+<p>In visualizing the way in which traffic goes through the IPCop
+firewall, we can see it as a sort of giant junction with a traffic
+cop (literally, an IP Cop&mdash;hence the name!) in the middle of
+it. When a car (in network parlance, a packet of data) reaches the
+crossroads, the cop decides in which direction the packet should go
+(based on the routing tables IPCop uses), and pushes it in the
+appropriate direction.</p>
+
+<p>In the case of a Green client accessing the Internet, we can see
+from the previous table that this access is OPEN, so the cop allows
+the traffic through. In other instances, however, this might not be
+the case. If a Blue client tries to access a client on the Green
+segment, for instance, the cop might allow the traffic through if
+it comes over a VPN or through DMZ pinholes&mdash;but if a client
+on the Blue segment has neither of these things explicitly allowing
+the traffic, it is stopped. The car is pulled over, the occupants
+victims of some virtual time in the cells!</p>
+
+<p>Note that (generally) when we illustrate IPCop Configurations,
+the Red interface is uppermost (North), the Orange interface is to
+the left (West), the Blue interface is to the right (East), and the
+Green interface is to the bottom (South).</p>
+
+<h3>Altering IPCop Functionality</h3>
+
+<p>As with many aspects of the behavior of the IPCop firewall, it
+is possible to alter the behavior of the firewalling rules in order
+to customize IPCop to meet a topology un-catered for by the default
+rules. Within the context of the firewall rules, IPCop has had a
+file since the 1.4-series release that allows users to specifically
+add their own firewall rules (<code>/etc/rc.d/rc.firewall.local</code>). Since
+version 1.3, there have been iptables chains, CUSTOMINPUT,
+CUSTOMFORWARD, etc., allowing iptables rules to be added manually.
+Specifically using iptables is out of our scope here, but we
+recommend that interested readers read the 
+<a href="http://www.linuxguruz.com/iptables/howto/">Linux iptables HOWTO</a>.
+</p>
+
+<h3>Topology One: NAT Firewall</h3>
+
+<p>Our first topology exists as a drop-in replacement for the many
+NAT firewalls that exist in the market. In small offices and homes,
+solutions such as the embedded NAT firewalls sold by D-Link,
+Linksys, and friends are frequently deployed in order to provide
+small networks with cost-effective Internet access. Solutions such
+as Internet Connection Sharing, a combined NAT firewall, DNS Proxy,
+and DHCP Server, built into client editions of Windows since
+Windows 98, are also frequently used in order to allow one PC with
+a modem or network interface to act as a network gateway for other
+clients. For our purposes here, we will consider ICS, as such a
+topology with ICS is effectively a superset of the work required to
+replace a router such as a Linksys or NETGEAR model as mentioned
+previously. Our migration from one of these routers to IPCop would
+be identical save for the decommissioning of the ICS software on
+the client&mdash;if we remove the router, this is unnecessary and
+the router can be left configured as-is (and/or kept as a backup,
+or reused elsewhere) (See <a href="http://www.annoyances.org/exec/show/ics">http://www.annoyances.org/exec/show/ics</a> 
+for more information on implementing (and consequently,
+decommissioning) ICS on different Windows versions). Such
+solutions, while cheap and convenient, are often not scalable or
+reliable, and provide poor security. They open workstations up to
+unnecessary security risks, provide limited throughput, and are
+often unreliable, requiring frequent reboots and locking up.</p>
+
+<p>As with software firewalls, a network firewall is designed as a
+barrier in between your workstations and the Internet. By
+connecting one of your workstations directly to the Internet and
+using a solution like ICS, although you reduce the resources
+required to share the internet connection, you expose that
+workstation to unnecessary risk. There is also an obligation for
+that PC to be on all the time&mdash;compared to a low-end PC with
+no unnecessary components and a low-power PSU running IPCop, this
+may be noisier, and have a higher power consumption.</p>
+
+<p>IPCop offers a cost-effective replacement in such situations,
+providing small businesses and home users with a powerful firewall
+without the need for over-complexity, and adding other features not
+present in embedded solutions or ICS, such as a customizable DHCP
+Server, Intrusion Detection, a Proxy Server, and so on.</p>
+
+<p>Such a topology ensures that firewalling is done before data
+gets to clients, using a package designed to act as a network
+firewall, greatly increasing the quality of service to clients as
+well as the security that their network offers. In this situation,
+the components of IPCop in use would be:</p>
+
+<ul>
+<li>Green/Red zones</li>
+<li>DHCP Server</li>
+<li>DNS Server</li>
+</ul>
+
+<p>In such a situation, a network administrator or consultant might
+also choose to enable any of the following pieces of functionality
+in order to enhance the services provided to the network:</p>
+
+<ul>
+<li>Intrusion Detection</li>
+<li>IPSec in order to allow remote work or remote support</li>
+<li>Port Forwarding in order to allow remote access to VNC or
+Terminal Services/Remote Desktop for a simplified model of remote
+access for remote support (more convenient than IPSec although
+inherently more insecure)</li>
+</ul>
+
+<p>Decommissioning of ICS in such a situation is quite
+simple&mdash;we would merely disable the ICS functionality, as
+depicted in the following screenshot (taken from the network
+connections property of the external, internet-facing ICS network
+interface). Removing ICS is as simple as deselecting the 'Allow
+other network users to connect through this computer's Internet
+connection' option. After we have done this, we should hit OK,
+reboot if asked to, and then we are free to disable and/or remove
+the external interface on the workstation (disable if we wish to
+leave a second network card in the machine or if it has two onboard
+cards, or remove if we are using an external modem or other piece
+of hardware we intend to remove or install in our IPCop host).</p>
+
+<img src="misc/dempster/screenshot-IPCop.png" alt=
+"Windows ICS dialog" width="367" height="445" border="1" vspace="5"
+hspace="5">
+
+<p>Firewall rules for this topology are simple; as the Green
+segment is automatically allowed to access resources on the Red
+interface, there is no topology-specific setup required in order to
+set this up. Another substantial benefit in deploying IPCop for
+such a small office situation is that in the event that the
+business is required to grow, the solution that it has is scalable.
+Such a business running a handful of Windows workstations in a
+workgroup may decide that a workgroup is insufficient for its needs
+and that it requires centralized management, file storage, and
+configuration.</p>
+
+<p>IPCop, even in a pre-upgrade scenario like this, is advantageous
+simply because it provides a built-in, open upgrade path. There is
+no hardware or software upgrade required to move from simple NAT
+and DHCP to a network with several network segments, port
+forwarding, and a proxy server. If the Server already has several
+network cards (and with the price of these nowadays, there's no
+reason for it not to, if an expansion is anticipated), this can
+even be done with little or no noticeable interruption in service
+to existing clients.</p>
+
+<h3>Topology Two: NAT Firewall with DMZ</h3>
+
+<p>In a small office situation with a growing company, the need for
+incoming email might force the activation of the Orange zone, and
+the deployment and installation of a mail server in this segment.
+Such a company might choose to keep its Desktop and Internal Server
+infrastructure within the Green network segment and put their 
+server in the DMZ on a switch/hub, or simply attached to the Orange
+interface of the IPCop host using a crossover cable. As such
+systems are exposed to the Internet, this segmentation provides a
+considerable advantage by providing a 'stop line' past which it
+would be harder for an intruder to escalate his or her access to
+the network. Microsoft's Exchange mail server has for some time
+supported such a configuration through the use of the 'front end'
+and 'back end' exchange roles (although these roles will be
+deprecated with future Exchange releases). With a different network
+configuration however, such as Linux clients using a management
+system such as Novell's eDirectory or RedHat's Directory Server
+(RHDS), or a filtering appliance, a similar system with
+externally-facing SMTP servers (perhaps running the open-source MTA
+exim) would be equally beneficial.</p>
+
+<p>In this topology, Clients are freely able to connect to the mail
+server (whether via POP, IMAP, RPC, or RPC over HTTP). In order for
+a mail server that exists as part of the network domain to
+authenticate to the directory server, we would also need to open
+the appropriate ports (contingent upon the directory provider) to
+the directory server using the DMZ Pinholes feature.</p>
+
+<p>We also have a Port Forwarding rule set up from the external IP
+address of the IPCop firewall to port 25 on the mail server. This
+allows external mail servers to connect to the mail server in order
+to deliver email. In this topology, a compromise of the mail server
+(which in the Green segment could compromise the entire network
+segment) is controlled, as there is some level of protection
+provided by the firewall.</p>
+
+<p>In such a topology, we use the following capabilities of the
+IPCop Firewall:</p>
+
+<ul>
+<li>Red, Orange, Green zones</li>
+<li>DMZ Pinholes</li>
+<li>DHCP Server</li>
+<li>DNS Server</li>
+<li>Port Forwarding to Orange segment</li>
+</ul>
+
+<p>We might also choose to employ any of the following elements of
+functionality:</p>
+
+<ul>
+<li>Intrusion Detection System</li>
+<li>Port Forwarding to web server on the mail server (for external
+access of IMAP or Exchange mailboxes via a webmail solution such as
+Horde, SquirrelMail, or Outlook Web Access) Proxy Server (for
+desktop Internet access)</li>
+<li>IPSec for remote access to Servers in the Green and Orange
+segment or for external support</li>
+<li>Back-end mail server with mailboxes in the Green zone, using
+the Server in the Orange zone as a relay, performing anti-spam and
+anti-virus scanning/filtering</li>
+</ul>
+
+<h3>Topology Three: NAT Firewall with DMZ and Wireless</h3>
+
+<p>In a larger organization, or if the network above grew, we might
+choose to expand our network topology using one or more IPCop
+firewalls.</p>
+
+<p>Several IPCop firewalls might be used by such an individual in
+order to separate several sites, or in order to further segregate
+one or more DMZs with physically distinct firewalls. It is also
+worth considering that IPCop is designed primarily for networks in
+which it is the only network firewall, in the Small and Medium
+Business, and Home/Home Office market. Although it is possible to
+set IPCop up in larger deployments, this is fairly rare, and there
+are other packages that are arguably more suited to such
+deployments. In such circumstances, the constraints of IPCop's
+network segmentation begin to be more burdensome than they are
+convenient, and the amount of work required to tailor IPCop to meet
+an organization's needs may exceed the work it would take to
+manually set up another firewall package to suit the same
+topology.</p>
+
+<p>In this example, we will consider the broadest scope in which
+one IPCop box could be deployed, using all four network interfaces
+to protect a network with an internal (Green) network, an Internet
+or WAN connection (Red), a DMZ containing more than one Server
+(Orange), and a wireless segment (Blue) with an IPSec VPN system.
+In such a situation, we would almost certainly choose to deploy all
+of the higher-end features that IPCop contains, such as the Proxy
+Server and the Intrusion Detection System.</p>
+
+<p>In this situation, the services we are providing for individual
+network interfaces are as follows: On the Red Interface, in
+addition to the default firewalling policy, we are invoking the
+Port Forwarding feature to allow connections to the mail server on
+port 25 in the DMZ, and also to port 443 (https) on the mail server
+in order to allow connections to the business webmail system. We
+are also allowing incoming IPSec connections to the IPCop firewall
+in order to allow remote access to staff who work remotely and to
+provide remote connectivity for support purposes for the IT Staff
+and third-party software and hardware vendors.</p>
+
+<p>On the Blue interface, we are providing connectivity via an
+IPSec VPN for clients in order that they can access services run
+from Servers internally on the Green segment and DMZ segment.
+Vendors and visitors are allowed access to the Green segment
+through use of WPA in pre-shared key mode configured on the
+wireless access point.</p>
+
+<p class="editorial">[ When using pre-shared keys make sure you use
+the longest possible key combination straight from a good random source.
+Even WPA cannot guard against the brute-forcing of weak keys. This
+is also a fine reason for changing the pre-shared key 
+periodically. -- Ren&eacute; ]
+</p>
+
+<p>WPA-PSK with solely an access point prevents access to the
+wireless segment and the Internet by unauthorized users, and is an
+adequate solution for most small and medium networks; use of a
+newer, WPA2-PSK-capable access point increases this security more
+for those without an access point or network infrastructure
+implementing RADIUS or Certificate Services. The firewalling policy
+and IPSec system ensures that visitors/vendors only have access to
+the Red zone (the Internet), and not to any of the resources on the
+network.</p>
+
+<p>On the Orange interface, our pinholes allow the DMZ servers to
+connect to a directory server and Kerberos domain controller in the
+Green segment in order to authenticate users logging onto them via
+the company directory system. This ensures that the policy and
+configuration for these Servers is managed centrally, and that
+there are logs stored centrally for them, but the damage that could
+be caused by a compromise of these externally-facing services is
+greatly minimized, ensuring business security and regulatory
+compliance.</p>
+
+<p>On the Green interface we allow connectivity to all interfaces;
+ workstations and Servers within the Green segment are managed
+service workstations on which users do not have the necessary level
+of access to cause damage to the resources to which they have
+access.</p>
+
+<p class="editorial">[ Trojans have become very popular. This a
+good reason to think about restricting the networked
+machine access inside the Green network to proxies equipped with
+intrusion detection/prevention software. -- Ren&eacute; ]
+</p>
+
+<p>In such a situation, we are making use of the following IPCop
+features:</p>
+
+<ul>
+<li>Red, Orange, Green, Blue zones</li>
+<li>DMZ Pinholes</li>
+<li>DHCP Server</li>
+<li>DNS Server</li>
+<li>Port Forwarding to Orange segment</li>
+<li>IPSec for remote access to Green, Orange, Blue segments</li>
+<li>IPSec for access to internal resources by Blue users</li>
+<li>Intrusion Detection System</li>
+<li>Port Forwarding to web server on the Mail server
+externally</li>
+<li>Proxy Server (for desktop Internet access)</li>
+</ul>
+
+<p>In a larger organization, we may also choose to use IPSec in
+site-to-site mode in order to link this office with one or more
+branch or parent offices. In this role, as in the role of a single
+network firewall, IPCop excels.</p>
+
+<hr>
+
+<p>This article has been adapted from the book, "Configuring IPCop
+Firewalls: Closing Borders with Open Source" by <a target="_blank"
+	href="http://www.packtpub.com/">Packt Publishing</a>.</p>
+
+<p>For further details please visit <a
+href="http://www.packtpub.com/ipcop/book">http://www.packtpub.com/ipcop/book/</a>.</p>
+
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:132/dempster.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<H4>Barrie Dempster</H4>
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/authors/dempster.jpg" class="bio">
+</p>
+
+<em>
+<p>
+Barrie Dempster is currently employed as a Senior Security Consultant
+ for NGS Software Ltd, a world-renowned security consultancy well known
+ for their focus in enterprise-level application vulnerability research
+ and database security. He has a background in Infrastructure and
+ Information Security in a number of specialised environments, such as
+ financial services institutions, telecommunications companies, call
+ centres, and other organisations across multiple continents. Barrie has
+ experience in the integration of network infrastructure and
+ telecommunications systems requiring high-calibre secure design, testing
+ and management. He has been involved in a variety of projects from the
+ design and implementation of Internet banking systems to large-scale
+ conferencing and telephony infrastructure, as well as penetration
+ testing and other security assessments of business-critical
+ infrastructure.
+</p>
+
+
+
+</em>
+
+<br clear="all">
+
+
+<H4>James Eaton-Lee</H4>
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/2002/note.png" class="bio">
+</p>
+
+<em>
+<p>
+James Eaton-Lee works as a Consultant specializing in Infrastructure
+ Security who has worked with clients ranging from small businesses with
+ a handful of employees to multinational banks. He has a varied
+ background, including experience working with IT in ISPs, manufacturing
+ firms, and call centers. James has been involved in the integration of a
+ range of systems, from analogue and VOIP telephony to NT and AD domains
+ in mission-critical environments with thousands of hosts, as well as
+ UNIX &amp; LINUX servers in a variety of roles. James is a strong
+ advocate of the use of appropriate technology, and the need to make
+ technology more approachable and flexible for businesses of all sizes,
+ but especially in the SME marketplace in which technology is often
+ forgotten and avoided. James has been a strong believer in the relevancy
+ and merit of Open Source and Free Software for a number of years and -
+ wherever appropriate - uses it for himself and his clients, integrating
+ it fluidly with other technologies.
+</p>
+</em>
+
+<br clear="all">
+
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2006, Barrie Dempster and James Eaton-Lee. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 132 of Linux Gazette, November 2006
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="lg_tips.html" >&lt;-- prev</A> | <A HREF="pfeiffer.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/mailman/listinfo/">Mailing Lists</a>
+<a href="../jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">November 2006 (#132)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

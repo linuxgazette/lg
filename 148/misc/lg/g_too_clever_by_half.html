@@ -1,0 +1,347 @@
+<!DOCTYPE html PUBLIC '-//W3C//DTD XHTML 1.0 Transitional//EN'
+		 'http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd'>
+<html xmlns='http://www.w3.org/1999/xhtml' lang='utf-8' xml:lang='utf-8'>
+<head>
+<title>G++ too clever by half</title>
+<meta http-equiv='Content-Type; charset=utf-8' />
+<link rel='stylesheet' type='text/css' href='../../../lg.css' />
+</head>
+<body>
+<a href="../../../"><img alt="Linux Gazette" src="../../../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" /></a><img alt="Tux" src="../../../gx/tux_86x95_indexed.png" id="tux" /><p id="fun">...making Linux just a little more fun!</p><div class='content articlecontent'><a name="top"></a><h3>G++ too clever by half</h3>
+<p>
+<b><p>
+Paul Sephton [prsephton at gmail.com]
+
+</p>
+</b><br />
+<b>Thu, 28 Feb 2008 15:53:46 +0200</b>
+</p>
+
+<p>
+I have done a fair bit of my own "second guessing of the user" in the 
+past, and where it comes to the g++ folks they generally get it right.  
+Be that as it may, there is a rather irritating  and dangerous 
+compile-time warning in g++ version 4.1.2.  that is to me, an ideal 
+example of where acting with the best intention to protect the user from 
+his own stupidity can backfire.
+</p>
+
+<p>
+A pure virtual base class, or interface class definition is used when 
+one would like to use the class definition without having access in any 
+way to the implementation.  Typically, a factory function creates 
+objects of this type, and another factory function may be used to 
+destroy them.  One cannot use the 'new' keyword to create, or the 
+'delete' keyword to destroy objects of this type, as the object 
+definition has no public constructor or destructor, and no base 
+implementation for the virtual methods.  However, one may call the 
+objects methods; since they are all pure virtual declarations, one is 
+guaranteed of their implementation in the subclass.
+</p>
+
+<p>
+The following header is used to provide a pure virtual interface class 
+and functions to create or delete instances of the class:
+</p>
+
+<pre>
+class abc {
+  public :
+     virtual void if_method1()=0;
+     virtual long if_method2()=0;
+     virtual bool if_method3()=0;
+     ...
+};
+ 
+abc *abc_factory_new();
+void abc_factory_delete(abc *);
+</pre>
+
+<p>
+when compiled, this emits the warning:
+   ``  warning: 'class abc' has virtual functions but non-virtual 
+destructor''
+</p>
+
+<p>
+which is only partially true, as there is no declaration for a 
+destructor at all (either virtual or non-virtual).  One might expect the 
+following code to emit warnings both for the attempt to create an 
+instance of 'abc' as well as the attempt to delete 'abc':
+<pre>
+int main() {
+  abc *a = new abc();
+  delete a;
+}
+</pre>
+
+<p>
+As it happens, we are warned when we try to create an instance of 'abc' 
+(because of all the pure virtual functions) , but not warned at all when 
+we delete the object directly.  It would appear that g++ assumes that 
+the coder has made a mistake, and creates a default (public non-virtual) 
+destructor for the class anyway, regardless that we excluded definitions 
+for the destructor to prevent accidental deletion.  To add insult to 
+injury, g++ then warns the coder that his [automatic] destructor is not 
+virtual.
+</p>
+
+<p>
+Just as well that it does warn you, since the destructor it 
+automatically creates is not virtual, and therefore invoking delete 
+against the virtual base class (which should have failed with a compiler 
+error) would result in a potential memory leak.
+</p>
+
+<p>
+The above warning is not a new one, and previous versions of the 
+compiler would emit the warning when a destructor was declared as 
+non-virtual in a class with virtual method declarations.  For example,
+</p>
+
+<pre>
+class abc {
+  protected :
+    ~abc() {};
+  public :
+     virtual void if_method1()=0;
+     virtual long if_method2()=0;
+     virtual bool if_method3()=0;
+     ...
+};
+</pre>
+will also  emit the above warning, but at least fails with the 'delete' 
+keyword, emitting the additional warning:
+<pre>
+error: 'abc::~abc()' is protected
+filexx:yyy: error: within this context
+</pre>
+
+<p>
+Now, I for one have an absolute fetish about eliminating warnings.  I 
+can't stand them.  When I see a warning, I just <em>have</em> to try to 
+eliminate it to get a "clean" compilation.
+</p>
+
+<p>
+There are a few problems with the prior definition of class 'abc', 
+though.  In the first place, the class is no longer 'pure virtual', in 
+that it includes the potential for code associated with what should be a 
+simple interface definition.  In order to eliminate the warning 
+altogether one would define the class as:
+</p>
+
+<pre>
+class abc {
+  protected :
+    virtual ~abc()=0;
+  public :
+     virtual void if_method1()=0;
+     virtual long if_method2()=0;
+     virtual bool if_method3()=0;
+     ...
+};
+</pre>
+which compiles cleanly, and gives you what you want.  There is one more 
+problem though, which only rears it's head when you subclass the virtual 
+base class.
+</p>
+
+<pre>
+...
+ 
+class def : public abc
+{
+  public :
+  virtual ~def(){}
+  virtual void if_method1(){}
+  virtual int  if_method2(){return 0;}
+  virtual bool if_method3(){return true;}
+ 
+};
+   
+int main()
+{
+  def *a = new def();
+  delete a;
+}
+</pre>
+
+<p>
+When you compile and link this, the linker complains about a missing 
+symbol for the destructor of class abc!
+``undefined reference to `abc::~abc()''
+</p>
+
+<p>
+To eliminate the problem, you have to provide a body for the destructor: 
+`` virtual ~abc(){} '' rather than ``virtual ~abc()=0;'' in the above 
+class definition for 'abc'.  Although this is less than perfect in that 
+there is an implementation defined for a member of what would otherwise 
+be a pure virtual base class, it accomplishes what we need to do, and 
+eliminates those horrible warnings.
+</p>
+
+<p>
+In parting, g++ does provide another way to rid us of the  ``  warning: 
+'class abc' has virtual functions but non-virtual destructor'', by 
+specifying the -Wno-non-virtual-dtor flag at compile time.  Beware 
+though; The default destructor as created [automatically] for the 
+virtual base class is public, which implies that an inadvertent 'delete' 
+on a pointer to the virtual base class will succeed with a resulting 
+memory leak.
+</p>
+
+<p>
+Paul Sephton
+</p>
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_mail.html#mb-g_too_clever_by_half">Back</a><hr width="50%" align="left" /><p><br /></p><p>
+<b><p>
+Neil Youngman [ny at youngman.org.uk]
+
+</p>
+</b><br />
+<b>Thu, 28 Feb 2008 14:18:43 +0000</b>
+</p>
+
+<p>
+On Thursday 28 February 2008 13:53, Paul Sephton wrote:
+</p>
+
+<pre>
+&gt; which is only partially true, as there is no declaration for a
+&gt; destructor at all (either virtual or non-virtual).  One might expect the
+&gt; following code to emit warnings both for the attempt to create an
+&gt; instance of 'abc' as well as the attempt to delete 'abc':
+</pre>
+
+<p>
+It may be true, I can't say without seeing the full class definition. My 
+Annotated C++ Reference Manual says "If a base or member has a destructor and 
+no destructor is declared for it's derived class a default destructor is 
+generated". I can see that class abc is not a derived class, but does it have 
+member variables with destructors?
+</p>
+
+<p>
+Neil Youngman
+</p>
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_mail.html#mb-g_too_clever_by_half">Back</a><hr width="50%" align="left" /><p><br /></p><p>
+<b><p>
+Paul Sephton [paul at inet.co.za]
+
+</p>
+</b><br />
+<b>Thu, 28 Feb 2008 17:38:02 +0200</b>
+</p>
+
+<p>
+On Thu, 2008-02-28 at 14:18 +0000, Neil Youngman wrote:
+</p>
+
+<pre>
+&gt; On Thursday 28 February 2008 13:53, Paul Sephton wrote:
+&gt; &gt; which is only partially true, as there is no declaration for a
+&gt; &gt; destructor at all (either virtual or non-virtual).  One might expect the
+&gt; &gt; following code to emit warnings both for the attempt to create an
+&gt; &gt; instance of 'abc' as well as the attempt to delete 'abc':
+&gt; 
+&gt; It may be true, I can't say without seeing the full class definition. My 
+&gt; Annotated C++ Reference Manual says "If a base or member has a destructor and 
+&gt; no destructor is declared for it's derived class a default destructor is 
+&gt; generated". I can see that class abc is not a derived class, but does it have 
+&gt; member variables with destructors?
+&gt; 
+&gt; Neil Youngman
+</pre>
+
+<p>
+Hi, Neil
+</p>
+
+<p>
+Nope.  No member variables.
+</p>
+
+<p>
+I think the point I was trying to get across to anyone interested, is
+that there is a default public non-virtual destructor generated where no
+destructor was specified for a class.
+</p>
+
+<p>
+It seems to be the case regardless of whether or not member variables
+were specified, or whether the class contains pure virtual methods.
+</p>
+
+<p>
+Now that is ok, so long as one understands that this is the case, as one
+can simply code around it as I have done.  I noticed though, that
+several people received the wrong advice (not on TAG) as to how to deal
+with the compiler warning.
+</p>
+
+<p>
+As far as I can figure, the vtable must contain placeholders for virtual
+destructor though, as soon as there exists even a single pure virtual
+method in a class declaration, since you can never create an instance of
+it anyway which makes coding a body for the destructor of such a class
+rather redundant.
+</p>
+
+<p>
+Would it not be more sensible then to simply generate the automatic
+private virtual destructor as the default for pure virtual classes, with
+no associated symbol that the linker can complain about as being
+unresolved?
+</p>
+
+<p>
+Why insist that the destructor for a class with pure virtual methods
+should have a body?  What on earth would be the sense in making it
+public and non-virtual by default to boot?
+</p>
+
+<p>
+Paul Sephton
+</p>
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_mail.html#mb-g_too_clever_by_half">Back</a><hr width="50%" align="left" /><p><br /></p><p>
+<b><p>
+Paul Sephton [paul at inet.co.za]
+
+</p>
+</b><br />
+<b>Thu, 28 Feb 2008 17:54:11 +0200</b>
+</p>
+
+<p>
+On Thu, 2008-02-28 at 17:38 +0200, Paul Sephton wrote:
+</p>
+
+<pre>
+&gt; Would it not be more sensible then to simply generate the automatic
+&gt; private virtual destructor 
+</pre>
+
+<p>
+I meant 'protected' rather than 'private'.  Sorry.
+</p>
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_mail.html#mb-g_too_clever_by_half">Back</a><hr width="50%" align="left" /><p><br /></p></div>
+</body>
+</html>

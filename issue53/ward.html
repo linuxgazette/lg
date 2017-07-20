@@ -1,0 +1,407 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>Some issues on floating-point precision under Linux LG #53</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<A HREF="http://www.linuxgazette.net/">
+<H1><IMG ALT="LINUX GAZETTE" SRC="../gx/lglogo.jpg" 
+	WIDTH="600" HEIGHT="124" border="0"></H1></A> 
+
+
+<!-- *** BEGIN navbar *** -->
+<A HREF="stagner.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A>
+<IMG ALT="" 
+	SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom" >
+<A HREF="index.html"><IMG ALT="[ Table of Contents ]" 
+	SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A>
+<A HREF="../index.html"><IMG ALT="[ Front Page ]" 
+	SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A>
+<A HREF="../faq/index.html"><IMG ALT="[ FAQ ]" 
+	SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A>
+<IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  >
+<IMG ALT="" 
+	SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom" >
+<A HREF="lg_backpage53.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A>
+<!-- *** END navbar *** -->
+<P>
+
+<FONT SIZE="+2"><EM>Talkback:</EM> Discuss this article with peers</FONT></A -->
+
+<!--endcut ============================================================-->
+
+<H4>
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H1><font color="maroon">Some issues on floating-point precision under Linux</font></H1>
+<H4>By <a href="mailto:award@mypic.ad">Alan Ward</H4>
+</center>
+<P> <HR> <P>  
+
+<!-- END header -->
+
+
+
+
+<p><b>Abstract</b></p>
+
+<p>In this article I propose a practical exploration of how Linux behaves when performing 
+single or double-precision calculations. I use a chaotic function to show how the calculation 
+results of a same program can vary quite a lot under Linux or a Microsoft operating system.</p>
+<p>It is intended for math and physics students and teachers, though the equations
+involved are quite accessible to just about everybody.</p>
+<p>I use Pascal, C and Java as they are the main programming languages in use today.</p>
+<p>This discussion focusses on the Intel architecture. Basic concepts are the same for other 
+types of processor, though the details can vary somewhat.</p> 
+
+<p><b>May functions</b></p>
+
+<p>These functions build up a series of terms with the form: </p>
+
+<p align=center>x<sub>0</sub> is given in [0;1]<br>
+x<sub>k+1</sub> = mu.x<sub>k</sub>.(1 - x<sub>k</sub>)    where mu is a parameter</p>
+
+<p>They were introduced by Robert May in 1976, to study the evolution of a closed insect 
+population. It can be shown that:</p>
+
+<p><ul>
+<li>for 0 &lt;= mu &lt; 3, the behaviour of the series is <u>deterministic</u></li>
+<li>for 3 &lt;= mu &lt;= 4, behaviour is <u>chaotic</u></li>
+</ul></p>
+
+<p>Simplifying things somewhat, the difference between a chaotic and a deterministic system is 
+their sensibility to initial conditions. A chaotic system is very sensible: a small 
+variation of the initial value of x<sub>0</sub> will lead to increasing differences 
+in subsequent terms. Thus any error that creeps into the calculations -- such as
+lack of precision -- will eventually give very different final results.</p>
+
+<p>Other examples of chaotic systems are satellite orbitals and weather prediction.</p>
+
+<p>On the other hand, a deterministic system is not so sensible. A small error in 
+x<sub>0</sub> will make us calculate terms that, while differing from their exact 
+value, will be "close enough" aproximations (whatever that means).</p>
+
+<p>An example of a deterministic system is the trajectory of a ping-pong ball.</p>
+
+<p>So chaotic functions are useful to test the precision of calculations on different 
+systems and with various compilers.</p>
+
+<p><b>Our example</b></p>
+ 
+<p>In this example, I propose to use the following values:</p>
+
+<p align=center>mu = 3.8<br>
+x<sub>0</sub> = 0.5</p>
+
+<p>A precise calculation with a special 1000-digit precision packet gives the following 
+results:</p>
+
+<pre>
+          k              x(k)
+         -----          ---------
+           10            0.18509
+           20            0.23963
+           30            0.90200
+           40            0.82492
+           50            0.53713
+           60            0.66878
+           70            0.53202
+           80            0.93275
+           90            0.79885
+          100            0.23161
+</pre> 
+
+<p>As you see, the series fluctuates merrily up and down the scale between 0 and 1.</p>
+
+<p><b>Programming in Turbo-Pascal</b></p>
+
+<p>A program to calculate this function is easily written in Turbo Pascal for MS-DOS:
+&nbsp;&nbsp;(<A HREF="misc/ward/caos.pas.txt">text version</A>)
+
+<pre>
+program caos;
+
+{$n+}       { you need to activate hardware floating-point calculation 
+              in order to use the extended type }
+
+uses
+   crt;
+
+var
+   s : single;    { 32-bit real }
+   r : real;      { 48-bit real }
+   d : double;    { 64-bit real }
+   e : extended;  { 80-bit real }
+
+   i : integer;  
+
+begin
+   clrscr;
+
+   s := 0.5;
+   r := 0.5;
+   d := 0.5;
+   e := 0.5;
+
+   for i := 1 to 100 do begin
+      s := 3.8 * s * (1 - s);
+      r := 3.8 * r * (1 - r);
+      d := 3.8 * d * (1 - d);
+      e := 3.8 * e * (1 - e);
+
+      if (i/10 = int(i/10)) then begin
+         writeln (i:10, s:16:5, r:16:5, d:16:5, e:16:5);
+      end;
+   end;
+
+   readln;
+end.
+</pre>
+
+<p>As you can see, Turbo Pascal has quite a number of floating-point types, each on 
+a different number of bits. In each case, specific bits are set aside for: </p>
+
+<p><ul>
+<li>the sign: one bit indicates a positive or negative number</li>
+<li>the magnitude (or mantissa): the number itself coded as binary</li>
+<li>the exponent: the power of 2 to multiply the magnitude by to obtain 
+the real value of the number. Note that it may be negative.</li>
+</ul></p>
+
+<p>For example, on a 386, an 80-bit floating-point is coded as:</p>
+
+<p><ul>
+<li>bits 0 to 55: magnitude</li>
+<li>bits 56 to 78: exponent</li>
+<li>bit 79: sign</li>
+</ul></p>
+
+<p>Naturally, hardware FP coding is determined by the processor manufacturer. However, 
+the compiler designer can specify different codings for internal calculations. If 
+FP-math emulation is not used, the compiler must then provide means to translate 
+compiler codings to hardware. This is the case for Turbo Pascal.</p> 
+
+<p>The results of the above program are:</p>
+
+<pre>
+
+     k       single        real         double     extended 
+    ----    ---------    ---------    ---------   ----------
+     10      0.18510      0.18510      0.18510      0.18510
+     20      0.23951      0.23963      0.23963      0.23963
+     30      0.88423      0.90200      0.90200      0.90200
+     40      0.23013      0.82492      0.82493      0.82493
+     50      0.76654      0.53751      0.53714      0.53714
+     60      0.42039      0.64771      0.66878      0.66879
+     70      0.93075      0.57290      0.53190      0.53203
+     80      0.28754      0.72695      0.93557      0.93275
+     90      0.82584      0.39954      0.69203      0.79884
+    100      0.38775      0.48231      0.41983      0.23138
+</pre>
+
+<p>The first terms are rather close in all cases, as heavy calculation 
+precision losses (from truncation) have not yet occurred. Then the least precise 
+(single) format already loses touch with reality around x<sub>30</sub>, while 
+the real format goes out around x<sub>60</sub> and the double around 
+x<sub>90</sub>. These are all compiler FP codings.</p>
+
+<p>The extended format -- which is the native hardware FP coding -- retains 
+sufficient precision right up to x<sub>100</sub>. As an educated guess, it 
+would probably go out around x<sub>110</sub>.</p>
+
+<p><b>p2c under Linux</b></p>
+
+<p>The above program can be compiled with almost no changes with the p2c translating 
+program under Linux:</p>
+
+<p><table align=center width=450>
+<tr><td>p2c caos.pas</td><td><i>translate caos.pas to caos.c</i></td></tr>
+<tr><td>cc caos.c -lp2c -o caos</td><td><i>compile caos.c + p2c library using gcc</i></td></tr>
+</table></p>
+  
+<p>Results are then:</p>
+
+<pre>
+
+     k       single        real         double     extended 
+    ----    ---------    ---------    ---------   ----------
+     10      0.18510      0.18510      0.18510      0.18510
+     20      0.23951      0.23963      0.23963      0.23963
+     30      0.88423      0.90200      0.90200      0.90200
+     40      0.23013      0.82493      0.82493      0.82493
+     50      0.76654      0.53714      0.53714      0.53714
+     60      0.42039      0.66878      0.66878      0.66878
+     70      0.93075      0.53190      0.53190      0.53190
+     80      0.28754      0.93558      0.93558      0.93558
+     90      0.82584      0.69174      0.69174      0.69174
+    100      0.38775      0.49565      0.49565      0.49565
+
+</pre>
+
+<p>It is interesting to note that the p2c translator converts Pascal single 
+precision FP to C single, while the real, double and extended types 
+all convert to C double. This is a format that keeps precision up to 
+around x<sub>80</sub>.</p>
+
+<p>I have no data to substantiate the following, but my impression is that 
+C double FP coding is also on 64 bits, but with a different magnitude vs. 
+exponent distribution than for Turbo Pascal.</p>
+
+<p><b>gcc under Linux</b></p>
+
+<p>The above program, rewritten in C and compiled with gcc, naturally gives the very same 
+results as with p2c:
+&nbsp;&nbsp;(<A HREF="misc/ward/caos.c.txt">text version</A>)
+
+<pre>
+#include &lt;stdio.h&gt;
+
+int main() {
+
+  float f;
+  double d;
+
+  int i;
+
+  f = 0.5;
+  d = 0.5;
+
+  for (i = 1; i &lt;= 100; i++) {
+    f = 3.8 * f * (1 - f);
+    d = 3.8 * d * (1 - d);
+
+    if (i % 10 == 0) 
+      printf ("%10d  %20.5f %20.5f\n", i, f, d);
+  }
+}
+
+</pre>
+
+<p><b>Java</b></p>
+
+<p>The Java programming language is another case altogether, as 
+from the start it was designed to work on many different platforms.</p>
+
+<p>A Java .class file contains the source program compiled in a Virtual Machine 
+Language format. This "executable" file is then interpreted on a client 
+box by whatever java interpreter is available.</p>
+
+<p>However, the Java specification took FP precision very much into account. Any 
+java interpreter <strong>should</strong> perform single and double precision FP 
+calculations with precisely the same results.
+
+<p>This means that one same program will:</p>
+<p><ul>
+<li>be executed with the same precision on different architectures (e.g. Intel, Motorola, Alpha, ...)</li>
+<li>be executed with the same precision on a same architecture, even though the java language interpreter 
+is different.</li>
+</ul></p>
+ 
+<p>The reader can easily experiment these facts. The following applet calculates 
+the May series we have been talking about. Compare its results on your own setup, viewed 
+with Netscape, HotJava, appletviewer, etc. You could also compare with the same 
+browsers, or others, under Windoze. Just open this page with each browser:</p>
+
+<p align=center><applet code="caos.class" width=400 height=180></applet></p>
+
+<p>I have, so far, only found one single exception to this rule. Guess who? 
+Microsoft Explorer 3.0!</p>
+
+<p>Finally, the java source file was:
+&nbsp;&nbsp;(<A HREF="misc/ward/caos.java.txt">text version</A>)
+
+<pre>
+
+import java.applet.Applet;
+import java.lang.String;
+import java.awt.*;
+
+public class caos extends Applet {
+
+    public void paint (Graphics g) {
+
+	float f;
+	double d;
+	String s;
+	
+	int i, y;
+	
+	f = (float)0.5;
+	d = 0.5;
+	
+	g.setColor (Color.black);
+	g.drawString ("k", 10, 10);
+	g.drawString ("float", 50, 10);
+	g.drawString ("double", 150, 10);
+	g.setColor (Color.red);
+	y = 20;
+
+	for (i = 1; i <= 100; i++) {
+	    f = (float)3.8* f * ((float)1.0 - f);
+	    d = 3.8 * d * (1.0 - d);
+	    
+	    if (i % 10 == 0) { 
+		y += 12;
+		g.drawString (java.lang.String.valueOf(i), 10, y);
+		g.drawString (java.lang.String.valueOf(f), 50, y);
+		g.drawString (java.lang.String.valueOf(d), 150, y);
+	    }
+	}
+    }
+
+}
+
+</pre> 
+
+
+<hr>
+
+<p><b>Further reading</b></p>
+
+<p><i>An introduction to Chaotic Dynamical Systems</i>, 
+R.L. Devaney</p>
+<p><i>Jurassic Park I and II</i>, Michael Crichton (the books, not the films!)</p>
+<p><i>The Intel 386-SX microprocessor data sheet</i>, Intel Corp. (available at http://developer.intel.com)</p>
+
+
+
+
+<!-- *** BEGIN copyright *** -->
+<P> <hr> <!-- P --> 
+<H5 ALIGN=center>
+
+Copyright &copy; 2000, Alan Ward<BR> 
+Published in Issue 53 of <i>Linux Gazette</i>, May 2000</H5>
+<!-- *** END copyright *** -->
+
+<!--startcut ==========================================================-->
+<!-- P --> <HR> <!-- P -->
+
+<FONT SIZE="+2"><EM>Talkback:</EM> Discuss this article with peers</FONT></A -->
+<P>
+<!-- *** BEGIN navbar *** -->
+<A HREF="stagner.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom">
+<IMG ALT="" 
+	SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom" >
+<A HREF="index.html"><IMG ALT="[ Table of Contents ]" 
+	SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A>
+<A HREF="../index.html"><IMG ALT="[ Front Page ]" 
+	SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A>
+<A HREF="../faq/index.html"><IMG ALT="[ FAQ ]" 
+	SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A>
+<IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  >
+<IMG ALT="" 
+	SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom" >
+<A HREF="lg_backpage53.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A>
+<!-- *** END navbar *** -->
+</BODY></HTML>
+<!--endcut ============================================================-->

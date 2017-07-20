@@ -1,0 +1,534 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN"> 
+<html>
+<head>
+<title>More 2 Cent Tips & Tricks Issue 10</title>
+</head>
+<body>
+<H4>&quot;Linux Gazette...<I>making Linux just a little more fun!</I>
+&quot;</H4>
+<hr>
+
+<!-- QUICK TIPS SECTION ==================================================
+-->
+<center>
+<H2><A NAME="tips"><IMG ALIGN=MIDDLE ALT="" SRC="../gx/twocent.gif">More 2&#162; Tips!
+</A></H2></center>
+
+<p><hr><p>
+<H3>Contents:</H3>
+<ul>
+<li><a HREF="./lg_tips10.html#pipe">Tcl/TK Tips</a>
+<li><a HREF="./lg_tips10.html#perl">Perl Control M Trick</a>
+<li><a HREF="./lg_tips10.html#emacs">Another Emacs Control M Trick</a>
+<li><a HREF="./lg_tips10.html#xterm">XTerm Title Bar Function</a>
+<li><a HREF="./lg_tips10.html#vi">More on Commenting Code in VI</a>
+<li><a HREF="./lg_tips10.html#x2">More on X Term Title Trick 2</a>
+<li><a HREF="./lg_tips10.html#bash">Bash Quick Tip</a>
+<li><a HREF="./lg_tips10.html#redhat">Neat Red Hat Management Trick</a>
+<li><a HREF="./lg_tips10.html#find">More on Find and Alternatives</a>
+<li><a HREF="./lg_tips10.html#pico">Pico Control M Trick</a>
+<li><a HREF="./lg_tips10.html#emacm">Yet Another Emacs Control M Trick</a>
+</ul>
+
+<P> <hr> <P> 
+<!-- =====================================================================  -->
+<H3><IMG ALIGN=MIDDLE ALT="" SRC="../gx/lil2cent.gif"><a name="pipe">Tcl/Tk Tips</a></H3>
+<P> 
+Date: Tue, 03 Sep 1996 13:29:37 +0100 <BR> 
+From: Liang Shing Ng 
+<A HREF="mailto:L.S.Ng@ecs.soton.ac.uk">&lt;L.S.Ng@ecs.soton.ac.uk&gt;</A><BR> 
+To: fiskjm@ctrvax.Vanderbilt.Edu <BR> 
+Subject: Tcl/Tk tips NOT IN Welch's Book <BR> 
+<P> 
+I see that you just got hooked with Tcl/Tk.
+<P> 
+I found an *OLD* way of interfacing C program with Tk scripts, which is
+not documented in Welch's Book. 
+<P> 
+What is it? Pipe!
+<P> 
+My C prog (parent) create two pipes to communicate with the Tk prog
+(child). The Tk prog only need to use stdin and stdout without knowing
+that this is controlled by the C prog. This provides a much easier way
+than the interface procedures described in Welch.
+<P> 
+Attached here are my C prog and my Tk prog. If you think this is worth
+writing a full article, please let me know. I will do that for the
+Gazette. :)
+<P> 
+Cheers <BR> 
+Liang-Shing Ng
+<P> 
+Description: simple C and Tk prog pair showing how to read/write with
+each other. example of use: C may use this Tk for graphical interface. C
+does some image processing, then ask Tk to display it.
+<P> 
+C Prog:
+<PRE> 
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;unistd.h&gt;
+
+int create_pipe(char *child, int opipe[2], int ipipe[2])
+{
+    pid_t pid;
+    
+    /* Create output pipe and input pipe  */
+    if (pipe (opipe)) {
+        fprintf (stderr, "Pipe failed.\n");
+        return EXIT_FAILURE;
+    }
+    if (pipe (ipipe)) {
+        fprintf (stderr, "Pipe failed.\n");
+        return EXIT_FAILURE;
+    }
+
+     /* Create the child process.  */
+    pid = fork ();
+    if (pid == (pid_t) 0) {
+        /* This is the child process.  */
+        /* Child stdin is opipe[0] */
+        close(0);
+        dup(opipe[0]);
+        close(opipe[0]);
+        /* Child stdout is ipipe[1] */
+        close(1);
+        dup(ipipe[1]);
+        close(ipipe[1]);
+        /* Closed unused FD */
+        close(opipe[1]);
+        close(ipipe[0]);
+        execlp(child, child, NULL);
+    }
+    else if (pid < (pid_t) 0) {
+        /* The fork failed.  */
+        fprintf (stderr, "Fork failed.\n");
+        return EXIT_FAILURE;
+    }
+    return pid;
+}
+
+main(int argc, char *argv[])
+{
+    FILE *po, *pi;
+    char s[128];
+    pid_t pid;
+    int opipe[2], ipipe[2];
+    char buff[256];
+    
+    if (argc<2) {
+        fprintf(stderr, "Tk display subprogram required.\n");
+        fprintf(stderr, "Usage: %s display.tk\n", argv[0]);
+        exit(1);
+    }
+
+    /* Change low level pipe FD to streams */
+    pid=create_pipe(argv[1], opipe, ipipe);
+    po=fdopen(opipe[1], "w");
+    pi=fdopen(ipipe[0], "r");
+
+    while (gets(s)!=NULL) {
+        fprintf(po, "%.5s\n", s);
+        fflush(po);
+        fgets(buff, 256, pi);
+        fprintf(stderr, "%s: %s", argv[0], buff);
+    }
+
+    /* Close output pipe and wait input pipe flush */
+    fclose(po);
+    fgets(buff, 256, pi);
+    fprintf(stderr, "%s: %s", argv[0], buff);
+
+    return 0;
+}
+</PRE> 
+<P> 
+--- <BR> 
+Tk prog
+<PRE> 
+#!/bin/sh
+# the next line restarts using wish \
+exec wish4.0 "$0" "$@"
+
+proc Reader { pipe } {
+    gets $pipe line
+    puts stderr "tk: $line"
+    puts stdout "from tk: $line"
+    flush stdout
+}
+
+image create photo imb -file a.ppm
+label .c -image imb
+pack .c
+wm geometry . +100+100
+update
+
+while { 1 } {
+
+if {[eof stdin]} {
+    exit
+} else {
+    fileevent stdin readable [ Reader stdin ] 
+}
+
+}
+</PRE> 
+
+<P> <hr> <P> 
+<!-- =====================================================================  -->
+<H3><IMG ALIGN=MIDDLE ALT="" SRC="../gx/lil2cent.gif"><a name="perl">Perl Control M Trick</a></H3>
+<P> 
+Date: Wed, 4 Sep 1996 17:02:40 -0700 (PDT) <BR> 
+From: Jonathan Gross <BR> 
+Subject: Perl Tip <BR> 
+<P> 
+I read the most recent issue of the gazette, and the control M
+issue caught my eye. Using vi or emacs is great, but if you have more than
+one file, you can do this:
+<PRE> 
+perl -pi.bak -e 's/\r//g;' filelist
+</PRE> 
+FYI.
+<P> 
+<pre>
+-----------------------  
+Jonathan 
+</pre>
+<P> <hr> <P> 
+<!-- =====================================================================
+-->
+
+<H3><IMG ALIGN=MIDDLE ALT="" SRC="../gx/lil2cent.gif"><a name="emacs">Another Emacs
+Control M Trick</a></H3>
+<P>
+Date: Thu, 05 Sep 1996 13:34:09 -0700 <BR> 
+From: Earl Stutes <A HREF="mailto:estutes@eas.com">&lt;estutes@eas.com&gt;</A><BR> 
+Subject: $.02 emacs tip <BR> 
+<P> 
+Here is the way I handle the ^M in files.
+Put this in your .emacs:
+<PRE> 
+(defun dos-unix ()
+  (interactive)
+  (goto-char (point-min))
+  (while (search-forward "\r" nil t) (replace-match "")))
+(defun unix-dos ()
+  (interactive)
+  (goto-char (point-min))
+  (while (search-forward "\n" nil t) (replace-match "\r\n")))
+</PRE> 
+IP don't usually bind these to keys, but you certainly could.  When you
+call the function M-xdos-unix, it will delete all of the delete all of
+the &lt;CR&gt; characters in the file.  And of course the other function will
+put them back.
+<P> 
+=eas=
+
+<P> <hr> <P> 
+<!-- =====================================================================
+-->
+
+<H3><IMG ALIGN=MIDDLE ALT="" SRC="../gx/lil2cent.gif"><a name="xterm">X Term
+Titlebar Function</a></H3>
+<P>
+Date: Fri, 06 Sep 1996 17:53:00 -0600 <BR> 
+From: "Michael J. Hammel" <A HREF="mailto:mjhammel@emass.com">&lt;mjhammel@emass.com&gt;</A><BR> 
+Subject: Gazette #9 comments -- xterm title bar function<BR> 
+<P> 
+Nice job on the new Linux Gazette!  I'm just scanning it and had a few 
+notes I thought I'd pass to you.
+<P> 
+In the mail, there are a couple of things.  Jim Murphy says that the 
+"-print" option to find is necessary to get output from the find command and 
+follows that up with "get used to it, its *nix".  Well, he's part right.
+Linux does require this.  However, any users who work on other Unix
+boxes will find slight differences in some of the common CLI commands
+(CLI is "command line interface").  For example, "find" on Solaris does
+not require the -print option to get output.  Just food for thought.
+<P> 
+Second, I have an xterm title bar function that people might find
+useful.  I'll give the code first, then explain what it does:
+<P> 
+In your .bashrc (or .kshrc - note this only works on ksh style shells)
+add the following:
+<PRE> 
+HOSTNAME=`uname -n`
+if [ "$TERM" = "xterm" ] && [ "$0" = "-bash" ]
+then
+   ilabel () { echo -n "^[]1;$*^G"; }
+   label () { echo -n "^[]2;$*^G"; }
+   alias stripe='label $HOSTNAME - ${PWD#$HOME/}'
+   alias stripe2='label $HOSTNAME - vi $*'
+   cds () { "cd" $*; eval stripe; }
+   vis () { eval stripe2; "vi" $*; eval stripe;}
+   alias cd=cds
+   alias vi=vis
+   eval stripe
+   eval ilabel "$HOSTNAME"
+fi
+</PRE> 
+This does three things (as long as you're in an xterm and running bash):
+<ol>
+<li>when the xterm is first opened, the name of the current host is
+   displayed in the title bar.
+<li>when you cd to a directory, the current path is displayed in the
+   xterm title bar with the users $HOME directory stripped off the
+   front end of the path (to save some space when you're somewhere
+   in your own directory tree).  The path is preceded by the
+   current hosts network name.
+<li>when you use vi to edit a file the name of the file is displayed
+   in the title bar along with the current hosts name.  When you exit
+   your vi session, the title bar reverts to the "hostname - path"
+   format described in #2 above.
+</ol>
+<P> 
+I found this very useful for all my ksh based systems because it
+removed the path from my shell prompt, thus saving me space for prompt 
+commands.  Since bash is a ksh compatible shell, this works quite
+well on standard Linux systems.
+<P> 
+Hope everyone finds this useful.
+<p>
+<pre>
+--  
+Michael J. Hammel           | 
+mjhammel@emass.com          | Consciousness: that annoying time between naps.
+mjhammel@csn.net            | 
+http://www.csn.net/~mjhammel| 
+</pre>
+
+<P> <hr> <P> 
+<!-- =====================================================================
+-->
+
+<H3><IMG ALIGN=MIDDLE ALT="" SRC="../gx/lil2cent.gif"><a name="vi">More
+on Commenting Code in vi</a></H3>
+<P> 
+Date: Mon, 09 Sep 1996 22:23:25 -0400 <BR> 
+From: Jeff Blaine <A HREF="mailto:jblaine@nda.com">&lt;jblaine@nda.com&gt;</A><BR> 
+Subject: $0.02 tip - More on commenting code in vi <BR> 
+<P> 
+I'm generally ON the code I want to comment, so instead of
+having to find out line numbers and then perform a substitution
+on those lines to insert # characters, I just map my # key
+to "go to the beginning of the current line, go into
+insert mode, insert a # and a space, exit insert mode, go
+down one line"
+<P>
+You can map your # key this way (or whatever key you want
+to assign it to, but be careful) by putting the following
+in your .exrc file:
+<PRE>
+map # I# ^[j
+</PRE>
+That "^[" is created by typing Ctrl-v and then hitting ESC,
+so you literally type:
+<PRE>
+map&lt;SPACE&gt;#&lt;SPACE&gt;I#&lt;SPACE&gt;&lt;Ctrl-v&gt;&lt;ESC&gt;j
+</PRE>
+<P>
+Then all you have to do to go comment-crazy is find where you want
+to start and hold down your # key.
+<P>
+Jeff Blaine <BR> 
+
+<P> <hr> <P> 
+<!--===================================================================-->
+
+<H3><IMG ALIGN=MIDDLE ALT="" SRC="../gx/lil2cent.gif"><a name="x2">More
+X Term Title Trick 2</a></H3>
+<P> 
+Date: Sun, 08 Sep 1996 23:38:31 -0500 <BR> 
+From: the Edward Blevins
+<A HREF="mailto:thedward@mail.utexas.edu ">&lt;thedward@mail.utexas.edu&gt; </A><BR> 
+Subject: Re:XTerm Title Trick 2 <BR> 
+<P> 
+In issue #9 of LG, one of the two cent tips is about how to put the
+hostname in the title of your xterm. It mentions precmd for csh,
+but not the bash equivalent. The way I do this in bash is as
+follows:
+<PRE> 
+  if [ $TERM = 'xterm' ]
+  then export PROMPT_COMMAND='echo -ne
+"\033]2;"`whoami`@`hostname`"\007"'
+  fi
+</PRE> 
+this can just go in your .bashrc, lots of fun. I add the whoami, because
+I am a sysadmin, and its a convienient way to tell if I am
+root, in addition to the '#' on the prompt. Another variation I use
+sometimes is : "`whoami`@`hostname`:`pwd`" then I can remove the path
+from my prompt.
+<P> 
+ps the LG is GREAT! Keep up the good work. Thank you very much!
+<P> 
+<pre>
+--  
+the Edward Blevins 
+thedward@mail.utexas.edu  
+</pre>
+<P> <hr> <P> 
+<!--===================================================================-->
+
+<H3><IMG ALIGN=MIDDLE ALT="" SRC="../gx/lil2cent.gif"><a name="bash">Bash
+Quick Tip</a></H3>
+<P> 
+Date: Thu, 12 Sep 1996 14:59:41 +1000 <BR> 
+From: Jeremy Laidman 
+<A HREF="mailto:JPLaidman@ACSLink.net.au">&lt;JPLaidman@ACSLink.net.au&gt;</A><BR> 
+Subject: Bash Quick tip <BR> 
+<P> 
+Issue 8 had a 2c tip "There and Back!" describing a neat way to
+change between two directories quickly.  The method was to
+use "cd ~-" which will set the working directory to the
+previous one you were in.
+<P> 
+Bash (and several other shells I've tested) will do this without
+the tilde, ie "cd -".  This saves me two keystrokes (including the
+shift key).
+<P> 
+Cheers <p> 
+<pre>
+---------------------------------------------------------------- 
+Jeremy Laidman                          JPLaidman@ACSLink.net.au  
+Networking Consultant                            +61 0416 290866  
+Canberra Institute of Technology                  +61 6 207 4272  
+</pre>
+
+<P> <hr> <P> 
+<!--===================================================================-->
+
+<H3><IMG ALIGN=MIDDLE ALT="" SRC="../gx/lil2cent.gif"><a name="redhat">Neat
+Red Hat Management Trick</a></H3>
+<P> 
+Date: Mon, 16 Sep 1996 01:33:51 -0400 (EDT) <BR> 
+From: Mike Acar
+<A HREF="mailto:mike@contract.kent.edu ">&lt;mike@contract.kent.edu&gt;</A><BR> 
+Subject: Neat Red Hat management trick <BR> 
+<P> 
+Well, it's not really a trick per se.
+If you're like me, you make an attempt to keep your Red Hat system 
+current- at least, in some respects. Tonight, looking at a man page which 
+mentioned Linux 0.99.11 brought to mind the thought that I should upgrade 
+my aging Red Hat 2.0 installation to something more current; fast on its 
+heels was a curiousity about just what I have taken from where. So with a 
+little bit of shell-play and some suggestions from my friend, the 
+following was produced:
+<PRE> 
+rpm -qai | grep Dist | awk -F': ' '{print $3}' | sort | uniq -c
+</PRE> 
+This will tell you all the distributions you have installed RPMs from, 
+and the number of RPMs from each.
+<P> 
+		Mike Acar, mike@contract.kent.edu <BR> 
+		Bret Martin, bret.martin@yale.edu <BR> 
+<p>
+<pre>
+--  
+DZ-015 (Mike Acar)         Information Retrieval        Ministry of Information 
+
+</pre>
+
+<P> <hr> <P> 
+<!--===================================================================-->
+
+<H3><IMG ALIGN=MIDDLE ALT="" SRC="../gx/lil2cent.gif"><a name="find">More on
+Find and Alternatives</a></H3>
+<P> 
+Date: Sat, 14 Sep 1996 19:50:55 -0400 (EDT) <BR> 
+From: Bill Duncan
+<A HREF="mailto:bduncan@beachnet.org">&lt;bduncan@beachnet.org&gt;</A><BR> 
+Subject: find tip... <BR> 
+<P> 
+Hi Jim Murphy. <BR> 
+Saw your "find" tip in issue #9, and thought you might like a quicker method.
+I don't know about other distributions, but Slackware and Redhat
+come with the GNU versions of locate(1) and updatedb(1) which use
+an index to find the files you want.  The updatedb(1) program should
+be run once a night from the crontab facility.  To ignore certain
+sub-directories (like your /cdrom) use the following syntax for the
+crontab file:
+<PRE> 
+41 5 * * *  updatedb --prunepaths="/tmp /var /proc /cdrom" > /dev/null 2>&1
+</PRE> 
+This would run every morning at 5:41am, and update the database with
+filenames from everywhere but the subdirectories (and those below) the
+ones listed.
+<P> 
+To locate a file, just type  "locate filename".  The filename can also
+do partial matching.  The search only takes a few seconds typically, and
+I have tens of thousands of files.
+<P> 
+The locate(1) command also has regular expression matching, but I often
+just pipe it through agrep(1)  (a faster grep)  to narrow the search if
+I want.  Thus:
+<PRE> 
+  locate locate | agrep -v man
+</PRE> 
+..would exclude the manpage for example, and only show me the binary
+and perhaps the sources if I had them online.  (The -v flag excludes
+the pattern used as an argument.)  Or the binary alone along
+with a complete directory listing of it with the following command:
+<PRE> 
+  ls -l `locate locate | agrep bin`
+</PRE> 
+The find(1) command is a great "swiss-army knife" (and actually not
+that bad once you get used to it), but for the 90% of the cases where
+you just want to search by filename, the locate(1) command is *far*
+faster, and much easier to use.
+<P> 
+<pre>
+--  
+Bill Duncan, VE3IED  | BeachNet  -->  http://www.beachnet.org 
+bduncan@BeachNet.org |   - Network/System Administration 
+bduncan@ve3ied.uucp  |   - Web Design, Hosting Services  
++1 416 693-5960      |   - System Analysis/Design/Programming 
+</pre>
+
+<P> <hr> <P> 
+<!--===================================================================-->
+
+<H3><IMG ALIGN=MIDDLE ALT="" SRC="../gx/lil2cent.gif"><a name="pico">Pico
+Control M Trick</a></H3>
+<P> 
+Date: Sat, 14 Sep 96 09:28 PDT <BR> 
+From: Peter <A HREF="mailto:pb@europa.com">&lt;pb@europa.com&gt;</A><BR> 
+Subject: Easier ^M removal with Pico <BR> 
+<P> 
+	I've been using this trick for a long time .. its a lot easier then
+defining macros in Emacs, too.  All it requires is a recent copy of the
+Pico editor.
+<P> 
+	Load the file you wish to strip ^Ms from, make a small change in the
+file (like hitting the space bar, then delete), and save it.  No more ^Ms!
+<P> 
+Peter
+
+<P> <hr> <P> 
+<!--===================================================================-->
+
+<H3><IMG ALIGN=MIDDLE ALT="" SRC="../gx/lil2cent.gif"><a name="emacm">Yet
+Another Emacs Control M Trick</a></H3>
+<P> 
+Date: Tue, 24 Sep 1996 19:26:10 -0700 <BR> 
+From: Dan Gunter <A HREF="mailto:dang@hooked.net">&lt;dang@hooked.net&gt;</A><BR> 
+Subject: re: emacs ^M trick
+<P> 
+I'm new to emacs, so I use a very simple trick to search & replace on
+special characters: I cut or copy them into the paste buffer, then
+Meta-% and hit Control-Y to yank them back into the minibuffer.  This
+isn't elegant, but it's very easy to remember, and seems to work for
+everything.
+
+<P> <hr> <P> 
+<!--====================================================================-->
+
+<A HREF="./index.html"><IMG SRC="../gx/indexnew.gif" ALT="[ TABLE OF 
+CONTENTS ]"></A> <A HREF="../index.html"><IMG SRC="../gx/homenew.gif" 
+ALT="[ FRONT PAGE ]"></A> <A HREF="lg_mail10.html"><IMG SRC="../gx/back2.gif" ALT=" Back "></A> <A HREF="lg_bytes10.html"><IMG SRC="../gx/fwd.gif" ALT=" Next "></A>
+
+<P> <hr> <P>
+This page written and maintained by the Editor of <I>Linux Gazette</I>,
+<A HREF="mailto:gazette@linuxgazette.net"> gazette@linuxgazette.net</A>
+<P> 
+</body> 
+</html>

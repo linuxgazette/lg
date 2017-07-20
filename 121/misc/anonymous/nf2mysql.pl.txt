@@ -1,0 +1,87 @@
+#!/usr/bin/perl
+
+use strict;
+use Date::Parse;
+use Switch; #standard since perl 5.8
+use DBI;
+
+my $dbh = DBI->connect("DBI:mysql:ulogdb","ulog","ulogpass") or die "Can't connect";
+#we could also use prepare/execute to speed up sql insert
+
+my $NF_REGEXP      = '(.*\d+:\d+:\d+)\s.*\skernel:\s(.*)IN=(.*)\sOUT=(.*)\sMAC=(.*)\sSRC=(\d+\.\d+\.\d+\.\d+)\sDST=(\d+\.\d+\.\d+\.\d+)\sLEN=(\d+)\sTOS=0x([0-9a-fA-F]+)\sPREC=([0-9x]+)\sTTL=(\d+)\sID=(\d+)\s.*PROTO=(TCP|UDP|ICMP)';
+my $NF_TCP_REGEXP  = 'SPT=(\d+)\sDPT=(\d+)\sWINDOW=(\d+)\sRES=(0x\w+)\s(.+)\sURGP=(\d+)';
+my $NF_UDP_REGEXP  = 'SPT=(\d+)\sDPT=(\d+)\sLEN=(\d+)';
+my $NF_ICMP_REGEXP = 'TYPE=(\d+)\sCODE=(\d+)\sID=(\d+)\sSEQ=(\d+)';
+
+while (<STDIN>) {
+	$_ =~ /$NF_REGEXP/;
+	my $oob_time_sec        = str2time($1);
+	my $oob_prefix          = $2;
+	my $oob_in              = $3;
+	my $oob_out             = $4;
+	my $raw_mac             = $5;
+	my $ip_saddr            = ip2long($6);
+	my $ip_daddr            = ip2long($7);
+	my $ip_totlen		= $8;
+	my $ip_tos		= hex($9);
+	my $ip_prec		= $10;
+	my $ip_ttl		= $11;
+	my $ip_id               = $12;
+	my $ip_protocol         = $13;
+	my $oob_time_usec=0;
+	
+	switch ($ip_protocol) {
+	case "TCP" {
+		$_ =~ /$NF_TCP_REGEXP/;
+		$ip_protocol=6;
+		my $tcp_sport        = $1;
+		my $tcp_dport        = $2;
+		my $tcp_window	     = $3;
+		my $tcp_res	     = $4;
+		my $tcp_flags	     = $5;
+		my $tcp_urg	     = $6;
+		my ($tcp_ack,$tcp_psh,$tcp_rst,$tcp_syn,$tcp_fin) = (0,0,0,0,0);
+		$tcp_ack = 1 if ($tcp_flags =~/ACK/);
+		$tcp_psh = 1 if ($tcp_flags =~/PSH/);
+		$tcp_rst = 1 if ($tcp_flags =~/RST/);
+		$tcp_syn = 1 if ($tcp_flags =~/SYN/);
+		$tcp_fin = 1 if ($tcp_flags =~/FIN/);
+		$dbh->do("INSERT INTO ulog VALUES (NULL,'00','$oob_time_sec','$oob_time_usec','$oob_prefix','0','$oob_in','$oob_out','$ip_saddr','$ip_daddr','$ip_protocol','$ip_tos','$ip_ttl','$ip_totlen','5',NULL,'$ip_id','0','$tcp_sport','$tcp_dport',NULL,NULL,'$tcp_window','$tcp_urg',NULL,'$tcp_ack','$tcp_psh','$tcp_rst','$tcp_syn','$tcp_fin',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL);");
+	}
+	
+	case "UDP" {
+		$_ =~ /$NF_UDP_REGEXP/;
+		$ip_protocol=17;
+		my $udp_sport	 = $1;
+		my $udp_dport	 = $2;
+		my $udp_len	 = $3;
+		$dbh->do("INSERT INTO ulog VALUES (NULL,'00','$oob_time_sec','$oob_time_usec','$oob_prefix','0','$oob_in','$oob_out','$ip_saddr','$ip_daddr','$ip_protocol','$ip_tos','$ip_ttl','$ip_totlen','5',NULL,'$ip_id',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,'$udp_sport','$udp_dport','$udp_len',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL);");
+	}
+	
+	case "ICMP" {
+		$_ =~ /$NF_ICMP_REGEXP/;
+		$ip_protocol=1;
+		my $icmp_type	 = $1;
+		my $icmp_code	 = $2;
+		my $icmp_echoid	 = $3;
+		my $icmp_echoseq = $4;
+		$dbh->do("INSERT INTO ulog VALUES (NULL,'00','$oob_time_sec','$oob_time_usec','$oob_prefix','0','$oob_in','$oob_out','$ip_saddr','$ip_daddr','$ip_protocol','$ip_tos','$ip_ttl','$ip_totlen','5',NULL,'$ip_id','0',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,'$icmp_type','$icmp_code','$icmp_echoid','$icmp_echoseq',NULL,NULL,NULL,NULL,NULL,NULL);");
+	}
+	}
+}
+
+sub ip2long {
+	#converts an IP address x.x.x.x into a long IP number as used by ulog
+	my $ip_address = shift;
+	
+	my (@octets,$octet,$ip_number,$number_convert);
+	
+	chomp ($ip_address);
+	@octets = split(/\./, $ip_address);
+	$ip_number = 0;
+	foreach $octet (@octets) {
+		$ip_number <<= 8;
+		$ip_number |= $octet;
+	}
+	return $ip_number;
+}

@@ -1,0 +1,296 @@
+<!--startcut =======================================================  -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<html>
+<head>
+<META NAME="generator" CONTENT="lgazmail v1.1pre6">
+<TITLE>The Answer Guy 29: Remote Tape Backups</TITLE> 
+</head>
+
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#A000A0"
+ALINK="#FF0000">
+<!--endcut =========================================================  -->
+<H4>"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+<P> <hr> <P>
+
+<!-- ===============================================================  -->
+<H1 align="center"><A NAME="answer">
+<img src="../gx/dennis/qbubble.gif" alt="" border="0" align="middle">
+<a href="./index.html">The Answer Guy</a>
+<img src="../gx/dennis/bbubble.gif" alt="" border="0" align="middle">
+</A></H1> <BR>
+<H4 align="center">By James T. Dennis,
+<a href="mailto:tag@lists.linuxgazette.net">tag@lists.linuxgazette.net</a><BR>
+Starshine Technical Services, 
+<A HREF="http://www.starshine.org/">http://www.starshine.org/</A> </H4>
+<p><hr><p>
+<H3><img src="../gx/dennis/qbub.gif" alt="(?)" width="50" height="28"
+	align="left" border="0">Remote Tape Backups</H3>
+
+<p><strong>From Bryan Andregg on 10 May 1998
+
+<br><br>
+<dl><dd><font color="#333366">&gt;&gt; On Thu, 19 Jun 1997 
+	13:26:49 -0500, Gary Vinson wrote: 
+	<br>Hello,
+	<br><br>
+        We are running Redhat 4.1 (kernel of 2.0.37). We recently added a tape
+        drive where we would like to do remote backups. Everything works fine
+        as long as we are not root, ie, the remote backup using "<tt>tar -cvf 
+        remotehost:/dev/st0</tt>" works fine for non-root. But for root, we 
+	get a "Permission denied" error.  I understand that 
+	<tt>hosts.equiv</tt> does not control remote access for root but 
+	tried adding entry for <tt>/root/.rhosts</tt> on the "remotehost", 
+	where the tape drive resides, without success.   How are others 
+	handling this problem?
+	</font></dl>
+You need to allow root to login to tty's not listed in 
+<tt>/etc/securetty</tt>. The proper way to fix this is to edit your 
+<tt>/etc/pam.conf</tt> or <tt>/etc/pam.d/login</tt> (which ever is 
+appropriate) and remove the line refering to securetty.
+
+</strong></p>
+<blockquote><img src="../gx/dennis/bbub.gif" width="50" height="28" alt="(!)"
+align="left" border="0">
+	I'm sorry to bring up such and old thread but this 
+	answer is still pretty bad and there is a <strong>much</strong> 
+	better solution (or several).
+
+<br><br>
+	First you can use the following syntax:
+
+<blockquote><code>
+		tar -cvf operator@remotehost:/dev/st0 ...
+
+</code></blockquote>
+	... by creating an "operator" psuedo-user with appropriate
+	permissions to the tape device on the remote host, and
+	creating an <tt>~operator/.rhosts</tt> with entries like:
+
+<blockquote><code>
+		myhost.mydomain.org	root
+
+</code></blockquote>
+	For each of the hosts to be allowed to perform backups.
+
+<br><br>
+	This doesn't expose the remotehost (tape server) to 
+	nearly as much risk as the approaches suggested in these
+	responses (although the normal concerns about user 
+	r* access and host spoofing apply.
+
+<br><br>
+	To alleviate that concern we can use the <tt>--rsh-command=</tt>
+	switch to tar to force it to run over ssh like so:
+
+<blockquote><code>
+		tar -cvf operator@remotehost:/dev/st0 
+			--rsh-command=/usr/local/bin/ssh ...
+
+</code></blockquote>
+	'<tt>cpio</tt>' and '<tt>dump</tt>' also support this 
+	"<tt>user@remote.tapeserver...:/path</tt>" syntax --- though I don't
+	see any option regarding the <tt>--rsh-command</tt> over-ride on those.
+
+<br><br>
+	In most cases (at least with '<tt>dump</tt>') you'll need to ensure
+	that there is a copy of the '<tt>rmt</tt>' command on the "operator's"
+	<tt>$PATH</tt> (on tape server, of course).
+
+</blockquote>
+
+<hr width="40%">
+
+<h3><img src="../gx/dennis/qbub.gif" width="50" height="28" alt="(!)"
+align="left" border="0">Bryan Clarifies...</h3>
+
+<p><strong>From Bryan C. Andregg on 11 May 1998
+
+<br><br>
+Their question was not how to backup, but how to allow root to do backups.
+
+<br><br>
+        Bryan C. Andregg
+</strong></p>
+<blockquote><img src="../gx/dennis/bbub.gif" width="50" height="28" alt="(!)"
+align="left" border="0">
+	My answer was about how to allow root (on the client) to do backups
+	on a remote machine without exposing that remote machine (the 
+	tapehost) to the risks of allowing <tt>rsh</tt> root access.  The 
+	point is that you don't have to change <tt>securetty</tt> or allow 
+	remote root access to provide tape service to to your clients.
+<br><br>
+	Getting off of the security issues, there is another important note
+	that's worth pointing out.  If you just run these commands as 
+	I've described them, you'll probably find that the tape drive
+	doesn't "stream" very well.  That is to say that the flow of data
+	to the drive will probably be "bursty" enough that you'll see the
+	drive stopping, rewinding, and restarting frequently (several 
+	times per minute.
+<br><br>
+	If you tape drive isn't streaming your backups can take ten times
+	as long as it should --- and it will put even more wear and tear on 
+	the drive than that.  So you want to avoid this non-streaming 
+	wherever possible.
+<br><br>
+	The solution to this problem is to use Lee McLoughlin's 
+	<a href="http://sunsite.doc.ic.ac.uk/packages/unix/buffer/">
+	<tt>buffer</tt></a> program.  I'm pretty sure that this is the same
+	Lee McLoughlin that wrote the popular FTP <tt>mirror</tt> Perl script.
+<br><br>
+	This program reads input from one data stream (often a network
+	socket) <strong>reblocks it</strong>, and writes it (usually to 
+	<tt>stdout</tt> which would usually be redirected to the tape drive).
+	You'd also use this if your going to compress or encrypt the data as 
+	you write it to the tape drive (e.g. using <tt>gzip</tt> as a 
+	filter, or using the '<tt>z</tt>' flag on GNU <tt>tar</tt>).
+<br><br>
+	Here's an example of one of the earlier commands using
+<blockquote><code>
+		tar -czvf - ... | rsh -l operator otherhost "buffer > /dev/st0"
+</code></blockquote>
+<br><br>
+	I didn't go into that detail in my other message since it 
+	related to the mechanics of the backup process rather than the 
+	specific security issues at hand.  However, anyone else reading this
+	message might put their tape drive and tapes through unecessary stress 
+	and get unsatisfactory performance and results by trying to follow
+	these examples without using a copy of <tt>buffer</tt>
+<br><br>
+	I've noticed that the <a href="http://www.suse.com/">S.u.S.E.</a>
+	distribution ships with a copy of <tt>buffer</tt> and 
+	<a href="http://www.debian.org/">Debian</a> has it in a package
+	for it (which will presumably be included in their &quot;Official
+	CD Sets&quot; as the 2.0 distribution is finalized and 
+	&quot;shipped&quot;.  I'd like to see this included with Red Hat
+	and I'd like to see GNU <tt>tar</tt> use it, if available, by
+	default when it is called with the '<tt>z</tt>' (gzip/compression) 
+	flag or with a remote file specification.  Likewise for the 
+	appropriate options in the GNU <tt>cpio</tt> and <tt>dump</tt> 
+	packages.
+<br><br>
+	This should <strong>not</strong> be a bit of hacker lore that must
+	be passed down from one sysadmin to another.  It should be documented
+	in the <tt>man</tt> and <tt>info</tt> pages for all of the programs 
+	that conventionally write to tape drives, particularly if they support
+	syntax to directly do so over network sockets, and through compression 
+	and/or encryption packages.
+<br><br>
+	One final note about network and remote tape backups:
+<br><br>
+	Most sysadmins seem to spend entirely too much of their time 
+	reinventing the backup wheel.  I haven't looked at the slick 
+	commercial packages like 
+	<a href="http://www.estinc.com/products.html">BRU</a>
+	<a href="http://www.legato.com>Networker</a> 
+	(which has a Linux <strong> client</strong> --- unsupported --- 
+	but apparently no server support).   These and packages like 
+	<a href="http://www.multiline.com.au/~yusuf/">Taper</a>
+	seem to be mostly user interfaces.
+<br><br>
+	Recently, however, I've been playing with the 
+	<a href="http://www.amanda.org">Advanced Maryland Automatic 
+	Network Disk Archiver</a> from the 
+	<a href="http://www.umd.edu/">University of Maryland</a>.  
+	This seems to be well suited to enterprise data backups.  It has 
+	not UI to speak of --- you add and configure the appropriate 
+	psuedo accounts and groups (providing network access over 
+	<tt>rsh</tt> or <tt>ssh</tt>), install the client and server 
+	components on your machines, in your <tt>/etc/services</tt>, and 
+	<tt>/etc/inetd.conf</tt>, and you add some <tt>cron</tt> jobs.  
+	It manages its own library of tapes and its own "holding space" 
+	on one of the server's filesystems.
+<br><br>
+	Basically you just feed it tapes. One <tt>cron</tt> entry does an 
+	<tt>amcheck</tt> and mails the operator(s) if the wrong tape is 
+	in the drive.  That's normally done during the day when you expect 
+	an operator to be around to fix the problem.  Another entry writes 
+	the backups from the holding disk(s) to tapes; which would normally 
+	be done in the middle of the night.  <strong>Amanda</strong> supports
+ 	a variety of tape changers (and has an extensible design so any tape 
+	changer mechanism with a decent command-line control program can be 
+	used with it).
+<br><br>
+	Many of the users on the Amanda mailing list (see their web site) 
+	are using it to maintain archives of hundreds of filesystems --- 
+	some of them measure their Amanda capacities in <em>Terabytes</em>!
+<br><br>
+	The biggest problem with <strong>Amanda</strong> at this point is the 
+	lack of documentation for new users.  It has plenty of features 
+	(the underlying backup processes use standard <tt>dump</tt> or 
+	GNU <tt>tar</tt> commands so the system is very portable, and some 
+	even use it to backup their NT systems).  
+<br><br>
+	Another problem is that Amanda is a complex system.  I'd suggest 
+	that an initial backup of the tape server be created using some 
+	traditional Unix/Linux command like <tt>cpio</tt> or <tt>tar</tt>, 
+	and that the resulting tape be write-protected and permanently 
+	stored.  (A removable medium, such as a CD-RW, CDR, LS-120, or 
+	whatever would also work).  The point is that this should have the 
+	Amanda installation on it, so you can bootstrap from a tape server 
+	failure to do a full recovery.
+<br><br>
+	<strong>Amanda</strong> deserves much more coverage than this; and 
+	perhaps, when I understand it well enough, I'll write an LG article 
+	on it.  I think that every professional Unix and Linux sysadmin 
+	should take a look at it.
+</blockquote>
+
+<!--================================================================-->
+<P> <hr> <P>
+<H5 align="center"><a href="http://www.linuxgazette.net/copying.html"
+	>Copyright &copy;</a> 1998, James T. Dennis <BR>
+Published in <I>Linux Gazette</I> Issue 29 June 1998</H5>
+<P> <hr> 
+<!--================================================================-->
+<p align="center"><table width="95%"><tr align="center">
+<td rowspan="4"><A HREF="lg_answer29.html"><IMG 
+	SRC="../gx/dennis/answernew.gif" 
+	ALT="[&nbsp;Answer&nbsp;Guy&nbsp;Index&nbsp;]"i
+	align="left"></A></td>
+</tr><tr align="center">
+
+<!-- begins -->
+<td><A HREF="tag_versions.html">versions</A></td>
+<td><A HREF="tag_lilo.html">lilo</A></td>
+<td><A HREF="tag_virtdom.html">virtdom</a></td>
+<td><A HREF="tag_kernel.html">kernel</A></td>
+<td><A HREF="tag_winmodem.html">winmodem</a></td>
+<td><A HREF="tag_basicmail.html">basicmail</a></td>
+<td><A HREF="tag_betterbak.html">betterbak</a></td>
+</tr><tr align="center">
+
+<td><A HREF="tag_shadow.html">shadow</a></td>
+<td><A HREF="tag_dell.html">dell</a></td>
+<td><A HREF="tag_dumbterm.html">dumbterm</a></td>
+<td><A HREF="tag_whylinux.html">whylinux</a></td>
+<td><A HREF="tag_redhat.html">redhat</a></td>
+<td><A HREF="tag_netcard.html">netcard</a></td>
+<td><A HREF="tag_macrovir.html">macrovir</a></td>
+</tr><tr align="center">
+
+<td><A HREF="tag_newlook.html">newlook</a></td>
+<td><A HREF="tag_tacacs.html">tacacs</a></td>
+<td><A HREF="tag_sendmail.html">sendmail</a></td>
+<td><A HREF="tag_dialdppp.html">dialdppp</a></td>
+<td><A HREF="tag_ppp233.html">ppp233</a></td>
+<td><A HREF="tag_msmail.html">msmail</a></td>
+<td><A HREF="tag_procmail.html">procmail</a></td>
+<!-- ends -->
+</tr></table>
+
+</P> <hr> <P>
+<!--================================================================-->
+<A HREF="./index.html"><IMG SRC="../gx/indexnew.gif" 
+	ALT="[&nbsp;Table&nbsp;Of&nbsp;Contents&nbsp;]"></A> 
+<A HREF="../index.html"><IMG SRC="../gx/homenew.gif" 
+	ALT="[&nbsp;Front&nbsp;Page&nbsp;]"></A>
+<A HREF="lg_bytes29.html"><IMG SRC="../gx/back2.gif" 
+	ALT="[&nbsp;Previous&nbsp;Section&nbsp;]"></A>
+<A HREF="./hamilton.html"><IMG SRC="../gx/fwd.gif" 
+	ALT="[&nbsp;Next&nbsp;Section&nbsp;]"></A>
+<!--startcut =======================================================  -->
+</body>
+</html>
+<!--endcut =========================================================  -->
+

@@ -1,0 +1,231 @@
+#include<linux/kernel.h>
+#include<linux/module.h>
+#include<asm/timex.h>
+#include<linux/slab.h>
+#include<asm/io.h>
+#include<linux/ioctl.h>
+#include<linux/fs.h>
+#include<asm/uaccess.h>
+#include<sys/soundcard.h>
+
+
+static char *name= "parsp";
+
+static int major=203;  //200 to 210 are free. Feel free to change it!
+static int loop = 4000; //Adjust this value to change speed of playback
+static long data_buffer, data_ptr,canplay,buffer_length;
+
+void sync(void);
+static ssize_t parsp_read(struct file *file, char *buf,size_t count,loff_t *ppos);
+static ssize_t parsp_write(struct file *file, char *buf,size_t count,loff_t *ppos);
+static int parsp_ioctl(struct inode *inode, struct file *file, unsigned int cmd, unsigned long arg);
+static int parsp_open(struct inode *inode, struct file *file);
+static int parsp_close(struct inode *inode, struct file *file);
+
+
+
+struct file_operations parsp_fops = 
+{
+	NULL,
+read:	parsp_read,
+write:	parsp_write,
+	NULL,
+	NULL,
+ioctl:  parsp_ioctl,
+	NULL,
+open:	parsp_open,
+release:parsp_close,
+};
+
+static ssize_t parsp_read(struct file *file,char *buf,size_t count,loff_t *ppos)
+{
+	printk("Speaker read\n");
+	return -EINVAL;
+}	
+
+static ssize_t parsp_write(struct file *file,char *buf,size_t count,
+loff_t *ppos)
+{
+	static	int b,v,i;
+	
+	if(count<0) return -EINVAL;
+	if(!count)
+	{
+		sync();
+		return 0;
+	}
+	while(canplay){
+	sync();
+	}
+	
+	if(!canplay)
+	{
+	count= (count <44100 ? count : 44100);
+	  if(copy_from_user((void *)data_buffer,buf,count))
+		return -EFAULT;
+		canplay =1;
+
+/*********************The core of the code *********************/
+	
+		for(v=0;v<count;v++)
+		{
+		
+			b=buf[v];
+			outb(b,0x378);
+			for(i=0;i<loop;i++);
+		}
+   /*****************************************************************/
+		return count;
+		}
+	return 0;
+}
+
+
+static int parsp_ioctl(struct inode *inode, struct file *file,unsigned int cmd, unsigned long arg)
+{
+  int val; 
+  val = -EINVAL;
+
+  switch (cmd)
+    {
+    case OSS_GETVERSION:
+      return put_user(SOUND_VERSION, (int *)arg);
+      break;
+
+    case SNDCTL_DSP_SYNC:  
+      sync();
+      return 0;
+      break;
+
+    case SNDCTL_DSP_POST: 
+      return 0; 
+	break;
+	
+    case SNDCTL_DSP_RESET: 
+      sync();
+      return 0;
+      break;
+
+    case SNDCTL_DSP_GETFMTS: 
+      return put_user(AFMT_U8, (int *)arg);
+          break;
+	  
+    case SNDCTL_DSP_SETFMT: 
+      return put_user(AFMT_U8, (int *)arg);
+      break;
+
+     case SNDCTL_DSP_SETFRAGMENT:
+      	return put_user(44100,  (int *)arg);
+	break;
+
+     case SNDCTL_DSP_STEREO:
+	return put_user(1 ,(int *)arg);
+	break;
+	
+    case SNDCTL_DSP_GETISPACE: 
+      return -EINVAL;
+      break;
+
+    case SNDCTL_DSP_NONBLOCK: 
+      file->f_flags |= O_NONBLOCK;
+      return 0;
+      break;
+
+    case SNDCTL_DSP_GETCAPS: 
+      return 0;
+      break;
+
+    case SOUND_PCM_WRITE_RATE: 
+      return put_user(44100, (int *)arg);
+      break;
+
+    case SOUND_PCM_READ_RATE:  
+      return -EINVAL;
+      break;
+
+    case SOUND_PCM_WRITE_CHANNELS: 
+      return put_user(0, (int *)arg);
+      break;
+
+    case SOUND_PCM_READ_CHANNELS: 
+      return put_user(2, (int *)arg);
+      break;
+
+    case SOUND_PCM_READ_BITS:
+      return put_user(8, (int *)arg);
+      break;
+
+    case SNDCTL_DSP_SETDUPLEX:   
+      return -EINVAL;
+      break;
+      
+    case SNDCTL_DSP_PROFILE: 
+      return -EINVAL;
+      break;
+
+    case SNDCTL_DSP_GETODELAY:
+    if (!(file->f_mode & FMODE_WRITE))
+	return -EINVAL;
+      val = (data_buffer ==data_ptr) ? 1 : 0; 
+      return put_user(5, (int *)arg); //changes
+      break;
+
+    case SNDCTL_DSP_GETIPTR:
+      return -EINVAL;
+      break;
+
+    case SNDCTL_DSP_GETBLKSIZE:
+      return put_user(44100 , (int *)arg);
+      break;
+      
+    default:
+      return val;
+    }
+  return put_user(val, (int *)arg);
+}
+
+
+static int parsp_open(struct inode *inode,struct file *file)
+{
+	outb(0,0x378); //To make the port virgin 
+	printk("The parallel port speaker opened\n");
+	return 0;
+}
+
+static int parsp_close(struct inode *inode, struct file *file)
+{
+	outb(0,0x378); //Cleans up the whole mess
+	printk("The parallel port speaker closed\n");
+	sync();
+	return 0;
+}
+
+int init_module(void)
+{
+	
+	major=register_chrdev(major,name,&parsp_fops);
+	if(major == 0)
+		printk("The module successfully initialized \n");
+	else
+		printk("Try with another major number\n");
+	
+	data_buffer= (long) kmalloc(44100, GFP_KERNEL); //allocates mem
+	canplay=0;
+	return 0;
+}
+
+void sync(void)
+{
+	canplay=0;
+	data_ptr=data_buffer;
+	buffer_length=0;
+}
+
+void cleanup_module(void)
+{
+
+	printk("The module was successfully removed from kernel\n");
+	kfree((void *)data_buffer);
+	unregister_chrdev(major,name);
+}
+

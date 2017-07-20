@@ -1,0 +1,423 @@
+<!--startcut ==========================================================-->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML>
+<HEAD>
+<title>Kandinsky Issue 17</title>
+</HEAD>
+<BODY BGCOLOR="#EEE1CC" TEXT="#000000" LINK="#0000FF" VLINK="#0020F0"
+ALINK="#FF0000">
+<!--endcut ============================================================-->
+
+<H4>
+&quot;Linux Gazette...<I>making Linux just a little more fun!</I>&quot;
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H2>Kandinski</H2>
+<H4>By Jeff Hohensee,
+<a href="mailto:"oot@casper.com">ott@casper.com</a></H4>
+
+</center>
+<P> <HR> 
+
+<p>Kandinski is my new pre-pre-pre-beta program which generates a picture
+file from a MIDI file. It does so based on my cycluphonic method of 
+correlating colors to musical pitches. The few careful observers who have 
+seen previous implementations of cycluphonics agree that it gives visual
+events which seem to sympathize with the generating music, in terms of
+implied feeling, better than previous "color organ" methods.
+Kandinski was written with pfe under Linux on a 486. It should be easy to
+port to another ANSI Forth system, as I am rusty at Forth, and the task at
+hand didn't call for any trickery, and I avoided the Linux-specific stuff
+in pfe, mostly because I couldn't find much documentation on it.
+The code presented here creates a .ppm image file on a selectable track by
+track basis. The piano envelope option is not implemented yet, just organ. 
+.ppm files can be converted to just about any image format with the unix
+pbmplus tools, and are viewable in Linux with zgv. 
+The crucial cycluphonic element in Kandinski is the "cycle" construct,
+a lookup table which Kandinski uses to map a 12 hue color wheel to the
+Cycle of Fifths. That's the crux of cycluphonics. If you use this code, or
+cycluphonics, give credit where due.
+
+<h3>How Kandinski operates ( I hope )</h3>
+Copy a MIDI file with some tonal music to filename in.mid .
+Run your ANSI Forth in the same directory. Include the Kandinski code into
+your dictionary. Type main  at the ok prompt. Kandinski will check in.mid
+for a MIDI header. If in.mid is a midi file, Kandinski will traverse
+tracks until it finds a noteon message. It will then tell you a bit about
+the track and ask you if you want to make a picture of it. Hit y and it
+will ask you if you want to use a piano or an organ type volume envelope.
+The piano option is curently just a stub. Kandinski will then ask you to
+hit a key to seed the filename randomizer. Kandinski will then create a
+picture file with a filename of the form kanrrrrr.ppm, where r is a random
+letter. The track portion of the program repeats if there are more tracks
+with notes. The pictures created by Kandinski are 640 by 80 pixels, 24
+bits color depth. I will soon be putting some Kandinski output up at
+<a href="http://cqi.com/~humbubba">http://cqi.com/~humbubba</a><br>
+
+
+<pre>
+( kandinski   )
+( ANSI Forth sourcecode    Rick Hohensee    begun 199703  )
+( A MIDIfile-to-still-picture implementation of my  Cycluphonic method
+       of correlating colors and musical pitches. )
+( used i486 Slackware Linux from the InfoMagic LDR sept 96, pfe, 
+      Jeff Glatt's    MIDI docs, dpans7    )
+(   redistribution permission contingent on authorship credit   )
+ 
+( default number base of file is.... ) decimal
+
+( app notes, pfe file-postition is a DOUBLE!
+            MIDI sizes are SINGLEs  
+            YEESH!  "f0" is a variable!   AAAAARRRRGGG!!! 
+            hex f0 decimal .      doesn't work as wished.      )
+
+
+( my prefered tools, jigs and cheats )
+
+: binary decimal 2   base !      ;
+
+: .base base @ dup decimal . base !     ;
+
+
+
+: walk ."             " key drop     ;
+
+: 0s (   wipe data stack )
+    depth dup if 0 do drop loop else drop then     ; 
+
+: paddump ( [  count ---  ]        counted dump from pad )
+       pad swap dump    ;
+
+
+(  app related ....)
+
+0 value deltasum
+2variable trkend   0 0 trkend 2!
+
+0 value dpp  ( deltas per pixel )
+create rgbs 640 3 * allot
+0 value trk#
+variable midifile
+0 value pbmfile
+
+create organstate 128 allot
+organstate 128 0 fill  ( pfe allot leaves an "allot" string in the alloted 
+                               space )
+create 12state 12 allot
+12state 12 0 fill
+
+0 value redac 
+0 value greenac
+0 value blueac
+0 value backfoot
+
+create cycle 0 , 7 , 2 , 9 , 4 , 11 , 6 , 1 , 8 , 3 , 10 , 5 ,
+
+create wheelred 12 allot
+255 c, 255 c, 255 c, 127 c, 0 c, 0 c, 0 c, 0 c, 0 c, 127 c, 255 c, 255 c,
+create wheelgreen 12 allot
+0 c, 127 c, 255 c, 255 c, 255 c, 255 c, 255 c, 127 c, 0 c, 0 c, 0 c, 0 c, 
+create wheelblue 12 allot
+0 c, 0 c, 0 c, 0 c, 0 c, 127 c, 255 c, 255 c, 255 c, 255 c, 255 c, 127 c,
+
+
+0 value fid
+
+create ppm
+ascii P c, ascii 6 c, 10 c, ascii 6 c, ascii 4 c, ascii 0 c, 
+bl c, ascii 8 c, ascii 0 c,
+bl c, ascii 2 c, ascii 5 c, ascii 5 c,
+
+
+
+
+: msboff 127 and ;
+
+: openin  ( opens a file called in.mid in current dir
+            which can then be referenced via    midifile @ )
+    S" in.mid" r/w bin open-file drop midifile !        ;
+
+: in.mid ( --- fid_of_in.mid ) ( poorly factored, ) midifile @      ;
+
+: inpos ( ---  2inpos ) ( get file position in in.mid )
+     midifile @  file-position drop ( ior)      ;
+
+: inpeek  ( [  count --- ]        counted read from in.mid to pad )
+        pad swap  
+        midifile @ read-file drop     ;
+
+: trksize (  --- trksize ) ( DOES move inpos )
+     ( build a 32 bit track size cell from the WRONGendian value
+       , from body0 to body0 )
+     4 inpeek  drop     ( endianism translation ) 
+     pad c@ 24 lshift
+     pad 1 + c@ 16 lshift +
+     pad 2 + c@ 8  lshift +
+     pad 3 + c@ +                ;
+
+2variable prevpos
+2variable starttrk 0 0 starttrk 2!
+
+: filebound ( fid --- 0 if inside file )
+      dup >r file-position  drop r> file-size drop  2swap d< ;
+
+: hoptrk ( [ --- inbounds_flag ] body0 to next trk body0 )
+    trksize 8 + 0 inpos d+ in.mid reposition-file drop 
+    in.mid  filebound            ;
+
+0 value envelope
+0 value noteons 0 value noteoffs
+
+: hinybble 240 and ;  ( f0 is a &$^%##%$ variable name! )
+hex
+0f constant lonybble
+binary
+: bit7 10000000 and ;
+decimal
+
+0 value delta
+
+: bytein pad 1 in.mid read-file drop  
+1 <> if ( error) cr 
+." end of in.mid  "
+    quit  else pad c@ then    ; 
+
+: bignum 0
+begin bytein dup bit7
+while 
+  msboff swap 7 lshift +
+repeat
+swap 7 lshift + ;    
+
+: ignore ( n --- ) ( add n to inpos )
+0  inpos  d+ in.mid reposition-file drop     ;
+
+: ignoreto ( delimiter --- ) ( ignore filebytes to delimiter )
+ begin dup bytein = until  drop     ;
+
+0 value moment
+
+: mthd   ( --- da position of MThD or fail ) 
+77 ignoreto 84 ignoreto 104 ignoreto 100 ignoreto inpos      ;
+
+: mtrk 77 ignoreto  84 ignoreto 114 ignoreto 107 ignoreto inpos     ;
+
+: seed 
+." hit a key please " key 
+time&date 2drop drop + + + in.mid + ;
+
+
+
+
+: 128to12 ( organstate to 12state, i.e. midinote#s to notename#s )
+12state 12 0 fill
+128 0 do 
+   organstate i + c@  if
+     1 i 12 mod 12state + c!
+   then ( simple for now )
+loop
+;
+
+: 12torgb 0 to redac  0 to  greenac  0 to blueac  
+12 0 do 
+   12state i + c@ if
+      i cells cycle + @ 
+      cells dup wheelred + @ redac  + 2 / to redac 
+      dup wheelgreen + @ greenac + 2 / to greenac 
+      wheelblue + @ blueac  + 2 / to blueac 
+   then    
+loop  ;
+
+
+
+
+: orgtorgb ( pixel# --- )
+128to12
+12torgb
+dup redac swap 3 * rgbs + c!
+dup greenac swap  3 * 1 + rgbs + c!
+blueac swap  3 * 2 + rgbs + c!
+;
+
+
+: reset (  --- )  (  actions on an   FF status byte  )
+bytein case 
+  0 of bignum ignore ." ff 00 ignored "  endof
+  1 of ." text     "           bignum ignore        endof
+  2 of ." copyright     "      bignum ignore  endof
+  3 of ."  trackname       "   bignum ignore   endof
+  4 of ." inst name   "        bignum ignore     endof
+  5 of ." lyric    "           bignum ignore      endof
+  6 of ." flow marker   "      bignum ignore  endof
+  7 of ." cue point, sample "  bignum ignore  endof
+  33 of 2 ignore   ( port # )                         endof
+  47 of ( ." last event of track   " ) 1 ignore       endof
+  81 of  4 ignore                                     endof
+  84 of 6 ignore ." smte o/s ignored "                endof
+  88 of 5 ignore ( time sig )                         endof
+   (  ."       unknown reset ff thang               "  )
+endcase          ;
+
+: sysex ( sysexbyte ---       ) ( i.e. message with status hinyb of f )
+dup case    
+  240 of      247 ignoreto  ." ignoring f0 to f7      "     drop  endof
+  241 of ." miditimecode, unsupported  "  drop          endof
+  242 of ."  song position pointer     "  drop          endof
+  243 of ."  song select               "  drop          endof
+  244 of ."  unimplemented f4 sysex     "  drop         endof
+  245 of ."  unimplemented f5 sysex    "  drop          endof
+  246 of ."  tune calibrate            "  drop          endof
+  249 of ."  unimplemented f9 sysex     "  drop         endof
+  247 of ."  discontinue f0/240 stream  "  drop         endof
+  248 of ."  midi clock                 "  drop         endof
+  250 of ."  restart song               "  drop         endof
+  251 of ."  midi continue, flow        "  drop         endof
+  252 of ."  stop                       "  drop         endof
+  254 of ."  active sense message       "  drop         endof
+  253 of ."  unimplemented fd sysex     "  drop         endof
+  255 of        reset                   endof
+   ." impossible sysex     "   
+endcase      ;
+
+: envelope? cr ." piano envelope or organ? (p=piano/other=organ) " key
+ascii p = if -1 to envelope else 0 to envelope then ;
+
+: message   ( survey pass )
+bytein dup hinybble  case 
+   128 of 2 ignore   noteoffs 1 + to noteoffs  drop endof
+   144 of  noteons  1+ to noteons   2 ignore drop endof
+   160 of 2 ignore drop   endof
+   176 of 2 ignore drop   endof
+   192 of 2 ignore drop   endof
+   208 of 2 ignore drop   endof
+   224 of 2 ignore drop   endof
+   240 of cr  sysex           endof
+
+endcase     ;
+
+: pianooff ." pianooff " 2 ignore ;
+: pianoon  2 ignore ;
+: organoff 0  organstate bytein +  c!  1 ignore   ;
+: organon  -1  organstate bytein +  c! 1 ignore   ;
+
+: messageagain   ( processing pass )
+bytein dup hinybble  case
+   128 of envelope if pianooff else organoff then drop endof
+   144 of envelope if pianoon else organon then  drop endof
+   160 of 2 ignore drop   endof
+   176 of 2 ignore drop   endof
+   192 of 2 ignore drop   endof
+   208 of 2 ignore drop   endof
+   224 of 2 ignore drop   endof
+   240 of cr  sysex           endof
+
+endcase     ;
+
+
+: random.kan ( create file[name] kan[random].ppm )
+seed srand
+ascii k pad  c! ascii a pad 1 + c!   ascii n pad 2 + c!  
+8 3 do 26 random 97 + i pad + c! loop  
+    ascii . pad 8 + c! ascii p pad 9 + c! ascii p pad 10 + c! 
+    ascii m pad 11 + c!      ;
+
+: makepic
+random.kan
+pad 12 r/w create-file drop to pbmfile  ( new filename exists )
+ppm 16 pbmfile write-file drop
+80 0 do 
+rgbs 640 3 * pbmfile write-file drop
+loop
+;
+
+: process
+0 to deltasum 0 to noteons 0 to noteoffs
+640 0 do ( i=pixel )
+
+   begin
+     (  bignum backfoot   )
+     bignum deltasum + to deltasum
+     messageagain
+     i dpp *  deltasum > 
+   while
+   repeat
+   (  paint pixel  )
+   
+   i orgtorgb
+loop
+makepic
+;
+
+
+: survey (  a track )
+inpos  starttrk 2!
+trksize 0  inpos d+ trkend 2!
+0 to deltasum 0 to noteons 0 to noteoffs
+begin
+   bignum deltasum + to deltasum
+   message
+   inpos trkend 2@ d< 
+while 
+repeat
+;
+
+: track survey
+noteons if ." This track has notes....    "
+   cr ."  noteons " noteons .  ."     noteoffs " noteoffs .
+   ."     MIDI clocks per pixel " deltasum 640 / dup to dpp . 
+   cr   ." wanna do a pic of this track? (y/other) "  key ascii y = if
+envelope?
+starttrk 2@ in.mid reposition-file drop inpos d. walk
+noteons     .      dpp if
+process else ."  less than one clock per pixel, no can do " walk then
+then then 
+   ;
+
+: typecheck
+   mthd 
+inpos 2dup 4 0 d= if ." apparent std MIDI seq file. Yay.    "
+else 16 0 d= if ." apparent RMID MIDI file.  OK.    " else
+cr  ." in.mid is apparently not a MIDI file "  cr
+." Copy MIDI file to be processed to in.mid   " bye then then       ;
+
+: main        0 to trk#
+openin  typecheck
+begin
+   trk# 1 + dup to trk#
+
+   mtrk
+   track  
+   ( bytein does a QUIT on end-of-file )
+again
+;
+</pre>
+<p>Separate documentation file for the Kandinski program
+Rick Hohensee  <a href="http://cqi.com/~humbubba">http://cqi.com/~humbubba</a>
+or <a href="mailto:rickh@capaccess.org">rickh@capaccess.org</a>
+please cc to <a href="mailto:humbubba@cqi.com">humbubba@cqi.com</a>
+
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<center><H5>Copyright &copy; 1997, Jeff Hohensee <BR> 
+Published in Issue 17 of the Linux Gazette, May 1997</H5></center>
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<A HREF="./index.html"><IMG ALIGN=BOTTOM SRC="../gx/indexnew.gif" 
+ALT="[ TABLE OF CONTENTS ]"></A>
+<A HREF="../index.html"><IMG ALIGN=BOTTOM SRC="../gx/homenew.gif"
+ALT="[ FRONT PAGE ]"></A>
+<A HREF="./gm.html"><IMG SRC="../gx/back2.gif"
+ALT=" Back "></A>
+<A HREF="./expo.html"><IMG SRC="../gx/fwd.gif" ALT=" Next "></A>
+<P> <hr> <P> 
+<!--startcut ==========================================================-->
+</BODY>
+</HTML>
+<!--endcut ============================================================-->
+

@@ -1,0 +1,670 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>SQLite Tutorial: Common Commands and Triggers LG #109</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="chirico.html" >&lt;-- prev</A> | <A HREF="howell.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>SQLite Tutorial: Common Commands and Triggers</h1>
+<p id="by"><b>By <A HREF="../authors/chirico.html">Mike Chirico</A></b></p>
+
+<p>
+<p>This article explores common methods in SQLite such as running
+commands from the shell prompt and creating triggers for
+populating time stamped fields with either UTC or local time
+values. In addition, delete, update, and insert trigger examples
+will be explored in detail.</p>
+
+<p>All examples can be found in <a href=
+"http://prdownloads.sourceforge.net/souptonuts/sqlite_examples.tar.gz?download">
+sqlite_examples.tar.gz</a> (<a 
+href="misc/chirico/sqlite_examples.tar.gz">local copy</a>), and I would 
+encourage you to download and run these examples as you read through this 
+document.</p>
+
+<p>The home page for sqlite3 is www.sqlite.org and the source for
+sqlite3 can be downloaded at <a href=
+"http://www.sqlite.org/download.html">www.sqlite.org/download.htm.</a>
+This tutorial was done with the source version 3.0.8</p>
+
+<h3>Getting Started - Common Commands</h3>
+
+<p>To create a database file, run the command "sqlite3" followed by
+the database name. For example, to create the database "test.db"
+run the sqlite3 command as follows:</p>
+
+<pre class="code">
+     $ sqlite3 test.db
+     SQLite version 3.0.8
+     Enter ".help" for instructions
+     sqlite&gt; .quit
+     $
+</pre>
+
+<p>The database file test.db will be created, if it does not
+already exist. Running this command will leave you in the sqlite3
+environment. There are 3 ways to safely exit this environment (.q,
+.quit, or .exit).</p>
+
+<p>You do not have to enter the sqlite3 interactive environment.
+Instead, you could perform all commands at the shell prompt, which
+is ideal when running bash scripts and commands in an ssh string.
+Below is an example of how you would create a simple table from the
+command prompt.</p>
+
+<pre class="code">
+     $ sqlite3 test.db  "create table t1 (t1key INTEGER 
+                  PRIMARY KEY,data TEXT,num double,timeEnter DATE);"
+</pre>
+
+<p>After table t1 has been created, data can be inserted as
+follows:</p>
+
+<pre class="code">
+     $ sqlite3 test.db  "insert into t1 (data,num) values ('This is sample data',3);"
+     $ sqlite3 test.db  "insert into t1 (data,num) values ('More sample data',6);"
+     $ sqlite3 test.db  "insert into t1 (data,num) values ('And a little more',9);"
+</pre>
+
+<p>As expected, doing a select returns the data in the table. Note,
+the primary key "t1key" auto increments; however, there are no
+default values for timeEnter. To populate the timeEnter field with
+the time, an update trigger is needed. An important note on the
+PRIMARY KEY: do not use the abbreviated "INT" when working with the
+PRIMARY KEY. You must use "INTEGER", for the primary key to
+update.</p>
+
+<pre class="code">
+     $ sqlite3 test.db  "select * from t1 limit 2";
+     1|This is sample data|3|
+     2|More sample data|6|
+</pre>
+
+<p>In the statement above, the limit clause is used and only 2 rows
+are displayed. For a quick reference of SQL syntax statements
+available with SQLite, see the link <a href=
+"http://www.sqlite.org/lang.html">syntax</a>. There is an offset
+option to the limit clause. For instance, the third row is equal to
+the following: "limit 1 offset 2".</p>
+
+<pre class="code">
+     $ sqlite3 test.db "select * from t1 order by t1key limit 1 offset 2";
+     3|And a little more|9|
+</pre>
+
+<p>The ".table" command shows the table names. For a more
+comprehensive list of tables, triggers, and indexes created in the
+database, query the master table "sqlite_master" as shown
+below.</p>
+
+<pre class="code">
+     $ sqlite3 test.db ".table"
+     t1
+
+     $ sqlite3 test.db "select * from sqlite_master"
+     table|t1|t1|2|CREATE TABLE t1 (t1key INTEGER 
+                  PRIMARY KEY,data TEXT,num double,timeEnter DATE)
+
+</pre>
+
+<p>All SQL information and data inserted into a database can be
+extracted with the ".dump" command.</p>
+
+<pre class="code">
+     $ sqlite3 test.db ".dump"
+     BEGIN TRANSACTION;
+     CREATE TABLE t1 (t1key INTEGER
+                  PRIMARY KEY,data TEXT,num double,timeEnter DATE);
+     INSERT INTO "t1" VALUES(1, 'This is sample data', 3, NULL);
+     INSERT INTO "t1" VALUES(2, 'More sample data', 6, NULL);
+     INSERT INTO "t1" VALUES(3, 'And a little more', 9, NULL);
+     COMMIT;
+</pre>
+
+<p>The contents of the ".dump" can be filtered and piped to another
+database. Below table t1 is changed to t2 with the sed command, and
+it is piped into the test2.db database.</p>
+
+<pre class="code">
+      $ sqlite3 test.db ".dump"|sed -e s/t1/t2/|sqlite3 test2.db
+</pre>
+
+<h3>Triggers</h3>
+
+<p>An insert trigger is created below in the file "trigger1". The
+Coordinated Universal Time (UTC) will be entered into the field
+"timeEnter", and this trigger will fire after a row has been
+inserted into the table t1. Again, this trigger will fire after the
+row has been inserted.</p>
+
+<pre class="code">
+     -- ********************************************************************
+     --   Creating a trigger for timeEnter
+     --     Run as follows:
+     --            $ sqlite3 test.db &lt; trigger1
+     -- ********************************************************************
+     CREATE TRIGGER insert_t1_timeEnter AFTER  INSERT ON t1
+     BEGIN
+      UPDATE t1 SET timeEnter = DATETIME('NOW')  WHERE rowid = new.rowid;
+     END;
+     -- ********************************************************************
+</pre>
+
+<p>The AFTER specification in ..."insert_t1_timeEnter AFTER..." is
+necessary. Without the AFTER keyword, the rowid would not have been
+generated. This is a common source of errors with triggers, since
+AFTER is NOT the default, so it must be specified. In summary, if
+your trigger depends on newly created data, in any of the fields
+from the created row, which was the case for us in this example
+since we need the rowid, then, the AFTER specification is needed.
+Otherwise, the trigger is a BEFORE trigger, and will fire before
+rowid or other pertinent data is entered into the field.</p>
+
+<p>Comments are preceded by "--". If this script was created in the
+file "trigger1", you could easily execute this script as
+follows.</p>
+
+<pre class="code">
+     $ sqlite3 test.db &lt; trigger1
+</pre>
+
+<p>Now try entering a new record as before, and you should see the
+time in the field timeEnter.</p>
+
+<pre class="code">
+     sqlite3 test.db  "insert into t1 (data,num) values ('First entry with timeEnter',19);"
+</pre>
+
+<p>Doing a select reveals the following data:</p>
+
+<pre class="code">
+     $ sqlite3 test.db "select * from t1";
+     1|This is sample data|3|
+     2|More sample data|6|
+     3|And a little more|9|
+     4|First entry with timeEnter|19|2004-10-02 15:12:19
+</pre>
+
+<p>If you look at the statement above, the last value has the
+timeEnter filled in automatically with Coordinated Universal Time -
+or (UTC). If you want local time, then, use select
+datetime('now','localtime'). See the note at the end of this
+section regarding UTC and local time.</p>
+
+<p>For examples that follow the table "exam" and the database
+"examScript" will be used. The table and trigger are defined below.
+Just like the trigger above, UTC time will be used.</p>
+
+<pre class="code">
+     -- *******************************************************************
+     --  examScript: Script for creating exam table                        
+     --   Usage:                                                           
+     --       $ sqlite3 examdatabase &lt; examScript                          
+     --                                                                    
+     --   Note: The trigger insert_exam_timeEnter                          
+     --          updates timeEnter in exam                                 
+     -- *******************************************************************
+     -- *******************************************************************
+     CREATE TABLE exam (ekey      INTEGER PRIMARY KEY,                     
+                        fn        VARCHAR(15),                             
+                        ln        VARCHAR(30),                             
+                        exam      INTEGER,                                 
+                        score     DOUBLE,                                  
+                        timeEnter DATE);                                   
+                                                                           
+     CREATE TRIGGER insert_exam_timeEnter AFTER  INSERT ON exam            
+     BEGIN                                                                 
+                                                                           
+     UPDATE exam SET timeEnter = DATETIME('NOW')                           
+              WHERE rowid = new.rowid;                                     
+     END;                                                                  
+     -- *******************************************************************
+     -- *******************************************************************
+</pre>
+
+<p>After the script file, it can be executed, by redirecting the
+contents of the script file into the sqlite3 command, followed by
+the database name. See the example below:</p>
+
+<pre class="code">
+     $ sqlite3 examdatabase &lt; examScript                            
+     $ sqlite3 examdatabase "insert into exam (ln,fn,exam,score)   
+            values ('Anderson','Bob',1,75)"                        
+                                                                   
+     $ sqlite3 examdatabase "select * from exam"                   
+                                                                   
+     1|Bob|Anderson|1|75|2004-10-02 15:25:00                       
+</pre>
+
+<p>And, as a check, the PRIMARY KEY and current UTC time have been
+updated correctly, as seen from the above example.</p>
+
+<h3>Logging All Inserts, Updates, and Deletes</h3>
+
+<p>The script below creates the table examlog and three triggers
+update_examlog, insert_examlog, and delete_examlog to record
+update, inserts, and deletes made to the exam table. In other
+words, anytime a change is made to the exam table, the changes will
+be recorded in the examlog table, including the old value and the
+new value. By the way if you are familiar with MySQL, the
+functionality of this log table is similar to MySQL's binlog. See
+<a href=
+"http://voxel.dl.sourceforge.net/sourceforge/souptonuts/README_mysql.txt">
+(TIP 2, TIP 24 and TIP 25)</a> if you would like more information
+on MySQL's log file.</p>
+
+<pre class="code">
+     -- *******************************************************************
+     --  examLog: Script for creating log table and related triggers       
+     --   Usage:                                                           
+     --       $ sqlite3 examdatabase &lt; examLOG                             
+     --                                                                    
+     --                                                                    
+     -- *******************************************************************
+     -- *******************************************************************
+     CREATE TABLE examlog (lkey INTEGER PRIMARY KEY,                       
+                       ekey INTEGER,                                       
+                       ekeyOLD INTEGER,                                    
+                       fnNEW   VARCHAR(15),                                
+                       fnOLD   VARCHAR(15),                                
+                       lnNEW   VARCHAR(30),                                
+                       lnOLD   VARCHAR(30),                                
+                       examNEW INTEGER,                                    
+                       examOLD INTEGER,                                    
+                       scoreNEW DOUBLE,                                    
+                       scoreOLD DOUBLE,                                    
+                       sqlAction VARCHAR(15),                              
+                       examtimeEnter    DATE,                              
+                       examtimeUpdate   DATE,                              
+                       timeEnter        DATE);                             
+                                                                           
+     --  Create an update trigger                                          
+     CREATE TRIGGER update_examlog AFTER UPDATE  ON exam                   
+     BEGIN                                                                 
+                                                                           
+       INSERT INTO examlog  (ekey,ekeyOLD,fnOLD,fnNEW,lnOLD,               
+                             lnNEW,examOLD,examNEW,scoreOLD,               
+                             scoreNEW,sqlAction,examtimeEnter,             
+                             examtimeUpdate,timeEnter)                     
+                                                                           
+               values (new.ekey,old.ekey,old.fn,new.fn,old.ln,             
+                       new.ln,old.exam, new.exam,old.score,                
+                       new.score, 'UPDATE',old.timeEnter,                  
+                       DATETIME('NOW'),DATETIME('NOW') );                  
+                                                                           
+     END;                                                                  
+     --                                                                    
+     --  Also create an insert trigger                                     
+     --    NOTE  AFTER keyword ------v                                     
+     CREATE TRIGGER insert_examlog AFTER INSERT ON exam                    
+     BEGIN                                                                 
+     INSERT INTO examlog  (ekey,fnNEW,lnNEW,examNEW,scoreNEW,              
+                           sqlAction,examtimeEnter,timeEnter)              
+                                                                           
+               values (new.ekey,new.fn,new.ln,new.exam,new.score,          
+                       'INSERT',new.timeEnter,DATETIME('NOW') );           
+                                                                           
+     END;                                                                  
+                                                                           
+     --  Also create a DELETE trigger                                      
+     CREATE TRIGGER delete_examlog DELETE ON exam                          
+     BEGIN                                                                 
+                                                                           
+     INSERT INTO examlog  (ekey,fnOLD,lnNEW,examOLD,scoreOLD,              
+                           sqlAction,timeEnter)                            
+                                                                           
+               values (old.ekey,old.fn,old.ln,old.exam,old.score,          
+                       'DELETE',DATETIME('NOW') );                         
+                                                                           
+     END;                                                                  
+     -- *******************************************************************
+     -- *******************************************************************
+</pre>
+
+<p>Since the script above has been created in the file examLOG, you
+can execute the commands in sqlite3 as shown below. Also shown
+below is a record insert, and an update to test these newly created
+triggers.</p>
+
+<pre class="code">
+     $ sqlite3 examdatabase &lt; examLOG                            
+                                                                    
+     $ sqlite3 examdatabase "insert into exam                       
+                               (ln,fn,exam,score)                   
+                             values                                 
+                               ('Anderson','Bob',2,80)"             
+                                                                    
+     $ sqlite3 examdatabase "update exam set score=82               
+                                where                               
+                              ln='Anderson' and fn='Bob' and exam=2"
+
+</pre>
+
+<p>Now, by doing the select statement below, you will see that
+examlog contains an entry for the insert statement, plus two
+updates. Although we only did one update on the command line, the
+trigger "insert_exam_timeEnter" performed an update for the field
+timeEnter -- this was the trigger defined in "examScript". On the
+second update we can see that the score has been changed. The
+trigger is working. Any change made to the table, whether by user
+interaction or another trigger is recorded in the examlog.</p>
+
+<pre class="code">
+  $ sqlite3 examdatabase "select * from examlog"
+
+  1|2||Bob||Anderson||2||80||INSERT|||2004-10-02 15:33:16
+  2|2|2|Bob|Bob|Anderson|Anderson|2|2|80|80|UPDATE||2004-10-02 15:33:16|2004-10-02 15:33:16
+  3|2|2|Bob|Bob|Anderson|Anderson|2|2|82|80|UPDATE|2004-10-02 15:33:16|2004-10-02 15:33:26|2004-10-02 15:33:26
+</pre>
+
+<p>Again, pay particular attention to the AFTER keyword. Remember
+by default triggers are BEFORE, so you must specify AFTER to insure
+that all new values will be available, if your trigger needs to
+work with any new values.</p>
+
+<h3>UTC and Local time</h3>
+
+<p>Note, select DATETIME('NOW') returns UTC or Coordinated
+Universal Time. But select datetime('now','localtime') returns the
+current time.</p>
+
+<pre class="code">
+     sqlite&gt; select datetime('now');
+     2004-10-18 23:32:34
+
+     sqlite&gt; select datetime('now','localtime');
+     2004-10-18 19:32:46
+</pre>
+
+<p>There is an advantage to inserting UTC time like we did with the
+triggers above, since UTC can easily be converted to local time
+after UTC has been entered in the table. See the command below. By
+inserting UTC, you avoid problems when working with multiple
+databases that may not share the same time zone and or daylight
+savings time settings. By starting with UTC, you can always obtain
+the local time.<br>
+(Reference: <a href=
+"http://prdownloads.sourceforge.net/souptonuts/README_Working_With_Time.html?download">
+Working with Time</a>)</p>
+
+<pre class="code">
+     CONVERTING TO LOCAL TIME:
+
+     sqlite&gt; select datetime(timeEnter,'localtime') from exam;
+</pre>
+
+<h2>Other Date and Time Commands</h2>
+
+<p>If you look in the sqlite3 source file "./src/date.c", you will
+see that datetime takes other options. For example, to get the
+local time, plus 3.5 seconds, plus 10 minutes, you would execute
+the following command:</p>
+
+<pre class="code">
+     sqlite&gt; select datetime('now','localtime','+3.5 seconds','+10 minutes');
+     2004-11-07 15:42:26
+</pre>
+
+<p>It is also possible to get the weekday where 0 = Sunday, 1 =
+Monday, 2 = Tuesday ... 6 = Saturday.</p>
+
+<pre class="code">
+       sqlite&gt; select datetime('now','localtime','+3.5 seconds','weekday 2');
+       2004-11-09 15:36:51
+</pre>
+
+<p>The complete list of options, or modifiers as they are called in
+this file, are as follows:</p>
+
+<pre class="code">
+       NNN days
+       NNN hours
+       NNN minutes
+       NNN.NNNN seconds
+       NNN months
+       NNN years
+       start of month
+       start of year
+       start of week
+       start of day
+       weekday N
+       unixepoch
+       localtime
+       utc
+</pre>
+
+<p>In addition, there is the "strftime" function, which will take a
+time string, and convert it to the specified format, with the
+modifications. Here is the format for this function:</p>
+
+<pre class="code">
+     **    strftime( FORMAT, TIMESTRING, MOD, MOD, ...)
+     **
+     ** Return a string described by FORMAT.  Conversions as follows:
+     **
+     **   %d  day of month
+     **   %f  ** fractional seconds  SS.SSS
+     **   %H  hour 00-24
+     **   %j  day of year 000-366
+     **   %J  ** Julian day number
+     **   %m  month 01-12
+     **   %M  minute 00-59
+     **   %s  seconds since 1970-01-01
+     **   %S  seconds 00-59
+     **   %w  day of week 0-6  sunday==0
+     **   %W  week of year 00-53
+     **   %Y  year 0000-9999
+</pre>
+
+<p>Below is an example.</p>
+
+<pre class="code">
+     sqlite&gt; select strftime("%m-%d-%Y %H:%M:%S %s %w %W",'now','localtime');
+     11-07-2004 16:23:15 1099844595 0 44
+</pre>
+
+<h2>Simple Everyday Application</h2>
+
+<h3>Keeping Notes in a Database</h3>
+
+<p>This simple bash script (part of the <a
+href="misc/chirico/sqlite_examples.tar.gz">sqlite_examples tarball</a>)
+allows you to take notes. The notes consist of a line of text followed by
+an optional category without the additional typing.</p>
+
+<pre class="code">
+ "sqlite3 &lt;database&gt; &lt;sql statement&gt;",
+</pre>
+
+<p>Instead, it is a simple one letter command.</p>
+
+<pre class="code">
+     $ n 'Take a look at sqlite3 transactions - 
+           http://www.sqlite.org/lang.html#transaction' 'sqlite3'
+</pre>
+
+<p>The above statement enters the text into a notes table under the
+category 'sqlite3'. Anytime a second field appears, it is
+considered the category. To extract records for the day, I enter "n
+-l", which is similar to "ls -l", to "note list".</p>
+
+<p>With just "n" help is listed on all the commands.</p>
+
+<pre class="code">
+     $ n
+     This command is used to list notes in 
+     a database.
+ 
+     n &lt;option&gt;                                  
+      -l list all notes                          
+      -t list notes for today                    
+      -c list categories                         
+      -f &lt;search string&gt; search for text          
+      -e &lt;cmd&gt; execute command and add to notes  
+      -d delete last entry                       
+</pre>
+
+<h2>REFERENCES:</h2>
+
+<p><strong><a href=
+"http://prdownloads.sourceforge.net/souptonuts/sqlite_examples.tar.gz?download">
+Source Code:</a></strong> Source code for this article.</p>
+
+<p><strong><a href=
+"http://prdownloads.sourceforge.net/souptonuts/README_sqlite_tutorial.html?download">
+SQLite Tutorial:</a></strong> If you are hungry for more
+information, this tutorial covers the ATTACH command, the power of
+the SIGN function, how to modify the SQLite source code, and how to
+create C and C++ APIs using SQLite. There is even a Perl example.
+There are many, many examples and this document is updated
+weekly.</p>
+
+<p><strong><a href=
+"http://prdownloads.sourceforge.net/souptonuts/How_to_Linux_and_Open_Source.txt?download">
+Over 100 Linux Tips:</a></strong> See TIP 50 on working with the
+libraries in C and C++. This tip details how to create dynamic and
+static libraries, as well make use of the -Wl,-R switch in gcc. If
+you create a C or C++ applications that uses SQLite, consider using
+dynamic libraries.</p>
+
+<p><strong><a href=
+"http://prdownloads.sourceforge.net/souptonuts/Solving_Complex_SQL_Problems.txt?download">
+Solving Complex SQL Problems:</a></strong> Growing list of
+examples using the sign function.</p>
+
+<p><strong><a href="http://www.sqlite.org/">www.sqlite.org:</a></strong>
+Home page for the SQLite project.</p>
+
+<p><strong><a href=
+"http://prdownloads.sourceforge.net/souptonuts/README_Working_With_Time.html?download">
+Working with Time:</a></strong> This article defines what is meant
+by UTC, shows you how to use the date command to calculate the date
+for any time zone including with or without daylight savings time.
+Plus you will see how to setup and confirm that NTP is working.
+There is also a program to calculate sunrise and sunset given
+longitude and latitude in degrees.</p>
+
+<p><strong><a href="../106/chirico.html">Lemon Parser Generator
+Tutorial:</a></strong> Tutorial on the parser used with sqlite.</p>
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<p>
+
+<img align="left" alt="[BIO]" src="../gx/authors/chirico.jpg" class="bio">
+
+<em>
+
+Mike Chirico, a father of triplets (all girls) lives outside of
+Philadelphia, PA, USA. He has worked with Linux since 1996, has a Masters
+in Computer Science and Mathematics from Villanova University, and has
+worked in computer-related jobs from Wall Street to the University of
+Pennsylvania. His hero is Paul Erdos, a brilliant number theorist who was
+known for his open collaboration with others.
+<br> Mike's notes page is <a
+href="http://souptonuts.sourceforge.net/chirico/index.php">souptonuts</a>.
+
+
+</em>
+<br clear="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2004, Mike Chirico. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 109 of Linux Gazette, December 2004
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="chirico.html" >&lt;-- prev</A> | <A HREF="howell.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">December 2004 (#109)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/2003/sit3-shine.7-2.gif" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

@@ -1,0 +1,140 @@
+/*========  DC Motor Speed Control ===================================
+
+  PURPOSE - Show how to control the speed of a DC motor using the 
+            Open-USB-IO board.
+            
+    USAGE - compile: g++ -lm -o dcm dc_motor_advanced_control.cpp
+            run:     ./dcm target_back_emf
+    
+  DETAILS - Program sets PWM 1 to 45 Hz and changes the PWM
+            duty cycle to keep the motor speed constant by
+            measuring the back-emf of the motor and trying to
+            keep that a constant.
+          - Motor must be stopped when program starts to ensure 
+            calibration works properly. 
+          - On startup there is a calibration phase where the
+            the motor is stopped and run at full speed for
+            one second.
+            
+  CIRCUIT - Need a DC plug pack and a DC motor.  Plug pack
+            voltage should be 1.5 times or less of the rated
+            motor voltage.
+          - Must add the circuitry below to the Open-USB-IO
+            board to get a smoothed version of the motor
+            voltage.
+
+Your C++ Program     OUSB      .  Components Soldered onto Prototype Area
+on Linux PC          Board     .
+-------------------------------+--------------------------------------------
+                               .    J5 pin 37 --- Vbatt from DC plug-pack 
+                               .    |
+                               .   /"\ DC Motor
+Create a square wave           .   \_/
+ "ousb pwm 1 ..."              .    |      47 kohm
+   |"|___|"|___| -->-- J5 ------>---+---[\\\]---+
+                        pin 27 .                |
+                               .        +-------+----+
+Read the ADC                   .        |       |    |+
+ "ousb adc 0 ..." --<-- J5 ------<------+      |"|  ===  10 uF
+                        pin 1  .          22   |_|   |
+                               .          kohm  |    |
+                               .                +----+-- J5 any even pin, 0v
+                               .
+
+
+Copyright Dr. Pj Radcliffe 2010
+*/
+
+#include <iostream>
+#include <cstdlib>
+#include <string>
+#include <sstream>
+
+#include <math.h>
+#include <stdio.h>
+
+using namespace std;
+
+//========= types and data.
+
+float gain = 0.01 ;  // Gain from ADC error to PWM % change.  Higher
+                     // values give faster response to mechanical load
+                     // changes but may cause cycling and overshoot.
+                     // Lower values cause slower response. 
+float pwm = 0 ;      // starting PWM %.
+
+string str ;
+stringstream stst;
+
+
+
+//============== cpp_do_ousb_comand ================================
+//
+// PURPOSE - send a command to the Open-USB-IO board using the ousb 
+//           command.  Return any integer reply.
+
+int cpp_do_ousb_command(string *str) { FILE *fpipe ;
+  if ( !(fpipe = (FILE*)popen(str->c_str(),"r")))
+   { cout << "pipe error" << endl ;
+     exit(0) ;
+   }
+  char line[100] ;
+  fgets( line, sizeof line, fpipe) ;
+  pclose(fpipe) ;
+  *str = line ; // Caller can see whole returned string.
+  return( atoi(str->c_str())) ; // try returning string as integer.
+}
+
+
+
+//==================== main ======================================
+
+int main(int argc, char *argv[]) 
+{
+ //--- set PWM frequency.
+   str = "ousb pwm-freq 1 45" ;
+   cpp_do_ousb_command(&str) ;
+ 	
+ //--- calculate Vext using pwm of zero.
+   str = "ousb pwm 1 0" ;
+   cpp_do_ousb_command(&str) ;
+   sleep(2) ; // allow motor to stop if going.
+   str = "ousb -r adc 0" ;
+   float Vext = cpp_do_ousb_command(&str) ;
+
+ //--- calculate ADC for motor full on,  Vsat
+   str = "ousb pwm 1 100" ;
+   cpp_do_ousb_command(&str) ;
+   sleep(1) ; // allow motor to get up to speed.
+   str = "ousb -r adc 0" ;
+   float Vsat = cpp_do_ousb_command(&str) ;
+   cout << "  Calibration:   Vsat= " << Vsat << ",  Vext= " << Vext << endl ; 
+
+ //--- advanced control loop.
+   float Vgen_goal = atoi(argv[1]) ;
+   if (Vgen_goal > 1023) Vgen_goal = 1023 ;
+   if (Vgen_goal < 0   ) Vgen_goal = 0 ;
+   float Vavg, Vgen ;
+   while(1)
+    {//--- read ADC input and calculate next PWM value.
+      str = "ousb -r adc 0" ;
+      Vavg = cpp_do_ousb_command(&str) ;
+      Vgen = Vext - (Vavg - Vsat*pwm/100) / ( 1 - pwm/100) ;
+      pwm += gain*(Vgen_goal - Vgen) ;
+      if (!isnormal(pwm))  pwm = 0 ; // if maths error set motor to stop.
+      if (pwm>100) pwm = 100 ;
+      if (pwm<0)   pwm = 0 ;
+      cout << "  pwm%= " << (int)pwm << ",  ADC0= " << Vavg 
+           << ",  Vgen= " << (int)Vgen << ",  Vgoal= " << Vgen_goal << endl ;
+     //--- form PWM command and send to board.
+      stst.str("") ;
+      stst << pwm ;
+      str = "ousb pwm 1 " + stst.str() ;
+      cpp_do_ousb_command(&str) ;
+    }
+    
+   return(0) ;
+}
+
+
+

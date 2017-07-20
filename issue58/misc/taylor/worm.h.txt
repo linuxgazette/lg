@@ -1,0 +1,222 @@
+// *********************************************************
+//
+// worm.h -- x86 Linux wormhole driver for diagnostics
+//
+//    Provides access to x86 I/O ports, PCI configuration space,
+//    memory mapped devices, and sytem time delay functions.  All
+//    access is provided through ioctl calls.
+//
+//    Code here is based on scull.c from "Linux Device Drivers" by
+//    Alessandro Rubini, published by O'Reilly & Associates.
+//    Page references are to the same book.  Source code is available
+//    via the  O'Reilly & Associates web site at
+//    ftp://ftp.ora.com/pub/examples/linux/drivers/examples.tar.gz
+//
+// Notes: 1.
+//
+//---------------------------------------------------------
+//  3/16/00  Mark Taylor
+//           o re-assigned ioctl numbers
+//           o consolidated 6 I/O port ioctls to 2 which share a common struct
+//           o consolidated 6 PCI ioctls to 2 which share a common struct
+//  3/12/00  Mark Taylor
+//           o add ISA commands to set, clear bits using read modify write
+//  3/09/00  Mark Taylor
+//           o add width field to allow read and write of 8 bit pci memory
+///  6/18/99  Mark Taylor
+//           o added delay for N ticks, and get HZ (tick interval)
+//  5/24/99  Mark Taylor         Initial creation
+//---------------------------------------------------------
+
+
+#include <linux/ioctl.h>
+
+// block module internal defines from user programs
+#ifdef __KERNEL__
+#include <linux/types.h>          // u8, u16
+#include <linux/param.h>          // HZ - Linux system clock rate
+#include <linux/sched.h>          // jiffies
+
+
+/* version dependencies have been confined to a separate file */
+
+#define VERSION_CODE(vers,rel,seq) ( ((vers)<<16) | ((rel)<<8) | (seq) )
+//#include "sysdep.h"   // Rubini
+
+
+/*
+ * Macros to help debugging
+ */
+
+#undef PDEBUG             /* undef it, just in case */
+#ifdef WORM_DEBUG
+#  ifdef __KERNEL__
+     /* This one if debugging is on, and kernel space */
+#    define PDEBUG(fmt, args...) printk( KERN_DEBUG "worm: " fmt, ## args)
+#  else
+     /* This one for user space */
+#    define PDEBUG(fmt, args...) fprintf(stderr, fmt, ## args)
+#  endif
+#else
+#  define PDEBUG(fmt, args...) /* not debugging: nothing */
+#endif
+
+#undef PDEBUGG
+#define PDEBUGG(fmt, args...) /* nothing: it's a placeholder */
+
+#ifndef WORM_MAJOR
+#define WORM_MAJOR 0   /* dynamic major by default */
+#endif
+
+/*
+ * The different configurable parameters
+ */
+extern int worm_major;     /* main.c */
+
+
+/*
+ * Prototypes for shared functions
+ */
+int worm_ioctl (struct inode *inode, struct file *filp,
+                 unsigned int cmd, unsigned long arg);
+
+#ifdef WORM_DEBUG
+#  if LINUX_VERSION_CODE > VERSION_CODE(1,99,3) /* 1.99.4 exported the needed symbols */
+#    define WORM_USE_PROC      // not implemented:w
+:1
+/ioctl
+
+#  endif
+#endif
+
+#ifndef min
+#  define min(a,b) ((a)<(b) ? (a) : (b))
+#endif
+
+#endif  // #ifdef __KERNEL__   // block the above from the user
+
+
+/*
+ * pointer to one of these structures is passed as ioctl arg
+ * (out) denotes a member updated by the ioctl call.  (in, out)
+ * denotes a member that is an input or writes and an output for reads.
+ * The remaining members are inputs to the ioctl call.
+ */
+
+// WORM_IOP_R, WORM_IOP_W
+typedef struct PORT_VALUE {     // read/write 8 bit I/O port
+    unsigned short ioport;      // I/O port address
+    unsigned int value;         // 8, 16, 32 bit (in out) value, LS justified
+    unsigned char width;        // 1, 2, 4 bytes
+} PORT_VALUE;
+
+// WORM_IOP_RMW
+typedef struct PORT_RMW_VALUE { // read/modify/write 8, 16, or 32 bit I/O port
+    unsigned short ioport;      // I/O port address
+    unsigned int setMask;       // logic 1 in mask means set the bit
+    unsigned int clearMask;     // logic 1 in mask means clear the bit
+    unsigned char width;        // 1 - 1 byte, 2 - 2 bytes, 4 - 4 bytes
+    unsigned int original;      // value before modify and write (out)
+} PORT_RMW_VALUE;
+
+// WORM_PCI_R, WORM_PCI_W
+typedef struct PCI_VALUE {      // read/write PCI config byte
+    unsigned char bus;          // PCI bus number
+    unsigned char function;     // [7:3] - device,  [2:0] - function
+    unsigned char where;        // byte offset within PCI space
+    unsigned int value;         // 8, 16, 32 bits LS justified (in out)
+    unsigned char width;        // 1, 2, 4 bytes
+} PCI_VALUE;
+
+// WORM_BIOSMEM_R, WORM_BIOSMEM_W, WORM_PCIMEM_R, WORM_PCIMEM_W
+typedef struct MEM_VALUE {      // read/write physical memory
+    unsigned long address;      // address
+    unsigned int value;         // value (in out)
+    unsigned char width;        // 1 or 4 bytes
+} MEM_VALUE;
+
+// WORM_DELAY_MS
+typedef struct DELAY_TIME_MS {        // milliseconds minimum delay
+    unsigned long milliseconds;       // number of milliseconds
+                                      // will be rounded up to nearest 1/HZ
+                               // for verification only
+    unsigned long elapsed_ms;  // elapsed Time Stamp Counter ticks (out)
+    unsigned long elapsed_ls;  // elapsed Time Stamp Counter ticks (out)
+    unsigned long end_ms;      // last Time Stamp Counter value (out)
+    unsigned long end_ls;      // last Time Stamp Counter value (out)
+} DELAY_TIME_MS;
+
+// WORM_DELAY_US
+typedef struct DELAY_TIME_US {        // microseconds minimum delay (in)
+    unsigned long microseconds;       // number of microseconds
+                                      // (good to keep below 100us)
+                               // for verification only
+    unsigned long elapsed_ms;  // elapsed Time Stamp Counter ticks (out)
+    unsigned long elapsed_ls;  // elapsed Time Stamp Counter ticks (out)
+    unsigned long end_ms;      // last Time Stamp Counter value (out)
+    unsigned long end_ls;      // last Time Stamp Counter value (out)
+} DELAY_TIME_US;
+
+// WORM_SYS_TIMER
+typedef struct SYSTEM_TIMER {    // returns system timer value
+    unsigned long value;   // value (out)
+} SYSTEM_TIMER;
+
+
+// WORM_GET_HZ
+typedef unsigned int HZ_TYPE;    // number of system clock ticks per second (out)
+
+// WORM_DELAY_TICKS
+typedef unsigned int TICKS_TYPE; // number of system clock ticks to wait (in)
+
+/*
+ * Ioctl definitions
+ */
+
+/* Use 'j' as magic number - no good reason */
+#define WORM_IOC_MAGIC  'j'
+
+// The _IOW* _IOR* macros use the arg type to determine the size of
+// the user area that is accessed by the pointer passed in arg.
+
+// read an 8, 16, or 32 bit I/O port
+#define WORM_IOP_R _IOWR(WORM_IOC_MAGIC,       0, PORT_VALUE)
+
+// write an 8, 16, or 32 bit I/O port
+#define WORM_IOP_W _IOWR(WORM_IOC_MAGIC,       1, PORT_VALUE)
+
+// atomic read, modify, write an 8, 16, or 32 bit I/O port, return original
+#define WORM_IOP_RMW  _IOW(WORM_IOC_MAGIC,     2, TICKS_TYPE)
+
+// read an 8, 16, or 32 bit PCI configuration space
+#define WORM_PCI_R      _IOWR(WORM_IOC_MAGIC,  3, PCI_VALUE)
+
+// write an 8, 16, or 32 bit PCI configuration space
+#define WORM_PCI_W      _IOWR(WORM_IOC_MAGIC,  4, PCI_VALUE)
+
+// access PCI memory (or memory mapped devices) above the top of DRAM
+#define WORM_PCIMEM_R   _IOWR(WORM_IOC_MAGIC,  5, MEM_VALUE)
+#define WORM_PCIMEM_W   _IOW(WORM_IOC_MAGIC,   6, MEM_VALUE)
+
+// access memory in the 640K to 1M range
+#define WORM_BIOSMEM_R  _IOWR(WORM_IOC_MAGIC,  7, MEM_VALUE)
+#define WORM_BIOSMEM_W  _IOW(WORM_IOC_MAGIC,   8, MEM_VALUE)
+
+// millisecond range delay (rounded up to an integral number of 1/HZ periods)
+// then rounded up 1 tick to account for partial tick
+#define WORM_DELAY_MS  _IOWR(WORM_IOC_MAGIC,   9, DELAY_TIME_MS)
+
+// microsecond range delay (suggest keeping below 100us)
+#define WORM_DELAY_US  _IOWR(WORM_IOC_MAGIC,  10, DELAY_TIME_US)
+
+// retrieves the value of the kernel system timer jiffies
+#define WORM_SYS_TIMER  _IOR(WORM_IOC_MAGIC,  11, SYSTEM_TIMER)
+
+// retrieves the kernel system timer ticks/second value HZ <linux/param.h>
+#define WORM_GET_HZ  _IOR(WORM_IOC_MAGIC,     12, HZ_TYPE)
+
+// delays until N system clock ticks occur
+#define WORM_DELAY_TICKS _IOW(WORM_IOC_MAGIC, 13, TICKS_TYPE)
+
+
+#define WORM_IOC_MAXNR 14        // smallest illegal maximum nr part of command

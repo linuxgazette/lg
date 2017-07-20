@@ -1,0 +1,243 @@
+#!/usr/bin/perl -w
+
+# cgate_alias_settings.pl - reads CommuniGate account aliases and
+# updates this information in the OpenLDAP tree.
+# 
+# Copyright (C) 2005, Rene Pfeiffer <lynx@luchs.at>
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#
+# Thu Nov 30 15:07:32 CET 2005	Created script.
+#
+
+use Carp;
+use DBI;
+use English;
+use Fcntl 'O_RDONLY';
+use Getopt::Long;
+use Net::LDAP;
+use Net::LDAP::Entry;
+use Net::LDAP::Filter;
+use Pod::Usage;
+use strict;
+use Term::ANSIColor qw(:constants);
+use Tie::File;
+use Unicode::String qw(latin1 utf8);
+
+# Getopt::Long
+my $binddn = 'cn=ldapadmin,dc=example,dc=net';
+my $debug  = 0;
+my $help;
+my $passwd = '123456';
+my $size   = 5;
+my $target = 'ldapmaster.example.net';
+my $tport  = 389;
+my $tree   = 'ou=users,ou=accounts,dc=example,dc=net';
+my $verbose= 0;
+
+# File handling
+my @aliases;
+my $line;
+
+# Things
+my $ldap_errors = 0;
+my $max;
+my $sizelimit = 5;
+my $updated = 0;
+
+# Aliases
+my $alstring;
+my @alias;
+
+# LDAP
+my $binddn_target;
+my $ldap_target;
+my $mesg;
+my $uid;
+my $update_dn;
+
+# $a="rene.pfeiffer = (r.pfeiffer,rpfeiffer,lynx);";
+# $a =~ m/\W*(.*)\W*=\W*\((.*)\);/g; 
+# print $1," -- ",$2,"\n";
+
+# --------------------------------------------------------------------
+# Let's start
+
+# Print out help message in case the user didn't supply a file
+# with the list of account.settings files to process
+pod2usage(-exitval => 2, -verbose => 2) if ( $#ARGV < 2 );
+
+GetOptions( 'binddn=s' => \$binddn,
+            'debug=i' => \$debug,
+            'help' => \$help,
+	    'passwd=s' => \$passwd,
+	    'sizelimit=i' => \$size,
+	    'target=s' => \$target,
+	    'tport=i' => \$tport,
+	    'tree=s' => \$tree,
+	    'verbose=i' => \$verbose );
+
+$binddn_target = $binddn;
+
+# Print out help message in case the user didn't supply all
+# mandatory parameters
+pod2usage(-exitval => 2, -verbose => 2) if $help;
+
+# Let's rock!
+#
+# Connect to LDAP server
+$ldap_target = Net::LDAP->new( $target, port => $tport, version => 3, async => 1 ) or die "$@";
+
+if ( $debug > 0 ) {
+	print WHITE "Connected to $target.",RESET,"\n";
+	# Limit results in debugging mode
+	$sizelimit = 7;
+	if ( $size > $sizelimit ) {
+		$sizelimit = $size;
+	}
+}
+else {
+	print WHITE "Connected to target server : ",YELLOW,$target,RESET,"\n";
+}
+
+# Bind to LDAP server
+$mesg = $ldap_target->bind( $binddn_target, password => $passwd );
+$mesg->code && die $mesg->error;
+
+# Tie file with paths to an array
+if ( $debug > 0 ) {
+	print WHITE "Opening file >",$ARGV[$#ARGV-1],"<",RESET,"\n";
+}
+tie @aliases, 'Tie::File', $ARGV[$#ARGV-1], autochomp => 1, mode => O_RDONLY or die "Could not open file of files!";
+$max = $#aliases;
+
+# Walk through the file and process every user
+foreach $line ( @aliases ) {
+	# Isolate uid and aliases
+	if ( $line =~ m/\W*(.*)\W*=\W*\((.*)\);/g ) {
+		$uid      = substr($1,0,length($1)-1);
+		$alstring = $2;
+		if ( $debug > 0 ) {
+			print YELLOW "Found uid     : ",$uid,RESET,"\n";
+			print YELLOW "Found aliases : ",$alstring,RESET,"\n";
+		}
+		@alias = split(/,/,$alstring);
+		if ( $#alias == 0 ) {
+			$alias[0] = $alstring
+		}
+		if ( $debug > 15 ) {
+			print YELLOW "Found ",$#alias+1," aliases.",RESET,"\n";
+			foreach $a ( @alias ) {
+				print RED $a, " ";
+			}
+			print RESET,"\n";
+		}
+		# Writing aliases to LDAP tree
+		foreach $a ( @alias ) {
+			$update_dn = sprintf("uid=%s,%s",$uid,$tree);
+			if ( $debug > 0 ) {
+				print YELLOW "Building LDAP update object for dn  <",$update_dn,">",RESET,"\n";
+			}
+			if ( $debug == 0 ) {
+				$a = $a.'@gruene.at';
+				$mesg = $ldap_target->modify( $update_dn,
+				        add => { 'mailAlternateAddress' => $a } );
+				if ( ! $mesg->code ) {
+					$updated++;
+				}
+				else {
+					print RED "Error: ",$mesg->error,"(",$mesg->error_name,")",RESET,"\n";
+					$ldap_errors++;
+				}
+			}
+			else {
+				print YELLOW "Adding: 'mailAlternateAddress' => $a",RESET,"\n";
+			}
+		}
+	}
+}
+
+# Show statistics
+print GREEN "Updated attributes    : ",$updated,RESET,"\n";
+print GREEN "Errors while updating : ",$ldap_errors,RESET,"\n";
+untie @aliases;
+$ldap_target->unbind;
+
+__END__
+
+=head1 NAME
+
+cgate_alias_settings.pl - reads account aliases from a CommuniGate server, extracts
+them and writes them to an LDAP tree
+
+=head1 SYNOPSIS
+
+cgate_aliases.pl [OPTIONS] FILE
+
+=head1 DESCRIPTION
+
+This script reads the aliases.data file from a CommuniGate server and extracts all aliases
+entries. The aliases are then stored into an LDAP tree in the mailAlternateAddress attribute.
+
+=head1 OPTIONS
+
+=over 8
+
+=item B<--binddn dn>
+
+The DN to use when binding to the target server.
+
+=item B<--debug n>
+
+Set the debug level. 0 is for production use.
+
+=item B<--help>
+
+Prints this text.
+
+=item B<--passwd password>
+
+The password to use when binding to the target server.
+
+=item B<--size n>
+
+Limit processed entries to n when in debug mode. Defaults to 5, but the
+default number of processed entries is 7. n needs to be bigger than 7 to
+have any effect.
+
+=item B<--target server>
+
+Target server. Defaults to ldapmaster.example.net.
+
+=item B<--tport port>
+
+Indicates the target port for talking to the target server. Defaults to 389.
+
+=item B<--tree dntree>
+
+The DN of the subtree on the target server where the data should be synced to.
+
+=item B<--verbose n>
+
+A verbose level greater than 0 makes the program print more status messages. Defaults to 0.
+
+=head1 BUGS
+
+The script does not use TLS when talking to the LDAP server. You can work around this
+limitation by creating SSH tunnels and using localhost with a different port.
+
+=head1 AUTHOR
+
+R. Pfeiffer <lynx@luchs.at>

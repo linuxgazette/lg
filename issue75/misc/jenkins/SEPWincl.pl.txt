@@ -1,0 +1,63 @@
+#!/usr/local/bin/perl -w
+# @(#) SEPclWin.pl	Secure Email Print client program for Windows with GPG.
+#			Takes incoming stream and generates PGP-signed message
+#			which is split in accordance with RFC 2046, then
+#			emailed to server. Requires 'gpg' program.
+#			Graham Jenkins, IBM GSA, Jan. 2002. [Rev'd 2002-02-05]
+
+use strict;				# Note: This is a Lite version of
+use File::Basename;			# SEPclientGPG.pl; recommendations of
+use Net::SMTP;				# RFC 3156 are not implemented herein.
+use Net::hostent;
+use Net::Domain;			# You may need to adjust location of
+use Net::Config;			# 'gpg' executable for your system(s).
+use Socket;
+my ($Sender,$Id,$j,$Dest,$InpBuf,$OutBuf,$Number);
+
+die "Usage: ".basename($0)." kb-per-part destination\n".
+    " e.g.: ".basename($0)." 16 lp3\@pserv.acme.com < report.ps\n".
+    "       Part-size must be >= 1\n" if ( ($#ARGV != 1) or ($ARGV[0] < 1) );
+
+$Dest=$ARGV[1]; $Number = 0; $OutBuf=""; $InpBuf="";
+$Sender="nobody\@".Net::Domain->hostfqdn;  $Id=$Sender.time;
+if ( $^O eq 'MSWin32' ) {open PIPE, "C:\\UTILS\\GPG     -as - |"}
+else                    {open PIPE, "/usr/local/bin/gpg -as - |"}
+
+while (<PIPE>) {			# Read into $InpBuf until EOF found.
+  if ( (length($InpBuf . $_)) > ($ARGV[0] * 1024) ) {do_output()}
+  $InpBuf = $InpBuf . $_		# Whenever $InpBuf is full, call output
+}					# routine to push it into $OutBuf.
+foreach $j (1,2) {do_output()}		# EOF: flush both buffers and exit.
+exit 0;
+
+sub do_output {				# Output subroutine.
+my $hosts = $NetConfig{smtp_hosts};
+my ($Total,$Content,$mailhost,$smtp);	# If output buffer contains data, 
+  if ($OutBuf ne "") {			# increment Number, and check whether
+    $Number++; $Total="";		# it is the last buffer.
+    $Content="message/partial; id=\"$Id\"; number=\"$Number\"";
+    if ($InpBuf eq "") {$Total=$Number; $Content="$Content; total=\"$Total\""}
+    foreach $mailhost (@{$hosts}) {	# Ensure $mailhost address is known.
+      next if ! defined gethost($mailhost);
+      print STDERR "Sending part: ",$Number,"/",$Total," via: ",$mailhost,"\n";
+      $smtp = Net::SMTP->new($mailhost) || next;
+      $smtp->mail($Sender);
+      $smtp->to  ($Dest);
+      $smtp->data();
+      $smtp->datasend("From: $Sender\n");
+      $smtp->datasend("Content-Disposition: inline\n");
+      $smtp->datasend("Content-Transfer-Encoding: 7bit\n");
+      $smtp->datasend("Content-Type: $Content\n");
+      $smtp->datasend("MIME-Version: 1.0\n");
+      $smtp->datasend("To: $Dest\n");
+      $smtp->datasend("Subject: Secure Email Print Job # ".time."\n\n");
+      $smtp->datasend($OutBuf);
+      $smtp->dataend;
+      $smtp->quit;
+      goto L
+    }
+    die "SMTP connection failure!\n"
+  }
+L:$OutBuf = $InpBuf;			# Move input buffer contents to
+  $InpBuf = ""				# output buffer and exit.
+}

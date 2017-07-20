@@ -1,0 +1,92 @@
+#!/usr/bin/perl -w
+# @(#) BIPprint.pl      Acquires Brother-Internet-Print files from POP3 server
+#                       and passes them to designated printer(s). Small-memory
+#                       version.  Intended for invocation via inittab entry.
+#                       Graham Jenkins, IBM GSA, Feb. 2001. Rev'd: 17 Mar. 2001.
+
+use strict;
+use File::Basename;
+use Net::POP3;
+use Date::Manip;
+use IO::File;
+my $host="bronzeback.in.telstra.com.au";        # Same host and password for
+my $pass="MySecret";                            # each printer.
+my $limit=30*1024*1024;                         # Maximum bytes per print job.
+my ($printer,$awkprog);
+defined($ARGV[0]) || die "Usage: ", basename($0). " printer1 [ printer2 ..]\n";
+open(LOG,"|/usr/bin/logger -p local7.info -t ".basename($0)); autoflush LOG 1;
+$awkprog="";                            
+while (<DATA>) {$awkprog = $awkprog . $_};      # Build awk program for later,
+while (1) {                                     # then loop forever, processing 
+  sleep 30;                                     # all printers in each pass, and
+  foreach $printer (@ARGV) {process($printer);} # sleeping for 30 seconds
+}                                               # between each pass.
+
+sub process {
+  my ($flag,$i,$j,$k,$l,$m,$allparts,$user,$pop,@field,@part,$count,$top15,
+      $msgdate,$parsdate,$notify,$reply,%slot,$fh);
+  $user = $_[0];
+  $pop = Net::POP3->new($host);                 # Login to POP3 server and get
+  $count = $pop->login($user,$pass) ;           # header plus 1st 15 lines
+  $count = -1 if ! defined ($count) ;           # of each message. Use apop
+  for ($i = 1; $i <= $count; $i++ ) {           # instead of login if server
+    $top15=$pop->top($i,15) ;                   # supports it.
+    if ($top15) {                       
+      $msgdate = ""; $notify="None"; $reply="";
+      for ($j = 0; $j < 99; $j++ ) {
+        if (@$top15[$j]) {                      # Use arrival-date on POP3
+          if($msgdate eq "") {                  # server to ascertain age of
+            (@field) = split(/;/,@$top15[$j]);  # message; if it is stale,
+            if ( defined($field[1])) {          # delete it and loop for next.
+              $parsdate=&ParseDate($field[1]);  # (Search for semi-colon
+              if( $parsdate ) {                 # followed by valid date.)
+                $msgdate="Y";
+                if(&Date_Cmp($parsdate, &DateCalc("today","-3 days") ) lt 0 ) {
+                  print LOG "Stale msg: $user $parsdate\n";
+                  $pop->delete($i);
+                  goto I;                       # If POP3 server does
+                }                               # automatic message expiration
+              }                                 # this entire section can be
+            }                                   # omitted.
+          }
+          (@field) = split(/=/, @$top15[$j]);
+          if ( defined($field[0]) ) {   
+            if ($field[0] eq "BRO-NOTIFY") {chomp $field[1];$notify=$field[1];}
+            if ($field[0] eq "BRO-REPLY")  {chomp $field[1];$reply =$field[1];}
+            if ( $field[0] eq "BRO-PARTIAL" ) { # Comment above line to
+              ( @part )=split("/", $field[1]);  # prevent mail notification.
+              chomp $part[1];           
+            }
+            if ( $field[0] eq "BRO-UID" ) {     # Determine print-job and part
+              chomp $field[1];                  # thereof contained in message.
+              $slot{$field[1]."=".$part[0]} = $i ;
+              $allparts = "Y";                  # As we see each message, check
+              for ($k=1;$k<=$part[1];$k++) {    # whether we have all parts.
+                $allparts = "N" if ! defined($slot{$field[1]."=".$k}) ; 
+              }
+              if ( $allparts eq "Y" ) {         # Print and delete all parts.
+                print LOG "$field[1] $part[1] => $user\n";
+                if(($notify ne "None") && ($reply ne "")) {system 
+                  "echo Print Job Received, $part[1] pcs|Mail -s$user $reply";}
+                $fh=new IO::File "|awk '{$awkprog}' Limit=$limit |lpr -P $user";
+                for ($k = 1;$k<=$part[1];$k++) {
+                  $pop->get($slot{$field[1]."=".$k},$fh) ;
+                  $pop->delete($slot{$field[1]."=".$k}) ;
+                }                               # If there is enough filespace,
+                $fh->close;                     # pipe awk output thru gzip to
+              }                                 # a temporary file, then print
+            }                                   # it and delete all parts; this
+          }                                     # caters for connection failure.
+        }                       
+      }                                         # The awk program here-under
+    }                                           # is used to extract parts from
+I:}                                             # a file containing multiple
+  $pop->quit() if ($count >= 0);                # parts and feed each of them
+}                                               # through a decoder to stdout.
+__DATA__
+if( Flag == 2 ) {
+    Size=Size+length
+    if(length == 0) { Flag=0; close("mmencode -u 2>/dev/null") }
+    else if(Size<=Limit*4/3) print $0 |"mmencode -u 2>/dev/null" }
+  if( Flag == 1 ) if(length == 0) Flag=2
+  if( Flag == 0 ) if($1 ~ /^Content-Transfer-Enc/) if($NF == "base64") Flag=1

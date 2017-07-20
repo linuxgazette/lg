@@ -1,0 +1,370 @@
+<!DOCTYPE html
+	PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+	 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="utf-8" xml:lang="utf-8">
+<head>
+<title>Command-Line Processing with 'process-getopt' LG #162</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link rel="stylesheet" href="../lg.css" type="text/css" media="screen, projection"  />
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<!-- link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" / -->
+<link rel="shortcut icon" href="../favicon.ico" />
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+</head>
+<body>
+
+<a href="../">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+<div id="navigation">
+<table summary="masthead" width="100%">
+<tr>
+<td align="center" colspan="3" style="font-size: 10px; font-weight: bold">
+<a href="../index.html">Home</a>
+<a href="http://linuxgazette.net">Main Site</a>
+<a href="../faq/index.html">FAQ</a>
+
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/mailman/listinfo/">Mailing Lists</a>
+<a href="../jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+<hr width="99%" style="border: 1px inset #000033">
+</td>
+</tr>
+<tr>
+<td width="40%" align="left" style="font-size: 10px; font-weight: bold">
+The Free International Online Linux Monthly
+</td>
+<td width="20%" align="center" style="font-size: 10px; font-weight: bold">
+ISSN: 1934-371X
+</td>
+<td width="40%" align="right" style="font-size: 10px; font-weight: bold">
+Main site: <a href="http://linuxgazette.net">http://linuxgazette.net</a> 
+</td>
+</table>
+</div>
+
+
+<div id="breadcrumbs1">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">May 2009 (#162)</a> &gt; 
+Article
+
+</div>
+
+<div class="articlecontent1">
+<div class="content">
+
+<div id="previousnexttop">
+<A HREF="lg_bytes.html" >&lt;-- prev</A> | <A HREF="lindholm.html" >next --&gt;</A>
+</div>
+
+<h1>Command-Line Processing with 'process-getopt'</h1>
+<p id="by"><b>By <a href="../authors/hepple.html">Bob Hepple</a></b></p>
+
+
+<h3>You know you oughta...</h3>
+<p>
+... make your bash(1) scripts as pretty as your C code, but somehow there's
+never time. If it's just for your own use, then maybe you don't care -
+until you forget what <code>foobar</code> does, and you try <code>foobar
+-h</code>. Uh oh, yes, now I remember: <code>-h</code> stands for "halt".
+Whoops.
+</p>
+
+<p>
+This article explains a simple way to spruce up your scripts so that they
+act predictably in the Unix way concerning options and arguments. But first
+of all, a little discussion of the problems the bash(1) developer faces.
+</p>
+
+<p>
+When it does matter, when other people are going to be using your script,
+or when you can't rely on your own memory (don't worry, it'll happen to you
+too one day), it's a pain to code responses in bash(1) to all the possible
+inputs that people can make.  Other people can be pretty inventive in
+breaking things with syntax you never imagined.
+</p>
+
+<p>
+Then there's the matter of standards:  Did you even know that there's a
+<a href="http://www.gnu.org/software/libc/manual/html_node/Program-Basics.html">
+GNU standard</a> for this kind of stuff?
+</p>
+
+<p>
+For example, does your script support long options (<code>--verbose</code>)
+as well as short ones (<code>-V</code>)? Long options are great for making
+scripts self-documenting, short ones for power users (and those of us still
+typing on glass teletypes).
+</p>
+
+<p>
+Is your script flexible about spacing around option arguments?  e.g.,
+<code>-n 123</code> should be equivalent to <code>-n123</code> and to
+<code>--number 123</code> and <code>--number=123</code>.  
+</p>
+
+<p>
+Can long options be given as the smallest unique substring, e.g.,
+<code>--numb</code> as a shorthand for <code>--number</code>?  
+</p>
+
+<p>
+Can you fold short options together, e.g., <code>-t -s -u</code> as
+<code>-tsu</code>?  
+</p>
+
+<p>
+Does <code>-h, --help</code> consistently display help (to stdout, thank
+you very much, so that the user can pipe it into a pager program like
+less(1))?
+</p>
+
+<p>
+How about <code>-v,--verbose</code> or <code>-V, --version</code>? ...  and
+so on. These are all things that users (OK, Unix-savvy users) expect - so
+adhering to these conventions makes everyone's life easier.
+</p>
+
+<p>
+But it's really quite tedious and surprisingly hard to get all this right
+when you write your own bash(1) code, and it's not surprising that so few
+scripts end up being user-hardened.
+</p>
+
+<p>
+Where it really hurts is when you try to maintain that bash(1) code. Even
+with getopt(1) this can be a pain (actually the syntax for getopt(1) itself
+is pretty arcane), because the getopt(1) command structure requires you to
+repeat the option letters and strings in three places:
+</p>
+
+<ul>
+<li> the call to getopt(1)
+<li> the case statement to process the options
+<li> the help and man(1) pages. 
+</ul>
+
+<p>
+This repetition introduces wide margins for bugs to creep into the
+code.
+</p>
+
+<h3>A solution</h3>
+<p>
+In compiled languages, there are wrapper functions to put around getopt(3)
+that help considerably in reducing the labour and opportunity for error, in
+writing this sort of code. They include GNU's own argp(3) and Red Hat's
+popt(3).  </p>
+
+<p>
+In python(1) you can
+use <a href="http://www.python.org/doc/2.5.1/lib/module-optparse.html">OptionParse</a>.
+</p>
+
+<p>
+For bash(1) scripts, there hasn't been anything since getoptx(1) died out -
+but, in all my own scripts for the past few years, I've been using a
+library that I wrote: process-getopt(1). It's a wrapper around getopt(1)
+that makes life considerably easier for bash(1) scripters, maintainers,
+and users.
+</p>
+
+<p>
+As an example, here's a tiny script that uses it to process its command
+line: 
+</p>
+
+<pre class="code">
+#!/bin/bash 
+PROG=$(basename $0) 
+VERSION="1" 
+USAGE="A tiny example" 
+
+# call process-getopt functions to define some options: 
+source ./process-getopt 
+SLOT_func()   { [ "$1" ] &amp;&amp; SLOT="yes"; }      # callback for SLOT option 
+add_opt SLOT "boolean option" s "" slot 
+TOKEN_func()  { [ "$1" ] &amp;&amp; TOKEN="$2"; }      # callback for TOKEN option 
+add_opt TOKEN "this option takes a value" t n token number 
+add_std_opts     # define the standard options --help etc: 
+
+# The next 4 lines call the callbacks and remove the options from the command line:
+TEMP=$(call_getopt "$@") || exit 1 
+eval set -- "$TEMP" 
+process_opts "$@" 
+shift "$?"    # remove the options from the command line 
+
+# The hard lifting is done - $@ just contains our arguments:
+echo "SLOT=$SLOT" 
+echo "TOKEN=$TOKEN" 
+echo "args=$@" 
+</pre>
+
+<p>
+... and you're done. Here's the sort of output you get without any
+further coding:
+</p>
+
+<pre>
+$ tiny --help 
+Usage: tiny [-shVvq-] [--slot --help --version --verbose --quiet] [-t <n>,--token=<number>] 
+</p>
+
+A tiny example 
+</p>
+
+Options: 
+  -s, --slot                boolean option 
+  -t n, --token=number      this option takes a value 
+  -h, --help                print this help and exit 
+  -V, --version             print version and exit 
+  -v, --verbose             do it verbosely 
+  -q, --quiet               do it quietly (negates -v) 
+  --                        explicitly ends the options 
+</pre>
+
+<p>
+Here's an example of using the options and arguments on the command line:
+</p>
+
+<pre>
+$ tiny -s --token="my token" arg1 arg2 
+SLOT=yes 
+TOKEN=my token 
+args=arg1 arg2 
+</pre>
+
+<p>
+process-getopt(1) works with bash-2.04 and later and lives
+at:
+</p>
+
+<p>
+<a href="http://sourceforge.net/projects/process-getopt">http://sourceforge.net/projects/process-getopt</a>
+</p>
+
+<p>
+It's pretty easy to convert your existing scripts to use process-getopt(1):
+Follow the samples and manuals here:
+</p>
+
+<p>
+<a href="http://bhepple.freeshell.org/oddmuse/wiki.cgi/process-getopt">http://bhepple.freeshell.org/oddmuse/wiki.cgi/process-getopt</a>
+</p>
+
+<p>
+Here's a direct link to the manual: 
+</p>
+
+<p>
+<a href="http://bhepple.freeshell.org/scripts/process-getopt.pdf">http://bhepple.freeshell.org/scripts/process-getopt.pdf</a>
+</p>
+
+<p>
+Enjoy!
+</p>
+
+
+<br clear="all" />
+
+<script type='text/javascript'>
+digg_url = 'http://linuxgazette.net/162/hepple.html';
+digg_title = 'Command-Line Processing with \'process-getopt\'';
+digg_bodytext = '<p> You know you should make your bash(1) scripts as pretty as your C code, but somehow there\'s never time. If it\'s just for your own use, then maybe you don\'t care - until you forget what <code>foobar</code> does, and you try <code>foobar -h</code>. Uh oh, yes, now I remember: <code>-h</code> stands for "halt". Whoops. </p> ';
+digg_topic = 'linux_unix';
+</script>
+<script src="http://digg.com/tools/diggthis.js" type="text/javascript"></script>
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:162/hepple.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/authors/hepple.jpg" class="bio">
+</p>
+
+<em>
+<p>
+Bob Hepple is the youngest grumpy old man at Promptu Corp on the Gold
+ Coast in Australia and earned his UNIX stripes at Hewlett-Packard in
+ 1981. Since then he's worked in Asia and Australia for various UNIX
+ vendors and crypto companies - but always in UNIX and GNU/Linux.
+</p>
+
+<p>
+Originally a Geordie land-surveyor, he now thinks he's dinky-di after 30
+ years of Oz - but apparently the pommie accent gives the game away.
+</p>
+
+
+
+</em>
+
+<br clear="all">
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2009, Bob Hepple. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication License</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 162 of Linux Gazette, May 2009
+</p>
+
+</div>
+
+<div id="previousnextbottom">
+<A HREF="lg_bytes.html" >&lt;-- prev</A> | <A HREF="lindholm.html" >next --&gt;</A>
+</div>
+
+</div>
+</div>
+
+<script src="http://www.google-analytics.com/urchin.js"
+type="text/javascript">
+</script>
+<script type="text/javascript">
+_uacct = "UA-1204316-1";
+urchinTracker();
+</script>
+
+
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+</body>
+</html>
+

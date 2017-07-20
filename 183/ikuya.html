@@ -1,0 +1,582 @@
+<!DOCTYPE html
+	PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+	 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="utf-8" xml:lang="utf-8">
+<head>
+<title>Automating virtual server administration using Puppet LG #183</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link rel="stylesheet" href="../lg.css" type="text/css" media="screen, projection"  />
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="../lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="../lg.rdf" />
+<!-- link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" / -->
+<link rel="shortcut icon" href="../favicon.ico" />
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+</head>
+<body>
+
+<a href="../">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+<div id="navigation">
+<table summary="masthead" width="100%">
+<tr>
+<td align="center" colspan="3" style="font-size: 10px; font-weight: bold">
+<a href="../index.html">Home</a>
+<a href="http://linuxgazette.net">Main Site</a>
+<a href="../faq/index.html">FAQ</a>
+
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/listinfo.cgi">Mailing Lists</a>
+<a href="../jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+<hr width="99%" style="border: 1px inset #000033">
+</td>
+</tr>
+<tr>
+<td width="40%" align="left" style="font-size: 10px; font-weight: bold">
+The Free International Online Linux Monthly
+</td>
+<td width="20%" align="center" style="font-size: 10px; font-weight: bold">
+ISSN: 1934-371X
+</td>
+<td width="40%" align="right" style="font-size: 10px; font-weight: bold">
+Main site: <a href="http://linuxgazette.net">http://linuxgazette.net</a> 
+</td>
+</table>
+</div>
+
+
+<div id="breadcrumbs1">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">February 2011 (#183)</a> &gt; 
+Article
+
+</div>
+
+<div class="articlecontent1">
+<div class="content">
+
+<div id="previousnexttop">
+<A HREF="hoogland.html" >&lt;-- prev</A> | <A HREF="silva.html" >next --&gt;</A>
+</div>
+
+<h1>Automating virtual server administration using Puppet</h1>
+<p id="by"><b>By <a href="../authors/ikuya.html">Ikuya Yamada</a> and <a href="../authors/takefuji.html">Yoshiyasu Takefuji</a></b></p>
+
+<style type="text/css">
+<!--
+#stdout {
+    color: black !important;
+    font-style: normal;
+}
+-->
+</style>
+
+<h3>Introduction</h3>
+<p>
+  When a server environment is created using virtualization software or a
+cloud service, the number of servers tends to increase rapidly. Software
+installation and configuration are required every time a server is
+created. Further, synchronizing server configurations requires additional
+effort such as writing shell scripts.
+</p>
+
+<p>
+  In this article, we will describe how to build a server environment
+automatically using a relatively new software tool called Puppet. Although
+this tool is typically used to manage large-scale server infrastructure
+(such as a data center or a Web service with a large number of users), it
+can also be used to manage a small number of servers. However, Puppet is a
+newly developed tool, and the existing documentation and the articles
+on Puppet are still somewhat cursory.
+</p>
+
+<p>
+  Here, we will show you simple examples that you can use to configure
+common server settings using Puppet without any difficulty. Using Puppet,
+you can create a new server instantaneously by entering only a few
+commands. Puppet will also periodically synchronize the coniguration of the
+created servers.
+
+</p>
+
+<p>
+ Note that it will be especially useful for configuring and maintaining
+common security settings including <em>sudo</em>, <em>sshd</em>, and
+<em>iptables</em>. In this article, we have also described some of our
+original and simple but powerful common security settings that have
+actually been used in our server environment.
+</p>
+
+<p>
+  We have tested all the examples using the CentOS 5 operating system.
+However, you can apply the described techniques to Linux and other
+operating systems.
+</p>
+
+<h3>Installing Puppet</h3>
+<p>
+  Puppet adopts a server-client architecture. Each client periodically
+communicates with one (or more) master servers and synchronizes the
+configuration (every half hour by default). So, first you need to prepare
+at least two server instances; one would be the Puppet master server and
+the others would be the Puppet client servers.
+</p>
+
+<p>
+ Now, let us proceed to install Puppet. <a href="http://fedoraproject.org/wiki/EPEL">Fedora EPEL</a>
+ provides the Puppet Yum package. If your servers do not have EPEL, please
+install it before proceeding:
+</p>
+
+<pre>
+$ sudo rpm -Uvh http://download.fedora.redhat.com/pub/epel/5/i386/epel-release-5-4.noarch.rpm
+</pre>
+
+<p>
+ Then, install the <em>puppet-server</em> package on the master server that
+manages the other servers and <em>puppet</em> on the client servers:
+</p>
+
+<p>
+  On the master server:
+</p>
+
+<pre class="code">
+$ sudo yum -y install puppet-server
+$ sudo chkconfig puppetmaster on
+$ sudo service puppetmaster start
+</pre>
+
+<p>
+  On the client servers:
+</p>
+
+<pre class="code">
+$ sudo yum -y install puppet
+$ sudo chkconfig puppet on
+$ sudo service puppet start
+</pre>
+
+<p>
+  In addition, if your master server is placed behind a firewall and you
+want to use Puppet on servers that are outside the firewall, you need to
+open TCP port 8140.
+</p>
+
+<h3>A very brief introduction to Puppet</h3>
+<p>
+ In Puppet, all configurations are described as <em>resources</em>.
+Resources can be <em>files</em>, <em>software packages</em>, <em>server
+services</em>, etc. For example, the following <em>file</em> resource
+represents a very basic <em>/etc/passwd</em> file that is owned by root and
+has permission settings of '644':
+</p>
+
+<pre class="code">
+file { '/etc/passwd':
+    owner   =&gt; root,
+    mode    =&gt; 644,
+}
+</pre>
+
+<p>
+ The following configuration installs the <em>openssh-server</em> package,
+enables the <em>sshd</em> service by default, and ensures that <em>sshd</em>
+is running:
+</p>
+
+<pre class="code">
+package { 'openssh-server':
+    ensure =&gt; installed,
+}
+
+service { 'sshd':
+    enable  =&gt; true,
+    ensure  =&gt; running,
+    require =&gt; Package['openssh-server'],
+}
+</pre>
+
+<p>
+ Now, let's apply these configurations to your servers. In Puppet,
+<em>site.pp</em> is a special file that is included by default. If the
+server configuration is not complex, it might be advantageous to write all
+the configuration settings in this file. To do so, please paste the above
+code into your <em>/etc/puppet/manifests/site.pp</em>.
+</p>
+
+<pre class="code">
+file { '/etc/passwd':
+    owner   =&gt; root,
+    mode    =&gt; 644,
+}
+
+package { 'openssh-server':
+    ensure =&gt; installed,
+}
+
+service { 'sshd':
+    enable  =&gt; true,
+    ensure  =&gt; running,
+    require =&gt; Package['openssh-server'],
+}
+</pre>
+
+<p>
+ Next, you need to register and sign the client servers to the master
+server.<br />
+ Please execute the following command on the client servers:
+</p>
+
+<pre class="code">
+$ sudo puppetd --test --waitforcert 30 --server MASTER_SERVER_ADDRESS
+</pre>
+
+<p>
+  and run the following command on the master server.
+</p>
+
+<pre class="code">
+$ sudo puppetca --list
+(YOUR CLIENT_SERVER_ADDRESS IS DISPLAYED HERE)
+$ sudo puppetca --sign CLIENT_SERVER_ADDRESS
+</pre>
+
+<p>
+ Then, back on the client server's console, you will notice that all the
+above configuration entries have been applied automatically by Puppet.<br />
+Further, you will need to add the following parameter to <em>/etc/puppet/puppet.conf</em>
+ in order to specify the address of the master server to the clients.
+</p>
+
+<pre class="code">
+[main]
+    server = MASTER_SERVER_ADDRESS
+</pre>
+
+<p>
+ Now, Puppet will automatically synchronize the server configurations every
+30 minutes. You can confirm this in <em>/var/log/messages</em>:
+</p>
+
+<pre>
+$ sudo tail /var/log/messages
+</pre>
+
+<h3>Configuration examples</h3>
+<p>
+ In this section, we will provide several basic configuration examples. If
+you want to use them, please paste them into your <em>site.pp</em>.
+</p>
+
+<h4>Add administrative user</h4>
+<p>
+ Puppet provides a <em>user</em> resource that enables us to manage user
+accounts. The following configuration adds user <em>admin</em> to your server:
+</p>
+
+<pre class="code">
+# Add "admin" account
+user { 'admin':
+    home       =&gt; '/home/admin',   # home directory is /home/admin
+    managehome =&gt; true,            # manage the home directory by Puppet
+    groups     =&gt; ['wheel'],       # the user belongs to wheel group
+    password   =&gt; 'PASSWORD_HASH', # hashed password text
+}
+</pre>
+
+<p>
+PASSWORD_HASH is a basic password hash, similar to those used in
+<em>/etc/shadow</em>. You can generate it manually using the following
+commands:
+</p>
+
+<pre class="code">
+$ sudo yum -y install ircd-ratbox-mkpasswd
+$ /usr/bin/ircd-mkpasswd -m -s 'SALT' -p 'PASSWORD'
+</pre>
+
+<p class="editorial">[ Standard <code>crypt(3)</code> password creation is
+also available without installing any additional software; running, e.g.
+<span id="stdout">perl -wle 'print crypt "PASSWORD", "SALT"'</span> or <span id="stdout">python -c
+'import crypt; print(crypt.crypt("PASSWORD", "SALT"))'</span> will generate
+one. -- Ben ]
+</p>
+
+<h4>sudo</h4>
+<p>
+ The following configuration installs the <em>sudo</em> package and
+modifies <em>sudoers</em> by using <a href="http://augeas.net/">augeas</a> to
+allow users belonging to the <em>wheel</em> group to use <em>sudo</em>:
+</p>
+
+<pre class="code">
+# Install sudo package
+package { 'sudo':
+    ensure =&gt; installed, # ensure sudo package installed
+}
+
+# Allow users belonging wheel group to use sudo
+augeas { 'sudowheel':
+    context =&gt; '/files/etc/sudoers', # target file is /etc/sudoers
+    changes =&gt; [
+        # allow wheel users to use sudo
+        'set spec[user = "%wheel"]/user %wheel',
+        'set spec[user = "%wheel"]/host_group/host ALL',
+        'set spec[user = "%wheel"]/host_group/command ALL',
+        'set spec[user = "%wheel"]/host_group/command/runas_user ALL',
+    ]
+}
+</pre>
+
+<h4>SSH</h4>
+<p>
+ This configuration enables you to install and use <em>ssh</em> on your
+server. It also changes <em>sshd_config</em> to deny root logins and logins
+with empty passwords.
+</p>
+
+<pre class="code">
+# Install openssh-server package
+package { 'openssh-server':
+    ensure =&gt; installed,
+}
+
+# Enable sshd service
+service { 'sshd':
+    enable  =&gt; true,                      # execute sshd on startup
+    ensure  =&gt; running,                   # ensure sshd running
+    require =&gt; Package['openssh-server'], # require openssh-server before applying this config
+}
+
+# Change sshd configuration
+augeas { 'sshd_config':
+    context =&gt; '/files/etc/ssh/sshd_config', # target file is /etc/ssh/sshd_config
+    notify  =&gt; Service['sshd'],              # restart sshd after applying this config
+    changes =&gt; [
+        # deny root logins and logins with empty passwords
+        'set PermitRootLogin no',
+        'set PermitEmptyPasswords no',
+    ],
+}
+</pre>
+
+<h4>iptables</h4>
+<p>
+ To configure iptables using Puppet, you'll need to install an external module
+called <a href="https://github.com/kbarber/puppet-iptables/">puppet-iptables</a>
+. You need to download and install it from GitHub.
+</p>
+
+<pre class="code">
+$ cd /tmp
+$ wget --no-check-certificate "https://github.com/kbarber/puppet-iptables/tarball/master"
+$ tar xvzf kbarber-puppet-iptables-1.2.0-2-g9deddbb.tar.gz
+$ sudo mkdir -p /etc/puppet/modules
+$ sudo mv kbarber-puppet-iptables-9deddbb /etc/puppet/modules/
+</pre>
+
+<p>
+ Also, you need to add the following parameters to your <em>/etc/puppet/puppet.conf</em>
+ in both the master server and the client servers:
+</p>
+
+<pre class="code">
+[main]
+    libdir = /var/lib/puppet/lib
+
+[puppetd]
+    pluginsync=true
+    plugindest=/var/lib/puppet/lib
+</pre>
+
+<p>
+ Now, you can use <em>iptables</em> resources. The following is a basic
+firewall configuration that only accepts packets over existing connections,
+those from the localhost and the LAN, and those that come in via SSH.
+</p>
+
+<pre class="code">
+# Allow packets that belong to or related to an existing connection
+iptables { 'allow established, related':
+    state =&gt; ['ESTABLISHED', 'RELATED'],
+    proto =&gt; 'all',
+    jump  =&gt; 'ACCEPT',
+}
+
+# Allow all packets from localhost
+iptables { 'allow localhost':
+    source =&gt; '127.0.0.1',
+    proto  =&gt; 'all',
+    jump   =&gt; 'ACCEPT',
+}
+
+# Allow all packets from LAN
+iptables { 'allow LAN':
+    source =&gt; '192.168.0.0/16',
+    proto  =&gt; 'all',
+    jump   =&gt; 'ACCEPT',
+}
+
+# Allow all packets to SSH
+iptables { 'allow ssh':
+    proto =&gt; 'tcp',
+    dport =&gt; 22,
+    jump  =&gt; 'ACCEPT',
+}
+
+# Drop all incoming packets by default
+iptables { 'drop incoming packets':
+    chain =&gt; 'INPUT',
+    proto =&gt; 'all',
+    jump  =&gt; 'DROP',
+}
+</pre>
+
+<h3>Further information</h3>
+<p>
+If you are interested in Puppet and want to learn further about it, please
+refer to the <a href="http://docs.puppetlabs.com/">official
+documentation</a>; <a
+href="http://docs.puppetlabs.com/guides/introduction.html">introduction to
+Puppet</a> would be a good starting point.
+</p>
+
+
+<br clear="all" />
+
+<table align='center' cellspacing='10'>
+<tr>
+<td>
+<script type='text/javascript'>
+digg_url = 'http://linuxgazette.net/183/ikuya.html';
+digg_title = 'Automating virtual server administration using Puppet';
+digg_bodytext = '<p>   When a server environment is created using virtualization software or a cloud service, the number of servers tends to increase rapidly. Software installation and configuration are required every time a server is created. Further, synchronizing server configurations requires additional effort such as writing shell scripts. </p> ';
+digg_topic = 'linux_unix';
+</script>
+<script src="http://digg.com/tools/diggthis.js" type="text/javascript"></script>
+</td>
+<td>
+<a name="fb_share" type="box_count" href="http://www.facebook.com/sharer.php">Share</a>
+<script src="http://static.ak.fbcdn.net/connect.php/js/FB.Share" type="text/javascript"></script>
+</td>
+<td>
+<a href="http://twitter.com/home?status=Currently%20reading:%20http://linuxgazette.net/183/ikuya.html%20at%20Linux%20Gazette%20%23linuxgazette" title="Click to share this post on Twitter"><img src="../gx/twitter.png" width="50" height="85" border="0"></a>
+</td>
+</tr>
+</table>
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:183/ikuya.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<H4>Ikuya Yamada</H4>
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/authors/ikuya.jpg" class="bio">
+</p>
+
+<em>
+<p>
+Ikuya Yamada is an entrepreneur and an experienced software engineer.
+ Currently, he is the founder and the CTO of Studio Ousia Inc., a
+ software R&D company founded in 2007 in Tokyo. He is also a senior
+ visiting researcher at the Keio Research Institute at SFC from 2010.
+ Prior to Studio Ousia, he was the CTO of a listed Japanese software
+ company named Fractalist Inc. and previously the founder and the CEO of
+ a software R&D company called Newrong Inc., which was acquired by
+ Fractalist Inc. in 2005. He obtained his B.S. (2006) and M.S. (2010)
+ from Keio University.
+</p>
+
+
+
+</em>
+
+<br clear="all">
+
+
+<H4>Yoshiyasu Takefuji</H4>
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/2002/note.png" class="bio">
+</p>
+
+<em>
+<p>
+Yoshiyasu Takefuji was heavily involved in developing a unix based color
+workstation in 1983 at University of South Florida. Recently he has been
+monitoring three Linux servers to see the behavior of DOS attacks. He is
+a chair of SecurityExpo in Japan since 2004 and also a chair of OECD
+TrustE security product evaluation committee chair in Japan, and advisor
+of Japan Network Security Association and CMU in Japan.
+</p>
+</em>
+
+<br clear="all">
+
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2011, Ikuya Yamada and Yoshiyasu Takefuji. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication License</a>
+unless otherwise noted in the body of the article.
+<!-- Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc. -->
+</p>
+
+<p>
+Published in Issue 183 of Linux Gazette, February 2011
+</p>
+
+</div>
+
+<div id="previousnextbottom">
+<A HREF="hoogland.html" >&lt;-- prev</A> | <A HREF="silva.html" >next --&gt;</A>
+</div>
+
+</div>
+</div>
+
+<script src="http://www.google-analytics.com/urchin.js"
+type="text/javascript">
+</script>
+<script type="text/javascript">
+_uacct = "UA-1204316-1";
+urchinTracker();
+</script>
+
+
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+</body>
+</html>
+

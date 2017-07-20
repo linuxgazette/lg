@@ -1,0 +1,279 @@
+<!--startcut ==========================================================-->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML>
+<HEAD>
+<title>Linux Assists in the Windows NT Installation Process LG #37</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#A000A0"
+ALINK="#FF0000">
+<!--endcut ============================================================-->
+
+<H4>
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H1><font color="maroon">Linux Assists in the Windows NT Installation Process</font></H1>
+<H4>By <a href="mailto:gram@merece.uthscsa.edu">Gilbert Ramirez</a></H4>
+</center>
+<P> <HR> <P>  
+<center><img src="./gx/ramirez/3011f1.gif"></center>
+The University Health System is a major health provider in San Antonio,
+Texas, serving a large portion of south Texas. We have two large hospitals
+and many medium to large-sized clinics spread across the city. Half of
+our 4,500 employees do not directly use computers, but over 2,000 of our
+employees have been using DOS-based 80486 computers for years. We are now
+replacing all of these older computers with modern Pentium-class machines
+running Windows NT 4.0 Workstation. Linux not only lets us quickly send
+these computers through our NT assembly line, but it also lets us get
+around a fundamental flaw in Microsoft's NT-installation procedure:
+it is difficult to make NTFS boot-partitions that are bigger than 2
+GB. We created a system that makes NTFS boot-partitions of any size,
+both for manual and unattended installs of Windows NT. And it prepares
+the computer in only one minute instead of ten. It is Linux that adds
+this functionality to Microsoft's New Technology.
+<p>
+<h3>The Old Method</h3>
+<p>
+<center><img src="./gx/ramirez/3011f2.gif"></center>
+In order to replace two thousand computers with new NT workstations, we
+are trying to deliver between 50 to 100 computers a week to our users.
+To meet that goal with a limited staff size, the installation process
+for Windows NT must be as fast and efficient as possible. Our initial
+installation procedure was almost completely automated. It consisted of
+four steps, the first of which is manual:
+<p>
+<ul>
+  <li>	Repartition the hard drive to remove the OEM installation of Windows 95
+that comes from our hardware vendor.
+  <li>	Reboot. Run a DOS program that grabs the MAC address of the NIC and
+creates a custom ``uniqueness database file'' (UDF) for that computer. We
+name each computer after the MAC address of the NIC. It's a boring naming
+convention, but it provides unique names.
+  <li>	Run the Windows NT unattended installation program. This comes
+as a part of the Windows NT package.
+  <li>	Reboot. Run our custom Windows program, to install the applications that
+are needed on the hard drive of the computer rather than simply being
+available on the network (like a full Microsoft Office install).
+</ul>
+During the first step of the installation, our staff would run Partition
+Magic (http://www.powerquest.com/) to manually erase all partitions on
+the hard drive, then create a single maximum-sized FAT16 partition on
+the hard drive. This one step was manual, took about 10 minutes for
+each computer, and was error-prone. Our staff, because they're humans,
+would sometimes forget to set the new FAT16 partition to
+``active'' so
+another five minutes would be spent re-booting the computer and running
+Partition Magic again to set the active flag on the FAT16 partition.
+<p>
+Why would we want to create a FAT16 partition during the first step of the
+installation process if at the end we want an NT workstation with NTFS?
+The DOS programs that we run during the installation process (steps
+2 and 3 above) need to write data to the hard drive, but DOS programs
+cannot write the NT filesystems. The first program that needs to write
+the hard drive is our custom-made DOS program that finds the MAC address
+of the NIC and creates a uniqueness database file (UDF). This template
+file drives the NT installation program. The second program that writes
+to the hard drive is the Windows NT installation program itself; the NT
+installation program copies the operating system files from a network
+drive to the local hard drive. Then the FAT16 partition is converted to
+the New Technology File System (NTFS).
+<p>
+<h3>Automating fdisk</h3>
+<p>
+We needed a better, faster, and error-proof way to re-partition and format
+the hard drives in the workstations. One option was to use a disk-copying
+program to copy disk-images onto the hard drive. For example, I could
+partition a hard drive and set it up just as I wanted it, and then take
+a snapshot of it (basically, <tt>dd if=/dev/hda
+of=image</tt>). During the
+installation procedure, I would copy the appropriate disk image on a
+workstation's hard drive (<tt>dd if=image
+of=/dev/hda</tt>). This method would
+have worked, but we would have needed images of every uniquely-sized
+hard drive that we wanted to deliver to our users. We really wanted a
+solution that would work on any hard drive, regardless of its size. It
+would be nice to have the solution work right away on any new hard drive
+we happened to get from our hardware vendor.
+<p>
+What fits on a single boot disk, gives you low-level access to the
+hardware, and gives the programmer the most tools to get the job
+done? Linux, of course. I knew that with a bit of work I could create
+a Linux program that would partition hard drives exactly as we needed
+them and avoid the need for human intervention.
+<p>
+I took the boot-disk from the Debian installation disk set and modified
+it. The diskette boots Linux and loads a compressed root file system to
+a RAM disk. The program <A
+HREF="./ramirez.dinstall"><tt>/sbin/dinstall</tt></A>, which used to be the Debian
+installation script, starts automatically. This short script, which is
+now my auto-fdisk script, sends keystrokes to the STDIN of
+<tt>fdisk</tt>.
+First the script learns the number of cylinders that the hard drive
+contains, by capturing the output from <tt>fdisk -l</tt>. The cylinder count
+is then used as input to a second run of <tt>fdisk</tt> in order to create
+a single FAT16 partition that spans all the cylinders of the hard drive.
+(<A HREF="./ramirez.cylcalc">cylcalc</A> and <A
+HREF="./ramirez.fixbs">fixbs</A> are 2 programs called by dinstall.)
+<p>
+After the drive is partitioned correctly, <tt><b>mformat</b></tt> from the
+Mtools collection is used to format the hard drive as FAT16. Mtools
+(http://gwyn.tux.org/pub/knaff/mtools/) is a collection of programs that
+allows Unix users to manipulate FAT media from user-space. That is,
+no mounting of the file system is done. The
+<tt><b>mformat</b></tt> program is great
+because it assumes that the medium is already low-level formatted; it
+writes just the boot sector and two copies of the FAT (file allocation
+table). In no time at all it creates the minimal number of pieces required
+for a FAT file system. The DOS <tt>format</tt> program spends more than a
+minute formatting a diskette; <tt><b>mformat</b></tt> does it in just a few seconds.
+<p>
+The time spent booting this Linux auto-fdisk diskette and re-partitioning
+and formatting the drive is between 1 minute and 1.5 minutes, depending
+on the speed of the CPU of the workstation. Five seconds of this time is
+spent re-partitioning and formatting the drive; the rest of the time is
+just the boot process. Compare this 1-minute run-time to the 10-minute run
+time of our old method, using Partition Magic. Not only does Linux let
+us prepare the computer in one-tenth the time, the computer is prepared
+correctly every time, with no possibility of human error. Saving about
+10 minutes on 2000 computers saves us over 13 days over the time of
+the NT-rollout.
+<p>
+<h3>Large NTFS Boot-Partitions</h3>
+<p>
+When our NT-rollout started, the computers came from our vendor with
+1.2 GB hard drives. We easily created single FAT16 partitions on
+these hard drives, which our automated NT installation then converted
+to NTFS. Every user had a C: drive that spanned the entire hard drive.
+After a few months of the rollout, our vendors started to supply us with
+2.4 GB hard drives. Since our FAT partitions were made from DOS, the
+partitions were limited to 2 GB. After the conversion to NTFS, the users
+had a 2 GB C: drives!  We could have given the users a D: drive to use
+the rest of the space on their hard drive, but we worried that if users
+moved from computer to computer, the appearance of C: on one computer and
+C: and D: on another would confuse them. We decided to avoid confusion
+and create workstations with only C: drives. The workstations with the
+new 2.4 GB hard drives were delivered to users with 400 MB of un-used,
+wasted space. This was a hard decision for us to make, but it was the
+best decision at the time.
+<p>
+We tried to use the <tt>ExtendOEMPartition</tt> flag
+(http://www.ntfaq.com/ntfaq/install.html#install29) in the unattended
+installation file to make NT use all unallocated space on the hard
+drive when converting the FAT partition to NTFS. This flag tells
+the NT installation program to grow the NTFS boot-partition to the
+extent of the unused space on the hard drive. However, setting
+this flag caused the NT installation program to pause and prompt the
+user for a keypress to continue, making our unattended installation
+<i>attended</i>. The <tt>ExtendOEMPartition</tt> flag was unusable for us. We
+recently have learned that there is a fix which involves extracting a
+file from Service Pack 3 before running the unattended NT installation
+(http://support.microsoft.com/support/kb/articles/q143/4/73.asp), but that
+solution was not available to us at the time. Not having a solution from
+Microsoft, we made our own. The Service Pack 3 fix only creates large NTFS
+boot-partitions for unattended installs. Our homemade solution creates
+large NTFS boot-partitions for both manual and unattended installs.
+<p>
+The solution to our problem lies in one key point. A filesystem is a
+data structure within a partition, whereas a partition is a chunk of the
+hard drive. Although the terms ``FAT partition'' and ``FAT
+filesystem'' are
+commonly used interchangeably, they are not the same. A FAT partition
+is simply space carved out of the hard drive, reserved for use by a
+fileystem. The only reason the partition can be called ``FAT'' is because
+the partition type, as identified in the partition table stored on the
+hard drive, is type 6, which is BIG-FAT16. That's the only
+``FATtiness''
+of a FAT partition.
+<p>
+A filesystem is the collection of structures that organize data inside
+a partition, and the data itself. A File Allocation Table in a FAT
+filesystem is a structure that acts as a table of contents, identifying
+where files are stored on the disk. Filesystems, FAT and non-FAT, are
+usually created to fill the disk partition in which they reside (what
+would you want to put in a partition next to a filesystem anyway?), but
+technically they don't have to be built that way. No commercial tools
+that we are aware of will allow you make filesystems that are smaller
+than the disk partition in which they reside, but it <i>is</i> possible
+to create such a filesystem. The trick is to tell <b>mformat</b>, from the
+Mtools collection, that the disk partition is smaller than it actually is.
+<p>
+<tt><b>mformat</b></tt> was designed to format floppies. It can also format hard
+disk partitions, but to do so it needs to be told all the geometry of
+the partition (cylinders, heads, and sectors). Since I want a filesystem
+smaller than the hard drive partition, I lie to <b>mformat</b>. I
+don't tell
+it the true number of cylinders that the partition uses; I only tell
+<b>mformat</b> about enough cylinders to make a 500 MB FAT filesystem. (I
+really only need about 220 MB for the NT installation, but I make 500
+MB just in case). <b>mformat</b> dutifully makes a 500 MB FAT filesystem
+within my much-larger FAT partition.
+<p>
+Version 3.8 of Mtools contains a small bug in
+<tt><b>mformat</b></tt> when it is
+used on hard disks. The number of directory entries, which is a field in
+the boot sector of the FAT filesystem, is not written correctly. Less
+importantly, the jump vector is also slightly incorrect. I say that
+this is less important because this FAT filesystem won't be bootable,
+so the jump vector won't be necessary. To fix these small problems,
+a very small C program is run to fix the boot sector. This was easier
+than trying to fix <tt><b>mformat</b></tt>. Version 3.9 of Mtools is now out, but
+I do not know if this bug was fixed.
+<p>
+I then boot into DOS. By running <tt>chkdsk</tt>, I see that DOS sees
+it's C: drive as being 500 MB in size. By running
+<tt>fdisk</tt>, however,
+I see that DOS knows that the only partition on the hard drive is 2.4
+GB. This is quite a unusual situation, and perhaps the only time you'll
+ever see such a configuration. At this point, steps 2 and 3 from our
+installation process run. Files are created and stored onto this 500 MB
+FAT filesystem, and the NT installation program begins. After copying 220
+MB of operating system files to the C: drive, the computer reboots and
+the NT installation program resumes from the hard drive, converting the
+FAT filesystem to NTFS. When the FAT-to-NTFS conversion program runs,
+it converts the 500 MB FAT filesystem to NTFS, but continues converting
+to NTFS to the end of the partition. We end up with an NTFS filesystem
+that fills the partition, no matter how big the partition is. Our users
+now have 2.4 GB NTFS C: dries.
+<p>
+The ability of the filesystem-conversion program to convert to the end
+of the partition was pure luck for us. It didn't have to do this. But
+the FAT-to-NTFS conversion program that comes with Windows NT reads the
+FAT filesystem size and the partition size as different measurements. It
+knows that it has to keep converting the rest of the partition, even when
+the FAT filesystem is much smaller than the size of the partition. This
+is a feature that is undocumented by Microsoft.
+<p>
+This trick we play in the FAT partition works equally well for manual
+installations of Windows NT. We have used this procedure for 1.2 GB, 2.4
+GB, and 6.3 GB IDE hard drives, for both manual and uattended installs,
+with no problems. We stress-tested the filesystems on five different
+computers that were prepared this way. A program we wrote abused the
+filesystems on these computers over the course of a weekend, 24 hours
+a day. None of the filesystems had any problems then, and months later
+have not had any NTFS-related errors. Now that this procedure is being
+used in our NT rollout and a few hundred NT computers have been prepared
+this way, we have seen no NTFS corruption whatsoever.
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<center><H5>Copyright &copy; 1999, Gilbert Ramirez <BR> 
+Published in Issue 37 of <i>Linux Gazette</i>, February 1999</H5></center>
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<A HREF="./index.html"><IMG ALIGN=BOTTOM SRC="../gx/indexnew.gif" 
+ALT="[ TABLE OF CONTENTS ]"></A>
+<A HREF="../index.html"><IMG ALIGN=BOTTOM SRC="../gx/homenew.gif"
+ALT="[ FRONT PAGE ]"></A>
+<A HREF="./richardson.html"><IMG SRC="../gx/back2.gif"
+ALT=" Back "></A>
+<A HREF="./jenkins6.html"><IMG SRC="../gx/fwd.gif" ALT=" Next "></A>
+<P> <hr> <P> 
+<!--startcut ==========================================================-->
+</BODY>
+</HTML>
+<!--endcut ============================================================-->

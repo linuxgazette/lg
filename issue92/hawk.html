@@ -1,0 +1,491 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>select() on Message Queue LG #92</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<!-- *** BEGIN navbar *** -->
+<A HREF="ecol.html">&lt;&lt;&nbsp;Prev</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="index.html">TOC</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../index.html">Front Page</A>&nbsp;&nbsp;|&nbsp;&nbsp;Talkback&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../faq/index.html">FAQ</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="lodato.html">Next&nbsp;&gt;&gt;</A>
+<!-- *** END navbar *** -->
+
+<!--endcut ============================================================-->
+
+<TABLE BORDER><TR><TD WIDTH="200">
+<A HREF="http://www.linuxgazette.net/">
+<IMG ALT="LINUX GAZETTE" SRC="../gx/2002/lglogo_200x41.png" 
+	WIDTH="200" HEIGHT="41" border="0"></A> 
+<BR CLEAR="all">
+<SMALL>...<I>making Linux just a little more fun!</I></SMALL>
+</TD><TD WIDTH="380">
+
+
+<CENTER>
+<BIG><BIG><STRONG><FONT COLOR="maroon">select() on Message Queue</FONT></STRONG></BIG></BIG>
+<BR>
+<STRONG>By <A HREF="../authors/hawk.html">Hyouck "Hawk" Kim</A></STRONG>
+</CENTER>
+
+</TD></TR>
+</TABLE>
+<P>
+
+<!-- END header -->
+
+
+
+<h2>Introduction</h2>
+     
+<p>  When using message queue with socket or any other file descriptor based
+unix facilities, the most inconvenient thing is message queue does not
+support   <tt>select()</tt> system call. So usually unix programmers solve
+the I/O  multiplexing  issue in a simple but ugly way like</p>
+     
+<blockquote>         
+  <p><tt>while(1)</tt></p>
+  <p>    <tt>{</tt></p>
+  <p>    <tt>&nbsp;&nbsp;&nbsp; select on socket with timeout;</tt></p>
+  <p>    <tt>&nbsp; &nbsp; ...</tt></p>
+  <p>    <tt>&nbsp; &nbsp; wait on a message queue with IPC_NOWAIT</tt></p>
+  <p>    <tt>}</tt></p>
+</blockquote>
+     
+<p>  Certainly, the above implementation is ugly. I don't like it. Another 
+ solution  might be adopt multi-threading. But here in this article, I want 
+ to show you a funny approach, that is, implementing a new system call called 
+ <tt>msgqToFd()</tt>.  I'm not trying to provide you with full-fledged, 
+ bug-free kernel implementation.  I just want to present you my experiment.
+ This article might be interesting to readers who like to play 
+ with <b><tt>GNU/Linux</tt></b> kernel  source.</p>
+     <br>
+         
+<h2><tt>msgqToFd()</tt> - A new non-standard system call</h2>
+     
+<p>  Here is its signature.</p>
+     
+<blockquote>         
+  <p><b><tt>int msgqToFd(int msgq_id)</tt></b></p>
+           
+  <p>  </p>
+   </blockquote>
+     
+<p>  It returns a file descriptor corresponding to a message queue , which 
+ can  be used with <tt>select()</tt>.</p>
+     
+<p>  If any error happens, it returns -1.</p>
+     
+<p>  An application can use the call like</p>
+     
+<p>   <b><tt>&nbsp; &nbsp; &nbsp; ...</tt></b></p>
+     
+<blockquote>         
+  <p><b><tt>  q_fd = msgqToFd(msgq_id);</tt></b></p>
+           
+  <p>    <tt>while(1)</tt></p>
+           
+  <p>    <tt>{</tt></p>
+           
+  <p>    <tt>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; FD_ZERO(&amp;rset);</tt></p>
+           
+  <p>    <tt>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; FD_SET(0, &amp;rset);</tt></p>
+           
+  <p>    <tt>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <b>FD_SET(q_fd, &amp;rset);</b></tt></p>
+           
+  <p>    </p>
+           
+  <p>    <tt>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <b>select(q_fd + 1, &amp;rset, 
+ NULL,  NULL, NULL);</b></tt></p>
+           
+  <p>    </p>
+           
+  <p>    <tt>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; if(FD_ISSET(0, &amp;rset))</tt></p>
+           
+  <p>    <tt>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; {</tt></p>
+           
+  <p>    <tt>&nbsp;&nbsp;&nbsp; &nbsp;&nbsp; &nbsp;&nbsp;&nbsp; <b>...</b></tt></p>
+           
+  <p>    <tt>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; }</tt></p>
+           
+  <p>    </p>
+           
+  <p>    <tt>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; if(<b>FD_ISSET(q_fd, &amp;rset)</b>)</tt></p>
+           
+  <p>    <tt>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; {</tt></p>
+           
+  <p>    <tt>&nbsp;&nbsp;&nbsp; &nbsp;&nbsp;&nbsp; &nbsp;&nbsp; <b>r = msgrcv(msgq_id, 
+  &amp;msg, sizeof(msg.buffer), 0, 0);</b></tt></p>
+           
+  <p>    <tt>&nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp;<b>...</b></tt></p>
+           
+  <p>    <tt>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; }</tt></p>
+           
+  <p>    <tt>}</tt></p>
+       <br>
+     </blockquote>
+         
+<h2>How <tt>select()</tt> works</h2>
+     
+<p>  A file descriptor is associated with a file structure. In the file 
+ structure, there is a set of operations supported by this file type called 
+ <tt>file_operations</tt>.  In the <tt>file_operations</tt> structure, there 
+ is an entry named <tt>poll</tt>. What the generic  <tt>select()</tt> call does 
+ is call this <tt>poll()</tt> function to get status of a file (or socket 
+or whatever) as the name suggests.</p>
+     
+<p>  In general, the <tt>select()</tt> works like</p>
+     
+<blockquote>         
+  <p><i><tt>while(1)</tt></i></p>
+           
+  <p>    <i><tt>{</tt></i></p>
+           
+  <p>    <i><tt>&nbsp;&nbsp;&nbsp;&nbsp; for each file descriptor in the 
+ set</tt></i></p>
+           
+  <p>    <i><tt>&nbsp;&nbsp;&nbsp;&nbsp; {</tt></i></p>
+           
+  <p>    <i><tt>&nbsp;&nbsp;&nbsp;&nbsp; &nbsp;&nbsp;&nbsp; call file's poll()
+  to get mask.</tt></i></p>
+           
+  <p>    <i><tt>&nbsp;&nbsp;&nbsp;&nbsp; &nbsp;&nbsp;&nbsp; if(mask &amp; 
+ can_read  or mask &amp; can_write or mask &amp; exception)</tt></i></p>
+           
+  <p>    <i><tt>&nbsp;&nbsp;&nbsp;&nbsp; &nbsp;&nbsp;&nbsp; {</tt></i></p>
+           
+  <p>    <i><tt>&nbsp;&nbsp;&nbsp;&nbsp; &nbsp;&nbsp;&nbsp; &nbsp;&nbsp;&nbsp;
+  set bit for this fd that this file is readable/writable or there is an
+  <br>
+     &nbsp;&nbsp;&nbsp; &nbsp;&nbsp;&nbsp; &nbsp;&nbsp;&nbsp; &nbsp;exception.</tt></i></p>
+           
+  <p>    <i><tt>&nbsp;&nbsp;&nbsp;&nbsp; &nbsp;&nbsp;&nbsp; &nbsp;&nbsp;&nbsp;
+  retval++;</tt></i></p>
+           
+  <p>    <i><tt>&nbsp;&nbsp;&nbsp;&nbsp; &nbsp;&nbsp;&nbsp; }</tt></i></p>
+           
+  <p>    <i><tt>&nbsp;&nbsp;&nbsp;&nbsp; }</tt></i></p>
+           
+  <p>    <i><tt>&nbsp;&nbsp;&nbsp;&nbsp; if(retval != 0)</tt></i></p>
+           
+  <p>    <i><tt>&nbsp;&nbsp;&nbsp;&nbsp; &nbsp;&nbsp;&nbsp; break;</tt></i></p>
+           
+  <p>    <i><tt>&nbsp;&nbsp;&nbsp;&nbsp; schedule_timeout(__timeout);</tt></i></p>
+           
+  <p>    <i><tt>}</tt></i></p>
+           
+   </blockquote>
+     
+<p>  For detailed implementation of <tt>select()</tt>, please take a look 
+ at <tt>sys_select()</tt> and <tt>do_select()</tt> in <tt>fs/select.c</tt>. 
+ of standard kernel source code.</p>
+     
+<p>  Another thing required to understand is <tt>poll_wait()</tt>. What it 
+ does  is put current process into a wait queue provided by each kernel facilities 
+  such as file or pipe or socket or in our case, message queue.</p>
+     
+<p>  Please note that the current process may wait on several wait queues 
+ by calling <tt>select()</tt></p>
+     <br>
+         
+<h2><tt>long sys_msgqToFd(long msqid)</tt></h2>
+     
+<p>  The system call should return a file descriptor corresponding to a message 
+  queue. &nbsp;The file descriptor should point to a file structure which 
+contains  <tt>file_operations </tt>for message queue.</p>
+     
+<p>  To do that, <tt>sys_msgqToFd() </tt><tt>does</tt></p>
+     
+<ol>
+     <li>               
+    <p>with msqid, locate the corresponding <b><tt>struct msg_queue</tt></b></p>
+     </li>
+     <li>                    
+    <p>allocate a new inode by calling <b><tt>get_msgq_inode()</tt></b></p>
+     </li>
+     <li>                    
+    <p>allocate a new file descriptor with <b><tt>get_unused_fd()</tt></b></p>
+     </li>
+     <li>                    
+    <p>allocate a new file structure with <b><tt>get_empty_filp()</tt></b></p>
+     </li>
+     <li>                    
+    <p>initialize inode, file structure</p>
+     </li>
+     <li>                    
+    <p>set file's <b><tt>file_operations</tt></b> with <tt><b>msgq_file_ops</b></tt></p>
+     </li>
+     <li>                    
+    <p>set file's <b><tt>private_data</tt></b> with <b><tt>msq-&gt;q_perm.key</tt></b></p>
+     </li>
+     <li>                    
+    <p>install fd and file structure with <b><tt>fd_install()</tt></b></p>
+     </li>
+     <li>                    
+    <p>return the new fd</p>
+    </li>
+     
+</ol>
+     
+<p>  Please take a look at 
+     <a href="misc/hawk/msg.c.txt"><tt>msg.c</tt></a> 
+and the accompanying
+     <a href="misc/hawk/msg.h.txt"><tt>msg.h</tt></a> 
+provided with this article.  See also
+     <a href="misc/hawk/sys_i386.c.txt"><tt>sys_i386.c</tt></a> 
+<br>
+   </p>
+     
+         
+<h2><tt>msgq_poll()</tt></h2>
+     
+<p>  msgq_poll() implementation is pretty simple.</p>
+     
+<p>  What it does is</p>
+     
+<ol>
+     <li>               
+    <p>With <b><tt>file-&gt;private_data</tt></b>, which is a key for a message 
+ queue, locate the corresponding  message queue</p>
+     </li>
+     <li>                    
+    <p>put current process into the message queue's wait queue by calling 
+     <b><tt>poll_wait()</tt></b></p>
+     </li>
+     <li>                    
+    <p>if the message queue is empty (<b><tt>msq-&gt;q_qnum == 0</tt></b>), 
+ set mask as writable(  this may cause some arguments but let's forget this 
+ for now). If not, set  mask as readable</p>
+     </li>
+     <li>                    
+    <p>return the mask</p>
+     </li>
+     
+</ol>
+   <br>
+     
+<h2>Modification of existing message queue source code</h2>
+     
+<p>  To support <b><tt>poll()</tt></b> on a message queue, we need to modify 
+ existing message  queue source code.</p>
+     
+<p>  The modification includes</p>
+     
+<ol>
+     <li>               
+    <p>adding a wait queue head to <b><tt>struct msg_queue</tt></b>, which 
+ will be used to put a process into for <b><tt>select()</tt></b>. Also the 
+ wait queue head should  be initialized when a message queue is created. Please
+ take a look at <b><tt>struct  msg_queue</tt></b> and <b><tt>newque()</tt></b> 
+ in <tt>msg.c</tt>.</p>
+     </li>
+     <li>                    
+    <p>Whenever a new message is inserted to a message queue, a process waiting 
+  on the message queue( by calling <b><tt>select()</tt></b>) should be awaken. 
+ Take a look at     <b><tt>sys_msgsnd()</tt></b> in <tt>msg.c</tt>.</p>
+     </li>
+     <li>                    
+    <p>When a message queue is removed or it's properties are changed, all 
+  the processes waiting on the message queue(by calling <b><tt>select()</tt></b>) 
+ should be  awaken. Take a look at <b><tt>sys_msgctl()</tt></b> and <tt><b>freeque()</b></tt> 
+ in <tt>msg.c</tt>.</p>
+     </li>
+     <li>                    
+    <p>To allocate a new inode and file structure, we need to set up some 
+  file system related&nbsp;</p>
+  </li>
+  <li>
+    <p>s for VFS to operate properly. For this purpose,   we need additional
+initialization code to register a new file system and  set something up.
+Take a look at <tt>msg_init()</tt> in <b><tt>msg.c</tt></b>.</p>
+    </li>
+     
+</ol>
+     
+<p>  All the changes are "<b><tt>ifdef</tt></b>"ed with <b><tt>MSGQ_POLL_SUPPORT</tt></b>. 
+ So it should be easy  to identify the changes.</p>
+     <br>
+         
+<h2>File System Related Stuff</h2>
+     
+<p>  To allocate a file structure, we need to set up the file's <b><tt>f_vfsmnt</tt></b> 
+ and <tt><b>f_dentry</b></tt>  properly. Otherwise you'll see some <tt><b>OOPS</b></tt> 
+ messages printed our on your console.  &nbsp;For VFS to work correctly with 
+ this new file structure, we need some  additional setup, which is already 
+ explained briefly.</p>
+     
+<p>  Since we support only <b><tt>poll()</tt></b> for the <b><tt>file_operations</tt></b>,&nbsp; 
+ we don't have to care about every detail  of the file system setup code. 
+All we need is a properly set up <tt><b>f_dentry</b></tt> and 
+<b><tt>f_vfsmnt</tt></b>. Most of the related code is copied from <tt>pipe.c</tt>.</p>
+     <br>
+         
+<h2>Adding a new system call</h2>
+     
+<p>  To add a new system call, there two things need to be done.</p>
+     
+<p>  The first step is add a new system call in kernel level, which we already 
+  did (<tt><b>sys_msgqToFd()</b></tt>).<br>
+   In the <b><tt>GNU/Linux</tt></b> kernel, all <b><tt>system V IPC</tt></b>
+related  calls are dispatched  through <b><tt>sys_ipc()</tt></b> in <tt>arch/i386/kernel/sys_i386.c</tt>. 
+ <b><tt>sys_ipc()</tt></b> uses call number  to identify a specific system 
+ call requested. To dispatch the new system call properly, we have to define 
+ a new call number(which  is 25) for <b><tt>sys_msgqToFd()</tt></b> and modify 
+ <b><tt>sys_ipc()</tt></b> to call <b><tt>sys_msgqToFd()</tt></b>. Just for 
+ your reference, please take a look at &nbsp;<tt>arch/i386/kernel/entry.S 
+</tt> in the standard kernel source and <b><tt>sys_ipc()</tt></b> 
+in <a href="misc/hawk/sys_i386.c.txt"><tt>sys_i386.c</tt></a>
+ provided with this article.</p>
+     
+<p>  The second step is add a stub function for user level application. Actually
+ all the system call stub functions are provided by GLIBC. And to add a new
+ system call, you have to modify the <b><tt>GLIBC</tt></b> and build your
+own and install it. Oh hell, NO THANKS!!!. I don't want to do that and I
+don't want you to do that either. To solve the problem, I did some copy and
+paste from <b><tt>GLIBC</tt></b>. If you look at 
+<a href="misc/hawk/user/syscall_stuff.c.txt"><tt>user/syscall_stuff.c</tt></a>
+ provided with this article, there is  a function named <b><tt>msgqToFd()</tt></b>, 
+ which is the stub for <b><tt>msgqToFd()</tt></b> system call.</p>
+     
+<p>  What it does is simply</p>
+     
+<blockquote>         
+  <p><tt>return INLINE_SYSCALL(ipc, 5, 25, key, 0, 0, NULL);</tt></p>
+           
+  <p>  </p>
+   </blockquote>
+     Here is a brief description for the macro.   
+     
+<blockquote>         
+  <p><tt> ipc &nbsp;: &nbsp;system call number for sys_ipc(). ipc is expanded 
+ as __NR_ipc, which is 117.<br>
+    5 &nbsp; &nbsp;: &nbsp;number of arguments for this macro.<br>
+    25 &nbsp; : &nbsp;call number for sys_msgqToFd()<br>
+    key &nbsp;: &nbsp;an argument to sys_msgqToFd()</tt></p>
+           
+  <p> </p>
+   </blockquote>
+     
+<p><b><tt>  INLINE_SYSCALL</tt></b> sets up the arguments property and invokes 
+ interrupt 0x80  to switch to kernel mode to invoke a system call.</p>
+     
+<h2>Conclusion</h2>
+     
+<p>  I'm not so sure about practical usability of this modification. 
+  I just wanted to see whether this kind of modification was possible or not.<br>
+   </p>
+     
+<p>  Besides that, I want to talk about a few issues needed to be addressed.</p>
+     
+<ol>
+     <li>               
+    <p>&nbsp;If two or more threads or processes are accessing a message
+queue and one process is waiting on the message queue with <tt>msgrcv()</tt>
+and another  is waiting with <tt>select()</tt>, then always the former process/thread 
+ will receive  the new message. Take a look at <b><tt>pipelined_send()</tt></b> 
+ in <tt>msg.c</tt>.</p>
+     </li>
+     <li>                    
+    <p>For writability test, <b><tt>msgq_poll()</tt></b> sets the mask as 
+ writable only if  the message queue is empty. Actually we can set the mask 
+ as writable if a message  queue is not full and there will be no big difference. 
+ But I chose the implementation for simplicity.</p>
+     </li>
+     <li>                    
+    <p>Let's think about this scenario.</p>
+                       
+    <ol>
+         <li>         A queue is created</li>
+         <li>         A file descriptor for the queue is created</li>
+         <li>         The queue is removed </li>
+                 
+    </ol>
+                       
+    <p>  In this kind of case, what should be do? A correct solution would 
+ be close  the fd when the queue is removed. But this is impossible since 
+a message queue can be removed by any process which has a right to do that. 
+ This means a process removing the message queue may not have a file descriptor 
+ associated  with the message queue even if the message queue is mapped to 
+ a file descriptor by some other process.</p>
+                       
+    <p>  Additionally, if the same queue (with the same key) is created again, 
+ the mapping will be still maintained.</p>
+     </li>
+     <li>                    
+    <p>Efficiency problem. All the processes waiting on the wait queue by 
+ calling <b><tt>select()</tt></b> will be awaken when there is a new message. 
+ Eventually only one process will receive the message and all the other processes 
+ will go to sleep again.</p>
+    </li>
+    <li>No support for message type. Regardless of message type, if there 
+is any message, the <b><tt>select()</tt></b> will return. <br>
+    </li>
+     
+</ol>
+     
+<h2>Bugs and Improvements</h2>
+     <b>DIY :-)</b><br>
+         
+<h2>Source Code</h2>
+     <tt>
+     <a href="misc/hawk/msg.c.txt">msg.c</a>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Modified message queue implementation<br>
+     <a href="misc/hawk/msg.h.txt">msg.h</a>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Header file for message queue<br>
+     <a href="misc/hawk/sys_i386.c.txt">sys_i386.c</a>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Modified for the new system call<br>
+     <a href="misc/hawk/user/Makefile.txt">user/Makefile</a>&nbsp;&nbsp;&nbsp; &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Makefile  to build test program (rename from Makefile.txt to Makefile)<br>
+     <a href="misc/hawk/user/syscall_stuff.c.txt">user/syscall_stuff.c</a>&nbsp;&nbsp;&nbsp;&nbsp;Stub function for msgqToFd()<br>
+     <a href="misc/hawk/user/msg_test.h.txt">user/msg_test.h</a>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Header for msgqToFd()<br>
+     <a href="misc/hawk/user/msgq.c.txt">user/msgq.c</a>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Test program source<br>
+     <a href="misc/hawk/user/msgq2.c.txt">user/msgq2.c</a>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Another test program&nbsp; <br>
+     </tt>
+     <p>
+     I used GNU/Linux kernel 2-4-20 on x86 for this experiment.<br>
+     To build a new kernel with this modification, I suggest you should copy<br>
+     <br>
+     msg.c&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;to&nbsp;&nbsp;&nbsp;&nbsp;ipc/msg.c<br>
+     msg.h&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;to&nbsp;&nbsp;&nbsp;&nbsp;include/linux/msg.h<br>
+     sys_i386.c&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;to&nbsp;&nbsp;&nbsp;&nbsp;arch/i386/kernel/sys_i386.c<br>
+     <br>
+     </tt>
+     and build and install it!!!!<br>
+   <br>
+   Before running the test programs, please be sure to make key files:<br>
+   <br>
+   <b><tt>touch .msgq_key1<br>
+   touch .msgq_key2</tt></b>
+
+
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<!-- P>
+<img ALIGN="LEFT" ALT="[BIO]" SRC="../gx/2002/note.png">
+<em>
+</em>
+<br CLEAR="all" -->
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+
+<!-- *** BEGIN copyright *** -->
+<hr>
+<CENTER><SMALL><STRONG>
+Copyright &copy; 2003, Hyouck "Hawk" Kim.
+Copying license <A HREF="../copying.html">http://www.linuxgazette.net/copying.html</A><BR> 
+Published in Issue 92 of <i>Linux Gazette</i>, July 2003
+</STRONG></SMALL></CENTER>
+<!-- *** END copyright *** -->
+<HR>
+
+<!--startcut ==========================================================-->
+<CENTER>
+<!-- *** BEGIN navbar *** -->
+<A HREF="ecol.html">&lt;&lt;&nbsp;Prev</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="index.html">TOC</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../index.html">Front Page</A>&nbsp;&nbsp;|&nbsp;&nbsp;Talkback&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../faq/index.html">FAQ</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="lodato.html">Next&nbsp;&gt;&gt;</A>
+<!-- *** END navbar *** -->
+</CENTER>
+</BODY></HTML>
+<!--endcut ============================================================-->

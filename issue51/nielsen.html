@@ -1,0 +1,488 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>Private Networks and Roadrunner using IP Masquerading LG #51</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<!-- *** BEGIN navbar *** -->
+<A HREF="index.html"><IMG ALT="[ Table of Contents ]" 
+	SRC="../gx/indexnew.gif" WIDTH=163 HEIGHT=60 ALIGN=bottom ></A>
+<A HREF="../index.html"><IMG ALT="[ Front Page ]" 
+	SRC="../gx/homenew.gif" WIDTH=163 HEIGHT=60 ALIGN=bottom></A>
+<A HREF="mauerer.html"><IMG ALT="[ Prev ]" SRC="../gx/back2.gif" WIDTH=41 HEIGHT=60 ALIGN=bottom></A>
+<A HREF="../faq/index.html"><IMG ALT="[ Linux Gazette FAQ ]" 
+	SRC="./../gx/dennis/faq.gif"WIDTH=163 HEIGHT=60 ALIGN=bottom></A>
+<A HREF="pramode.html"><IMG ALT="[ Next ]" SRC="../gx/fwd.gif" WIDTH=41 HEIGHT=60 ALIGN=bottom  ></A>
+<!-- *** END navbar *** -->
+
+<!--endcut ============================================================-->
+
+<H4>
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H1><font color="maroon">Private Networks and Roadrunner using IP Masquerading</font></H1>
+<H4>By <a href="mailto:zing@tcu-inc.com">Mark Nielsen</a> and <a href="mailto:byrd.74@osu.edu">Andrew Byrd</a></H4>
+</center>
+<P> <HR> <P>  
+
+<!-- END header -->
+
+
+
+
+<h3>Abstract</h3>
+This article is intended to assist in setting up a masqueraded private TCP/IP network connected to the internet via Time Warner's Roadrunner cable modem service. It is a rewrite of a previous article on the same subject -- with Redhat 6 available and Roadrunner's migration to DHCP (at least in Columbus, Ohio, check to see if they use DHCP in your city) several things have changed.
+This is a serious exercise in networking, involving concepts from DNS to firewalls. When you complete this project, you will truly have some experience in small-scale networking.
+<p>
+One thing to note, I called up RR, and they were very vague about whether they allow people to use IP Masquerading. The sales rep
+basically said that if you hog bandwidth, they will get upset. If you run servers that hog bandwidth, they will get upset. 
+<p>
+There are two "I"'s in this document. Sometimes it is Andrew talking, and sometimes it is Mark. 
+<hr>
+<h2>Table of Contents</h2>
+<ol>
+<li><a href="#one">Required Reading</a>
+<li><a href="#two">The Big Picture</a>
+<li><a href="#three">Selecting Hardware</a>
+<li><a href="#four">Setting up the Gateway</a>
+<li><a href="#five">Configuring IPChains / Masquerading</a>
+<li><a href="#six">Configuring DNS on the Private Network</a>
+<li><a href="#seven">Setting up the Workstation Machines</a>
+<li><a href="#eight">Security Concerns</a>
+<li><a href="#nine">Dynamic DNS</a>
+<li><a href="#comments"> Comments and Other Notes</a> 
+<li><a href="#ten">Example Files</a>
+</ol>
+<a name="one"><h2>Required Reading</h2></a>
+These HOWTOs contain the necessary background information required to understand the rest of this document. If you proceed without having read these, you may not fully grasp what is being done.
+<ol>
+<li><a href=http://www.linuxdoc.org/HOWTO/NET3-4-HOWTO.html>Networking</a> - Basic Ethernet and TCP/IP information. Sections 5 and 6 are most relevant.
+<li><a href=http://www.linuxdoc.org/HOWTO/IPCHAINS-HOWTO.html>IPCHAINS</a> - IP Firewall Chains will do most of the work in our configuration. Also has many security implications.
+<li><a href=http://www.linuxdoc.org/HOWTO/DNS-HOWTO.html>DNS</a> - setting up DNS will be a lot easier if you understand how it works.
+<li><a href=http://www.linuxdoc.org/HOWTO/IP-Masquerade-HOWTO.html>IP Masquerading</a> - covered in a more general sense than we will here.
+<li> <a href="../issue28/nielsen.html">Our Previous</a> article on this topic. 
+<li> <a href="http://www.vortech.net/rrlinux/"> RRLinux Help Site</a>
+<li> <a href="http://dir.yahoo.com/Computers_and_Internet/Software/Operating_Systems/Unix/Security/"> Unix Security</a> located
+on Yahoo.
+<li> <a href="http://stones.wcbe.org/~COLUG/"> The Central Ohio Linux User Group</a> -- where lots of ideas come from. 
+
+</ol>
+<p>
+<a name="two"><h2>The Big Picture</h2></a>
+This diagram demonstrates the basic idea:
+
+<br><br><center><img src=gx/nielsen/diagram.png></center><br>
+
+Each heavy black dot in this diagram is an ethernet interface card, and each connecting line is a length of CAT5 cable, with the exception of the one running down from the cable modem, which is your cable connection to Time Warner. Note that you need one interface card in each workstation, and two in your gateway machine.
+<p>
+Your workstations and hub are inside your private network, indicated by a white background in the image, and the rest of the world is shown as the gray area. Note that the gateway machine is riding the fence between the two. Each of the Ethernet cards has an IP address assigned to it, and your gateway has one in the outside world and one on the inside. Positioned as such, the gateway has the power to forward communications from your private network to the outside world.
+<p>
+For the purpose of this discussion, I have assigned the internal network the 10.x.x.x (netmask 255.0.0.0) block of reserved private IP addresses and chosen the domain name "local". These can of course be changed if you know what you are doing, but they should work for most people.
+<p>
+The workstations are named "w1.local" (10.0.0.10) through "w3.local" (10.0.0.30) and the masquerading gateway is called "main.local" (10.0.0.1 on its private adaptor.) As before, you can modify or expand this scheme if you feel comfortable with it.
+<p>
+<a name="three"><h2>Selecting Hardware</h2></a>
+The gateway machine requires relatively few resources, and can even be an old '486 machine with relatively little memory; routing packets is not particularly strenuous work. If it can run Linux at all, it should do the trick.
+<p>
+The workstations can be any machine running a TCP/IP capable OS, such as Linux, MacOS, or even MS operating systems, and you will need to outfit each machine with an ethernet card.
+<p>
+Choose a 10/100 autosensing hub. It makes your life a lot easier. Use 100 mbit ethernet cards on the inside, and the ethernet card
+connecting your gateway computer to the outside can be just a 10 mbit ethernet card. I will still use all the same type of
+ ethernet cards and make them all 10/100. Using the same hardware across the board makes your life easier most of the time. 
+<p>
+It is a good idea to stick with PCI ethernet cards in linux systems. Ethernet cards are quite cheap now, and having PCI cards will save you some possible headaches in the configuration phase. I have used the Netgear FA310TX card flawlessly in several machines, and have been told that Intel cards provide extremely reliable service. In any case, do some web research and make sure that there are commonly available modules for the cards you buy. The Netgear card and most 3com cards (which I have used extensively) have drivers that ship with Redhat 6. If you must use ISA cards, 3com 3c509s are quite easy to use. Keep in mind that if you are using an older machine for your gateway, it may have only ISA slots, possibly requiring you to use two ISA ethernet cards. In this case, you will have to acquire a utility program (which usually runs only in DOS) for your cards from their manufacturer, and use this program to set the IO address and/or IRQ of the cards to prevent conflicts. 
+<p>
+<a name="four"><h2>Setting up the Gateway</h2></a>
+The computer which will be your gateway will be the computer which RR is connected to. 
+<p>
+First, physically install your carefully selected Ethernet cards in the machine. It is much less confusing to use two different brand cards on the gateway; by having a unique driver for each card you can be sure which one will be called eth0 and which will be eth1, and also lessen the chances of interrupt conflicts (to be avoided like the plague). If you opt for ISA cards, you may need to download some DOS utilities to set the IRQ and I/O addresses.
+<p>
+Start with a clean install of the Redhat 6 (for the purpose of this article) distribution on the gateway. If you've got the hard drive space, go ahead and install everything, but you really don't need an X server, graphics processing software, etc. on this machine. Just make sure that you are installing the ipchains, BIND, cacheing nameserver, pump, and other packages critical to what we are doing here. Also tell the install program to start named at boot.
+<p>
+For the purpose of this article, eth0 will be going to the cable modem and eth1 will be on your private network. You can probably get the first ethernet device up and running during the initial install. Have eth0 connected to the cable modem with the necessary crossover cable and tell it to use DHCP to get its IP address (don't specify one) since the Roadrunner service will be assigning us an internet IP. Use the netconf utility (or edit the /etc/sysconfig/network-scripts/ifcfg-eth?  and <a href=#confmod>/etc/conf.modules</a> files directly) to get eth1 working once you can boot, and assign this one a private network IP address (10.0.0.1). It may take a bit of tinkering to get both cards detected and up. Be sure to specify the correct kernel modules/drivers, and once you can do an 'ifconfig' and see both eth0 and eth1 (or see them both go up at boot time), you should be ready to continue. It is possible to compile network card drivers into the kernel (this was often done in the past) but it is common and perfectly acceptable to simply use modular drivers as we've suggested here.
+<p>
+Ensure that your /etc/sysconfig/network looks like <a href="#networkg">this</a> and replace /etc/hosts with your own version of <a href="#hosts">this file</a>. The /etc/hosts file isn't absolutely necessary since we'll be setting up a DNS server, but it's a good backup.
+<p>
+NOTE ON TWO 3c509 NETWORK CARDS:
+<br>Install both ISA ethernet cards before you install RedHat Linux. The two ethernet cards Mark used (a long time ago) were
+3com 3c509. The first had values of, irq=10, address=300 and the second had irq=11, address=310.
+Also, when you install RedHat, go ahead and install it for a LAN and have it autoprobe the
+ethernet cards. 
+<p>NOTE ON DHCP:<br>
+You can setup DHCP using 
+<a href="http://www.redhat.com/support/manuals/RHL-6.1-Manual/ref-guide/s1-sysconfig-control-panel.html"> 
+RedHat's control panel</a>, netconf, editing the files manually, or during the installation of RedHat (or whatever
+other Linux distribution you are using). 
+
+<a name="five"><h2>Configuring IPChains / Masquerading</h2></a>
+<p>
+Try pinging a few outside servers or retrieving a few web pages with lynx to see if your Roadrunner connection is functioning. If so, you are ready to add masquerading. Append <a href="#rclocal">this</a> block of modprobe and ipchains commands to your /etc/rc.d/rc.local script  to enable forwarding/masquerading and also provide some fairly strong firewall rules.
+<p>
+<a name="six"><h2>Configuring DNS on the Private Network</h2></a>
+As of now, 'pump' (which retrieves the DHCP information for eth0) is also setting the /etc/resolv.conf file to use Roadrunner's DNS servers. This provides no functionality for looking up hostnames in our private network and would require that each workstation have an identical copy of /etc/hosts and be manually set to use a Roadrunner nameserver. This is a little messy, so it's advisable to run your own DNS service.
+<p>
+Armed with some knowledge from the DNS-HOWTO, create or modify <a href="#namedconf">/etc/named.conf</a>, <a href="#resolvconf">/etc/resolv.conf</a>, and the related <a href="#varnamed">files</a> in /var/named. You must also create or edit <a href="#pumpconf">/etc/pump.conf</a> to keep pump from overwriting your resolv.conf settings every time eth0 goes up. Verify that 'named' is being run at bootup (there will be an S??named link in /etc/rc.d/rc3.d/ if it is) and you should have a cacheing nameserver running upon reboot, as well as DNS for your private network.
+<p>
+<a name="seven"><h2>Setting up the Workstation Machines</h2></a>
+Make sure all of your private network machines (including the gateway) are connected via a hub and Cat5 cable, and then configure the workstations. Give each machine/interface a unique IP address within the private block, and here is an example <a href="#networkw">/etc/sysconfig/network</a> for the Linux workstations. Add a customized <a href="#hosts">/etc/hosts</a> and this <a href="#resolvconf">/etc/resolv.conf</a> file, and you should be on your way. Try some pings or read some web documents from a workstaion to ensure that masquerading and DNS are operating correctly.
+<p>
+Here is an example for other computers in your network. 
+<ol>
+  <li>ip address = 10.0.0.10 
+  <li>name address = w1.local 
+  <li>netmask = 255.255.255.0 
+  <li><a href="#resolvconf">/etc/resolv.conf</a> for your other Linux computers.  
+  <li><a href="#hosts">/etc/hosts</a> is a file I would use, but don't need. Just in case your dns server fails, this is handy
+    for a backup. 
+</ol>
+The only thing you should have to change to each additional computer is the ip address and the
+name address. w2.local and 10.0.0.20 would be used for the next computer. Get the idea? 
+<p>
+Also, if you are using pc or mac clients or other stuff, check out 
+<a href="http://www.ssc.com/mirrors/LDP/HOWTO/IP-Masquerade-HOWTO.html">
+the masquerading mini-howto</a>. 
+<p>
+The general idea is to specify your masquerading machine (10.0.0.1) as the gateway and DNS server for each machine. The <a href="#one">IP-Masquerading HOWTO</a> has an excellent section on how to configure workstations running several different non-Linux operating systems in a masq'd private network.
+<p>
+<a name="eight"><h2>Security Concerns</h2></a>
+Being connected to the internet constantly has its risks. There are plenty of people out there who have nothing better to do than wreck unprotected systems, and many more who would like to use your system as a jumping-off point for illegal activities. 
+<p>
+Masquerading is inherently somewhat unsafe because we must allow traffic to pass through the firewall. By disabling telnet, ftp, or other daemons that listen at ports on your gateway you can avert much of the danger, and fully understanding IP firewall chains is also valuable. A port forwarder such as <a href="ftp://ftp.ox.compsoc.org.uk/pub/users/steve/ipsubs/">ipportfw</a>
+ can also be used to redirect incoming requests for connections to other machines on your network (which would then be running the requested service), directing the danger away from your gateway.
+<p>
+You can prevent access to your DNS server by moving it to another machine on your network or by simply giving an appropriate listen-on directive to named (see the named.conf man page) to keep it from binding to a port on your external interface. If you would like higher security but need login capabilities from the outside, look into <a href="http://www.openssh.com/">
+openssh</a>,
+ which allows telnet-like logins over an encrypted connection. It is also advisable to install an advanced logger such as 
+<a href="http://www.tigerteam.net/linuxgroup/tcplogd/">tcplogd</a> which can detect and inform you of most portscans and malicious activity. 
+<p>
+Lastly, in many cases you can simply turn off the interface to the outside world when not using your connection, thereby lessening the chances of someone gaining unauthorized access. Simply issue 'ifdown eth0' on your gateway machine to disable your connection and 'ifup eth0' when you need to use it again.
+<p><font size=+1 color=green> Summary of Security</font>
+<ol>
+  <li> The only service on your firewall computer should <A href="http://www.openssh.com/">openssh</a>.
+ Ideally, you shouldn't have your DNS on your gateway computer. Although our server configuration has DNS on it, again, ideally, 
+ you should put the DNS service on another internal computer. 
+        If you must, keep it firewalled at least so that the outside can't use it.  
+  <li> All other services (like a webserver) that you want available to the outside 
+        should be port forwarded using <a href="ftp://ftp.ox.compsoc.org.uk/pub/users/steve/ipsubs/">ipportfw</a>
+ to another computer on the inside of your network.
+  <li> Do NOT NOT NOT NOT have any services under /etc/inetd.conf turned on, or just don't have inet running.
+         <br> chkconfig inet off      ### for RedHat users
+         <br> /etc/rc.d/init.d/inet stop
+  <li> Have all other internal services on a separate computer (printing, filesharing, database, etc). 	 
+  <li> Install <a href="http://www.tigerteam.net/linuxgroup/tcplogd/">tcplogd</a> and post the people who have scanned your computer -- hey, it is public information isn't it?
+  <li> There are ways to tunnel VNC, mail, ftp, and other programs through <a href="http://www.openssh.com/">OpenSSH</a>. 
+This can keep things secure. 
+  <li> Check out <a href="http://www.psionic.com//abacus/"> 
+  Abacus Project - The Intrusion Prevention System</a>
+</ol>
+<p>
+<a name="nine"><h2>Dynamic DNS</h2></a>
+Unless you asked for a fixed IP address, RoadRunner gives you a different ip address every time you log in. Dynamic DNS gives you
+an alias so that you can find your computer at home when you are at work or let other people know where it is. 
+<p> 
+
+<a href="http://www.dyndns.org">Dyndns.org</a> can provide for you a static domain name despite your dynamic IP address, giving others on the internet an easy to remember and constant name for your gateway machine. Once you have registered with dyndns, a utility called  <a href="http://www.gandy.dyndns.org/~thomas/ddup.php3">'ddup'</a> can contact dyndns.org and update your nameserver record when your IP address changes. Appending <a href="#ddup">this</a> shell script fragment to our /etc/rc.d/rc.local will update your dyndns record at boot time, but only if your IP address has changed (dyndns doesn't like you to update your record for no reason.) This assumes that you have 'ddup' installed properly.
+<p>
+I tend to reboot the gateway machine every day or two and haven't had any problems with my assigned IP changing while it was up, though this is technically possible. If you plan on leaving your gateway up for weeks at a time, you might want to have cron run this script occasionally to make sure your dyndns record is always current. This will take a little reworking -- experiment and see what you can do.
+
+<hr> 
+<a name="comments"><h2>Comments and Other Notes</h2></a>
+<ol>
+<li> For even more security, you may want to buy a network switch where you can isolate traffic on the inside on your network. 
+     They are expensive, but worth it for the serious networker. 
+<li> There are more advanced things you can do once you get your internal network setup. You can have fetchmail download all email
+     from a domain and match up email addresses to your local users, use a proxy server to save bandwith (which may not
+     be necessary, set VPN set tunneling of services through openssh, etc. 
+</ol>
+
+<EM> <a href="http://tcu-inc.com"> Mark Nielsen</a> works as a book binder for <a href="http://www.genericbooks.com">ZING</a>
+and <a href="http://www.tcu-inc.com">TCU</a>
+ and Andrew is a Linux consultant.</EM>
+
+<hr>
+<a name="ten"><h2>Example Files</h2></a>
+(these are just syntactic examples, you will probably have to modify domain names, etc. for your own use)
+<br><br>
+<a name="rclocal"><h3>/etc/rc.d/rc.local (gateway)</h3></a>
+<pre>
+# Firewall config - Should be appended to the end of /etc/rc.d/rc.local to run on boot.
+# Adapted from examples in the IP Masquerading HOWTO and IPChains HOTWO. See the original
+# documents to learn more. These examples should provide a fairly safe masquerading
+# firewall.
+
+echo "Loading IP masquerading modules..."
+# load modules to handle masquerading some tricky but common protocols
+/sbin/depmod -a
+/sbin/modprobe ip_masq_ftp
+/sbin/modprobe ip_masq_raudio
+/sbin/modprobe ip_masq_irc
+
+echo "Turning IP forwarding on..."
+# make sure the forwarding is turned on
+echo "1" > /proc/sys/net/ipv4/ip_forward
+
+# Get the dynamic IP address assigned via DHCP
+# and external interface name, save them to variables for easy use
+extip="`/sbin/ifconfig eth0 | grep 'inet addr' | awk '{print $2}' | sed -e 's/.*://'`"
+extint="eth0"
+
+# Do the same for internal network name and interface
+intint="eth1"
+intnet="10.0.0.0/8"
+
+echo "Configuring firewall chains:"
+echo -n "input..."
+#############################################################################
+# Input chain: flush and set default policy of reject. Actually the default policy
+# is irrelevant because there is a catch all rule with deny and log.
+
+ipchains -F input
+ipchains -P input REJECT
+
+# local interface, local machines, going anywhere is valid
+ipchains -A input -i $intint -s $intnet -d 0.0.0.0/0 -j ACCEPT
+
+# remote interface, claiming to be local machines, IP spoofing, get lost
+ipchains -A input -i $extint -s $intnet -d 0.0.0.0/0 -l -j REJECT
+
+# remote interface, bounce anything trying to open a connection to us
+# this should keep anyone from opening TCP connections to this machine from
+# the outside world. Just an example of what we can do with IPChains, and not
+# a bad idea unless you have a reason for letting people connect to your firewall.
+# ipchains -A input ! -f -i $extint -p TCP -y -j REJECT
+
+# remote interface, any source, going to roadrunner dhcp address is ok
+ipchains -A input -i $extint -s 0.0.0.0/0 -d $extip/32 -j ACCEPT
+
+# loopback interface is valid.
+ipchains -A input -i lo -s 0.0.0.0/0 -d 0.0.0.0/0 -j ACCEPT
+
+# catch all rule, all other incoming is denied and logged.
+ipchains -A input -s 0.0.0.0/0 -d 0.0.0.0/0 -l -j REJECT
+
+echo -n "output..."
+#############################################################################
+# Output chain: flush and set default policy of reject. Actually the default policy
+# is irrelevant because there is a catch all rule with deny and log.
+
+ipchains -F output
+ipchains -P output REJECT
+
+# local interface, any source going to local net is valid
+ipchains -A output -i $intint -s 0.0.0.0/0 -d $intnet -j ACCEPT
+
+# outgoing to local net on remote interface, stuffed routing, deny
+ipchains -A output -i $extint -s 0.0.0.0/0 -d $intnet -l -j REJECT
+
+# outgoing from local net on remote interface, stuffed masquerading, deny
+ipchains -A output -i $extint -s $intnet -d 0.0.0.0/0 -l -j REJECT
+
+# anything else outgoing on remote interface is valid
+ipchains -A output -i $extint -s $extip/32 -d 0.0.0.0/0 -j ACCEPT
+
+# loopback interface is valid.
+ipchains -A output -i lo -s 0.0.0.0/0 -d 0.0.0.0/0 -j ACCEPT
+
+# catch all rule, all other outgoing is denied and logged.
+ipchains -A output -s 0.0.0.0/0 -d 0.0.0.0/0 -l -j REJECT
+
+echo -n "forward..."
+#############################################################################
+# Forward chain: flush and set default policy of deny. Actually the default policy
+# is irrelevant because there is a catch all rule with deny and log.
+#
+ipchains -F forward
+ipchains -P forward DENY
+
+# Masquerade from local net on local interface to anywhere.
+# This is the line that does all the work, most of the rest if the lines
+# in this file are just for security reasons.
+ipchains -A forward -i $extint -s $intnet -d 0.0.0.0/0 -j MASQ
+
+# catch all rule, all other forwarding is denied and logged. pity there is no
+# log option on the policy but this does the job instead.
+ipchains -A forward -s 0.0.0.0/0 -d 0.0.0.0/0 -l -j REJECT
+
+echo "done."
+</pre>
+<br>
+<br>
+<a name="networkg"><h3>/etc/sysconfig/network (gateway)</h3></a>
+<pre>
+NETWORKING="yes"
+FORWARD_IPV4="yes"
+HOSTNAME="main.local"
+DOMAINNAME="local"
+GATEWAY="10.0.0.1"
+GATEWAYDEV="eth0"
+</pre>
+<br>
+<br>
+<a name="networkw"><h3>/etc/sysconfig/network (workstations)</h3></a>
+<pre>
+NETWORKING="yes"
+FORWARD_IPV4="no"
+# change hostname on each machine
+HOSTNAME="w1.local"
+DOMAINNAME="local"
+GATEWAY="10.0.0.1"
+GATEWAYDEV="eth0"
+</pre>
+<br>
+<br>
+<a name="hosts"><h3>/etc/hosts (gateway and workstations)</h3></a>
+<pre>
+127.0.0.1	localhost	localhost.localdomain
+10.0.0.1	main		main.local
+10.0.0.10	w1		w1.local
+10.0.0.20	w2		w2.local
+10.0.0.30	w3		w3.local
+</pre>
+<br>
+<br>
+<a name="resolvconf"><h3>/etc/resolv.conf (gateway and workstations)</h3></a>
+<pre>
+search local columbus.rr.com
+nameserver 10.0.0.1		#our local nameserver
+nameserver 128.146.1.7		#fill in a backup server. do not use this one, it is for OSU students only.
+</pre>
+<br>
+<br>
+<a name="pumpconf"><h3>/etc/pump.conf (on gateway only)</h3></a>
+<pre>
+device  eth0 {  
+	nodns 
+	}
+</pre>
+<br>
+<br>
+<a name="namedconf"><h3>/etc/named.conf (on gateway only)</h3></a>
+<pre>
+options {
+	directory "/var/named";
+};
+zone "." {
+	type hint;
+	file "named.ca";
+};
+zone "local"{
+	type master;
+	file "local.zone";
+	notify no;
+};
+zone "0.0.10.in-addr.arpa"{
+	type master;
+	file "local.reverse";
+	notify no;
+};
+zone "0.0.127.in-addr.arpa"{
+	type master;
+	file "named.local";
+};
+</pre>
+<br>
+<br>
+<a name="varnamed"><h3>/var/named/local.zone (on gateway only)</h3></a>
+<pre>
+@		IN	SOA	main.local.	root.main.local. (
+				200001151 ; serial
+				8 ; refresh
+				2 ; retry
+				1 ; expire
+				1 ; default_ttl
+				)
+@		IN	NS	main.local.
+localhost	IN	A	127.0.0.1
+main		IN	A	10.0.0.1
+w1		IN	A	10.0.0.10
+w2		IN	A	10.0.0.20
+w3		IN	A	10.0.0.30
+</pre>
+<br>
+<br>
+<h3>/var/named/local.reverse (on gateway only)</h3>
+<pre>
+0.0.10.in-addr.arpa.  	IN 	SOA 	main.local. root.main.local. (
+					1997022700 ; serial
+					28800 ; refresh
+					14400 ; retry
+					3600000 ; expire
+					86400 ; default_ttl
+					)
+1.0.0.10.in-addr.arpa.	IN	PTR	main.local.
+10.0.0.10.in-addr.arpa.	IN	PTR	w1.local.
+20.0.0.10.in-addr.arpa.	IN	PTR	w2.local.	
+30.0.0.10.in-addr.apra.	IN	PTR	w3.local.
+</pre>
+<br>
+<br>
+<a name="ddup"><h3>append to /etc/rc.d/rc.local (dyndns support with ddup)</h3></a>
+<pre>
+# Update dyndns.org entry with crafty abuse prevention
+# This will not work unless you have a dyndns account and the ddup package installed.
+# This requires some variables that are set in the firewall config script,
+# so this should be appended to the end of the firewall script.
+
+# replace dummy.hostname with your registered hostname
+reghost="dummy.hostname" 
+regip="`nslookup $reghost main.dyndns.org | tail -n 3 | grep 'ddress' | awk '{print $2}'`"
+
+echo -e "\n Dyndns.org abuse prevention IP address check:"
+echo "$reghost registered: $regip"
+echo -e "$extint has IP address: $extip \n"
+
+if [ "$regip" = "$extip" ]; then
+	echo "Address has not changed. DDUP not run."; 
+	else
+	echo "Address has changed. Updating your record.";
+	ddup --host $reghost;
+fi
+</pre>
+<br>
+<br>
+<a name="confmod"><h3>/etc/conf.modules (gateway; only 'alias ethx' lines are relevant)</h3></a>
+<pre>
+alias eth0 3c509
+alias parport_lowlevel parport_pc
+pre-install pcmcia_core /etc/rc.d/init.d/pcmcia start
+alias eth1 tulip
+</pre>
+
+
+
+
+
+<!-- *** BEGIN copyright *** -->
+<P> <hr> <!-- P --> 
+<H5 ALIGN=center>
+
+Copyright &copy; 2000, Mark Nielsen, Andrew oyd<BR> 
+Published in Issue 51 of <i>Linux Gazette</i>, March 2000</H5>
+<!-- *** END copyright *** -->
+
+<!--startcut ==========================================================-->
+<!-- P --> <HR> <!-- P -->
+
+<FONT SIZE="+2">Talkbacks</FONT>
+<P>
+<!-- *** BEGIN navbar *** -->
+<A HREF="index.html"><IMG ALT="[ Table of Contents ]" 
+	SRC="../gx/indexnew.gif" WIDTH=163 HEIGHT=60 ALIGN=bottom ></A>
+<A HREF="../index.html"><IMG ALT="[ Front Page ]" 
+	SRC="../gx/homenew.gif" WIDTH=163 HEIGHT=60 ALIGN=bottom></A>
+<A HREF="mauerer.html"><IMG ALT="[ Prev ]" SRC="../gx/back2.gif" WIDTH=41 HEIGHT=60 ALIGN=bottom></A>
+<A HREF="../faq/index.html"><IMG ALT="[ Linux Gazette FAQ ]" 
+	SRC="./../gx/dennis/faq.gif"WIDTH=163 HEIGHT=60 ALIGN=bottom></A>
+<A HREF="pramode.html"><IMG ALT="[ Next ]" SRC="../gx/fwd.gif" WIDTH=41 HEIGHT=60 ALIGN=bottom  ></A>
+<!-- *** END navbar *** -->
+</BODY></HTML>
+<!--endcut ============================================================-->

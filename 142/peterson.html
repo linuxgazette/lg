@@ -1,0 +1,497 @@
+<!DOCTYPE html
+	PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+	 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="utf-8" xml:lang="utf-8">
+<head>
+<title>Writing PostgreSQL Functions in C, Part Two LG #142</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link rel="stylesheet" href="../lg.css" type="text/css" media="screen, projection"  />
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+<link rel="shortcut icon" href="../favicon.ico" />
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+</head>
+<body>
+
+<a href="../">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+<div id="navigation">
+<table summary="masthead" width="100%">
+<tr>
+<td align="center" colspan="3" style="font-size: 10px; font-weight: bold">
+<a href="../index.html">Home</a>
+<a href="http://linuxgazette.net">Main Site</a>
+<a href="../faq/index.html">FAQ</a>
+
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/mailman/listinfo/">Mailing Lists</a>
+<a href="../jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+<hr width="99%" style="border: 1px inset #000033">
+</td>
+</tr>
+<tr>
+<td width="40%" align="left" style="font-size: 10px; font-weight: bold">
+The Free International Online Linux Monthly
+</td>
+<td width="20%" align="center" style="font-size: 10px; font-weight: bold">
+ISSN: 1934-371X
+</td>
+<td width="40%" align="right" style="font-size: 10px; font-weight: bold">
+Main site: <a href="http://linuxgazette.net">http://linuxgazette.net</a> 
+</td>
+</table>
+</div>
+
+
+<div id="breadcrumbs1">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">September 2007 (#142)</a> &gt; 
+Article
+
+</div>
+
+<div class="articlecontent1">
+<div class="content">
+
+<div id="previousnexttop">
+<A HREF="moen.html" >&lt;-- prev</A> | <A HREF="pfeiffer.html" >next --&gt;</A>
+</div>
+
+<h1>Writing PostgreSQL Functions in C, Part Two</h1>
+<p id="by"><b>By <a href="../authors/peterson.html">Ron Peterson</a></b></p>
+
+<h3 id="intro">Introduction</h3>
+
+<p>In my <a href="http://linuxgazette.net/139/peterson.html">last
+article</a>, I introduced the basic framework for creating your own
+PostgreSQL function in C.  In this article, I'd like to expand on that
+introduction.  I'll introduce:
+</p>
+
+<ul>
+<li>Accepting multiple arguments</li>
+<li>Parsing arguments that are <em>tuples</em></li>
+<li>Returning a tuple, rather than a simple value</li>
+<li>Linking against an external library</li>
+<li>Printing debug statements from within your PostgreSQL module</li>
+</ul>
+
+<p>
+I'm also going to eschew the use of the PostgreSQL extension building
+infrastructure I used last time, in order to illustrate the details of
+how PostgreSQL shared object files are built in Linux.
+</p>
+
+<p>The same prerequisites as in my previous article still apply.  All of
+the code presented here can be downloaded as a single tarball if you would
+prefer to avoid typing practice (and the consequent frustration of
+debugging typos, rather than code.)</p>
+
+<hr>
+
+<h3>The End</h3>
+
+<p>Before we begin, let's look at what we want to accomplish.  Let's say
+we'd like to create a set of PostgreSQL functions that implement the
+features of <a href="http://www.galassi.org/mark/">Mark Galassi's</a>
+excellent <a href="http://www.gnu.org/software/gsl/">GNU Scientific
+Library</a>.  Let's pick one of the library's functions,
+gsl_complex_add, and see what we need to do to create a corresponding
+PostgreSQL function.  When we're finished, we'll be able to write SQL
+statements like this:</p>
+
+<pre>
+&gt; select gsl_complex_add( ROW( 3.2e4, -3.2 ), ROW( 4.1, 4.245e-3 ) );
+
+   gsl_complex_add   
+---------------------
+ (32004.1,-3.195755)
+</pre>
+
+<p>I think it's appropriate to represent complex numbers in PostgreSQL
+as tuples, where the real and imaginary components get passed around
+together as a pair.  Think of a tuple as a structure in C.  The tuple
+concept jibes with the way we're taught to think about these things in
+other domains.  We'll be using PostgreSQL's <a
+href="http://www.postgresql.org/docs/8.2/static/sql-createtype.html">CREATE
+TYPE</a> statement to define the composite type we use as follows:</p>
+
+<pre>
+DROP FUNCTION gsl_complex_add ( __complex, __complex );
+DROP TYPE __complex;
+
+CREATE TYPE __complex AS ( r float, i float );
+
+CREATE OR REPLACE FUNCTION
+  gsl_complex_add( __complex, __complex )
+RETURNS
+  __complex
+AS
+  'example.so', 'c_complex_add'
+LANGUAGE
+  C
+STRICT
+IMMUTABLE;
+</pre>
+
+<hr>
+
+<h3>The Stuff in the Middle</h3>
+
+<p>OK, so now that we know what we would like to do, let's look at how we
+get there.  I'll dump all of the code on you at one time, and follow up
+by trying to explain how it works.  I won't spend too much time
+repeating what I say in the code comments though, because that would be
+redundant, just like this sentence.</p>
+
+<pre>
+// example.c:
+
+// PostgreSQL includes
+#include "postgres.h"
+#include "fmgr.h"
+// Tuple building functions and macros
+#include "access/heapam.h"
+#include "funcapi.h"
+
+#include &lt;string.h&gt;
+
+// GNU Scientific Library headers
+#include &lt;gsl/gsl_complex.h&gt;
+#include &lt;gsl/gsl_complex_math.h&gt;
+
+#ifdef PG_MODULE_MAGIC
+PG_MODULE_MAGIC;
+#endif
+
+// forward declaration to keep compiler happy
+Datum c_complex_add( PG_FUNCTION_ARGS );
+
+PG_FUNCTION_INFO_V1( c_complex_add );
+Datum
+c_complex_add( PG_FUNCTION_ARGS )
+{
+   // input variables
+   HeapTupleHeader   lt, rt;
+
+   bool           isNull;
+   int            tuplen;
+   bool           *nulls;
+
+   // things we need to deal with constructing our composite type
+   TupleDesc         tupdesc;
+   Datum             values[2];
+   HeapTuple         tuple;
+
+   // See PostgreSQL Manual section 33.9.2 for base types in C language
+   // functions, which tells us that our sql 'float' (aka 'double
+   // precision') is a 'float8 *' in PostgreSQL C code.
+   float8                *tmp;
+
+   // defined by GSL library
+   gsl_complex           l, r, ret;
+
+   // Get arguments.  If we declare our function as STRICT, then
+   // this check is superfluous.
+   if( PG_ARGISNULL(0) ||
+       PG_ARGISNULL(1) )
+   {
+      PG_RETURN_NULL();
+   }
+
+   // Get components of first complex number
+   //// get the tuple
+   lt = PG_GETARG_HEAPTUPLEHEADER(0);
+   ////// get the first element of the tuple
+   tmp = (float8*)GetAttributeByNum( lt, 1, &amp;isNull );
+   if( isNull ) { PG_RETURN_NULL(); }
+   GSL_SET_REAL( &amp;l, *tmp );
+   ////// get the second element of the tuple
+   tmp = (float8*)GetAttributeByNum( lt, 2, &amp;isNull );
+   if( isNull ) { PG_RETURN_NULL(); }
+   GSL_SET_IMAG( &amp;l, *tmp );
+
+   // Get components of second complex number
+   rt = PG_GETARG_HEAPTUPLEHEADER(1);
+   tmp = (float8*)GetAttributeByNum( rt, 1, &amp;isNull );
+   if( isNull ) { PG_RETURN_NULL(); }
+   GSL_SET_REAL( &amp;r, *tmp );
+   tmp = (float8*)GetAttributeByNum( rt, 2, &amp;isNull );
+   if( isNull ) { PG_RETURN_NULL(); }
+   GSL_SET_IMAG( &amp;r, *tmp );
+
+   // Example of how to print informational debugging statements from
+   // your PostgreSQL module.  Remember to set minimum log error
+   // levels appropriately in postgresql.conf, or you might not
+   // see any output.
+   ereport( INFO,
+            ( errcode( ERRCODE_SUCCESSFUL_COMPLETION ),
+              errmsg( "tmp: %e\n", *tmp )));
+
+   // call our GSL library function
+   ret = gsl_complex_add( l, r );
+
+   // Now we need to convert this value into a PostgreSQL composite
+   // type.
+
+   if( get_call_result_type( fcinfo, NULL, &amp;tupdesc ) != TYPEFUNC_COMPOSITE )
+      ereport( ERROR,
+              ( errcode( ERRCODE_FEATURE_NOT_SUPPORTED ),
+                errmsg( "function returning record called in context "
+                      "that cannot accept type record" )));
+
+   // Use BlessTupleDesc if working with Datums.  Use
+   // TupleDescGetAttInMetadata if working with C strings (official
+   // 8.2 docs section 33.9.9 shows usage)
+   BlessTupleDesc( tupdesc );
+
+   // WARNING: Architecture specific code!
+   // GSL uses double representation of complex numbers, which
+   // on x86 is eight bytes.  
+   // Float8GetDatum defined in postgres.h.
+   values[0] = Float8GetDatum( GSL_REAL( ret ) );
+   values[1] = Float8GetDatum( GSL_IMAG( ret ) );
+
+   tuplen = tupdesc-&gt;natts;
+   nulls = palloc( tuplen * sizeof( bool ) );
+
+   // build tuple from datum array
+   tuple = heap_form_tuple( tupdesc, values, nulls );
+
+   pfree( nulls );
+
+   // A float8 datum palloc's space, so if we free them too soon,
+   // their values will be corrupted (so don't pfree here, let
+   // PostgreSQL take care of it.)
+   // pfree(values);
+   
+   PG_RETURN_DATUM( HeapTupleGetDatum( tuple ) );
+}
+</pre>
+
+<p>Wow, those comments are so illustrative, I think the article is
+almost finished!  Alright, I'll try to explicate a few of the finer
+points.  After all, that's what I don't get paid for.</p>
+
+<p>There's nothing much new going on here relative to my last article
+until we see the declaration of our HeapTupleHeader variables lt and rt
+(for "left tuple" and "right tuple".)  We're not taking simple data
+types as arguments here, we're taking tuple arguments that we defined
+with our CREATE TYPE statement.  Each of our tuples have two double
+precision components, representing our complex number's real and
+imaginary components.</p>
+
+<p>First, we read our tuple arguments in to rt and lt, using the
+PG_GETARG_HEAPTUPLEHEADER macro.  Then we pick the component values out
+of our tuple using the GetAttributeByNum function.  Refer to the <a
+href="http://www.postgresql.org/docs/8.2/static/xfunc-c.html#XFUNC-C-BASETYPE">Base Types
+in C Language Functions</a> section of the manual (33.9.2) for
+information about how to represent PostgreSQL data types in your C code.
+In our case, this table tells us that our double precision (aka "float")
+values in SQL are represented in PostgreSQL C code as "float8 *".</p>
+
+<p>It so happens that our GSL library's complex number functions expect
+"double" values as input, which on the x86 Linux platform I'm running,
+are conveniently eight bytes, and map directly to the float8 values used
+by PostgreSQL.  Pay close attention here, because if your data types
+don't map properly, you'll get a headache.</p>
+
+<p>We then use the GSL library's GSL_SET_REAL and GSL_SET_IMAG macros
+to construct complex number representations that we can pass to the
+gsl_complex_add function.  We convert the data that GSL understands back
+into a form that PostgreSQL understands by using the Float8GetDatum
+function.  You can see the set of other typical C type to Datum
+conversion functions in postgres.h.</p>
+
+<p>To create the tuple we'd like to return, we first construct an array
+of datum values in our "values" variable.  The heap_formtuple function
+converts this array into a PostgreSQL tuple, which the HeapTupleGetDatum
+function converts into a datum form we can return with 
+PG_RETURN_DATUM.</p>
+
+<p>If we were working with C strings, we would probably do things a bit
+differently.  I'm not going to illustrate how that works, because The
+Fine Manual already includes a <a
+href="http://www.postgresql.org/docs/8.2/static/xfunc-c.html#AEN37421">nice
+example</a>.  Note that the example in the manual is also illustrating
+how to return a <em>set</em> of tuples, which we are not concerning
+ourselves with here.</p>
+
+<p>Note the ereport( INFO ... ) function in the middle of our code.  I
+find this function very handy for printing debugging information to the
+SQL console while I'm developing new code.  You can see how this works
+if you leave this uncommented when you compile and install this
+code.</p>
+
+<hr>
+
+<h3>Shake and Bake</h3>
+
+<p>It's time to turn this code into something we can use.  Instead of
+using the PGXS infrastructure as I did in my last article, we'll get
+under the hood.  It's not only educational to see how to build a shared
+module, but creating your own Makefile also gives you a little more
+latitude to tweak your build options just the way you like. It might also
+make it easier for you to handle building projects with lots of
+dependencies.</p>
+
+<p>Here's a simple Makefile to illustrate how we build our shared object
+file.  In real life, I'd probably use some automatic variables and such,
+but I don't want to obfuscate the basic build process with Makefile
+arcana.  The pg_config command is your friend, and will help you
+ascertain where the include files and such are installed on your system.
+Building the shared object file is a simple matter of first building a
+position independent (the -fpic flag) object file, and then linking
+against all required libraries using the -shared flag to build the
+shared object file.  This is all detailed in <a
+href="http://www.postgresql.org/docs/8.2/static/xfunc-c.html#DFUNC">section
+33.9.6</a> of the manual, which also includes instructions for other
+architectures besides Linux.</p>
+
+<pre>
+INCLUDEDIRS := -I.
+INCLUDEDIRS += -I$(shell pg_config --includedir-server)
+INCLUDEDIRS += -I$(shell pg_config --includedir)
+# If you are using shared libraries, make sure this location can be
+# found at runtime (see /etc/ld.so.conf and ldconfig command).
+LIBDIR = -L$(shell pg_config --libdir)
+# This is where the shared object should be installed
+LIBINSTALL = $(shell pg_config --pkglibdir)
+
+example.so: example.c Makefile
+			gcc -fpic -o example.o -c example.c $(INCLUDEDIRS)
+			gcc -shared -o example.so example.o $(LIBDIR) -lpq -lgsl -lgslcblas -lm
+			cp example.so $(LIBINSTALL)
+</pre>
+
+<p>The Makefile copies the shared object file into the PostgreSQL
+library directory, so that we can execute the SQL I showed you at the
+beginning of this article to create our __complex composite type and our
+gsl_complex_add function.  Just fire up psql as a user with permissions
+to do such things, and then type '\i example.sql' to do so.  And that
+brings us to...</p>
+
+<hr>
+
+<h3>The Beginning</h3>
+
+<p>Well, we started at the end, so I guess that means we're finished.
+As you can see, once you have grasped the basic framework, you have the
+whole world of C library functions available for you to use directly
+within PostgreSQL. This gives you all of the attendant advantages of
+working within a transactional database system.  I hope you find this
+prospect interesting enough to port some intriguing libraries into
+PostgreSQL, because Lord knows I certainly don't have time to do it all
+myself.  :)</p>
+
+<p>Happy hacking.  And a special thanks to the PostgreSQL coding gurus who
+made this fantastic database in the first place.</p>
+
+<hr>
+
+<h3>Resources</h3>
+
+<ul>
+<li><a href="http://www.postgresql.org/docs/">Official PostgreSQL Documentation</a>
+<li><a href="http://www.postgresql.org/docs/8.2/static/xfunc-c.html">C-Language Function Documentation</a>
+<li>Bruce Momjian's excellent <a href="http://www.postgresql.org/docs/books/awbook.html">PostgreSQL Book</a>
+<li>A. Elain Mustain's excellent <a href="http://www.varlena.com/varlena/GeneralBits/">PostgreSQL General Bits</a>
+<li><a href="http://www.postgresql.org/docs/techdocs.4">Community Provided Installation Documentation</a></li>
+<li>Other community created PostgreSQL <a href="http://www.postgresql.org/docs/techdocs.2">Articles and Documentation</a>
+<li><a href="http://www.emacswiki.org/cgi-bin/wiki?SqlMode">SQL Mode for Emacs</a></li>
+</ul>
+
+<script type="text/javascript">
+digg_url = 'http://linuxgazette.net/142/peterson.html';
+digg_title = 'Writing PostgreSQL Functions in C, Part Two';
+digg_bodytext = 'I\'ll introduce Accepting multiple arguments, Parsing arguments that are tuples, Returning a tuple, rather than a simple value, Linking against an external library, Printing debug statements from within your PostgreSQL module. I\'m also going to eschew the use of the PostgreSQL extension building infrastrucure I used last time, in order to illustrate the details of how PostgreSQL shared object files are built in Linux.';
+digg_topic = 'linux_unix';
+</script>
+<script src="http://digg.com/tools/diggthis.js" type="text/javascript"></script> 
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:142/peterson.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<!-- *** BEGIN bio *** -->
+<hr>
+<p>
+<img align="left" alt="Bio picture" src="../gx/authors/peterson.jpg" class="bio">
+</p>
+<p>
+<em>
+
+Ron Peterson is a Network & Systems Manager at Mount Holyoke College in
+the happy hills of western Massachusetts. He enjoys lecturing his three
+small children about the maleficent influence of proprietary media
+codecs while they watch Homestar Runner cartoons together.
+
+</em>
+</p>
+<br clear="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2007, Ron Peterson. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication License</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 142 of Linux Gazette, September 2007
+</p>
+
+</div>
+
+<div id="previousnextbottom">
+<A HREF="moen.html" >&lt;-- prev</A> | <A HREF="pfeiffer.html" >next --&gt;</A>
+</div>
+
+</div>
+</div>
+
+<script src="http://www.google-analytics.com/urchin.js"
+type="text/javascript">
+</script>
+<script type="text/javascript">
+_uacct = "UA-1204316-1";
+urchinTracker();
+</script>
+
+
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+</body>
+</html>
+

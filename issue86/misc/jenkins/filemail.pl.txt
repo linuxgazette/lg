@@ -1,0 +1,33 @@
+#!/usr/local/bin/perl -w
+# @(#) filemail.pl      Breaks incoming stream into parts, then encodes
+#                       each part and emails it to designated recipient.
+#                       Vers. 2.05; Graham Jenkins, IBM GSA, December 2002.
+
+use strict;             # Parts are encoded and sent via a double-buffer scheme.
+use File::Basename;     # Uuencoding is used to reduce module dependence.
+my  $PSize = 700;       # Default (input) part-size.
+my  ($Count,$Sum,$Size,$Total,$InpBuf,$InpLen,$OutBuf,$j);
+
+if ($#ARGV eq 2) { if ($ARGV[0] =~ m/^-\d+$/ ) { $PSize=0-$ARGV[0]; shift } } 
+
+die "Usage: cat file  |".basename($0)." [-KbPerPart] destination filename\n".
+    " e.g.: tar cf - .|".basename($0)." -64 smith\@popser.acme.com mydir.tar\n".
+    "(Note: default un-encoded part size = $PSize","kb)\n"  if ($#ARGV ne 1);
+
+open(INFILE,"-") || die "Can't read input!\n";
+$Count = 0; $Total = "";# Loop until no further input available.
+
+do { $InpLen = read(INFILE, $InpBuf, 1024 * $PSize);
+     $Total  = $Count if $InpLen lt 1;
+     do { $Size = length($OutBuf); 
+          print STDERR "$ARGV[1] part $Count/$Total => $ARGV[0] $Size bytes\n";
+          $Sum  = unpack("%32C*", $OutBuf);
+          foreach $j (1,2) {$Sum = ($Sum & 0xffff) + int($Sum/0x10000)}
+          open(PIPE, "| Mail -s" .
+            "'$ARGV[1] part $Count/$Total size/sum $Size/$Sum' $ARGV[0]");
+          $j = $Count ; while (length($j) < 3 ) { $j = "0" . $j }
+          $j = dirname($ARGV[1])."/".$j if dirname($ARGV[1]) ne "."; 
+          print PIPE "begin 644 ",$j,"_", basename($ARGV[1]),"\n",
+            pack("u",$OutBuf),"\`\nend\n";
+          close(PIPE)                                   } if $Count gt 0;
+     $Count++; $OutBuf = $InpBuf                          } until $InpLen lt 1;

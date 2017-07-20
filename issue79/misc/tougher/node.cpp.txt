@@ -1,0 +1,280 @@
+//
+//
+// Copyright 2002 Rob Tougher <robt@robtougher.com>
+//
+// This file is part of xmlrpc.
+//
+// xmlrpc is free software; you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation; either version 2 of the License, or
+// (at your option) any later version.
+//
+// xmlrpc is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with xmlrpc; if not, write to the Free Software
+// Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+//
+//
+
+
+// Implementation of the xml::node class.
+
+
+#include "node.hpp"
+#include <sstream>
+
+namespace xml
+{
+
+  void node::add_child ( node * n )
+  {
+    if ( n )
+      {
+	m_children.push_back ( n );
+      }
+  }
+
+  node* node::add_child ( const std::string name, const std::string text )
+  {
+    node * n = new node ( name, text );
+    add_child ( n );
+    return n;
+  }
+
+  node* node::get_child ( const int index ) const
+  {
+    if ( m_children.size() > index )
+      {
+	return * (m_children.begin() + index );
+      }
+    else
+      {
+	return 0;
+      }
+  }
+
+
+  void node::cleanup()
+  {
+    if ( ! m_cleanup ) return;
+
+    for ( std::vector<node*>::const_iterator it = m_children.begin();
+	  it != m_children.end();
+	  it++ )
+      {
+	if ( it && *it )
+	  {
+	    node* n = *it;
+	    delete n; 
+	  }
+      }
+
+    m_children.clear();
+    set_root ( 0 );
+    m_current_node = 0;
+  }
+
+
+  std::string node::get_xml() const
+  {
+    std::string xml = "<";
+    xml += encode ( get_name() );
+    xml += ">";
+
+    //
+    // Take special characters into account
+    //
+    xml += encode ( get_text() );
+
+    int child_count = get_child_count();
+    for ( int child_index = 0; child_index < child_count; child_index++ )
+      {
+	node * child = get_child ( child_index );
+
+	if ( child )
+	  {
+	    xml += child->get_xml();
+	  }
+      }
+
+    xml += "</";
+    xml += encode ( get_name() );
+    xml += ">";
+
+    return xml;
+  }
+
+  std::string node::encode ( const std::string s ) const
+  {
+    std::string tmp;
+
+    for ( std::string::const_iterator it = s.begin();
+	  it != s.end();
+	  it++ )
+      {
+	char c = *(it);
+
+	if ( c == '&' )
+	  {
+	    tmp += "&amp;";
+	  }
+	else if ( c == '<' )
+	  {
+	    tmp += "&lt;";
+	  }
+	else if ( c == '>' )
+	  {
+	    tmp += "&gt;";
+	  }
+	else if ( c == '"' )
+	  {
+	    tmp += "&quot;";
+	  }
+	else if ( c == '\'' )
+	  {
+	    tmp += "&apos;";
+	  }
+	else
+	  {
+	    tmp += c;
+	  }
+      }
+    return tmp;
+  }
+
+  // --------------------------------------------------
+  //
+  // The following code handles the parsing stuff
+  //
+  // --------------------------------------------------
+
+
+  //
+  // Creates and frees an expat parser
+  //
+  //
+  class expat_parser
+  {
+  public:
+    expat_parser()
+    {
+      m_p = XML_ParserCreate ( NULL );
+
+      if ( ! m_p )
+	{
+	  throw parse_exception ( "Couldn't allocate memory for parser.\n" );
+	}
+    }
+    ~expat_parser() { XML_ParserFree ( m_p ); }
+    operator XML_Parser () const { return m_p; }
+  private:
+    XML_Parser m_p;
+  };
+
+
+
+  void start_element ( void *data, const char *el, const char **attr )
+  {
+    if ( ! data ) return;
+    node * p = (node*)data;
+
+    node* n = new node();
+
+    if ( ! p->root() )
+      {
+	p->set_root ( n );
+      }
+
+    if ( p->current_node() )
+      p->current_node()->add_child ( n );
+
+
+    p->node_stack().push_back ( n );
+    p->set_current_node ( n );
+    n->set_name ( el );
+  }
+
+
+  void end_element ( void *data, const char *el )
+  {
+    if ( ! data ) return;
+    node * p = (node*)data;
+
+    if ( p->node_stack().size() < 1 )
+      {
+	return;
+      }
+
+    p->node_stack().pop_back();
+
+
+    if ( p->node_stack().size() == 0 )
+      {
+	p->set_current_node ( 0 );
+      }
+    else
+      {
+	p->set_current_node ( * ( p->node_stack().begin() + p->node_stack().size() - 1 ) );
+      }
+
+    return;
+  }
+
+
+  void characters ( void *userData, const XML_Char *s, int len )
+  {
+    if ( ! userData ) return;
+    node * p = ( node* ) userData;
+
+    std::string tmp = s;
+    tmp = tmp.substr ( 0, len );
+
+    if ( p->current_node() )
+      {
+	p->current_node()->append_text ( ( const char * ) tmp.c_str() );
+      }
+
+    return;
+  }
+
+
+  void node::load_xml ( const std::string s )
+  {
+    //
+    // Destroys any memory we are holding on to
+    //
+    cleanup();
+
+
+    expat_parser p;
+
+    XML_SetElementHandler ( p, start_element, end_element );
+    XML_SetCharacterDataHandler ( p, characters );
+    XML_SetUserData ( p, this );
+
+    if ( ! XML_Parse ( p, s.c_str(), s.size(), true ) )
+      {
+	std::ostringstream ost;
+	ost << "Parse error at line " << XML_GetCurrentLineNumber(p)
+		  << " --- " << XML_ErrorString(XML_GetErrorCode(p));
+	throw parse_exception ( ost.str() );
+      }
+
+    if ( m_root )
+      {
+	m_name = m_root->m_name;
+	m_text = m_root->m_text;
+	m_children = m_root->m_children;
+	m_root->m_cleanup = false;
+	set_root ( 0 );
+      }
+
+  }
+
+
+
+};

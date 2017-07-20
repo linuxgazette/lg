@@ -1,0 +1,117 @@
+#include <fcntl.h>
+#include <stdio.h>
+#include <string.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netdb.h>
+
+#define SLEEP 5
+#define PORT 8080
+#define LEN 80
+
+main(argc, argv)
+   char *argv[];
+   int argc;
+{
+   /*
+   **   test.c - tests cloned service: inetd port 5050
+   **            (requires clone.o in local directory)
+   */
+   struct sockaddr_in sock;   /* structure for sockets */
+   struct hostent *hp;        /* structure for IP address */
+   int count = 5;             /* maximum connect retries */
+   int clone();               /* remote clone interface */
+   int sfd;                   /* socket file descriptor */
+   int len;                   /* size for accept() call */
+   int acc;                   /* accept file descriptor */
+   int i=0;
+   char buffer[1024];         /* socket transcvr buffer */
+   char rhost[32], *p;        /* target remote host name */
+   char lhost[32];            /* local host.domain name */
+
+   /* get local host name for chat */
+   gethostname(lhost, sizeof(lhost));
+   /* point at "." start of domain */
+   if((p = strchr(lhost, '.')) != NULL)
+      *p = '\0'; /* truncate .domain */
+
+   /*
+   ** Become client or server according to argv[1]
+   */
+   if(argc == 2) /* rhost is present: CLIENT */
+   {
+      strcpy(rhost, argv[1]); /* remote host */
+
+      /* The LOCAL version of "test" becomes
+      ** a CLIENT connecting to the SERVER on
+      ** the REMOTE machine in the arg list.
+      */
+      clone(rhost);
+
+      /* modify socket data for connect */
+      bzero((char *) &sock, sizeof(sock));
+      sock.sin_family = AF_INET;
+      sock.sin_port = htons(PORT);
+      hp = gethostbyname(rhost);
+      bcopy(hp->h_addr, &sock.sin_addr, hp->h_length);
+
+      /* establish CLIENT socket for LOCAL machine */
+      if((sfd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+      {
+         perror("test: socket()");
+         exit(-1);
+      }
+
+      sleep(SLEEP);
+      /* connect to REMOTE_test after time to establish a new process */
+      if(connect(sfd, (struct sockaddr *) &sock, sizeof(sock)) < 0)
+      {
+         perror("test: connect()");
+         exit(-1);
+      }
+
+      /* TEMPORARY: LOCAL_test/REMOTE_test conversation */
+      /* you do whatever suits your application's needs */
+      sprintf(buffer, "Hello from LOCAL_test on %s", lhost);
+      send(sfd, buffer, strlen(buffer)+1, 0);
+      printf("LOCAL_test sends: '%s'\n", buffer);
+      recv(sfd, buffer, sizeof(buffer), 0);
+      printf("REMOTE_test says: '%s'\n", buffer);
+      /* end LOCAL_test */
+   }
+   else                               /***REMOTE***/
+   {
+      /* The REMOTE instantiation of test becomes
+      ** a SERVER, awaiting connection from the
+      ** LOCAL version, a CLIENT. Get a socket.
+      */
+      acc = socket(AF_INET, SOCK_STREAM, 0);
+
+      /* bind server socket to port */
+      bzero((char *) &sock, sizeof(sock));
+      sock.sin_family = AF_INET;
+      sock.sin_port = htons(PORT);
+      sock.sin_addr.s_addr = htonl(INADDR_ANY);
+      len = sizeof(sock);
+      i = bind(acc, (struct sockaddr *) &sock, len);
+
+      /* allow connects to queue up */
+      i = listen(acc, 5);
+
+      /* get file descriptor from accepted connection */
+      sfd = accept(acc, (struct sockaddr *) &sock, &len);
+      close(acc);
+
+      /* receive 1st message from LOCAL */
+      recv(sfd, buffer, sizeof(buffer), 0);
+      sprintf(buffer, "Hello from REMOTE_test on %s", lhost);
+      send(sfd, buffer, strlen(buffer)+1, 0);
+      /* TEMPORARY chat with local version */
+      /* you do what fits your application */
+
+   } /* end REMOTE_test */
+
+   close(sfd);
+   exit(0);
+}

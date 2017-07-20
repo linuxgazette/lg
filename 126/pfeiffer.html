@@ -1,0 +1,501 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Digging More Secure Tunnels with IPsec LG #126</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="peterson.html" >&lt;-- prev</A> | <A HREF="savage.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Digging More Secure Tunnels with IPsec</h1>
+<p id="by"><b>By <A HREF="../authors/pfeiffer.html">Ren&eacute; Pfeiffer</A></b></p>
+
+<p>
+<h3>Introduction</h3>
+
+<p>
+In <a href="../125/pfeiffer.html">my last article about IPsec</a> we
+learned about the building blocks of IPsec in the Linux kernel.  We took a
+look at the tools needed to build encrypted and secured data paths between
+two hosts.  Now we'll use this knowledge and move a step further on.
+</p>
+
+<p>
+IPsec is often used to connect two or more different networks by using
+tunnels. If you have a complex setup, then exchanging keys manually and
+keeping track of them can get very challenging. IPsec offers a way of
+handling keys automatically. Let's take a look how this works.
+</p>
+
+<h3>Entering the Tunnels</h3>
+
+<p>
+We already know how to encrypt all data between two hosts. We created the
+keys and put them into the <b>setkey.conf</b> file, where we also
+configured our security policy that tells the kernel to use IPsec between
+the IP addresses of our hosts. When using IPsec for remote access purposes,
+it is far more useful to reach a whole network of hosts than only one IP
+address. You can do this by using IPsec's tunnel mode. Let's assume that we
+have two networks named A and B.  Both are "behind" two gateways named
+after the nearest connected network.  The classical way to connect both
+networks is to install a route on both gateways. This means that every
+packet between network A and B travels unencrypted through the direct
+connection.
+<p>
+<img src="misc/pfeiffer/vpn_tunnel.png" alt="Illustration of IPsec tunnel between two networks" width="584" height="371">
+</p>
+We want to use IPsec instead. This means that both gateways still need to
+see each other, and we still have the direct connection. In addition to
+that, we get a "second" way our packets can travel. We call this connection
+a virtual connection or tunnel. Only the tunnel holds our packets
+travelling between network A and B. They are encapsulated into ESP or AH
+packets. The direct connection holds the corresponding IPsec packets (i.e.
+the AH and ESP packets itself). You have to keep this in mind when creating
+configurations. Compared to the two single host scenario we have more
+addresses involved. We need the gateway and the network we want to connect
+to. If you know this information, then you can begin to create an
+appropriate entry for the gateways' Security Policy Databases (SPD).
+<pre class="code">
+#!/usr/sbin/setkey -f
+#
+# SPD for gateway A (172.16.72.1)
+#
+spdadd 192.168.1.0/24 10.42.23.0/24 any -P out ipsec
+       esp/tunnel/172.16.72.1-172.16.72.254/require
+       ah/tunnel/172.16.72.1-172.16.72.254/require;
+
+spdadd 10.42.23.0/24 192.168.1.0/24 any -P in ipsec
+       esp/tunnel/172.16.72.254-172.16.72.1/require
+       ah/tunnel/172.16.72.254-172.16.72.1/require;
+</pre>
+Let's start with the first <b>spdadd</b> line. It tells the kernel the
+following: if you see a outbound packet going from our network
+192.168.1.0/24 to the network 10.42.23.0/24, then use IPsec encapsulation
+and transport the encapsulated data from our external address 172.16.72.1
+to the machine with the address 172.16.72.254. The keyword <i>require</i>
+tells the kernel that IPsec encapsulation is mandatory. The second line
+defines how to handle the return traffic. Rephrased it says: if you see an
+IPsec encapsulated inbound packet coming from the network 10.42.23.0/24 and
+going to our network 192.168.1.0/24 and this packet is coming from the
+gateway 172.16.72.254 to our external address, then undo the IPsec
+encapsulation. These are the policies we need for our tunnel.  It sounds
+complicated, but if you take the diagram and trace the packet flow, you
+will see that it is just a description of what the kernel should do. We now
+need the keys. We'll reuse the ones from the last article.
+<pre class="code">
+# AH SAD entries with 160 bit keys
+add 172.16.72.254 172.16.72.1 ah 0x200 -A hmac-sha1 0x46915c30ed7e2465b42861b6ab19f2772813020c;
+add 172.16.72.1 172.16.72.254 ah 0x300 -A hmac-sha1 0xc4dac594f8228e0b94a54758f7fbf2fdf4e37f3e;
+
+# ESP SAD entries with 192 bit keys
+add 172.16.72.254 172.16.72.1 esp 0x201 -E rijndael-cbc 0xa3993b3dfc41ef0a1aa8d168a8bf2c27e48249ac17b61e09;
+add 172.16.72.1 172.16.72.254 esp 0x301 -E rijndael-cbc 0x8f6498928ba354bd45cfad147f54c67b3b742896b3bafc02;
+</pre>
+Again this tells the kernel which keys to use when to go from one gateway to another. You have one
+line for outbound traffic and one for inbound traffic. Now go ahead and create the configuration on
+both gateways. You can create one <b>setkey.conf</b> and mirror source and destination for the other
+gateway since packet flows are symmetrically reversed. Enter the command
+<pre class="code">
+setkey -f /path/to/setkey.conf
+</pre>
+on both gateways and try pinging, telnetting or tracerouting to the network "on the other side".
+</p>
+<p>
+One word about the example setup: I set the gateways' IP addresses so that
+they're near each other in IP space; this is something you need to do when
+routing with directly-connected gateways. When using IPsec tunnels, the
+gateways don't have to be physically connected, and you can create IPsec
+tunnels between any hosts and networks that "see" each other on layer 3 (IP
+in our case).
+</p>
+
+<h3>Routing and the Kernel Policy</h3>
+
+<p>
+Maybe you have noticed that we didn't set any routes to the networks we
+connected. We don't need to.  We told the kernel already what to do with
+the packets. The Security Policy Database takes care of the packets' path.
+This behaviour has some implications you have to consider. First, whenever
+using IPsec tunnels your networks can be "contaminated" by packets with an
+origin IP outside your network. This is actually what you usually want, but
+it is very important to consider it in order to implement good access
+control. If a server in network B only expects and allows connections to be
+from 10.42.23.0/24, then clients in network A cannot access these services.
+This can be either good or bad. In any case you have to be aware (and
+possibly take care) of that. This leads to the second consideration -
+security. When building one or lots of VPN tunnels, you have to be careful
+where your endpoints are and what networks they can see. 
+</p>
+
+<h3>Automatic Keying and X.509 Certificates</h3>
+
+<p>
+Digging multiple tunnels, dealing with many IPsec clients and keeping track of the keys is a big
+problem. Consider a gateway that expects IPsec connections from 10 other systems. Then the <b>setkey.conf</b>
+gets a bit crowded and no one will want to maintain long hexadecimal numbers. In addition to that,
+pre-shared keys are best used with fixed IP addresses. If you obtain IP addresses dynamically, then
+you have to think of something else.
+</p>
+
+</p>
+Fortunately there is a solution for this problem. The Internet Security
+Association and Key Management Protocol (ISAKMP) is part of IPsec. It was
+designed "for establishing Security Associations (SA) and cryptographic
+keys in an Internet environment", to quote the RFC. It can help us with
+exchanging keys and creating security policies for the Linux kernel. Key
+exchange and creation of an IPsec connection are broken up into different
+phases.
+<ul>
+<li> Phase 1 is a setup phase, also called <i>main mode</i>. The two
+partners work out how to exchange information securely. They negotiate the
+encryption method, the hash algorithm, the authentication methods, and a
+way to securely exchange encryption keys for the next phase. The result of
+phase 1 is a "security association" that tells both partners how to
+communicate securely.</li>
+<li> Phase 2 includes the creation of the security policies for the AH and
+ESP protocols. That's what we already did manually.</li>
+</ul>
+During phase 1 the two IPsec partners also check whether they have the
+right keys to talk to each other. The real data transmission starts after
+phase 2 is completed.
+</p>
+
+<p>In order to use ISAKMP you have to configure the <b>racoon</b>
+daemon. It is also part of the ipsec-tools package. Its configuration file is typically found at
+<i>/etc/racoon/racoon.conf</i>. We will recreate the tunnel above with <b>racoon</b> in order to get
+to know the most important configuration directives.
+</p>
+
+<p>
+While we are at it, we will swap the pre-shared keys for X.509
+certificates. This makes life easier when maintaining multiple keys or
+issuing VPN access to clients. The certificates are used in the same
+familiar way as SSL certificates on the World Wide Web, a combination also
+known as HTTPS (encrypted HTTP). Instead of creating long strings, you
+simply create a self-signed SSL certificate. Your IPsec gateway(s) check
+these certificates against the public key of your own Certificate Authority
+(CA).  Every certificate signed by your own CA opens a IPsec tunnel, just
+like a key would. You can now give these certified keys to every host that
+is allowed to talk IPsec to you. While this sounds more complicated, it
+really gets easier when dealing with a lot of IPsec clients.
+</p>
+
+<h3>Automatic Keying in Action</h3>
+
+<p>
+Let's rebuild the last example with <b>racoon</b>. It starts like this:
+<pre class="code">
+# racoon.conf file for gateway A
+#
+path certificate "/etc/racoon/certs";
+path pre_shared_key "/etc/racoon/psk.txt";
+log notify;
+listen {
+	isakmp 172.16.72.1 [500];
+};
+</pre>
+The first directive tells <b>racoon</b> where to look for certificates and
+certified keys. In our case, this is the directory
+<i>/etc/racoon/certs</i>. Then we tell the daemon where to look for a
+collection of pre-shared keys (PSKs). You can use PSKs as well, you don't
+need to use certificates. The file <i>/etc/racoon/psk.txt</i> holds a list
+of unique identifiers (such as hostnames or IP addresses) and their
+corresponding keys.
+</p>
+<p>
+The next line sets the log level. The log level can be either
+<i>notify</i>, <i>debug</i> or <i>debug2</i>. Increase the log level if you
+want to see how <b>racoon</b> creates the IPsec connection. All logging
+goes to syslog. The <i>listen</i> directive tells <b>racoon</b> where to
+listen for ISAKMP requests. By default it listens on all devices and on
+port 500/UDP (the default port for ISAKMP). So far, so good. Now we define
+the path to gateway B.
+<pre class="code">
+remote 172.16.72.254 {
+	exchange_mode main;
+	generate_policy off;
+	passive off;
+	certificate_type x509 "gateway.a.example.net.cert" "gateway.a.example.net.key";
+	ca_type x509 "ca-cert.pem";
+	my_identifier asn1dn;
+	peers_identifier asn1dn;
+	verify_identifier on;
+	proposal {
+		encryption_algorithm 3des;
+		hash_algorithm sha1;
+		authentication_method rsasig;
+		dh_group modp1024;
+	}
+}
+</pre>
+Let's walk through the options and see what they mean. 
+<ul>
+<li> <i>exchange_mode main</i> - defines the key exchange mode. <i>main</i> is a good choice since
+it is considered more secure.</li>
+<li> <i>generate_policy off</i> and <i>passive off</i> - when using automatic keying one gateway
+acts as initiator of the IPsec link. The other gateway remains passive and answers the requests of
+its peer. By using these two directives we define gateway A to be the initiator of the link. Gateway
+B need the options <i>generate_policy on</i> and <i>passive on</i> to answer.</li>
+<li> <i>certificate_type</i> and <i>ca_type</i> - indicate the type of certificates we use. We use
+X.509 certificates and <b>racoon</b> needs to know our key, our certificate and the public certificate of our CA.
+Even though we're using IP addresses for our gateway definitions, make sure that you use hostnames in the
+certificates and keys. This is good practice.</li>
+<li> <i>my_identifier</i> and <i>peers_identifier</i> - indicate which identifier should be used to
+identify hosts or IPsec endpoints. You can use either IP addresses, fully-qualified domain name,
+ASN.1 distinguished names (ASN.1 DNs) or self-defined IDs. We use ASN.1 DNs since our certificates
+contain them anyway.</li>
+<li> <i>verify_identifier on</i> - means that we wish to verify our peer's identifier by checking
+the certificate with our CA.</li>
+<li> <i>proposal</i> - this section holds all information for the phase 1. You can define encryption
+and hash algorithm, authentication method and Diffie-Hellman exponentiations for secure key
+exchange. The authentication method is <i>rsasig</i> when using certificates, use
+<i>pre_shared_key</i> for pre-shared keys.</li>
+</ul>
+The man page of <i>racoon.conf</i> has a full list of options and parameters. My example boils down
+to the bare bones. Keep in mind that we need the configuration above for phase 1 of our connection.
+We still need to define the security policy for phase 2. This is done in a separate block.
+<pre class="code">
+sainfo address 192.168.1.0/24 any address 10.42.23.0/24 any {
+        pfs_group modp1024;
+        encryption_algorithm aes;
+        authentication_algorithm hmac_sha1;
+        lifetime time 28800 sec;
+        compression_algorithm deflate;
+}
+</pre>
+The first line announces that the policy is valid for all packets originating in the 192.168.1.0/24
+network and going to the 10.42.23.0/24 network.
+<ul>
+<li> <i>pfs_group modp1024</i> - is used as a parameter for the Diffie-Hellman algorithm.</li>
+<li> <i>encryption_algorithm aes</i> - selects the AES encryption algorithm. You can specify more
+than one algorithm. One will be chosen during phase 2.</li>
+<li> <i>authentication_algorithm hmac_sha1</i> - select the authentication algorithm. Again you can
+specify more than one.</li>
+<li> <i>lifetime time 28800 sec</i> - tells <b>racoon</b> how often this security policy 
+needs to be renegotiated.</li>
+<li> <i>compression_algorithm deflate</i> - selects a compression algorithm. Currently there is only
+one implemented.</li>
+</ul>
+We don't need to define the return path policy since our peer already encapsulates inbound packets
+with IPsec.
+That is the whole <a href="misc/pfeiffer/racoon.conf.txt">racoon.conf</a> configuration. You need to
+have another on gateway B. Make sure that the IP address in the <i>remote</i> section corresponds to
+the correct peer and that the networks in the <i>sainfo</i> section are reversed. As soon as you
+have everything in place you can test the setup. Start the <b>racoon</b> daemon on both gateways.
+On most systems you can do this by issueing the command:
+<pre class="code">
+/etc/init.d/racoon start
+</pre>
+Check the logs. Most probably not much will happen. The IPsec connection will be initiated by the
+gateway with the option <i>passive off</i> enabled. Use a client on this gateway's network and
+create some traffic to the network you wish to connect to via the tunnel. After the first packets are
+sent, the <b>racoon</b> daemon will start ISAKMP and negotiate through phase 1 and 2. If everything
+goes well, you can send your first ping packets through the tunnel. The tunnel may needs some seconds
+to come up. You will get messages such as "resource temporarily unavailable" if the tunnel is
+not yet ready.
+</p>
+
+<h3>Mobile Tunnels for Roadwarriors</h3>
+
+<p>
+IPsec tunnels are frequently used to connect mobile clients "on the road". They connect to a central
+gateway, sometimes called a <i>VPN</i> or an <i>IPsec server</i>, and create a secure tunnel. You can use
+our <i>racoon.conf</i> files with some modifications. Your IPsec server needs to be in passive mode
+since it's waiting for incoming connections. The connections can originate from anywhere, so your peer will
+be anonymous.
+<pre class="code">
+remote anonymous {
+	exchange_mode main;
+	generate_policy on;
+	passive on;
+	certificate_type x509 "vpnserf.example.net.cert" "vpnserf.example.net.key";
+	ca_type x509 "ca-cert.pem";
+	my_identifier asn1dn;
+	peers_identifier asn1dn;
+	verify_identifier on;
+	proposal {
+		encryption_algorithm 3des;
+		hash_algorithm sha1;
+		authentication_method rsasig;
+		dh_group modp1024;
+	}
+}
+</pre>
+The rest of the options can stay the same except for <i>generate_policy</i> and <i>passive</i>. Both
+need to be enabled. <i>generate_policy</i> tells <b>racoon</b> to create new policies for new
+connections; this makes sense because our peer varies. The same considerations need to be applied to
+the security policy in phase 2.
+<pre class="code">
+sainfo anonymous {
+        pfs_group modp1024;
+        encryption_algorithm aes;
+        authentication_algorithm hmac_sha1;
+        lifetime time 1 hour;
+        compression_algorithm deflate;
+}
+</pre>
+It is a good idea to reduce the lifetime for mobile peers. Again, the parameter <i>anonymous</i> lets
+<b>racoon</b> accept varying policies. The configuration of the mobile client has to specify
+the IPsec server's address and the security policy to our internal networks.
+</p>
+
+<p>
+Next time we will take a look at filtering IPsec traffic and protecting exposed IPsec servers.
+Happy digging!
+</p>
+
+<h3>Further Reading</h3>
+
+<p>
+<ul>
+<li> <a href="http://www.ipsec-howto.org/">IPsec HOWTO</a></li>
+<li> <a href="http://www.ietf.org/rfc/rfc2408.txt">Internet Security Association and Key Management Protocol (ISAKMP)</a></li>
+<li> <a href="http://www.tcpipguide.com/free/t_IPSecKeyExchangeIKE-2.htm">IPSec Key Exchange (IKE)</a></li>
+<li> <a href="http://en.wikipedia.org/wiki/Certificate_authority">Certificate Authority (definition)</a></li>
+<li> <a href="http://www.tc.umn.edu/~brams006/selfsign.html">Creating a self-signed SSL certificate</a></li>
+<li> <a href="http://tinyca.sm-zone.net/">TinyCA</a></li>
+</ul>
+</p>
+
+</p>
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:126/pfeiffer.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<!-- *** BEGIN bio *** -->
+<hr>
+<p>
+
+<img align="left" alt="[BIO]" src="../gx/authors/pfeiffer.jpg" class="bio">
+
+</p>
+<em>
+
+<p>
+Ren&eacute; was born in the year of Atari's founding and the release of the game Pong.
+Since his early youth he started taking things apart to see how they work. He
+couldn't even pass construction sites without looking for electrical wires that
+might seem interesting. The interest in computing began when his grandfather
+bought him a 4-bit microcontroller with 256 byte RAM and a 4096 byte operating
+system, forcing him to learn assembler before any other language.
+</p>
+
+<p>
+After finishing school he went to university in order to study physics. He then
+collected experiences with a C64, a C128, two Amigas, DEC's Ultrix, OpenVMS and
+finally GNU/Linux on a PC in 1997. He is using Linux since this day and still
+likes to take things apart und put them together again. Freedom of tinkering
+brought him close to the Free Software movement, where he puts some effort into
+the right to understand how things work. He is also involved with civil liberty
+groups focusing on digital rights.
+</p>
+
+<p>
+Since 1999 he is offering his skills as a freelancer. His main activities
+include system/network administration, scripting and consulting. In 2001 he
+started to give lectures on computer security at the Technikum Wien. Apart from
+staring into computer monitors, inspecting hardware and talking to network
+equipment he is fond of scuba diving, writing, or photographing with his digital
+camera. He would like to have a go at storytelling and roleplaying again as soon
+as he finds some more spare time on his backup devices.
+</p>
+
+</em>
+</p>
+<br clear="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2006, Ren&eacute; Pfeiffer. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 126 of Linux Gazette, May 2006
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="peterson.html" >&lt;-- prev</A> | <A HREF="savage.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">May 2006 (#126)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

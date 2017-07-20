@@ -1,0 +1,454 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<html>
+<head>
+<title>Building an Audio CD Player, Listing 4</title>
+</head>
+<body bgcolor="#FFFFFF" text="000000">
+<p><HR> <P> 
+<h3>Listing 4. Jcd_Drive_ix86-Linux.c</h3>
+<p><HR> <P> 
+<pre>
+#include &lt;sys/types.h>                   /*   1 */
+#include &lt;sys/stat.h>                    /*   2 */
+#include &lt;fcntl.h>                       /*   3 */
+#include &lt;linux/cdrom.h>                 /*   4 */
+#include &lt;sys/ioctl.h>                   /*   5 */
+#include &lt;unistd.h>                      /*   6 */
+#include &lt;stdlib.h>                      /*   7 */
+#include &lt;stdio.h>                       /*   8 */
+#include &lt;time.h>                        /*   9 */
+#include &quot;Jcd_Drive.h&quot;                   /*  10 */
+/**                                          12
+  Jcd - Java CD Audio Player                 13
+  Michael Hamilton (michael@actrix.gen.nz).  14
+  All rights reserved.                       15
+ */                                      /*  16 */
+ * This code could be far more integrated into 
+ * the Java code, but I may want to used it
+ * with python (my prefered langauge), so I'm 
+ * avoiding this for now.  Ignoring supporting 
+ * multi-disc players for now, but the java
+ * class allows for it in the future.        22
+ * If using kaffe generate .h with 
+ * &quot;kaffeh Jcd/Drive&quot;                        24
+ */                                      /*  26 */
+#ifdef TRUE                              /*  28 */
+#undef TRUE                              /*  29 */
+#undef FALSE                             /*  30 */
+#endif                                   /*  31 */
+#define TRUE  1                          /*  33 */
+#define FALSE 0                          /*  34 */
+/*                                           36
+ * Javah and Kaffeh differ over the type of long
+ * in Java-1.1.1 this is int32_t             38 
+ */
+#ifndef KAFFE                            /*  39 */
+#  define Java_Int long  /* Java 1.0 */  /*  40 */  
+#else                                    /*  41 */
+#  define Java_Int jint  /* kaffeh */    /*  42 */
+#endif                                   /*  43 */
+#define FRAMES_PER_SECOND \
+        Jcd_Drive_FRAMES_PER_SECOND      /*  46 */
+#define MAX_DEVICE_LEN 512               /*  47 */
+#define MAX_ERROR_LEN 512                /*  48 */
+#define FRAME_ADDRESS(mins, secs, frames) \
+  (((mins) * FRAMES_PER_SECOND * 60) +    \
+        ((secs) * FRAMES_PER_SECOND) + (frames))
+static int debug;                        /*  53 */
+static void 
+  yield_player(struct HJcd_Drive *drive);/*  55 */
+static void 
+  take_player(struct HJcd_Drive *drive); /*  56 */
+static void take_player(struct HJcd_Drive *drive)
+{                                        /*  59 */
+  /*                                         60
+   * If not already open, open the device.   61
+   */                                    /*  62 */
+  if (unhand(drive)->fd == -1) {         /*  63 */
+    char device_name[MAX_DEVICE_LEN + 1];/*  64 */
+    javaString2CString(
+      unhand(drive)->device_name,device_name,
+      MAX_DEVICE_LEN);                   /*  65 */
+    if (device_name == '\0') {           /*  66 */
+      char *device = getenv(&quot;CDROM&quot;);    /*  67 */
+      if (device == NULL)                /*  68 */
+        strcpy(device_name, &quot;/dev/cdrom&quot;);
+    }                                    /*  70 */
+    unhand(drive)->device_flags |= 
+      (getenv(&quot;SBPCD&quot;) != NULL) ?        /*  71 */
+      Jcd_Drive_FLAG_STOP_PLAY :         /*  72 */
+      Jcd_Drive_FLAG_NONE;               /*  73 */
+    unhand(drive)->fd =open(device_name,O_RDONLY);
+    if (debug)                           /*  77 */
+      fprintf(stderr, 
+              &quot;Openned %s flags=%d fd=%d\n &quot;,  
+              device_name,               /*  79 */
+              unhand(drive)->device_flags,  
+              unhand(drive)->fd);        /*  81 */
+  }                                      /*  82 */
+}                                        /*  83 */
+static void yield_player(struct HJcd_Drive *drive)
+{                                        /*  87 */
+ /*                                          88
+  * Close the device, make it available to others.
+  */                                     /*  90 */
+  if (unhand(drive)->fd != -1) {         /*  91 */
+    close(unhand(drive)->fd);            /*  92 */
+  }                                      /*  93 */
+  unhand(drive)->fd               = -1;  /*  95 */
+  unhand(drive)->current_track    = 1;   /*  96 */
+  unhand(drive)->current_index    = 1;   /*  97 */
+  unhand(drive)->number_of_tracks = 0;   /*  98 */
+  unhand(drive)->audio_status     = 
+    Jcd_Drive_STATUS_INVALID;            /*  99 */
+  if (debug)                             /* 101 */
+    fprintf(stderr, &quot;closed cd device\n&quot;); 
+}                                        /* 103 */
+static Java_Int 
+new_status(struct HJcd_Drive *drive)     /* 105 */
+{                                        /* 106 */
+  * Try to obtain the device and query its status.
+  * May cause the tray to close with some drivers.
+  */                                     /* 110 */
+  struct cdrom_subchnl ch;               /* 111 */
+  long stat;                             /* 112 */
+  unhand(drive)->current_track   = 1;    /* 114 */
+  unhand(drive)->current_index   = 1;    /* 115 */
+  unhand(drive)->current_address = 0;    /* 116 */
+  if (unhand(drive)->fd == -1) { 
+                     /* See if there's a new CD */
+    take_player(drive);                  /* 120 */
+    if (unhand(drive)->fd != -1) {       /* 121 */
+      struct cdrom_tochdr tinfo;         /* 122 */
+      stat = ioctl(unhand(drive)->fd, 
+                   CDROMREADTOCHDR, 
+                   &tinfo);              /* 123 */
+      if (stat == -1) {                  /* 124 */
+        yield_player(drive);             /* 125 */
+        unhand(drive)->audio_status = 
+          Jcd_Drive_STATUS_INVALID;      /* 126 */
+        return (Java_Int) 
+          unhand(drive)->audio_status;   /* 127 */
+      }                                  /* 128 */
+      unhand(drive)->number_of_tracks = 
+        tinfo.cdth_trk1;                 /* 129 */
+      if (debug)                         /* 130 */
+        fprintf(stderr,                  /* 131 */
+                &quot;number_of_tracks=%d\n&quot;,
+                unhand(drive)->number_of_tracks);  
+    }                                    /* 134 */
+  }                                      /* 135 */
+  ch.cdsc_format = CDROM_MSF;            /* 137 */
+  stat = ioctl(unhand(drive)->fd, 
+               CDROMSUBCHNL, 
+               &ch);                     /* 139 */
+  if (stat == -1) { /* Assume no CD in drive */
+    yield_player(drive);                 /* 141 */
+    unhand(drive)->audio_status = 
+      Jcd_Drive_STATUS_INVALID;          /* 142 */
+    return (Java_Int) unhand(drive)->audio_status; 
+  }                                      /* 144 */
+  unhand(drive)->current_track = ch.cdsc_trk;
+  unhand(drive)->current_index = ch.cdsc_ind;
+  unhand(drive)->current_address = 
+    FRAME_ADDRESS(ch.cdsc_absaddr.msf.minute,
+                  ch.cdsc_absaddr.msf.second,
+                  ch.cdsc_absaddr.msf.frame);
+  unhand(drive)->audio_status =          /* 153 */
+    ch.cdsc_audiostatus;                 /* 154 */
+  return (Java_Int) unhand(drive)->audio_status;
+}                                        /* 157 */
+static int is_open(struct HJcd_Drive *drive)
+{                                        /* 160 */
+  if (unhand(drive)->fd == -1) {         /* 161 */
+    return FALSE;                        /* 163 */
+  }                                      /* 164 */
+  return TRUE;                           /* 165 */
+}                                        /* 166 */
+static int                               /* 168 */  
+is_available_now(struct HJcd_Drive *drive)
+{                                        /* 169 */
+  new_status(drive);                     /* 170 */
+  return is_open(drive);                 /* 171 */
+}                                        /* 172 */
+void Jcd_Drive_initDrive(struct HJcd_Drive *drive)
+{                                        /* 175 */
+  fprintf(stderr, &quot;Initializing cd drive...\n&quot;);
+  debug = getenv(&quot;JCD_DEBUG&quot;) != NULL;   /* 177 */
+  new_status(drive);                     /* 178 */
+}                                        /* 179 */
+Java_Int                                 /* 181 */
+Jcd_Drive_status(struct HJcd_Drive *drive) 
+{                                        /* 182 */
+  if (unhand(drive)->fd == -1) {         /* 183 */
+    return unhand(drive)->audio_status;  /* 184 */
+  }                                      /* 185 */
+  else {                                 /* 186 */
+    return new_status(drive);            /* 187 */
+  }                                      /* 188 */
+}                                        /* 189 */
+Java_Int                                 /* 191 */
+Jcd_Drive_currentTrack(struct HJcd_Drive *drive)
+{                                        /* 192 */
+  if (!is_available_now(drive)) { return 1; }
+  return unhand(drive)->current_track;   /* 194 */
+}                                        /* 195 */
+Java_Int                                 /* 197 */
+Jcd_Drive_currentIndex(struct HJcd_Drive *drive)
+{   /* Must call current track first */  /* 198 */
+  if (!is_available_now(drive)) { return 1; } 
+  return unhand(drive)->current_index;   /* 200 */
+}                                        /* 201 */
+Java_Int                                 /* 204 */
+Jcd_Drive_currentAddress(struct HJcd_Drive *drive)
+{                                        /* 205 */
+  if (!is_available_now(drive)) { return 0; }
+  return unhand(drive)->current_address; /* 207 */
+}                                        /* 208 */
+Java_Int 
+Jcd_Drive_numberOfTracks(struct HJcd_Drive *drive)
+{                                        /* 212 */
+  if (!is_open(drive)) { return 0; }     /* 213 */
+  return unhand(drive)->number_of_tracks;/* 214 */
+}                                        /* 215 */
+Java_Int                                 /* 218 */
+Jcd_Drive_trackAddress(struct HJcd_Drive *drive, 
+                       Java_Int track)
+{                                        /* 219 */
+  struct cdrom_tocentry tocentry;        /* 220 */
+  if (!is_open(drive)) { return 0; }     /* 222 */
+  tocentry.cdte_track = track;           /* 223 */
+  tocentry.cdte_format = CDROM_MSF;      /* 224 */
+  if ((ioctl(unhand(drive)->fd, 
+             CDROMREADTOCENTRY, 
+             &tocentry)) == -1) {
+    if (debug)                           /* 226 */
+      fprintf(stderr, &quot;tae=%d\n&quot;, track);/* 227 */
+    SignalError(0, 
+                &quot;Jcd/TrackAddressException&quot;, 
+                strerror(errno));        /* 228 */
+    return 0;                            /* 229 */
+  }                                      /* 230 */
+  return                                 /* 231 */  
+    FRAME_ADDRESS(tocentry.cdte_addr.msf.minute, 
+                  tocentry.cdte_addr.msf.second, 
+                  tocentry.cdte_addr.msf.frame);
+}                                        /* 234 */
+Java_Int 
+Jcd_Drive_trackLength(struct HJcd_Drive *drive, 
+                      Java_Int n)        /* 236 */
+{                                        /* 237 */
+  int starts_at =Jcd_Drive_trackAddress(drive, n);
+  int start_of_next =                    /* 239 */
+    (n >= unhand(drive)->number_of_tracks) 
+    ? Jcd_Drive_cdEndAddress(drive)      /* 241 */
+    : Jcd_Drive_trackAddress(drive, n + 1);  
+  return start_of_next - starts_at;      /* 243 */
+}                                        /* 244 */
+Java_Int                                 /* 247 */
+Jcd_Drive_cdEndAddress(struct HJcd_Drive *drive)
+{                                        /* 248 */
+  if (!is_open(drive)) { return 0; }     /* 249 */
+  return                                 /* 250 */
+    Jcd_Drive_trackAddress(drive, CDROM_LEADOUT); 
+}                                        /* 251 */
+static int cddbSum(int n)                /* 253 */
+{   /* Sum the digits */                 /* 254 */
+  int s = 0;                             /* 255 */
+  while (n != 0) {                       /* 256 */
+    s += n % 10;                         /* 257 */
+    n = n / 10;                          /* 258 */
+  }                                      /* 259 */
+  return s;                              /* 260 */
+}                                        /* 261 */
+struct Hjava_lang_String *Jcd_Drive_cddbID(
+  struct HJcd_Drive *drive)              /* 263 */
+{                                        /* 264 */
+  /* see http://sunsite.unc.edu~/cddb/xjcd/ */
+  char id[10] = &quot;00000000&quot;;              /* 266 */
+  int i;                                 /* 267 */
+  int t = 0;                             /* 268 */
+  int n = 0;                             /* 269 */
+  if (!is_open(drive)) 
+    { return makeJavaString(id, 8); }    /* 271 */
+  for (i = 1; 
+       i 
+       i++) {                            /* 272 */
+    n += cddbSum(Jcd_Drive_trackAddress(drive, i) 
+                 / FRAMES_PER_SECOND);
+    t += (Jcd_Drive_trackLength(drive, i) /
+          FRAMES_PER_SECOND) ;           /* 274 */
+  }                                      /* 275 */
+  i = ((n % 0xff) 
+       &lt;&lt; 24 | t
+       &lt;&lt; 8 | (unhand(drive)->number_of_tracks));
+  sprintf(id, &quot;%08x&quot;, i);                /* 277 */
+  return makeJavaString(id, 8);          /* 278 */
+}                                        /* 279 */
+void Jcd_Drive_play(struct HJcd_Drive *drive,
+                        Java_Int start_track,
+                        Java_Int start_index,
+                        Java_Int end_track,  
+                        Java_Int end_index)  
+{                                        /* 286 */
+  struct cdrom_ti ti;                    /* 287 */
+  long stat;                             /* 288 */
+  unhand(drive)->current_track = 1;      /* 290 */
+  if (!is_available_now(drive)) { return; }
+  if (debug)                             /* 294 */
+    fprintf(stderr,                      /* 295 */
+            &quot;play %d %d %d\n&quot;,           /* 296 */
+            start_track, 
+            end_track, 
+            unhand(drive)->number_of_tracks); 
+  if (end_track == 0) { 
+    /* Kludge for first call to play. */ /* 299 */
+    end_track = unhand(drive)->number_of_tracks;
+  }                                      /* 301 */
+  if (start_track 
+    start_track > unhand(drive)->number_of_tracks) 
+    {
+      SignalError(0,
+         &quot;Jcd/DriveException&quot;, 
+         &quot;Play: start track out of range.&quot;);
+      return;                            /* 305 */
+  }                                      /* 306 */
+  if (end_track 
+      end_track > unhand(drive)->number_of_tracks)
+    {
+      SignalError(0, 
+                  &quot;Jcd/DriveException&quot;, 
+                  &quot;Play: end track out of range.&quot;);
+      return;                            /* 310 */
+    }                                    /* 311 */
+  if (!is_open(drive)) {                 /* 313 */
+    return;                              /* 314 */
+  }                                      /* 315 */
+  if ((unhand(drive)->device_flags & 
+       Jcd_Drive_FLAG_STOP_PLAY)) {      /* 317 */
+       /* Must issue stop before play. */
+    Jcd_Drive_stop(drive);               /* 318 */
+  }                                      /* 319 */
+  if (debug)                             /* 321 */
+    fprintf(stderr, &quot;try play %d\n&quot;, start_track);  
+  ti.cdti_trk0 = start_track;            /* 324 */
+  ti.cdti_ind0 = start_index;            /* 325 */
+  ti.cdti_trk1 = end_track;              /* 326 */
+  ti.cdti_ind1 = end_index;              /* 327 */
+  if (ti.cdti_ind1 == 0) {               /* 329 */
+    /* Doesn't seem to be a way of specifying end 
+     * index.  But this seems to work.      331
+     */                                  /* 332 */
+    ti.cdti_ind1 =unhand(drive)->number_of_tracks;
+  }                                      /* 334 */
+  stat = ioctl(unhand(drive)->fd, 
+               CDROMPLAYTRKIND,
+               &ti);                     /* 336 */
+  if (stat 
+    SignalError(0, &quot;Jcd/PlayException&quot;,
+                strerror(errno));        /* 338 */
+    return;                              /* 339 */
+  }                                      /* 340 */
+  unhand(drive)->current_track = start_track;
+  if (debug)                             /* 344 */
+    fprintf(stderr, &quot;playing %d\n&quot;,      /* 346 */
+            unhand(drive)->current_track);
+}                                        /* 346 */
+void Jcd_Drive_stop(struct HJcd_Drive *drive)
+{                                        /* 350 */
+  if (!is_available_now(drive)) { return; } 
+  if (ioctl(unhand(drive)->fd, CDROMSTOP) == -1) {
+    SignalError(0, &quot;Jcd/StopException&quot;, 
+                strerror(errno));        /* 354 */
+  }                                      /* 355 */
+}                                        /* 356 */
+void Jcd_Drive_pause(struct HJcd_Drive *drive)
+{                                        /* 360 */
+  if (!is_available_now(drive)) { return; }
+  if (unhand(drive)->audio_status != 
+      Jcd_Drive_STATUS_PLAY) {           /* 363 */
+    SignalError(0, &quot;Jcd/PauseException&quot;,
+                &quot;Pause: drive isn't playing.&quot;);
+    return;                              /* 365 */
+  }                                      /* 366 */
+  if (ioctl(unhand(drive)->fd,CDROMPAUSE) == -1) {
+    SignalError(0, &quot;Jcd/PauseException&quot;, 
+                strerror(errno));        /* 369 */
+  }                                      /* 370 */
+}                                        /* 371 */
+void Jcd_Drive_resume(struct HJcd_Drive *drive) 
+{                                        /* 375 */
+  if (!is_available_now(drive)) { return; }
+  if (unhand(drive)->audio_status != 
+      Jcd_Drive_STATUS_PAUSED) {         /* 378 */
+    SignalError(0, &quot;Jcd/ResumeException&quot;,
+                &quot;Resume: drive isn't paused.&quot;);
+    return;                              /* 380 */
+  }                                      /* 381 */
+  if (ioctl(unhand(drive)->fd,CDROMRESUME) == -1){
+    SignalError(0, &quot;Jcd/ResumeException&quot;,
+                strerror(errno));        /* 384 */
+  }                                      /* 385 */
+}                                        /* 386 */
+void Jcd_Drive_eject(struct HJcd_Drive *drive)
+{                                        /* 390 */
+  long retract = unhand(drive)->fd == -1; 
+  if (!is_available_now(drive)) { return; }
+  if (retract) { return; }               /* 396 */
+  Jcd_Drive_stop(drive);                 /* 399 */
+  if (ioctl(unhand(drive)->fd,CDROMEJECT) == -1) {
+    SignalError(0, &quot;Jcd/EjectException&quot;, 
+                strerror(errno));        /* 402 */
+  }                                      /* 403 */
+  yield_player(drive);                   /* 405 */
+}                                        /* 406 */
+Java_Int                                 /* 409 */
+Jcd_Drive_volume(struct HJcd_Drive *drive)
+{                                        /* 410 */
+  struct cdrom_volctrl vol;              /* 411 */
+  if (!is_available_now(drive)) { return; }
+  if (ioctl(unhand(drive)->fd, CDROMVOLREAD,
+            &vol) == -1) {               /* 415 */
+    SignalError(0, &quot;Jcd/VolumeException&quot;, 
+                strerror(errno));        /* 416 */
+    return 0;                            /* 417 */
+  }                                      /* 418 */
+  return vol.channel0;                   /* 419 */
+}                                        /* 420 */
+void Jcd_Drive_setVolume(struct HJcd_Drive *drive, 
+                         Java_Int volume)
+{                                        /* 423 */
+  struct cdrom_volctrl vol;              /* 424 */
+  if (!is_available_now(drive)) { return; } 
+  if (volume 
+    SignalError(0, &quot;Jcd/SetVolumeException&quot;, 
+                &quot;Volume out of range.&quot;); /* 429 */
+    return;                              /* 430 */
+  }                                      /* 431 */
+  vol.channel0 = volume;                 /* 433 */
+  vol.channel1 = volume;                 /* 434 */
+  vol.channel2 = volume;                 /* 435 */
+  vol.channel3 = volume;                 /* 436 */
+  if (ioctl(unhand(drive)->fd, CDROMVOLCTRL, 
+            &vol) == -1) {               /* 438 */
+    SignalError(0, &quot;Jcd/SetVolumeException&quot;,
+                strerror(errno));        /* 439 */
+  }                                      /* 440 */
+}                                        /* 441 */
+struct Hjava_lang_String *               /* 444 */
+Jcd_Drive_productCode(struct HJcd_Drive *drive)
+{                                        /* 445 */
+  char upc[9] = &quot;00000000&quot;;              /* 446 */
+  if (!is_available_now(drive)) { 
+    return makeJavaString(upc, 8);       /* 448 */
+  }                                      /* 449 */
+  if (ioctl(unhand(drive)->fd, CDROM_GET_UPC, upc)
+      == -1) {                           /* 450 */
+    SignalError(0, &quot;Jcd/ProductCodeException&quot;,
+                strerror(errno));        /* 451 */
+  }                                      /* 452 */
+  return makeJavaString(upc, 8);         /* 453 */
+}                                        /* 454 */
+</pre>
+</body>
+</html>

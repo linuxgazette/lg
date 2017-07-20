@@ -1,0 +1,458 @@
+#!/usr/bin/perl -w
+
+# cgate_migrate_ldap.pl - reads LDAP export from CommuniGate server and 
+# updates it in the OpenLDAP tree.
+# 
+# Copyright (C) 2005, René Pfeiffer <lynx@luchs.at>
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#
+# Wed Sep 14 12:57:57 CEST 2005	Created script.
+# Fri Sep 16 00:09:51 CEST 2005 Tested import to test server. UTF8 conversion.
+# Fri Nov 18 22:46:21 CET 2005  Used cgate_sync.pl as basis for this script.
+# Mon Nov 21 20:43:02 CET 2005	Strategy and code skeleton.
+# Wed Nov 23 12:54:28 CET 2005  Added userPassword, loginShell, accountStatus.
+#
+# Update/synchronisation strategy:
+#
+# - Connect to cgate.example.net and extract all user accounts. The extracted data
+#   is stored into an array holding cn, sn, uid, mail and userPassword. By doing this
+#   we obtain the full user list very quickly.
+# - Disconnect from cgate.example.net.
+# - Connect to ldapmaster.example.net.
+# - Loop through the array of users
+#   - If the user does not exist then create a new one.
+#   - If the user already exists then compare the data in the entries and update if necessary.
+# - Disconnect from ldapmaster.example.net.
+#
+
+use Carp;
+use DBI;
+use Digest::SHA1 qw(sha1 sha1_hex sha1_base64);
+use English;
+use Getopt::Long;
+use Net::LDAP;
+use Net::LDAP::Entry;
+use Net::LDAP::Filter;
+use Pod::Usage;
+use strict;
+use Term::ANSIColor qw(:constants);
+use Unicode::String qw(latin1 utf8);
+
+# DB Connection
+my $db_user;
+my $db_pass;
+my $db_database;
+my $db_host;
+my $db_port;
+
+my $dbh;
+my $dsn;
+my $sth;
+my $updatesth;
+
+# Getopt::Long
+my $binddn = 'cn=ldapadmin,dc=example,dc=net';
+my $debug  = 0;
+my $help;
+my $passwd = '123456';
+my $size   = 5;
+my $source = 'cgate.example.net';
+my $sport  = 389;
+my $target = 'ldapmaster.example.net';
+my $tport  = 389;
+my $tree   = 'ou=users,ou=accounts,dc=example,dc=net';
+my $verbose= 0;
+
+# LDAP fields
+my $cgate_cn;
+my $cgate_mail;
+my $cgate_sn;
+my $cgate_uid;
+my $cgate_userPassword;
+
+# LDAP
+my $attribute;
+my $binddn_source = 'mail=postmaster@example.net';
+my $binddn_target;
+my $entry;
+my $filter;
+my $filterobj;
+my $ldap;
+my $ldap_source;
+my $ldap_store;
+my $ldap_target;
+my @list_cn;
+my @list_mail;
+my @list_sn;
+my @list_uid;
+my @list_userPassword;
+my $lres;
+my $maxentries;
+my $mesg;
+
+my $newaccountStatus;
+my $newcn;
+my $newdn;
+my $newentry;
+my $newgidNumber;
+my $newgivenName;
+my $newhomeDirectory;
+my $newloginShell = '/bin/sh';
+my $newmail;
+my $newmailQuotaSize;
+my $newsambaSID;
+my $newsn;
+my $newuid;
+my $newuidNumber;
+my $newuserCertificate;
+my $newuserPassword;
+my $newuserid;
+
+my @objects;
+my $sizelimit = 0;
+my $tres;
+
+# Program logic
+my $errors = 0;
+my $i;
+my $inserted = 0;
+my $updated  = 0;
+
+# --------------------------------------------------------------------
+# Let's start
+
+GetOptions( 'binddn=s' => \$binddn,
+            'debug=i' => \$debug,
+            'help' => \$help,
+	    'passwd=s' => \$passwd,
+	    'sizelimit=i' => \$size,
+	    'source=s' => \$source,
+	    'sport=i' => \$sport,
+	    'target=s' => \$target,
+	    'tport=i' => \$tport,
+	    'tree=s' => \$tree,
+	    'verbose=i' => \$verbose );
+
+$binddn_target = $binddn;
+
+# Print out help message in case the user didn't supply all
+# mandatory parameters
+pod2usage(-exitval => 2, -verbose => 2) if $help;
+
+# Connect to LDAP source and target
+$ldap_source = Net::LDAP->new( $source, port => $sport, version => 2, async => 1 ) or die "$@";
+$ldap_target = Net::LDAP->new( $target, port => $tport, version => 3, async => 1 ) or die "$@";
+
+if ( $debug > 0 ) {
+	print WHITE "Connected to $source and $target.",RESET,"\n";
+	# Limit results in debugging mode
+	$sizelimit = 7;
+	if ( $size > $sizelimit ) {
+		$sizelimit = $size;
+	}
+}
+else {
+	print WHITE "Connected to source server : ",YELLOW,$source,RESET,"\n";
+	print WHITE "Connected to target server : ",YELLOW,$target,RESET,"\n";
+}
+
+# Bind to servers
+$mesg = $ldap_source->bind( $binddn_source, password => 'panzendorf');
+$mesg->code && die $mesg->error;
+$mesg = $ldap_target->bind( $binddn_target, password => $passwd );
+$mesg->code && die $mesg->error;
+
+# Get all user accounts from source server
+$lres = $ldap_source->search(  base => '',
+			       scope => 'sub',
+			       sizelimit => $sizelimit,
+			       timelimit => 1800,
+			       attrs => ['cn','sn','mail','uid','userPassword'],
+			       filter => "(objectclass=CommuniGateAccount)" );
+
+# Loop through results and see if they exist on the target server
+$maxentries = $lres->count;
+if ( $debug > 0 ) {
+	print YELLOW "Got $maxentries results.",RESET,"\n";
+}
+if ( $maxentries > 0 ) {
+	@objects = $lres->entries;
+	foreach $entry (@objects) {
+		$cgate_cn           = $entry->get_value("cn");
+		$cgate_mail         = $entry->get_value("mail");
+		$cgate_sn           = $entry->get_value("sn");
+		$cgate_uid          = $entry->get_value("uid");
+		$cgate_userPassword = $entry->get_value("userPassword");
+		if ( !$cgate_sn ) {
+			$cgate_sn = "-";
+		}
+		else {
+			$cgate_sn = $entry->get_value("sn");
+		}
+		if ( !$cgate_cn ) {
+			$cgate_cn = "-";
+		}
+		if ( !$cgate_userPassword ) {
+			$cgate_userPassword = "-";
+		}
+		if ( ($debug > 15) and ($debug <= 20) ) {
+			print RED,"---\n";
+			print "cn   : ",$cgate_cn,"\n";
+			print "sn   : ",$cgate_sn,"\n";
+			print "uid  : ",$cgate_uid,"\n";
+			print "mail : ",$cgate_mail,"\n";
+			print "pass : ",$cgate_userPassword,"\n";
+			print "---",RESET,"\n";
+		}
+		push @list_cn, $cgate_cn;
+		push @list_mail, $cgate_mail;
+		push @list_sn, $cgate_sn;
+		push @list_uid, $cgate_uid;
+		push @list_userPassword, $cgate_userPassword;
+	}
+	print WHITE,"Done reading users.",RESET,"\n";
+	$ldap_source->unbind;
+	print WHITE,"Disconnected from ",YELLOW,$source,RESET,".\n";
+	if ( $debug > 0 ) {
+		if ( $debug > 20 ) {
+			for($i=0; $i<$maxentries; $i++) {
+				print RED;
+				printf("uid=%s, cn=<%s>, sn=<%s>, mail=<%s>, pass=<%s>\n",
+				       $list_uid[$i], $list_cn[$i], $list_sn[$i], $list_mail[$i], $list_userPassword[$i]);
+			}
+		}
+	}
+	# Now loop through the list of users
+	for($i=0; $i<$maxentries; $i++) {
+		# Create filter and look up user in target tree
+		$filter    = sprintf("(uid=%s)",$list_uid[$i]);
+		$filterobj = Net::LDAP::Filter->new($filter);
+		$tres      = $ldap_target->search( base => $tree,
+		                                   scope => 'sub',
+					 	   sizelimit => 1,
+						   timelimit => 900,
+						   attrs => ['cn','sn','mail','userPassword'],
+						   filter => $filter );
+		if ( $tres->count == 0 ) {
+			# The user doesn't exist on the target server and has to
+			# be created from scratch.
+			#
+			if ( $debug > 0 ) {
+				print RED,"User with uid ",$list_uid[$i]," doesn't exist.",RESET,"\n";
+			}
+			# Free old search result
+			$mesg = $ldap_target->abandon($tres);
+			$mesg->code && print 'Couldn\'t abandon search result used for detection of duplicates.\n';
+			#
+			# Prepare the insertion, create a new object
+			$newentry           = Net::LDAP::Entry->new;
+			$newaccountStatus   = 'aktiv';
+			$newcn              = latin1($list_cn[$i])->utf8;
+			$newgidNumber       = 100;
+			$newhomeDirectory   = sprintf("/home/%s",$list_uid[$i]);
+			$newmail            = $list_mail[$i];
+			$newmailQuotaSize   = 30720;
+			$newsambaSID        = latin1('S-1-0-0')->utf8;
+			$newsn              = latin1($list_sn[$i])->utf8;
+			$newuid             = $list_uid[$i];
+			$newuidNumber       = 500+$i;
+			$newuserCertificate = 'empty';
+			$newuserPassword    = latin1($list_userPassword[$i])->utf8;
+			$newuserid          = $list_uid[$i];
+			$list_cn[$i]        =~ m/(.*?)\W(.*?)/g;
+			if ( $1 ) {
+				$newgivenName = latin1($1)->utf8;
+			}
+			else {
+				if ( length($list_cn[$i]) > 2 ) {
+					$newgivenName = latin1($list_cn[$i])->utf8;
+				}
+				else {
+					$newgivenName = "Vorname";
+				}
+			}
+			# Create DN and compile object
+			$newdn = sprintf("uid=%s,%s",$newuid,$tree);
+			$newentry->dn($newdn);
+			$newentry->add( 'objectclass' => [ 'account', 'greenUser', 'pkiUser', 'posixAccount', 'sambaSamAccount', 'shadowAccount' ],
+			                'cn'              => $newcn,
+					'accountStatus'   => $newaccountStatus,
+					'gidNumber'       => $newgidNumber,
+					'homeDirectory'   => $newhomeDirectory,
+					'loginShell'      => $newloginShell,
+					'mail'            => $newmail,
+					'mailQuotaSize'   => $newmailQuotaSize,
+					'sambaSID'        => $newsambaSID,
+					'uidNumber'       => $newuidNumber,
+					'userid'          => $newuserid,
+			                'userPassword'    => $newuserPassword );
+			if ( $debug > 0 ) {
+				print GREEN "Would have added this record:\n";
+				print $newentry->dump;
+				print RESET,"\n";
+			}
+			else {
+				print GREEN "Adding ",$newdn,RESET,"\n";
+				$mesg = $ldap_target->add($newentry);
+				if ( ! $mesg->code ) {
+					$inserted++;
+				}
+				else {
+					print RED "Error: ",$mesg->error,"(",$mesg->error_name,")",RESET,"\n";
+					$errors++;
+				}
+			}
+		}
+		else {
+			# Account exists and needs to be updated
+			$entry = $lres->entry(0);
+			if ( ($entry->get_value("cn") ne $list_cn[$i]) or 
+				($entry->get_value("mail") ne $list_mail[$i]) or
+				($entry->get_value("sn") ne $list_sn[$i]) or
+				($entry->get_value("uid") ne $list_uid[$i]) or
+				($entry->get_value("userPassword") ne $list_userPassword[$i]) ) {
+
+				if ( $debug > 0 ) {
+					print RED,"User with uid ",$list_uid[$i]," needs an update.",RESET,"\n";
+				}
+				# Entry needs updating
+				# (we can only update the fields we get from the source server)
+				$newentry           = Net::LDAP::Entry->new;
+				$newcn              = latin1($list_cn[$i])->utf8;
+				$newhomeDirectory   = sprintf("/home/%s",$list_uid[$i]);
+				$newmail            = $list_mail[$i];
+				$newsn              = latin1($list_sn[$i])->utf8;
+				$newuid             = $list_uid[$i];
+				$newuserPassword    = latin1($list_userPassword[$i])->utf8;
+				$newuserid          = $list_uid[$i];
+				# Create DN and compile object
+				$newdn = sprintf("uid=%s,%s",$newuid,$tree);
+				$newentry->dn($newdn);
+				$newentry->add( 'objectclass' => [ 'account', 'greenUser', 'pkiUser', 'posixAccount', 'sambaSamAccount', 'shadowAccount' ],
+						'cn'              => $newcn,
+						'homeDirectory'   => $newhomeDirectory,
+						'mail'            => $newmail,
+						'uid'             => $newuid,
+						'userid'          => $newuserid,
+						'userPassword'    => $newuserPassword );
+				if ( $debug > 0 ) {
+					print GREEN "Would have updated this record:\n";
+					print $newentry->dump;
+					print RESET,"\n";
+				}
+				else {
+					print GREEN "Updating ",$newdn,RESET,"\n";
+					$mesg = $ldap_target->modify($newentry);
+					if ( ! $mesg->code ) {
+						$updated++;
+					}
+					else {
+						print RED "Error: ",$mesg->error,"(",$mesg->error_name,")",RESET,"\n";
+						$errors++;
+					}
+				}
+			}
+		}
+	}
+}
+
+# Disconnect from LDAP server
+print WHITE,"Disconnected from ",YELLOW,$target,RESET,".\n";
+$ldap_target->unbind;
+
+# Show statistics
+print GREEN "Processed entries     : ",$maxentries,RESET,"\n";
+print GREEN "Inserted entries      : ",$inserted,RESET,"\n";
+print GREEN "Updated entries       : ",$updated,RESET,"\n";
+print GREEN "Errors while inserting: ",$errors,RESET,"\n";
+
+exit;
+
+__END__
+
+=head1 NAME
+
+cgate_migration.pl - reads complete CommuniGate user base and imports it into LDAP tree
+
+=head1 SYNOPSIS
+
+cgate_migration.pl [OPTIONS]
+
+=head1 DESCRIPTION
+
+This script reads the LDAP export from a CommuniGate server and syncs the
+user base with an LDAP tree branch.
+
+=head1 OPTIONS
+
+=over 8
+
+=item B<--binddn dn>
+
+The DN to use when binding to the target server.
+
+=item B<--debug n>
+
+Set the debug level. 0 is for production use.
+
+=item B<--help>
+
+Prints this text.
+
+=item B<--passwd password>
+
+The password to use when binding to the target server.
+
+=item B<--size n>
+
+Limit processed entries to n when in debug mode. Defaults to 5, but the
+default number of processed entries is 7. n needs to be bigger than 7 to
+have any effect.
+
+=item B<--source server>
+
+Source server. Defaults to cgate.example.net.
+
+=item B<--sport port>
+
+Indicates the source port for talking to the source server. Defaults to 389.
+
+=item B<--target server>
+
+Target server. Defaults to ldapmaster.example.net.
+
+=item B<--tport port>
+
+Indicates the target port for talking to the target server. Defaults to 389.
+
+=item B<--tree dntree>
+
+The DN of the subtree on the target server where the data should be synced to.
+
+=item B<--verbose n>
+
+A verbose level greater than 0 makes the program print more status messages. Defaults to 0.
+
+=head1 BUGS
+
+The script does not use TLS when talking to the LDAP servers. You can work around this
+limitation by creating SSH tunnels and using localhost with different ports. Another bug
+is the presence of the password in the shell history of the user using this script. The
+password should be entered interactively.
+
+=head1 AUTHOR
+
+R. Pfeiffer <lynx@luchs.at>

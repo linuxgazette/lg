@@ -1,0 +1,873 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>WSGI Explorations in Python LG #115</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="okopnik1.html" >&lt;-- prev</A> | <A HREF="seymour.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>WSGI Explorations in Python</h1>
+<p id="by"><b>By <A HREF="../authors/orr.html">Mike Orr (Sluggo)</A></b></p>
+
+<p>
+<h2>Contents</h2>
+
+<ul class="simple">
+<li><a href="#introduction">Introduction</a>
+</li>
+
+<li><a href="#frameworks">Frameworks</a>
+</li>
+
+<li><a href="#pre-wsgi-standardization">Pre-WSGI
+Standardization</a>
+</li>
+
+<li><a href="#wsgi">WSGI</a>
+</li>
+
+<li><a href="#why-wsgi-won-t-replace-scgi">Why WSGI Won't Replace
+SCGI</a>
+</li>
+
+<li><a href="#quixote-s-challenges-to-wsgi">Quixote's Challenges to
+WSGI</a>
+</li>
+
+<li><a href="#wsgi-utils">WSGI Utils</a>
+</li>
+
+<li><a href="#other-packages">Other packages</a>
+</li>
+
+<li><a href="#paste">Paste</a>
+</li>
+
+<li><a href="#qlime">QLime</a>
+</li>
+
+<li><a href="#the-web-sig">The web-sig</a>
+</li>
+
+<li><a href="#conclusion">Conclusion</a>
+</li>
+</ul>
+
+<h2><a name="introduction" id="introduction"></a>Introduction</h2>
+
+<p>WSGI has become a buzzword among Python developers, especially
+since the <a href=
+"http://pyre.third-bit.com/pyweb/index.html">PyWebOff</a> discussed
+in my last <a href=
+"http://linuxgazette.net/113/orr.html">article</a>. The burgeoning
+proliferation of web application frameworks -- once a testament to
+how easy it is to build one in Python -- is now seen by many as a
+liability. The fifty-odd frameworks are non-interoperable for the
+most part and leave the new user scratching his head wondering
+which one to use. WSGI attempts to address the interoperability
+problem by providing a common protocol between frameworks and
+servers. A lot of related work has started over the past year, but
+it's mainly been by individuals working alone quietly. There hasn't
+been a central place to get an overview on what's available, and
+the packages themselves often lack the documentation and demos
+necessary to survey them all in a reasonable amount of time. One
+bright spot is Paste (formerly WSGIKit), which is positioning
+itself as a meta-framework and has seen significant development
+over the past few weeks. This article attempts to bring all this
+together and provide an overview of WSGI activity circa May
+2005.</p>
+
+<p>The article changed direction at least three times while I was
+writing it because the WSGI landscape is changing so rapidly. My
+original modus operandi was to get the Quixote Altdemo running in
+the widest variety of WSGI environments. (The Altdemo is a one-file
+application demonstrating logging in, sessions, and displaying the
+request context. Quixote is our reference point because I like its
+philosophy and am currently using it.) I started exploring, putting
+my notes into the article as I went so they wouldn't get lost. The
+first wall I hit was the lack of a WSGI interface for Quixote.
+(I'll explain all these words later.) This led to the discovery of
+Titus Brown's QWIP (the missing interface), and my detour to update
+QWIP and embed it in a server module for Quixote (<a href=
+"http://cafepy.com/quixote_extras/rex/wsgi_server.py">wsgi_server.py</a>).
+Then I put aside the article for a few days, grew frustrated at how
+long the not-yet-written sections were threatening to be, and
+finally realized Paste is where I should concentrate my exploration,
+even though I'm not yet ready to commit to Paste for my own
+projects. So the article finally morphed from a hands-on HOWTO for
+comparing projects into a bird's-eye summary of what's
+available.</p>
+
+<h2><a name="frameworks" id="frameworks"></a>Frameworks</h2>
+
+<p>First let's take a <em>very</em> brief overview of the
+differences between the frameworks. <a href=
+"http://www.zope.org/">Zope</a> stands alone as the Emacs of web
+application environments. It's very comprehensive but you have to
+do things "the Zope way", which is very different from normal
+Python programming. Zope predated most of the other frameworks, and
+many of them are a reaction to it. Nevertheless, several advanced
+add-ons have been written for Zope including the <a href=
+"http://plone.org/">Plone</a> Content Management System.</p>
+
+<p><a href="http://webwareforpython.org/">Webware</a> (or rather
+its WebKit component) is based on the Java servlet model. Python
+modules coexist with static files (images, multimedia) in the
+filesystem. The URL resolver finds <tt class="literal"><span class=
+"pre">foo.py</span></tt> if there's no closer match for "/foo". The
+module must contain a same-name subclass of <tt class=
+"literal"><span class="pre">Servlet</span></tt>. Various methods
+are called to produce the output; various other method provide
+context information (GET/POST variables, session variables) and
+support services (redirects).</p>
+
+<p><a href=
+"http://www.mems-exchange.org/software/quixote/">Quixote</a> and
+<a href="http://www.cherrypy.org/">CherryPy</a> resolve URLs by
+searching object attributes rather than the filesystem. So you
+provide a root object, and "/foo/bar/baz" maps to <tt class=
+"literal"><span class="pre">ROOT.foo.bar.baz</span></tt>. Context
+information comes from global imports that "know about" the current
+request; this is not very OO but it keeps the application code
+remarkably clean. A URL directory maps to a class, and a leaf node
+to a method.</p>
+
+<p>Quixote 2.0 goes a step further by giving you complete control
+over the URL resolver. All Quixote does is call <tt class=
+"literal"><span class=
+"pre">ROOT._q_traverse(url_components)</span></tt>, and the default
+implementation works as above, calling <tt class=
+"literal"><span class="pre">._q_traverse</span></tt> on
+"subdirectories" as necessary. But you can override it to do
+anything you want, including handling all URLs another way,
+diverting to a login form, checking authorization, calling leaf
+nodes with additional arguments, wrapping a header/footer around
+the output, etc. Many of the "Why doesn't Quixote do it this way?"
+questions are answered with, "You can do it in <tt class=
+"literal"><span class="pre">._q_traverse</span></tt>.</p>
+
+<p><a href="http://twistedmatrix.com/">Twisted</a> is more of an
+application-and-server framework rather than just a web application
+framework, but it does include the minimal <tt class=
+"literal"><span class="pre">twisted.web</span></tt> upon which
+<a href="http://nevow.org/">Nevow</a> is based. Both use the
+Directory object model, with a <tt class="literal"><span class=
+"pre">.locateChild</span></tt> method handling all URLs under
+it.</p>
+
+<p>Minimalist frameworks provide only the minimum required for web
+applications: a URL resolver, access to context variables, session
+management, handling HTTP headers and errors, and redirection. The
+URL resolver more or less determines the structure of your
+application. Richer frameworks provide a complete
+Model-View-Controller structure, a template system, a database
+access system, a Form object of some sort, HTML generation
+functions, a configuration file, and/or a Javascript library.</p>
+
+<p>Applications need a template system to merge calculated values
+into predefined HTML. Most of these (Zope Page Templates, Nevow's)
+use XML-style tags for the variable placeholders, and are thus
+limited to producing HTML/XML output. <a href=
+"http://cheetahtemplate.org/">Cheetah</a> uses a <tt class=
+"literal"><span class="pre">$placeholder</span></tt> and <tt class=
+"literal"><span class="pre">#command</span></tt> syntax, making it
+suitable for other types of output as well. Quixote's PTL system
+turns templating on its head: the template is an ordinary Python
+function, except that standalone expressions are concatenated and
+used as the implicit return value. PTL also escapes "unsafe" values
+automatically -- those coming from a non-trusted source (arguments
+or function calls) that may contain unexpected HTML markup. There's
+an <tt class="literal"><span class="pre">htmltext</span></tt> class
+to mark a string as "safe" to prevent further escaping. (There are
+examples of PTL and Nevow in my <a href=
+"http://www.linuxjournal.com/node/7541">PyCon 2004 article</a>.)
+Python 2.4 includes a built-in template system using <tt class=
+"literal"><span class="pre">$placholder</span></tt> syntax, but
+it's so new and limited I haven't seen anyone using it. Most
+template systems are affiliated with a certain framework but can
+also be used standalone.</p>
+
+<p>Another difference between the template systems is where the
+plug-in values come from. For Python's, you provide a dictionary.
+For Cheetah, you can provide a list of dictionaries/objects to
+search in order, or you can set template attributes directly. For Nevow
+you provide a function that sets the values in the template
+(really!), and additional functions for looping. PTL gets values
+from the function arguments or lexical scope. Fortunately, none of
+these systems require a bunch of <tt class="literal"><span class=
+"pre">.setValue(key, value)</span></tt> calls like certain Java/PHP/Perl
+templates!</p>
+
+<p>Applications also need to access a database. Some use object
+databases like <a href=
+"http://www.zope.org/Wikis/ZODB/FrontPage">ZODB</a> or <a href=
+"http://www.mems-exchange.org/software/durus/">Durus</a>, others
+use SQL directly, others use an object-relational mapper to pretend
+they're not using a SQL database. Of course, the object-relational
+mappers are non-interoperable; perhaps that is the next frontier
+for standardization in Python. There are also various
+SQL-generation modules that provide a thin wrapper over the syntax.
+(I've written one of those, <a href=
+"http://cafepy.com/quixote_extras/rex/dbutil.py">dbutil.py</a>.)</p>
+
+<p>Most frameworks come with a Python web server either recommended
+for production or used just for testing. All connect to Apache via
+CGI, and some via a generic Apache module (FastCGI, mod_python) or
+a custom Apache module (mod_scgi, mod_webkit). Some can run under
+Twisted. Because web requests can arrive simultaneously, servers
+have to deal with concurrency. There are four concurrency
+models:</p>
+
+<ul class="simple">
+<li><strong>Synchronous</strong> servers handle one request at a
+time. Any subsequent requests just have to wait. (Python's
+SimpleHTTPServer, Quixote's simple_server)</li>
+
+<li><strong>Multiprocess</strong> servers handle each request in a
+subprocess. (Apache CGI, mod_python, mod_scgi) Each subprocess
+handles one request or several synchronously, but they all run in
+parallel. A subprocess can handle the request itself or transmit it
+to a long-running server via a socket.</li>
+
+<li><strong>Multithreaded</strong> servers handle each request in a
+thread. (Webware, Zope, WSGI Utils' httpServer)</li>
+
+<li><strong>Asynchronous</strong> servers use <tt class=
+"literal"><span class="pre">select</span></tt> to multiplex I/O
+between several pending requests. (Twisted, Medusa)</li>
+</ul>
+
+<p>Each model has its advantages and disadvantages. Synchronous
+servers are too slow for most production systems. Multithreaded
+servers require careful programming to avoid clobbering shared
+variables. Some frameworks are not thread safe anyway. Twisted uses
+a non-linear programming model to avoid threads; its Deferreds and
+callbacks are enough to make many programmers run screaming from
+the room. The multiprocess model avoids clobbering shared variables
+but can still clobber shared files. In many cases (especially with
+Apache) the webserver adapter does not calculate the response
+itself but instead forwards the request to a separate application
+server. The application server may have a different concurrency
+model than the web server.</p>
+
+<p>All frameworks provide session management, each in its own way.
+A session is a dictionary or object that is shared between requests
+by the same user as long as the user doesn't quit his/her browser
+or remain idle too long. A session manager stores sessions and
+gives the correct session to each request. Sessions may be stored
+in a dictionary, files, or a database. A dictionary session manager
+requires a single long-running process (not multiprocesses), and
+the sessions vanish when the server quits or crashes. File-based
+sessions persist between server instances and can be shared by
+multiprocesses, but file locking is required to prevent
+simultaneous updates. Database sessions are similar but the
+database server often handles the multiplexing for you.</p>
+
+<p>Each framework also has a way for managing forms. Some have a
+form object and widget objects; others use an XML description.
+Quixote uses the former. The form object can both render a form,
+validate it, and redisplay it with error messages. With some
+frameworks you get the form input and validate it against the
+widgets. In Quixote, you ask the widgets to find themselves in the
+GET/POST variables, validate themselves, and return the value or
+<tt class="literal"><span class="pre">None</span></tt>.</p>
+
+<h2><a name="pre-wsgi-standardization" id=
+"pre-wsgi-standardization"></a>Pre-WSGI Standardization</h2>
+
+<p>A few attempts at standardization were made before WSGI
+appeared. For instance, frameworks come with their own web servers
+and adapters for Apache, and these are generally not
+interchangeable with other frameworks. Webware comes with
+mod_webkit, a module that quickly transmits the request to a
+Webware application server. Neil Schemenauer, a Quixote developer,
+aimed to do this in a generic way and wrote <a href=
+"http://www.mems-exchange.org/software/scgi/">SCGI</a>. It
+serializes the request environment variables and input, sends it
+through a socket, and expects a complete HTTP document (with
+headers) in reply. His mod_scgi does this in an Apache module, and
+his cgi2scgi.c does it in a CGI script. I wrote a Python
+equivalent, <a href=
+"http://cafepy.com/quixote_extras/rex/cgi2scgi.py">cgi2scgi.py</a>,
+which is useful for testing. Titus Brown wrote SWAP, a SCGI-WSGI
+gateway. It's included in Paste, or you can get it from his
+<a href="http://www.idyll.org/~t/www-tools/wsgi/">QWIP and SWAP</a>
+page.</p>
+
+<p><a href="http://subway.python-hosting.com/">Subway</a>
+aggregates CherryPy, Cheetah, SQLObject, and now Paste into an
+integrated development environment similar to Ruby on Rails. It
+uses CherryPy's WSGI interface to link into Paste.</p>
+
+<p>Credit should also be given to the Zope team for unbundling
+their <a href="http://www.zope.org/Wikis/ZODB/FrontPage">ZODB</a>
+database and template systems so they can be used with other
+frameworks.</p>
+
+<h2><a name="wsgi" id="wsgi"></a>WSGI</h2>
+
+<p>WSGI is Python <a href=
+"http://www.python.org/peps/pep-0333.html">PEP 333</a>, the Web
+Server Gateway Interface. It's a a protocol for communicating with
+Python web applications. WSGI works by callbacks. The application
+provides a function which the server calls for each request:</p>
+
+<pre class="literal-block">
+application(environ, start_response)
+</pre>
+
+<p><tt class="literal"><span class="pre">environ</span></tt> is a
+Python dictionary containing the CGI-defined environment variables
+plus a few extras. One of the extras is "wsgi.input", the file
+object from which to read the POST variables. <tt class=
+"literal"><span class="pre">start_response</span></tt> is a
+callback by which the application returns the HTTP headers:</p>
+
+<pre class="literal-block">
+start_response(status, response_headers, exc_info=None)
+</pre>
+
+<p><tt class="literal"><span class="pre">status</span></tt> is an
+HTTP status string (e.g., "200 OK"). <tt class=
+"literal"><span class="pre">response_headers</span></tt> is a list
+of 2-tuples, the HTTP headers in key-value format. <tt class=
+"literal"><span class="pre">exc_info</span></tt> is used in
+exception handling; we won't cover it here.</p>
+
+<p>The application function then returns an <em>iterable</em> of
+body chunks. In the simplest case this can be:</p>
+
+<pre class="literal-block">
+["&lt;html&gt;Hello, world!&lt;/html&gt;"]
+</pre>
+
+<p>Getting slightly more elaborate, here's the second-smallest WSGI
+application in the world:</p>
+
+<pre class="literal-block">
+def app2(environ, start_response):
+    start_response("200 OK", [])
+    s = "&lt;html&gt;You requested &lt;strong&gt;%s&lt;/strong&gt;&lt;/html&gt;"
+    s %= environ['PATH_INFO']
+    return [s]
+</pre>
+
+<p>The protocol may look strange, but it's designed to meet the
+needs of the widest possible variety of existing and potential
+frameworks and servers. <em>And</em> middleware. Middleware are
+reusable components providing generic services normally handled by
+frameworks; e.g., a Session object, a Request object, error
+handling. They're implemented as wrapper functions; i.e.,
+decorators. Inbound they can add keys to the dictionary (e.g.,
+<tt class="literal"><span class="pre">quixote.request</span></tt>
+for a Quixote-style Request object). Outbound they can modify HTTP
+headers or translate the body into Latin or Marklar. Here's a small
+middleware:</p>
+
+<pre class="literal-block">
+class LowercaseMiddleware:
+    def __init__(self, application):
+        self.application = application   # A WSGI application callable.
+
+    def __call__(self, environ, start_response):
+        pass  # We could set an item in 'environ' or a local variable.
+        for chunk in self.application(environ, start_response):
+            yield chunk.lower()
+</pre>
+
+<p>Assuming we had a server constructor <tt class=
+"literal"><span class="pre">Server</span></tt>, we could do:</p>
+
+<pre class="literal-block">
+app = LowercaseMiddleware(app2)
+server = Server(app)
+</pre>
+
+<p>Since it's so easy to write a WSGI application, you may wonder,
+"Who needs a framework?" That's a legitimate question, although the
+answer is, "It's tedious without one." Your application is
+responsible for every URL under it; e.g., if it's installed as
+<strong>http://localhost:8080/</strong>, it would have to do
+something intelligent with
+<strong>http://localhost:8080/foo/bar/baz</strong>. Code to parse
+the URL and switch to an appropriate function is... a framework! So
+you may as well use an existing framework and save yourself the
+tedium.</p>
+
+<p>Writing a WSGI <em>server</em> interface is more complex.
+There's an example in PEP 333. I wrote an object-oriented one for
+Quixote (in wsgi_server.py). But the experience taught me it's more
+fun to write the application side.</p>
+
+<p>WSGI opens the way for a lot of interesting possibilities.
+Simple frameworks can be turned completely into middleware. Some
+frameworks might be able to run on top of other frameworks or even
+be emulated by them. Ideally, existing applications would run
+unchanged or with minimal changes. But this is also a time for
+framework developers to rethink how they're doing things and
+perhaps switch to more middleware-friendly APIs.</p>
+
+<p>Currently, CherryPy and Nevow have WSGI interfaces. Twisted's
+CVS has a <tt class="literal"><span class=
+"pre">twisted.web2.wsgi</span></tt> module. Quixote has QWIP.</p>
+
+<h2><a name="why-wsgi-won-t-replace-scgi" id=
+"why-wsgi-won-t-replace-scgi"></a>Why WSGI Won't Replace SCGI</h2>
+
+<p>Many people think WSGI will replace mod_scgi and all the other
+webserver adapters. This is partly due to the confident language in
+the PEP about connecting to "web servers". But both sides of WSGI
+must be in the same process, for the simple reason that the spec
+requires an open file object in the dictionary, and you can't
+pickle a file object and transmit it to another process. So a WSGI
+call from an Apache module to an embedded Python application is
+possible, but a WSGI call from Apache to a long-running application
+server is not. Yet these long-running servers are necessary to
+maintain state and factor out the initialization overhead. SCGI can
+replace the framework-specific adapters since it is serializable
+and framework neutral (and programming-language neutral), but WSGI
+will have to operate on the "application side" of an SCGI
+interface.</p>
+
+<p>Conversely, people may wonder why to use WSGI when SCGI is both
+a gateway <em>and</em> serializable. However, inbound processors
+would have to parse and reformat the entire input stream instead of
+merely passing a dictionary object through, and outbound processors
+would likewise have to parse the headers.</p>
+
+<p>Python web servers, however, can take the day off because they
+have to provide only one interface now, WSGI. Then any compliant
+application can be plugged into them regardless of framework. Since
+the web server is a long-running process, the application will
+initialize itself only once, and it can store any needed state in
+module globals (but watch out for threading issues). And I suppose
+a WSGI application could be a stub that calls a standalone
+application server via SCGI...</p>
+
+<h2><a name="quixote-s-challenges-to-wsgi" id=
+"quixote-s-challenges-to-wsgi"></a>Quixote's Challenges to
+WSGI</h2>
+
+<p>Let's look at the specific challenges one framework has in
+adapting to WSGI. QWIP exists to connect the monolithic Quixote
+Publisher to WSGI, but what if we want to factor out parts of
+Quixote to middleware? Given that the URL resolving is already
+factored out to your <tt class="literal"><span class=
+"pre">Directory</span></tt> object, if you take out the session
+handling, error handling, and request handling, is there much of a
+Publisher left? Do you use generic middleware, which would require
+people to change their applications, or middleware that produces
+Quixote-style objects? Three considerations stand out:</p>
+
+<ul class="simple">
+<li>Because Quixote makes it easy to subclass Publisher, Session
+and Request, many applications do. These applications are
+apparently incompatible with some middleware.</li>
+
+<li>Applications access their context objects by calling global
+functions: e.g., <tt class="literal"><span class=
+"pre">quixote.get_session()</span></tt>. These functions are
+frequently used in lieu of passing arguments. Middleware puts
+context objects in the environment dictionary. A middleware'd
+Quixote may have to create a fake <tt class="literal"><span class=
+"pre">quixote</span></tt> module with functions that read the
+environment dictionary, or maybe the middleware would have to stuff
+the objects into a fake <tt class="literal"><span class=
+"pre">quixote</span></tt> module itself. There is precedent for
+this in Paste, whose webkit component provides a fake Webware
+environment for a servlet to run in.</li>
+
+<li>Most frameworks use a dictionary for the session object, but
+Quixote uses an instance, and users often add attributes. One
+predefined attribute is <tt class="literal"><span class=
+"pre">.user</span></tt>, although Quixote does nothing with it
+except initialize it to <tt class="literal"><span class=
+"pre">None</span></tt>. But applications frequently set it to
+something and access it via <tt class="literal"><span class=
+"pre">quixote.get_user()</span></tt>. Is it better to change
+applications to use dictionary sessions, or provide a Quixote-style
+session middleware? Or can we use a generic session manager
+middleware with our own session objects?</li>
+
+<li>Quixote is not thread safe, so my version of QWIP refuses to
+connect to a multithreaded server. There's a class and a wrapper in
+wsgi_server.py to make it thread safe, but they need further
+testing.</li>
+</ul>
+
+<h2><a name="wsgi-utils" id="wsgi-utils"></a>WSGI Utils</h2>
+
+<p><a href="http://www.owlfish.com/software/wsgiutils/">WSGI
+Utils</a> provides:</p>
+
+<ul class="simple">
+<li>wsgiServer, a multithreaded HTTP-to-WSGI server based on
+Python's SimpleHTTPServer. It takes a mapping of URL prefixes to
+applications, allowing you to serve multiple applications from one
+server, and can also overlay a static directory for any
+non-matching URLs.</li>
+
+<li>wsgiAdapter, a simple application framework. It provides Basic
+Authentication and signed cookies.</li>
+
+<li>some persistent session classes using DBM and an optional
+daemon.</li>
+</ul>
+
+<p>Paste has an interface to wsgiServer, as does my wsgi_server.py.
+I had some trouble with the application mapping. It works fine with
+a single application but is not very robust for multiple
+applications. One wonders whether attaching multiple applications
+at this level is really that useful anyway, but time will tell.
+wsgiAdapter may be an interesting framework to build other
+frameworks on top of, although that may require more modification
+to existing frameworks than it's worth.</p>
+
+<p>One caveat about the static overlay, which is inherited from
+Python's <tt class="literal"><span class=
+"pre">SimpleHTTPServer</span></tt>: it serves from the
+<em>current</em> directory, and there's no provision to specify
+another directory. So make sure to chdir to the static directory
+before launching wsgiServer.</p>
+
+<h2><a name="other-packages" id="other-packages"></a>Other
+packages</h2>
+
+<p><a href="http://www.saddi.com/software/flup/">Flup</a> is Allan
+Saddi's package of WSGI utilities. There are gateways to SCGI and
+FastCGI, both threaded and forking. There are middlewares for error
+handling, gzip compression, and sessions. The session object is a
+dictionary subclass, and the session managers are memory-, shelve-,
+and file-based. There's also a minimal application framework. (The
+more the merrier!)</p>
+
+<p><a href="http://peak.telecommunity.com/">PEAK</a> is a library
+for enterprise applications. Among its diverse offerings is
+wsgiref, a reference library for WSGI including a simple HTTP
+server. wsgiref seems to have spun off into its own repository,
+located <a href="http://cvs.eby-sarna.com/wsgiref/">here</a>.</p>
+
+<h2><a name="paste" id="paste"></a>Paste</h2>
+
+<p><a href="http://pythonpaste.org/">Paste</a> is what I call a
+meta-framework, a way to plug together frameworks and servers and
+middleware using a common configuration system. Here's how Paste's
+creator, Ian Bicking, describes it: <a href=
+"http://pythonpaste.org/docs/what-is-paste.html">http://pythonpaste.org/docs/what-is-paste.html</a></p>
+
+<p>Paste has been getting an extraordinary level of development
+recently. It includes two frameworks: a WSGI-aware implementation
+of Webware, and a (backward-incompatible) modernization of
+<em>that</em> called Wareweb. Paste is becoming the <a href=
+"http://en.wikipedia.org/wiki/Borg">Borg</a>, assimilating some
+third-party code and linking to others. It has incorporated
+gateways from SWAP and Flup, and Quixote support is in progress.
+Subway has refactored itself to work with Paste. Paste should also
+work with any generic WSGI application. It has been creating and
+borrowing middleware left and right, for configuration, error
+handling, caching, testing, authentication, redirects, session
+management, HTML validation, and no doubt others.</p>
+
+<p>Paste has a top-level executable 'paster'. If the first argument is
+"serve", it launches the server/application/middleware combination
+specified in a Python-syntax configuration file. Some of the
+configuration parameters are:</p>
+
+<ul class="simple">
+<li><strong>server</strong>: "wsgiutils", "scgi", "scgi_flup_fork",
+"scgi_flup_threaded", "console", etc. The console server is for
+debugging and dumps the response on the screen. Run 'paster serve
+--list-servers' to see all servers with descriptions.</li>
+
+<li><strong>publish_app</strong>: a generic WSGI application. This
+can be a function object, or a string naming the object to import.
+This overrides the "framework" and "publish_dir" parameters.</li>
+
+<li><strong>framework</strong>: "webkit", "wareweb", "subway", etc.
+The default uses webkit.</li>
+
+<li><strong>publish_dir</strong>: a directory containing a
+framework-specific application. (Only used by certain
+frameworks.)</li>
+</ul>
+
+<p>The configuration is read into a dictionary and available to all
+parts of the runtime. This means frameworks can define additional
+parameters, and so can middleware and your application. This allows
+you to put all configuration information in one place with one
+format. For instance, a session middleware might need to know which
+directory to save to, and your application might need to know which
+database to connect to.</p>
+
+<p>If the first argument is "create", paster creates
+a stub directory for a new application. You don't have to do this
+-- you can build your own application directory from scratch -- but
+paster has skeletons for several common scenarios.
+For instance:</p>
+
+<pre class="literal-block">
+$ paster create --template=webkit_zpt /tmp/paste_app.py
+$ ls /tmp/paste_app.py
+__init__.py   server.conf  sitepage.pyc  web/
+__init__.pyc  sitepage.py  templates/
+</pre>
+
+<p>This creates a Webware application using Zope Page Templates and
+SQLObject. Here's what it contains:</p>
+
+<ul class="simple">
+<li><strong>__init.py__</strong>: Makes this directory a Python
+package so you can import it.</li>
+
+<li><strong>server.conf</strong>: The configuration file.</li>
+
+<li><strong>sitepage.py</strong>: Class <tt class=
+"literal"><span class="pre">SitePage</span></tt>, the superclass of
+your servlets.</li>
+
+<li><strong>templates</strong>: Put your ZPT templates here. By
+default you get a generic home page, a standard header/footer, and
+a basic error page.</li>
+
+<li><strong>web</strong>: The published directory. Put your servlet
+and static files here. The default home page lists the WSGI
+dictionary for the request.</li>
+</ul>
+
+<p>Here's the server.conf file created by the above command
+(comments deleted):</p>
+
+<pre class="literal-block">
+import os
+app_template = 'webkit_zpt'
+app_name = 'paste_app'
+framework = 'webkit'
+publish_dir = os.path.join('/tmp/paste_app', 'web')
+sys_path = ['/tmp']
+verbose = False
+server = 'wsgiutils'
+reload = True
+debug = True
+</pre>
+
+<p>Obviously I didn't choose a good location since you don't want
+/tmp in your Python path, but you get the idea. (Note: don't call
+your application directory "paste" or Python's import mechanism
+will get confused.)</p>
+
+<p>Paste had Twisted support but it removed due to bugginess and
+obsolescence. New code for <tt class="literal"><span class=
+"pre">twisted.web2.wsgi</span></tt> (not released yet; in Twisted
+CVS only) has not been written.</p>
+
+<h2><a name="qlime" id="qlime"></a>QLime</h2>
+
+<p><a href="http://www.qlime.org">QLime</a> is a rich framework built on top of
+Quixote. I'm mentioning it because it has an intriguing
+configuration system, one that might be useful for Paste or another
+meta-framework. QLime uses a global "registry" <tt class=
+"literal"><span class="pre">reg</span></tt>, which is just a
+container for arbitrary attributes. <tt class=
+"literal"><span class="pre">reg.site</span></tt> is the published
+application; i.e., a Quixote Directory and its sub-Directories.
+<tt class="literal"><span class="pre">reg.oc</span></tt> contains
+table classes for QLime's object-relational mapper, and <tt class=
+"literal"><span class="pre">reg.ds</span></tt> contains database
+connection objects. But you can set any attributes you want, such
+as <tt class="literal"><span class="pre">reg.skin.red</span></tt>
+and <tt class="literal"><span class=
+"pre">reg.skin.blue</span></tt>, which might be instances
+describing user-selectable color themes.</p>
+
+<p>The registry is built from a configuration file in Windows .ini
+format:</p>
+
+<pre class="literal-block">
+[site qlime.registry.SiteObject]
+
+[site.colorhello colorhello.Hello]
+skin_name=skin.red
+
+[skin.red colorhello.Red]
+[skin.blue colorhello.Blue]
+
+[oc.note class:qlime.demo.noteapp.Note]
+ds=notedb
+oc=default
+</pre>
+
+<p>Each [] line is a section header. The first word in the header
+tells where in the registry to attach this object. The second word
+names the class to instantiate. Any key=value pairs are arguments
+to the constructor (strings only). If the second word begins with
+"class:", it attaches the class itself rather than an instance. In
+that case, the arguments are passed to a special class method,
+<tt class="literal"><span class="pre">._q_class_init</span></tt>.
+So the above configuration corresponds roughly to:</p>
+
+<pre class="literal-block">
+from qlime.registry import SiteObject
+from colorhello import Hello, Red, Blue
+from qlime.demo.noteapp import Note
+reg.site = SiteObject()
+reg.site.colorhello = Hello(skin_name="skin.red")
+reg.skin.red = Red()
+reg.skin.blue = Blue()
+reg.oc.note = Note      # Class, not instance!
+Note._q_class_init(ds="notedb", oc="default")
+</pre>
+
+<h2><a name="the-web-sig" id="the-web-sig"></a>The web-sig</h2>
+
+<p>Python's <a href="http://python.org/sigs/web-sig/">web-sig</a>
+is a mailing list for coordinating the various web-related
+projects. Discussion topics include how to improve the Python
+standard library for HTTP/HTML/framework support, and what
+third-party packages are needed and how they should be structured.
+Of course the cabal cannot tell a developer what to do, but those
+interested in standardization will look to the group's consensus,
+and the list is also a resource for questions like "Is anybody else
+working on X?" and "How do I do Y?" The list is pretty active, and
+most of the bigwigs are on it. So this is a good place to
+coordinate WSGI work.</p>
+
+<p>Recent topics include making a Javascript library a la Nevow's,
+an <a href="http://en.wikipedia.org/wiki/AJAX">AJAX</a> framework,
+what Rails got that we don't got, porting frameworks to Paste,
+etc.</p>
+
+<h2><a name="conclusion" id="conclusion"></a>Conclusion</h2>
+
+<p>WSGI is only part of the solution. It helps interoperability but
+does nothing for the Python newbie who just wants to get a simple
+dynamic site up and running quickly and is overwhelmed by the
+choices. Documentation is what the newbie needs, and the Python
+community needs to come to an agreement regarding the top
+framework(s) to recommend, or perhaps the top framework for each
+purpose (simple site, large site, heavily-loaded site). Paste plays
+a paradoxical role. On the one hand it encourages people to write
+even <em>more</em> frameworks to experiment with the expanding
+possibilities. On the other hand, this new code will be designed
+with interoperability in mind, something we haven't had before. And
+perhaps instead of compromising on one framework and giving up our
+beloved esoteric features, we can compromise on this meta-framework
+and keep our features, and Johnny Newbie will be less confused.</p>
+
+<p>Next month I'm planning an article on User-Centered Design and
+Usability Testing, and maybe the following month I'll have more to
+report on Paste.</p>
+<!-- Hyperlink targets -->
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<P>
+<IMG ALT="picture" SRC="../gx/2003/authors/orr.jpg" WIDTH="235" HEIGHT="333" ALIGN="left"  HSPACE="10" VSPACE="10" class="bio">
+<em>
+Mike is a Contributing Editor at <I>Linux Gazette</I>. He has been a
+Linux enthusiast since 1991, a Debian user since 1995, and now Gentoo.
+His favorite tool for programming is Python.  Non-computer interests include
+martial arts, wrestling, ska and oi! and ambient music, and the international
+language Esperanto.  He's been known to listen to Dvorak, Schubert,
+Mendelssohn, and Khachaturian too.
+</em>
+<br CLEAR="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2005, Mike Orr (Sluggo). Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 115 of Linux Gazette, June 2005
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="okopnik1.html" >&lt;-- prev</A> | <A HREF="seymour.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">June 2005 (#115)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/2003/sit3-shine.7-2.gif" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

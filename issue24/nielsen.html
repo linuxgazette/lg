@@ -1,0 +1,209 @@
+<!--startcut ==========================================================-->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML>
+<HEAD>
+<title>Quick autofs Tutorial Issue 24</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#A000A0"
+ALINK="#FF0000">
+<!--endcut ============================================================-->
+
+<H4>
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H1>Quick autofs Tutorial</H1>
+<H4>By <a href="mailto:men2@auto.med.ohio-state.edu">Mark Nielsen</a></H4>
+</center>
+<P> <HR> <P>  
+
+What is autofs? Autofs uses automount to mount cdrom and floppy drives 
+(and other things) to your computer as you need them and umount as
+they are not being used. What is mount and unmount? Mount and umount
+are programs to mount a device ontop of a directory. For example, 
+this command would mount the first floppy drive (drive a: in DOS terms)
+to the directory "/mnt/floppy" so that everytime you access "/mnt/floppy" 
+to access your floppy drive.
+<p>
+<pre>
+mount /dev/fd0 /mnt/floppy
+</pre>
+<p>
+And this command unmounts or frees up the floppy drive from being used.
+<p>
+<pre>    
+umount /dev/fd0 
+</pre>    
+
+<p>
+Now, in DOS terms, your floppy disk is accessed as you need it. For normal
+users, that is what they would expect. They wouldn't want to use
+mount and umount because it is time consuming and because they might not
+get it right. 
+<p>
+I assume "/dev/cdrom" is your cdrom drive and "dev/fd0" is your
+floppy drive. I am also assuming you will backup your "/etc/auto.master"
+file. 
+Use this script to create the following threes files and restart autofs.
+ Login as "root", goto 
+your home directory, copy whatever between
+the next two lines to a file called "CreateAutofs.script" and execute 
+the script with the command 
+<pre> 
+source CreateAutofs.script
+</pre>
+
+<HR> 
+<pre>
+cd
+echo "Please ignore any errors when making directories"
+     ### Let us make sure the two directories exist, ignore errors
+mkdir /mnt/floppy
+mkdir /mnt/cdrom
+     ### Let us backup the auto files in case they haven't
+mv /etc/auto.master /etc/auto.master_old
+mv /etc/auto.floppy /etc/auto.floppy_old
+mv /etc/auto.cdrom /etc/auto.cdrom_old
+     ### Create the files for autofs
+echo "/mnt/cdrom /etc/auto.cdrom --timeout 10" > /etc/auto.master
+echo "/mnt/floppy /etc/auto.floppy --timeout 1" >> /etc/auto.master
+echo "floppy   -user,suid,fstype=msdos :/dev/fd0" > /etc/auto.floppy
+echo "cdrom    -fstype=iso9660,ro   :/dev/cdrom" > /etc/auto.cdrom
+     ### Create the links to the floppy drive and cdrom drive
+ln -s /mnt/floppy/floppy a:
+ln -s /mnt/cdrom/cdrom d:
+ln -s /mnt/floppy/floppy floppy
+ln -s /mnt/cdrom/cdrom cdrom 
+     ### Lets retstart autofs, you might have to reboot
+cd /etc/rc.d/init.d
+./autofs restart
+     ### If it didn't work, you might have to reboot 
+     ### Try "./autofs start" if the restart claims autofs has not been
+     #### started
+cd
+
+</pre>
+<HR> 
+
+<p>
+The end of your results should look something like the following if it
+was sucessfull
+<pre>
+Start /usr/sbin/automount --timeout 10 /mnt/cdrom file /etc/auto.cdrom
+Start /usr/sbin/automount --timeout 1 /mnt/floppy file /etc/auto.floppy
+</pre>
+
+Now put a floppy disk formatted for MSDOS and a cdrom in and execute the
+commands 
+<pre>
+ls a:
+ls d:
+</pre>
+to see if there is anything on them. Hopefully you don't get any error
+messages. 
+
+<p>
+Personally, my /etc/auto.floppy file looks like 
+<pre>
+floppy          -fstype=auto,defaults,user,suid :/dev/fd0
+</pre>
+and my /etc/auto.cdrom file look like this
+<pre>
+cdrom           -fstype=iso9660,user,suid       :/dev/cdrom
+</pre>
+
+The reason why I gave conservative values in the script was the fact the
+my values might be security hazards. But since I am the only person
+using my computer, I wanted to make sure my personal account had full
+access to the floppy and cdrom drives. Also, -fstype=auto doesn't seem
+to work quite right when your disk is formated for MSDOS, but works
+fine with ext2. "-fstype=auto" tries to autodetect the file format. 
+
+<p>
+If you noticed the timeout value for the floppy drive is 1 second. 
+This makes it so that by the time the floppy drive light has gone out, 
+your floppy disk is unmounted and  a normal user 
+can take the floppy
+disk out and "nothing bad happens". I made the timeout value for the cdrom
+10 seconds because it wasn't working really well at 1 second, and I
+figured it was because the drive didn't have enough time to "warm up"
+before it was being shut down. You might want to test what the timeout
+value for your cdrom drive should be. 
+
+<p>
+To get more information about autofs, do the commands
+<pre>
+man 5 autofs
+man autofs
+</pre>
+and look the the directory "usr/doc" for the directory "autofs-0.3.14"
+or something similar to it. 
+
+<h2> Now to explain it </h2>
+Okay, here is my brief explanation for what is happening. Read the man
+pages and any docs first.
+
+<p>
+Your "/etc/rc.d/init.d/autofs" script first looks at "/etc/auto.master".
+That file usually has three things on each line. It has
+the directory which all mounts will be located at. Then next to that value
+is the filename which contains the configuration(s) for what devices you
+want mounted. We will call these filenames the "supplemental" files. Next
+to that value is the timeout which you want to
+occur after so many seconds of inactivity. The timeout will free or umount
+all devices specificed in the supplemental files after so many seconds of
+inactivity. 
+<p>
+Now, the supplemental files can have more than on entry, but for my
+purposes I don't do that. Read below for the explanation. The supplemental
+files can be named anything you want them to be named. They also have
+three values for each entry. The first value is the "psuedo" directory. I
+will explain this later. The second value contains the
+mount options. The third value is the device (like "/dev/fd0" which
+is the floppy drive) which the "psuedo" directory
+is connected to.
+<p>
+The "pseudo" directory is contained in the directory which is defined
+in "/etc/auto.master". When people try to access this "psuedo" directory,
+they will be rerouted to the device you specified. For example, the above
+script will generate a link called "a:" which if you list with the
+command "ls a:" will give you a list of files in the floppy drive. Or, a
+similar command would be "ls /mnt/floppy/floppy". But if you do the
+command "ls /mnt/floppy", you don't see anything even though the directory
+"/mnt/floppy/floppy" should exist. That is because "/mnt/floppy/floppy"
+doesn't exist as a file or directory, but somehow the system knows that
+if you specifically ask for "/mnt/floppy/floppy", it will reroute you
+to the floppy drive. 
+<p>
+Now as to the reason why I didn't combine the floppy drive and cdrom drive
+into the same supplementary file. Each definition in the
+"/etc/auto.master" file will have its own "automount" program running for
+it. If you have several devices running on the same automount program and
+one of them fails, it could force the others not to work. That is why
+I want every device running on its own automount program which means
+there is one device per supplementary file per entry in the
+"/etc/auto.master" file.   
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<center><H5>Copyright &copy; 1998, Mark Nielsen <BR> 
+Published in Issue 24 of <i>Linux Gazette</i>, January 1998</H5></center>
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<A HREF="./index.html"><IMG ALIGN=BOTTOM SRC="../gx/indexnew.gif" 
+ALT="[ TABLE OF CONTENTS ]"></A>
+<A HREF="../index.html"><IMG ALIGN=BOTTOM SRC="../gx/homenew.gif"
+ALT="[ FRONT PAGE ]"></A>
+<A HREF="./lg_answer24.html"><IMG SRC="../gx/back2.gif"
+ALT=" Back "></A>
+<A HREF="./jaeggli.html"><IMG SRC="../gx/fwd.gif" ALT=" Next "></A>
+<P> <hr> <P> 
+<!--startcut ==========================================================-->
+</BODY>
+</HTML>
+<!--endcut ============================================================-->

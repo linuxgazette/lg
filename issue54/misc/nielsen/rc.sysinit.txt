@@ -1,0 +1,329 @@
+#!/bin/sh
+#
+# /etc/rc.d/rc.sysinit - run once at boot time
+#
+# Taken in part from Miquel van Smoorenburg's bcheckrc.
+#
+
+### This sutff entered in by Mark 
+action "Making ram0 " /sbin/mkfs.ext2  /dev/ram0
+action "Mounting ram0" mount /dev/ram0 /tmp
+action "Making /tmp/etc" mkdir /tmp/etc
+action "Making /tmp/var/log" mkdir -p /tmp/var/log
+action "Making /tmp/var/run" mkdir -p /tmp/var/run
+action "Making /tmp/var/lock" mkdir -p /tmp/var/lock
+action "Copying over mtab" cp /etc/mtab_backup /tmp/etc/mtab
+ 
+action "Chmod 777 /tmp " chmod 777 /tmp
+action "Chmod +t /tmp" chmod +t /tmp
+
+action "mking one more directory in var" mkdir -p /var/lock/subsys
+
+action "mkdir /tmp/dev" mkdir -p /tmp/dev
+action "Making ram1 " /sbin/mkfs.ext2  /dev/ram1
+action "Mounting ram1" mount /dev/ram1 /tmp/dev
+
+action "rsync -a /dev/* /tmp/dev/" cd /tmp ; rsync -a /dev/* /tmp/dev/ 
+action "umounting /tmp/dev" umount /tmp/dev
+action "remounting /tmp/dev to /dev" mount /dev/ram1 /dev
+action "modying mtab" cp /etc/mtab2 /tmp/etc/mtab
+
+# Rerun ourselves through initlog
+if [ -z "$IN_INITLOG" ]; then
+ [ -f /sbin/initlog ] && exec /sbin/initlog $INITLOG_ARGS -r /etc/rc.d/rc.sysinit
+fi
+
+# Set the path
+PATH=/bin:/sbin:/usr/bin:/usr/sbin
+export PATH
+
+# Read in config data.
+if [ -f /etc/sysconfig/network ]; then
+    . /etc/sysconfig/network
+else
+    NETWORKING=no
+    HOSTNAME=localhost
+fi
+
+# Source functions
+. /etc/rc.d/init.d/functions
+
+# Print a banner. ;)
+echo -en "\t\t\tWelcome to "
+[ "$BOOTUP" != "serial" ] && echo -en "\\033[1;31m"
+echo -en "Red Hat"
+[ "$BOOTUP" != "serial" ] && echo -en "\\033[0;39m"
+echo " Linux"
+if [ "$PROMPT" != "no" ]; then
+ echo -en "\t\tPress 'I' to enter interactive startup."
+ echo
+ sleep 1
+fi
+
+# Fix console loglevel
+/bin/dmesg -n $LOGLEVEL
+
+# Mount /proc (done here so volume labels can work with fsck)
+
+action "Mounting proc filesystem" mount -n -t proc /proc /proc
+
+# Turn off sysrq
+if [ -f /proc/sys/kernel/sysrq -a "$MAGIC_SYSRQ" = "no" ]; then
+	echo "0" > /proc/sys/kernel/sysrq
+	action "Turning off Magic SysRq key" /bin/true
+fi
+# Turn off Stop-A
+if [ -f /proc/sys/kernel/stop-a -a "$MAGIC_SYSRQ" = "no" ]; then
+	echo "0" > /proc/sys/kernel/stop-a
+	action "Turning off Stop-A/Break-A" /bin/true
+fi
+
+# Set the system clock.
+ARC=0
+SRM=0
+UTC=0
+
+
+if [ -f /etc/sysconfig/clock ]; then
+   . /etc/sysconfig/clock
+
+   # convert old style clock config to new values
+   if [ "${CLOCKMODE}" = "GMT" ]; then
+      UTC=true
+   elif [ "${CLOCKMODE}" = "ARC" ]; then
+      ARC=true
+   fi
+fi
+
+if grep "system serial" /proc/cpuinfo | grep -q MILO ; then
+   ARC=true
+else
+   SRM=true
+fi
+
+CLOCKDEF=""
+if [ -x /sbin/hwclock ]; then
+   CLOCKFLAGS="--hctosys"
+   CLOCK=/sbin/hwclock
+else
+   CLOCKFLAGS="-a"
+   CLOCK=/sbin/clock
+fi
+
+case "$UTC" in
+   yes|true)
+    CLOCKFLAGS="$CLOCKFLAGS -u";
+    CLOCKDEF="$CLOCKDEF (utc)";
+  ;;
+esac
+
+if [ "$CLOCK" = "/sbin/clock" ]; then
+   case "$ARC" in
+     yes|true)
+     	CLOCKFLAGS="$CLOCKFLAGS -A";
+     	CLOCKDEF="$CLOCKDEF (arc)";
+     ;;
+   esac
+   case "$SRM" in
+     yes|true)
+	CLOCKFLAGS="$CLOCKFLAGS -S";
+	CLOCKDEF="$CLOCKDEF (srm)";
+     ;;
+   esac
+   if grep -q "Jensen" /proc/cpuinfo >/dev/null 2>&1 ; then
+     CLOCKFLAGS="$CLOCKFLAGS -J";
+     CLOCKDEF="$CLOCKDEF (jensen)";
+   fi
+fi
+
+$CLOCK $CLOCKFLAGS
+
+action "Setting clock $CLOCKDEF: `date`" date
+
+# Load keymap
+KEYMAP=
+if [ -f /etc/sysconfig/console/default.kmap ]; then
+  KEYMAP=/etc/sysconfig/console/default.kmap
+else
+  if [ -f /etc/sysconfig/keyboard ]; then
+    . /etc/sysconfig/keyboard
+  fi
+  if [ -n "$KEYTABLE" -a -d "/usr/lib/kbd/keymaps" ]; then
+     KEYMAP=$KEYTABLE
+  fi
+fi
+if [ -n "$KEYMAP" ]; then 
+  # Since this takes in/output from stdin/out, we can't use initlog
+  echo -n "Loading default keymap"
+  loadkeys $KEYMAP < /dev/tty0 > /dev/tty0 2>/dev/null && \
+     success "Loading default keymap" || failure "Loading default keymap"
+  echo
+fi   
+
+# Load system font
+if [ -x /sbin/setsysfont ]; then
+    [ -f /etc/sysconfig/i18n ] && . /etc/sysconfig/i18n
+    if [ -f /etc/sysconfig/console/$SYSFONT.psf.gz -o -f /usr/lib/kbd/consolefonts/$SYSFONT.psf.gz ]; then
+       action "Setting default font" /sbin/setsysfont
+    fi
+fi
+
+# Start up swapping.
+action "Activating swap partitions" swapon -a
+
+# Set the hostname.
+action "Setting hostname ${HOSTNAME}" hostname ${HOSTNAME}
+
+# Set the NIS domain name
+if [ -n "$NISDOMAIN" ]; then
+    action "Setting NIS domain name $NISDOMAIN" domainname $NISDOMAIN
+else
+    domainname ""
+fi
+
+if [ -f /fsckoptions ]; then
+	fsckoptions=`cat /fsckoptions`
+    else
+	fsckoptions=
+fi
+
+if [ -f /forcefsck ]; then
+	fsckoptions="-f $fsckoptions"
+fi
+
+_RUN_QUOTACHECK=0
+
+# check for arguments 
+
+if grep -i nopnp /proc/cmdline >/dev/null ; then
+    PNP=
+else
+    PNP=yes
+fi
+
+# set up pnp 
+if [ -x /sbin/isapnp -a -f /etc/isapnp.conf ]; then
+    if [ -n "$PNP" ]; then
+	action "Setting up ISA PNP devices" /sbin/isapnp /etc/isapnp.conf
+    else
+	action "Skipping ISA PNP configuration at users request" /bin/true
+    fi
+fi
+
+# Add /proc to /etc/mtab
+mount -f -t proc /proc /proc
+
+
+# Enter root and /proc into mtab.
+mount -f /
+mount -f /proc
+
+if ! grep -i nomodules /proc/cmdline >/dev/null && [ -f /proc/ksyms ]; then
+    USEMODULES=y
+else
+    USEMODULES=
+fi
+
+if [ -f /proc/sys/kernel/modprobe ]; then
+   if [ -n "$USEMODULES" ]; then
+       echo "/sbin/modprobe" > /proc/sys/kernel/modprobe
+   else
+       echo "" > /proc/sys/kernel/modprobe
+   fi
+fi
+
+# Load modules (for backward compatibility with VARs)
+if [ -f /etc/rc.d/rc.modules ]; then
+	/etc/rc.d/rc.modules
+fi
+
+
+## Commented out by Mark
+# Mount all other filesystems (except for NFS and /proc, which is already
+# mounted). Contrary to standard usage,
+# filesystems are NOT unmounted in single user mode.
+#action "Mounting local filesystems" mount -a -t nonfs,smbfs,ncpfs,proc
+
+{
+
+
+# Do we need (w|u)tmpx files? We don't set them up, but the sysadmin might...
+_NEED_XFILES=
+[ -f /var/run/utmpx -o -f /var/log/wtmpx ] && _NEED_XFILES=1
+
+# Clean up /var
+# I'd use find, but /usr may not be mounted.
+for afile in /var/lock/* /var/run/*; do
+   if [ -d $afile ]; then
+      rm -f $afile/*
+   else
+      rm -f $afile
+   fi
+done
+
+# Clean up utmp/wtmp
+>/var/run/utmp
+touch /var/log/wtmp
+chgrp utmp /var/run/utmp /var/log/wtmp
+chmod 0664 /var/run/utmp /var/log/wtmp
+if [ -n "$NEED_XFILES" ]; then
+  >/var/run/utmpx
+  touch /var/log/wtmpx
+  chgrp utmp /var/run/utmpx /var/log/wtmpx
+  chmod 0664 /var/run/utmpx /var/log/wtmpx
+fi
+
+# Delete X locks
+rm -f /tmp/.X*-lock
+
+# Delete Postgres sockets
+rm -f /tmp/.s.PGSQL.*
+
+# Right, now turn on swap in case we swap to files.
+swapon -a >/dev/null 2>&1
+action "Enabling swap space" /bin/true
+
+# Initialize the serial ports.
+if [ -f /etc/rc.d/rc.serial ]; then
+	. /etc/rc.d/rc.serial
+fi
+
+# Generate a header that defines the boot kernel.
+if uname -r | grep -q smp ; then
+  SMP="1"
+  UP="0"
+else
+  SMP="0"
+  UP="1"
+fi
+
+/* This file is automatically generated at boot time. */
+#ifndef __BOOT_KERNEL_H_
+#define __BOOT_KERNEL_H_
+
+#ifndef __BOOT_KERNEL_SMP
+#define __BOOT_KERNEL_SMP $SMP
+#endif
+
+#ifndef __BOOT_KERNEL_UP
+#define __BOOT_KERNEL_UP $UP
+#endif
+
+#endif
+EOF
+
+#action "almost at the end" ls > /tmp/1
+
+# Now that we have all of our basic modules loaded and the kernel going,
+# let's dump the syslog ring somewhere so we can find it later
+dmesg > /var/log/dmesg
+kill -TERM `/sbin/pidof getkey` >/dev/null 2>&1
+} &
+if [ "$PROMPT" != "no" ]; then
+   /sbin/getkey i && touch /tmp/confirm
+fi
+wait
+
+
+
+

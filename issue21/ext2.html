@@ -1,0 +1,414 @@
+<!--startcut ==========================================================-->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML>
+<HEAD>
+<title>A Non-Technical Look Inside the EXT2 File System Issue 21</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0020F0"
+ALINK="#FF0000">
+<!--endcut ============================================================-->
+
+<H4>
+&quot;Linux Gazette...<I>making Linux just a little more fun!</I>&quot;
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H2>A Non-Technical Look Inside the EXT2 File System</H2>
+<H4>By Randy Appleton,
+<a href="mailto:randy@euclid.nmu.edu">randy@euclid.nmu.edu</a></H4>
+</center>
+<P><HR><P>
+
+<H2>Introduction</H2>
+
+<P>Everyone wants a fast computer. However, not everyone realizes that
+one of the most important factors of computer performance is the speed
+of the file system. Regardless of how fast your CPU&nbsp;is, if the file
+system is slow then the whole computer will also seem slow. Many people
+with very fast Pentium Pro's but slow disk drives and slower networked
+file systems rediscover this fact daily.</P>
+
+<P>Luckily, Linux has a very fast file system called the <B>Extended File
+System Version 2 (EXT2)</B>. The EXT2 file system was created by Remy Card
+(card@masi.ibp.fr). This article will show you how the EXT2 file system
+is organized on disk and how it gets it's speed.</P>
+
+<H2>Disk Layout</H2>
+
+<H3>Goals</H3>
+
+<P>There are several objectives when deciding how to lay data out upon
+a disk. </P>
+
+<P>First and foremost, the data structure should be <B>recoverable</B>.
+This means that if there is some error while writing data to the disk (like
+a silly user pulling the power cord) the entire file system is not lost.
+Although loosing the data currently being written is often acceptable,
+loosing all the data on the disk is not. </P>
+
+<P>Secondly, the data structure must allow for an <B>efficent implementation</B>
+of all needed operations. The hardest operation to implement is normally
+the hard link. When using a hard link, there are more than one directory
+entry (more than one file name) that points to the same file data. Accessing
+the data by any of the valid file names should produce the same data. </P>
+
+<P>Another hard operation involves deleting an open file. If some application
+has a file open for access, and a user deletes the file, the application
+should still be able to access the file's data. The data can be cleared
+off the disk only when the last application closes the file. This behavior
+is quite unlike DOS/Windows, where deleting a file means that applications
+who have already begun to access the file loose all further access. Applications
+that use this UNIX behavior concerning deleted files are more common than
+one might think, and changing it would break many applications.</P>
+
+<P>Thirdly, a disk layout should minimize seek times by <B>clustering</B>
+data on disk. A drive needs more time to read two pieces of data that are
+widely seperated on the disk than the same sized pieces near each other.
+A good disk layout can minimize disk seek time (and maximize performance)
+by clustering related data close together. For example, parts of the same
+file should be close together on disk, and also near the directory containing
+the file's name.</P>
+
+<P>Finally, the disk layout should <B>conserve disk space</B>. Consurving
+disk space was more important in the past, when hard drives were small
+and expensive. These days, consurving disk space is not so important. However,
+one should not waste disk space unnecessarily.</P>
+
+<H3>Partitions</H3>
+
+<P>Partitions are the first level of disk layout. Each disk
+must have one or more partitions. The operating system pretends each partition
+is a seperate logical disk, even though they may share the same phyical
+disk. The most common use of partitioning is allow more than one file system
+to exist on the same physical disk, each in its own partition. Each partition
+has its own device file in the <TT>/dev</TT> directory (e.g. <TT>/dev/hda1,
+/dev/hda2</TT>, etc.). Every EXT2 file system occupies one partition, and
+fills the whole partition.</P>
+
+<H3>Groups</H3>
+
+<P>The EXT2 file system is divided into <B>groups</B>, which
+are just sections of a partition. The division into groups is done when
+the file system is formatted, and cannot change without reformatting. Each
+group contains related data, and is the unit of clustering in the EXT2
+file system. Each group contains a <B>superblock, </B>a<B> group descriptor</B>,
+a<B> block bitmap</B>, an<B> inode bitmap</B>, an <B>inode table</B>, and
+finally <B>data blocks</B>, all in that order.</P>
+
+<H3>Superblock</H3>
+
+<P>Some information about a file system belongs to the file
+system as a whole, and not to any particular file or group. This information
+includes the total number of blocks within the file system, the time it
+was last checked for errors, and so on. Such information is stored in the
+<B>superblock</B>.</P>
+
+<P>The first superblock is the most important one, since
+that is the one read when the file system is mounted. The information in
+the superblock is so important that the file system cannot even be mounted
+without it. If there were to be a disk error while updating the superblock,
+the entire file system would be ruined. Therefore, a copy of the superblock
+is kept in each group. If the first superblock becomes corrupted, the redundent
+copies can be used to fix the error by using the command <TT>e2fsck</TT>.</P>
+
+<H3>Group Descriptors and Bitmaps</H3>
+
+<P>The next block of each group is the <B>group descriptor</B>.
+The group descriptor stores information on each group. Within each group
+descriptor is a pointer to the table of inodes (more on inodes in a moment)
+and <B>allocation bitmaps</B> for inodes and data blocks. </P>
+
+<P>An allocation bitmap is simply a list of bits describing
+which blocks or inodes are in use. For example, data block number 123 is
+in use if bit number 123 in the data bitmap is set. Using the data and
+inode bitmaps, the file system can determine which blocks and inodes are
+in current use and which are available for future use.</P>
+
+<H3>Inodes and Such</H3>
+
+<P>Each file on disk is associated with exactly one <B>inode</B>.
+The inode stores important information about the file including the create
+and modify times, the permissions on the file, and the owner of the file.
+Also stored is the type of file (regular file, directory, device file like
+/<TT>dev/ttyS1</TT>, etc) and where the file is stored on disk. </P>
+
+<P>The data in the file is not stored in the inode itself.
+Instead, the inode points to the location of the data on disk. There are
+fifteen pointers to data blocks within each inode. However, this does not
+mean that a file can only be fifteen blocks long. Instead, a file can be
+millions of blocks long, thanks to the indirect way that data pointers
+point to data.</P>
+
+<P>The first thirteen pointers point directly to blocks containing
+file data. If the file is thirteen or fewer blocks long, then the file's
+data is pointed to directly by pointers within each inode, and can be accessed
+quickly. The fourteenth pointer is called the indirect pointer, and points
+to a block of pointers, each one of which points to data on the disk. The
+fifteenth pointer is called the doubly indirect pointer, and points at
+a block containing many pointers to blocks each of which points at data
+on the disk. Perhaps the picture below will make things clear.</P>
+
+<CENTER><P><IMG SRC="./gx/ext/layout.gif" HEIGHT=216 WIDTH=489><BR>
+Figure showing the pointers between an inode and it's associated
+data.</P></CENTER>
+
+<P>This scheme allows direct access to all the data of small files (files
+less than fourteen blocks long) and still allows for very large files with
+only a few extra accesses. As the table below shows, almost all files are
+actually quite small. Therefore, almost all files can be accessed quickly
+with this scheme.</P>
+
+<CENTER><TABLE BORDER=1 CELLSPACING=0 CELLPADDING=0 >
+<TR>
+<TD>File Size (bytes)</TD>
+
+<TD>0-768</TD>
+
+<TD>769-1.5K</TD>
+
+<TD>1.5K&nbsp;- 3K</TD>
+
+<TD>3K - 6K</TD>
+
+<TD>6K-12K</TD>
+
+<TD>12K and up</TD>
+</TR>
+
+<TR>
+<TD>Occurence (%)</TD>
+
+<TD>38.3</TD>
+
+<TD>19.8</TD>
+
+<TD>14.2</TD>
+
+<TD>9.4</TD>
+
+<TD>7.1</TD>
+
+<TD>10.1</TD>
+</TR>
+
+<TR>
+<TD>Cumulative (%)</TD>
+
+<TD>38.3</TD>
+
+<TD>58.1</TD>
+
+<TD>72.3</TD>
+
+<TD>81.7</TD>
+
+<TD>89.8</TD>
+
+<TD>99.9</TD>
+</TR>
+</TABLE></CENTER>
+
+<CENTER><P>Table showing occurence of various file sizes.</P></CENTER>
+
+<P>Inodes are stored in the inode table, which is at a location pointed
+to by the group descriptor within each group. The location and size of
+the inode table is set at format time, and cannot be changed without reformatting.
+This means that the maximum number of files in the file system is also
+fixed at format time. However, each time you format the file system you
+can set the maximum number of inodes with the <TT>-i </TT>option to <TT>mke2fs</TT>.</P>
+
+<H3>Directorie></H3>
+
+<P>No one would like a file system where files were accessed
+by inode number. Instead, people want to give textual names to files. Directories
+associate these textual names with the inode numbers used internally by
+the file system. Most people don't realize that directories are just files
+where the data is in a special directory format. In fact, on some older
+UNIXs you could run editors on the directories, just to see what they looked
+like internally (imagine running <TT>vi /tmp</TT>). </P>
+
+<P>Each directory is a list of directory entries. Each directory
+entry associates one file name with one inode number, and consists of the
+inode number, the length of the file name, and the actual text of the file
+name. </P>
+
+<P>The root directory is always stored in inode number two,
+so that the file system code can find it at mount time. Subdirectories
+are implemented by storing the name of the subdirectory in the name field,
+and the inode number of the subdirectory in the inode field. Hard links
+are implemented by storing the same inode number with more than one file
+name. Accessing the file by either name results in the same inode number,
+and therefore the same data.</P>
+
+<P>The special directories &quot;.&quot; and &quot;..&quot;
+are implemented by storing the names &quot;.&quot; and &quot;..&quot; in
+the directory, and the inode number of the current and parent directories
+in the inode field. The only special treatment these two entries recieve
+is that they are automatically created when any new directory is made,
+and they cannot be deleted.</P>
+
+<H2>The File System in Action</H2>
+
+<P>The easiest way to understand the EXT2 file system is to watch it in
+action.</P>
+
+<H3>Accessing a file</H3>
+
+<P>To explain the EXT2 file system in action, we will need
+two things:&nbsp;a variable that holds directories named DIR, and a path
+name to look up. Some path names have many components (e.g. <TT>/usr/X11/bin/Xrefresh</TT>)&nbsp;and
+others do not (e.g. /<TT>vmlinuz</TT>).</P>
+
+<P>Assume that some process wants to open a file. Each process
+will have associated with it a current working directory. All file names
+that do not start with &quot;/&quot; are resolved relative to this current
+working directory and DIR&nbsp;starts at the current working directory.
+File names that start with &quot;/&quot; are resolved relative to the root
+directory (see <TT>chroot</TT> for the one exception), and DIR&nbsp;starts
+at the root directory.</P>
+
+<P>Each directory name in the path to be resolved is looked
+up in DIR as it's turn comes. This lookup yields the inode number of the
+subdirectory we're interested in.</P>
+
+<P>Next the inode of the subdirectory is accessed . The permissions
+are checked, and if you have access permissions, then this new directory
+becomes DIR. Each subdirectory in the path is treated the same way, until
+only the last component of the path remains. </P>
+
+<P>When the last component of the pathname is reached, the
+variable DIR&nbsp;contains the directory that actually holds the file name
+we've been looking for. Looking in DIR tells us the inode number of the
+file. Accessing this final inode tells where the data for the file is stored.
+After checking permissions, you can access the data.</P>
+
+<P>How many disk accesses were needed to access the data
+you wanted? A reasonable maximum is two per subdirectory (one to look up
+the name, the other to find the inode) and then two more for the actual
+file name itself. This effort is only done at file open time. After a file
+has been opened, subsequent accesses can use the inode's data without looking
+it up again. Further, <B>caching </B>eliminates many of the accesses needed
+to look up a file (more later).</P>
+
+<CENTER><TABLE BORDER=1 CELLSPACING=0 CELLPADDING=0 >
+<TR>
+<TD>
+<PRE>Put the starting directory in DIR.
+Put the pathname in PATH.
+While (PATH has one than one component)
+    Take one component off PATH.
+    Find that component in DIR yielding the INODE.
+    If (permissions on INODE are not OK)
+        Return ERROR
+    Set DIR&nbsp;= INODE
+End-While
+Take the last component off PATH yielding FILENAME.
+Find FILENAME&nbsp;in DIR&nbsp;yielding INODE.
+If (permission on INODE are not OK)
+     Return ERROR
+Store INODE with the process for quick later lookup.
+Return SUCCESS.</PRE>
+</TD>
+</TR>
+</TABLE></CENTER>
+
+<CENTER><P>Pseudo-code for opening a file.</P></CENTER>
+
+<H3>Allocating New Data</H3>
+
+<P>When a new file or directory is created, the EXT2 file
+system must decide where to store the data. If the disk is mostly empty,
+then data can be stored almost anywhere. However, performance is maximized
+if the data is clustered with other related data to minimize seek times.</P>
+
+<P>The EXT2 file system attempts to allocate each new directory
+in the group containing it's parent directory, on the theory that accesses
+to parent and children directories are likely to be closely related. The
+EXT2 file system also attempts to place files in the same group as their
+directory entries, because directory accesses often lead to file accesses.
+However, if the group is full, then the new file or new directory is placed
+in some other non-full group></P>
+
+<P>The data blocks needed to store directories and files
+can found by looking in the data allocation bitmap. Any needed space in
+the inode table can be found by looking in the inode allocation bitmap.</P>
+
+<H2>Caching</H2>
+
+<P>Like most file systems, the EXT2 system relies very heavily on caching.
+A <B>cache</B> is a part of RAM dedicated to holding file system data.
+The cache holds directory information, inode information, and actual file
+contents. Whenever an application (like a text editor or a compiler) tries
+to look up a file name or requests file data, the EXT2 system first checks
+the cache. If the answer can be found in the cache, then the request can
+be answered very quickly indeed without using the disk. </P>
+
+<P>The cache is filled with data from old requests. Therefore, if you request
+data that you have never requested before, the data will not be in the
+cache, and must be retrieved from disk. Luckily, most of the time most
+people ask for data they have used before. These repeat requests are answered
+quickly from the cache, saving the disk drive much effort while providing
+the user quick access.</P>
+
+<P>Of course, each computer has a limited amount of RAM&nbsp;available.
+Most of that RAM is used for other things like running applications, leaving
+perhaps 10% to 30%&nbsp;of total RAM available for the cache. When the
+cache becomes full, the oldest unused data (least recently used data) is
+thrown out. Only recently used data remains in the cache. </P>
+
+<P>Since larger caches can hold more data, they also can satisfy a larger
+number of requests. The figure below shows a typical curve of the total
+cache size versus the percent of all requests that can be satisfied from
+the cache. As you can see, using more RAM for caching increase the number
+of requests answered from the cache, and therefore increase the apparent
+speed of the file system.</P>
+
+<CENTER><P><IMG SRC="./gx/ext/HitRate_vs_CacheSize.gif" HEIGHT=240 WIDTH=320 ALIGN=BOTTOM><BR>
+Figure #1:&nbsp;A typical curve of total cache <BR>
+size vs. the number of requests satisfied from the cache.</P></CENTER>
+
+<H2>Conclusion</H2>
+
+<P>It has been said that one should make things as simple as possible,
+but no simpler. The EXT2 file system is rather more complex than most people
+realize, but this complexity results in both the full set of UNIX operations
+working correctly, and good performance. The code is robust and well tested,
+and serves the Linux community well. We all owe a debt of thanks to M.
+Card.</P>
+
+<H2>Sources for More Information</H2>
+
+<P>The data for the figures in this paper can all be found in my dissertation
+<I>Improving File System Performance with Predictive Caching</I>. See the
+URL&nbsp; <A HREF="http://euclid.nmu.edu/~randy">http://euclid.nmu.edu/~randy</A>
+.</P>
+
+<P>An excellent paper with more technical detail can be found at <A HREF="http://step.polymtl.ca/~ldd/ext2fs/ext2fs_toc.html">http://step.polymtl.ca/~ldd/ext2fs/ext2fs_toc.html</A>
+.</P>
+
+<P>Some performance data can be found at <A HREF="http://www.silkroad.com/linux-bm.html">http://www.silkroad.com/linux-bm.html</A>
+.</P>
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<center><H5>Copyright &copy; 1997, Randy Appleton<BR> 
+Published in Issue 21 of the Linux Gazette, September 1997</H5></center>
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<A HREF="./index.html"><IMG ALIGN=BOTTOM SRC="../gx/indexnew.gif" 
+ALT="[ TABLE OF CONTENTS ]"></A>
+<A HREF="../index.html"><IMG ALIGN=BOTTOM SRC="../gx/homenew.gif"
+ALT="[ FRONT PAGE ]"></A>
+<A HREF="./clue.html"><IMG SRC="../gx/back2.gif"
+ALT=" Back "></A>
+<A HREF="./fvwm.html"><IMG SRC="../gx/fwd.gif" ALT=" Next "></A>
+<P> <hr> <P> 
+<!--startcut ==========================================================-->
+</BODY>
+</HTML>
+<!--endcut ============================================================-->
+

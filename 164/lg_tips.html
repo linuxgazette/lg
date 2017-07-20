@@ -1,0 +1,488 @@
+<!DOCTYPE html
+	PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+	 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="utf-8" xml:lang="utf-8">
+<head>
+<title>2-Cent Tips LG #164</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link rel="stylesheet" href="../lg.css" type="text/css" media="screen, projection"  />
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<!-- link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" / -->
+<link rel="shortcut icon" href="../favicon.ico" />
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+</head>
+<body>
+
+<a href="../">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+<div id="navigation">
+<table summary="masthead" width="100%">
+<tr>
+<td align="center" colspan="3" style="font-size: 10px; font-weight: bold">
+<a href="../index.html">Home</a>
+<a href="http://linuxgazette.net">Main Site</a>
+<a href="../faq/index.html">FAQ</a>
+
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/mailman/listinfo/">Mailing Lists</a>
+<a href="../jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+<hr width="99%" style="border: 1px inset #000033">
+</td>
+</tr>
+<tr>
+<td width="40%" align="left" style="font-size: 10px; font-weight: bold">
+The Free International Online Linux Monthly
+</td>
+<td width="20%" align="center" style="font-size: 10px; font-weight: bold">
+ISSN: 1934-371X
+</td>
+<td width="40%" align="right" style="font-size: 10px; font-weight: bold">
+Main site: <a href="http://linuxgazette.net">http://linuxgazette.net</a> 
+</td>
+</table>
+</div>
+
+
+<div id="breadcrumbs1">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">July 2009 (#164)</a> &gt; 
+Article
+
+</div>
+
+<div class="articlecontent1">
+<div class="content">
+
+<div id="previousnexttop">
+<A HREF="lg_talkback.html" >&lt;-- prev</A> | <A HREF="lg_bytes.html" >next --&gt;</A>
+</div>
+
+<h1>2-Cent Tips</h1>
+
+
+<!-- Thread anchor: 2-cent Tip: Wrapping a script in a timeout shell --><a name='2_cent_tip__wrapping_a_script_in_a_timeout_shell'></a>
+<h3>2-cent Tip: Wrapping a script in a timeout shell</h3>
+<p>
+<b><p>
+Ben Okopnik [ben at linuxgazette.net]
+
+</p>
+</b><br />
+<b>Thu, 4 Jun 2009 08:22:35 -0500</b>
+</p>
+
+<p>
+----- Forwarded message from Allan Peda &lt;tl082@yahoo.com&gt; -----
+</p>
+
+<pre>
+From: Allan Peda &lt;tl082@yahoo.com&gt;
+To: tag@lists.linuxgazette.net
+</pre>Sent: Wednesday, May 20, 2009 11:34:27 AM
+<pre>
+Subject: Two Cent tip
+</pre>
+I have written previously on other topics for LG, and then IBM, but it's
+been a while, and I'd like to first share this without creating a full
+article (though I'd consider one).
+</p>
+
+<p>
+This is a bit long for a two cent tip, but I wanted to share a solution
+I came up with for long running processes that sometimes hang for an
+indefinite period of time.  The solution I envisioned was to launch the
+process with a specified timeout period, so instead of running the
+problematic script directly, I would "wrap" it within a timeout shell
+function, which is no-coincidentally called "timeout".  This script
+could signal reluctant processes that their time is up, allowing the
+calling procedure to catch an OS error, and respond appropriately.
+</p>
+
+<p>
+Say the process that sometimes hung was called "long_data_load"; instead
+of running it directly from the command line (or a calling script), I
+would call it using the function defined below.
+</p>
+
+<p>
+The unwrapped program might be:
+</p>
+
+<p>
+long_data_load arg_one arg_two .... etc
+</p>
+
+<p>
+which, for a timeout limit of 10 minutes, this would then become:
+</p>
+
+<p>
+timeout 10 long_data_load arg_one arg_two .... etc
+</p>
+
+<p>
+So, in the example above, if the script failed to complete within ten
+minutes, it would instead be killed (using a hard SIGKILL), and an error
+would be retuned.  I have been using this on a production system for two
+months, and it has turned out to be very useful in re-attempting network
+intensive procedures that sometimes seem never to complete.  Source code
+follows:
+</p>
+
+<p>
+<pre class='code'>
+#!/bin/bash
+#
+# Allan Peda
+# April 17, 2009
+#
+# function to call a long running script with a
+# user set timeout period
+# Script must have the executable bit set
+#
+ 
+# Note that "at" rounds down to the nearest minute
+# best to use use full path
+function timeout {
+   if [[ ${1//[^[:digit:]]} != ${1} ]]; then
+      echo "First argument of this function is timeout in minutes." &gt;&amp;2
+      return 1
+   fi
+   declare -i timeout_minutes=${1:-1}
+   shift
+   # sanity check, can this be run at all?
+   if [ ! -x $1 ]; then
+      echo "Error: attempt to locate background executable failed." &gt;&amp;2
+      return 2
+   fi
+   "$@" &amp;
+   declare -i bckrnd_pid=$!
+   declare -i jobspec=$(echo kill -9 $bckrnd_pid |\
+                        at now + $timeout_minutes minutes 2&gt;&amp;1 |\
+                        perl -ne 's/\D+(\d+)\b.+/$1/ and print')
+   # echo kill -9 $bckrnd_pid | at now + $timeout_minutes minutes
+   # echo "will kill -9 $bckrnd_pid after $timeout_minutes minutes" &gt;&amp;2
+   wait $bckrnd_pid
+   declare -i rc=$?
+   # cleanup unused batch job
+   atrm $jobspec
+   return $rc
+}
+ 
+# test case:
+# ask child to sleep for 163 seconds
+# putting process into the background, the reattaching
+# but kill it after 2 minutes, unless it returns
+# before then
+ 
+# timeout 2 /bin/sleep 163
+# echo "returned $? after $SECONDS seconds."
+</pre>
+
+<p>
+----- End forwarded message -----
+<p>
+[ ... ]
+</p><p><b>[  <a name="mb-2_cent_tip__wrapping_a_script_in_a_timeout_shell"></a> <a href="misc/lg/2_cent_tip__wrapping_a_script_in_a_timeout_shell.html">Thread continues here (1 message/3.45kB)</a>  ]</b></p>
+<hr />
+
+
+<!-- Thread anchor: 2-cent Tip - Poor Man's Computer Books --><a name='2_cent_tip_poor_man_s_computer_books'></a>
+<h3>2-cent Tip - Poor Man's Computer Books</h3>
+<p>
+<b><p>
+Ben Okopnik [ben at linuxgazette.net]
+
+</p>
+</b><br />
+<b>Thu, 4 Jun 2009 08:10:13 -0500</b>
+</p>
+
+<p>
+----- Forwarded message from Paul Sands &lt;paul.sands123@yahoo.co.uk&gt; -----
+</p>
+
+<pre>
+Date: Wed, 20 May 2009 14:43:43 +0000 (GMT)
+From: Paul Sands &lt;paul.sands123@yahoo.co.uk&gt;
+Subject: 2-cent Tip - Poor Man's Computer Books
+To: editor@linuxgazette.net
+</pre>
+If, like me, you can't really afford expensive computer books, find a book in
+your bookshop with good examples, download the example code and work through
+the examples. Use a reference such as the W3C CSS technical recommendation. My
+favourite is Sitepoint's CSS anthology
+</p>
+
+
+<p>
+----- End forwarded message -----
+</p>
+
+<pre>-- 
+* Ben Okopnik * Editor-in-Chief, Linux Gazette * <a href='http://LinuxGazette.NET'>http://LinuxGazette.NET</a> *
+</pre>
+
+<p>
+
+</p>
+
+<p><b>[  <a name="mb-2_cent_tip_poor_man_s_computer_books"></a> <a href="misc/lg/2_cent_tip_poor_man_s_computer_books.html">Thread continues here (3 messages/2.59kB)</a>  ]</b></p>
+<hr />
+
+
+<!-- Thread anchor: 2-cent Tip: Checking the amount of swapped out memory owned by a process --><a name='2_cent_tip__checking_the_amount_of_swapped_out_memory_owned_by_a_process'></a>
+<h3>2-cent Tip: Checking the amount of swapped out memory owned by a process</h3>
+<p>
+<b><p>
+Mulyadi Santosa [mulyadi.santosa at gmail.com]
+
+</p>
+</b><br />
+<b>Sat, 6 Jun 2009 01:15:58 +0700</b>
+</p>
+
+<p>
+Hi all
+</p>
+
+<p>
+Recent Linux kernel versions allow us to see how much memory owned by
+a process is swapped out. All you need to do is the PID of the process
+and grab the output of related /proc entry:
+</p>
+
+<pre>
+$ cat /proc/&lt;pid of your process&gt;/smaps | grep Swap
+</pre>
+
+<p>
+To easily sum up all these per-process swap output, simply use below awk script:
+<pre>
+$ cat /proc/&lt;pid of your process&gt;/smaps | grep Swap | awk '{ SUM +=
+$2 } END { print SUM }'
+</pre>
+the unit is in kilobyte.
+</p>
+
+<p>
+PS: This is confirmed in Fedora 9 using Linux kernel version
+2.6.27.21-78.2.41.fc9.i686.
+</p>
+
+<p>
+regards,
+</p>
+
+<p>
+Mulyadi.
+</p>
+
+<p>
+
+</p>
+
+<p><b>[  <a name="mb-2_cent_tip__checking_the_amount_of_swapped_out_memory_owned_by_a_process"></a> <a href="misc/lg/2_cent_tip__checking_the_amount_of_swapped_out_memory_owned_by_a_process.html">Thread continues here (4 messages/4.29kB)</a>  ]</b></p>
+<hr />
+
+
+<!-- Thread anchor: 2-cent Tip: ext2 fragmentation --><a name='2_cent_tip__ext2_fragmentation'></a>
+<h3>2-cent Tip: ext2 fragmentation</h3>
+<p>
+<b><p>
+Paul Sephton [paul at inet.co.za]
+
+</p>
+</b><br />
+<b>Thu, 04 Jun 2009 01:52:01 +0200</b>
+</p>
+
+<p>
+Hi, all
+</p>
+
+<p>
+Just thought I'd share this 2c tip with you (now the mailing list is up
+- yay!).
+</p>
+
+<p>
+I was reading a forum where a bunch of fellows were griping about e2fs
+lacking a defragmentation tool.  Now, we all know that fragmentation is
+generally quite minimal with ext2/ext3, since the file system does some
+fancy stuff deciding where to write new files.  The problem though, is
+when a file grows over time, it is quite likely going to fragment,
+particularly if the file system is already quite full.
+</p>
+
+<p>
+There was a whole lot of griping, and lots of "hey you don't need
+defragging, its ext3 and looks after iteself, wait for ext4", etc.  Not
+a lot of happy campers.
+</p>
+
+<p>
+Of course, Ted Ts'o opened the can of worms by writing 'filefrag', which
+now lets people actually <em>see</em> the amount of fragmentation.  If not for
+this, probably no-one would have been complaining in the first place!
+</p>
+
+<p>
+I decided to test a little theory, based on the fact that when the file
+system writes a new file for which it already knows the size, it will do
+it's utmost to make the new file contiguous.  This gives us a way of
+defragging files in a directory like so:
+</p>
+
+<pre>
+#!/bin/sh
+# Retrieve a list for fragmented files, #fragments:filename
+flist() {
+  for i in *; do
+    if [ -f $i ]; then
+      ff=`filefrag $i`
+      fn=`echo $ff | cut -f1 -d':'`
+      fs=`echo $ff | cut -f2 -d':' | cut -f2 -d' '`
+      if [ -f $fn -a $fs -gt 1 ]; then echo -e "$fs:$fn"; fi
+    fi
+  done
+}
+ 
+# Sort the list numeric, descending
+flist | sort -n -r |
+(
+# for each file
+  while read line; do
+    fs=`echo $line | cut -f 1 -d':'`
+    fn=`echo $line | cut -f 2 -d':'`
+# copy the file up to 10 times, preserving permissions
+    j=0;
+    while [ -f $fn -a $j -lt 10 ]; do
+      j=$[ $j + 1 ]
+ 
+      TMP=$$.tmp.$j
+      if ! cp -p "$fn" "$TMP"; then
+        echo copy failed [$fn]
+        j=10
+      else
+# test the new temp file's fragmentation, and if less than the
+# original, move the temp file over the original
+        ns=`filefrag $TMP | cut -f2 -d':' | cut -f2 -d' '`
+        if [ $ns -lt $fs ]; then
+          mv "$TMP" "$fn"
+          fs=$ns
+          if [ $ns -lt 2 ]; then j=10; fi
+        fi
+      fi
+    done
+    j=0;
+# clean up temporary files
+    while [ $j -lt 10 ]; do
+      j=$[ $j + 1 ]
+ 
+      TMP=$$.tmp.$j
+      if [ -f $TMP ]; then
+        rm $TMP
+      else
+        j=10
+      fi
+    done
+  done
+)
+# report fragmentation
+for i in *; do if [ -f $i ]; then filefrag $i; fi; done
+</pre>
+
+<p>
+Basically, it uses the 'filefrag' utility and 'sort' to determine which
+files are fragmented the most.  Then, starting with the most fragmented
+file, it copies that file up to 10 times.  If the copied file is less
+fragmented than the original, the copy gets moved over the original.
+Given ext2's continuous attempt to create new files as unfragmented,
+there's a good chance with this process, that you end up with a
+directory of completely defragmented files.
+<p>
+[ ... ]
+</p><p><b>[  <a name="mb-2_cent_tip__ext2_fragmentation"></a> <a href="misc/lg/2_cent_tip__ext2_fragmentation.html">Thread continues here (1 message/5.63kB)</a>  ]</b></p>
+<hr />
+
+
+<br clear="all" />
+
+<script type='text/javascript'>
+digg_url = 'http://linuxgazette.net/164/lg_tips.html';
+digg_title = '2-Cent Tips';
+digg_bodytext = '<p>In this month\'s Linux Gazette, \'2-Cent Tips\' covers the following topics:<br>2-cent Tip: Wrapping a script in a timeout shell<br>2-cent Tip - Poor Man\'s Computer Books<br>2-cent Tip: Checking the amount of swapped out memory owned by a process<br>2-cent Tip: ext2 fragmentation<br></p>';
+digg_topic = 'linux_unix';
+</script>
+<script src="http://digg.com/tools/diggthis.js" type="text/javascript"></script>
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:164/lg_tips.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2009, . Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication License</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 164 of Linux Gazette, July 2009
+</p>
+
+</div>
+
+<div id="previousnextbottom">
+<A HREF="lg_talkback.html" >&lt;-- prev</A> | <A HREF="lg_bytes.html" >next --&gt;</A>
+</div>
+
+</div>
+</div>
+
+<script src="http://www.google-analytics.com/urchin.js"
+type="text/javascript">
+</script>
+<script type="text/javascript">
+_uacct = "UA-1204316-1";
+urchinTracker();
+</script>
+
+
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+</body>
+</html>
+

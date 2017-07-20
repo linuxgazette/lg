@@ -1,0 +1,157 @@
+/* 
+  exampleecho.c: Example echo plugin for XMMS.
+
+  Note that this plugin is very simple and doesn't allow for much
+  customization. See the echo.c in the XMMS tarball for a better echo
+  plugin.
+
+    exampleecho: simple XMMS echo plugin, made as an example.
+    Copyright (C) 2006  Kumar Appaiah <akumar [*AT] ee.iitm.ac.in>
+
+    This program is free software; you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 2 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+
+*/
+
+#include <xmms/plugin.h>
+#include <xmms/configfile.h>
+#include <xmms/util.h>
+#include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
+
+#define ECHO_SCALE 0.4
+
+void
+about(void);
+
+void
+query(AFormat *afmt, gint *s_rate, gint *n_channels);
+
+void
+init(void);
+
+void
+cleanup(void);
+
+void
+configure(void);
+
+gint
+mod_samples(gpointer * d, gint length, AFormat afmt, gint srate, gint nch);
+
+/* The plugin details for XMMS. */
+EffectPlugin e_plugin = {
+	NULL,
+	NULL,
+	"Example Echo plugin",
+	init,
+	cleanup,
+	about,
+	configure,
+	mod_samples,
+	query};
+
+EffectPlugin *
+get_eplugin_info(void)
+{
+	return &e_plugin;
+}
+
+#define BUFFER_LENGTH 16384 /* For about 0.37 seconds delay */
+
+/* Buffers: used as circular buffers. */
+static gfloat *buffer_left = NULL;
+static gfloat *buffer_right = NULL;
+
+/* Circular buffer indices. */
+static guint left_index = 0;
+static guint right_index = 0;
+
+
+static char *about_text =
+"An example echo plugin";
+
+void
+about(void)
+{
+	static GtkWidget *about_dialog = NULL;
+	if (about_dialog != NULL)
+		return;
+	/* Convenient function for dialog boxes */
+	about_dialog = xmms_show_message("About Example Echo Plugin",
+					 about_text, "Ok", FALSE,
+					 NULL, NULL);
+	gtk_signal_connect(GTK_OBJECT(about_dialog), "destroy",
+			   GTK_SIGNAL_FUNC(gtk_widget_destroyed),
+			   &about_dialog);
+}
+
+void
+query(AFormat *afmt, gint *s_rate, gint *n_channels) {
+	*afmt = FMT_S16_LE;
+	*s_rate = 44100;
+	*n_channels = 2;
+}
+
+void init(void)
+{
+	if (buffer_left == NULL) {
+		buffer_left = g_malloc0(sizeof(gfloat) * BUFFER_LENGTH);
+	}
+	if (buffer_right == NULL) {
+		buffer_right = g_malloc0(sizeof(gfloat) *
+		BUFFER_LENGTH);
+	}
+}
+
+void
+cleanup(void)
+{
+	g_free(buffer_left);
+	buffer_left = NULL;
+	g_free(buffer_right);
+	buffer_right = NULL;
+}
+
+void
+configure(void)
+{
+	/* Configuration dialog box goes here. */
+}
+
+gint
+mod_samples(gpointer * d, gint length, AFormat afmt, gint srate, gint nch)
+{
+	/* Read data as 16 bit values */
+	gint16 *data = (gint16 *) * d;
+	gint i;
+
+	/* We have "length" bytes, so "length / 2" samples */
+	for (i = 0; i < length / 2; i += 2) {
+		gfloat echo_val;
+
+		/* For the left sample */
+		echo_val = buffer_left[left_index]; /* Retrieve delayed value */
+		buffer_left[left_index++] = data[i]; /* Store latest sample */
+		data[i] = (1 - ECHO_SCALE) * data[i] + ECHO_SCALE * echo_val; /* Set the echoed value */
+		left_index = left_index % BUFFER_LENGTH; /* Circular buffer shift */
+		/* Do the same for the right channel samples */
+		echo_val = buffer_right[right_index]; /* Retrieve delayed value */
+		buffer_right[right_index++] = data[i + 1]; /* Store latest sample */
+		data[i + 1] = (1 - ECHO_SCALE) * data[i + 1] + ECHO_SCALE * echo_val; /* Set the echoed value */
+		right_index = right_index % BUFFER_LENGTH; /* Circular buffer shift */
+	}
+	return length; /* Amount of data we have processed. */
+}

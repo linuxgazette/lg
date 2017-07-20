@@ -1,0 +1,340 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML>
+<HEAD>
+<title>Directory Trees Issue 14</title>
+</HEAD>
+<BODY >
+
+<H4>
+&quot;Linux Gazette...<I>making Linux just a little more lovable!</I>&quot;
+<IMG ALIGN=MIDDLE SRC="../gx/heart.gif"> </H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H2>Directory Trees in Outline Format</H2>
+<H4>By James T. Dennis
+<a href="mailto:jim@starshine.org">jim@starshine.org</a></H4>
+</center>
+<P> <HR> <P>  
+
+    Since I frequently post messages to various Unix and Linux
+    newsgroups and mailing lists I often get technical questions
+    mailed to me ``out of the blue.''
+<P> 
+    I recently received a request for a script to produce
+    the following sort of output:
+<PRE> 
+        dir/
+	   file1
+	   file2
+        file
+	dir/
+	   dir/
+	      file
+
+	(etc)
+</PRE> 
+     Here was my quick and dirty solution:
+<PRE> 
+     	find . | awk -F/ '{for (x=1;x&lt;NF;x++) { printf "\t"}; print $NF}'
+</PRE> <P> 
+     ... which only does about 80% of the job.  The only problem is 
+     that the directory entries don't end with the ``/'' to indicate their 
+     file type.  It was late -- so that's what I sent him.
+<P> 
+     Here's how that works:
+<P> 
+     	find . just prints a list of full paths (using GNU find).  Some
+	non-Linux users may have to using 'find . -print' to accomplish
+	this (or update to the GNU version on their systems).
+<P> 
+	awk is a text processing language/utility.  
+<P> 
+	The -F (capital ``f'') sets a field separator to the '/' 
+	(slash character).  Awk defaults to parsing it's input into
+	records (lines) of fields (whitespace delimited).  Using the
+	-F allows me to tell awk to treat each record (still just lines)
+	as a group of fields that are separated by slashes -- allowing
+	me to deal with each directory element as a separate element
+	very easily.
+<P> 
+	The next parameter to awk is a short program -- a for loop 
+	(like the C for() construct). It iterates from 1 to NF.  
+<P> 
+	NF in awk is the ``number of fields'' for each record.  
+	This, among many other values, is preset by awk as it parses its 
+	input.  
+<P> 
+	Awk defaults to reading it's input from a pipe or from
+	each file listed after it's script on the command line.  We're
+	supplying it with input through the pipe, of course.
+<P> 
+	In the body of my awk 'for' loop I simply print a tab for each 
+	directory named in that line.  This has the appearance of "wiping 
+	out" all of the leading directory names and indenting my line as 
+	desired.
+<P> 
+	Finally, after the end of the for loop I simply print the last
+	field ($NF).  Note how the printf takes a string similar to 
+	C's printf -- and it doesn't assume a newline.  I could put 
+	C-like format specifiers like %s and %f in there -- and I'd have
+	to supply additional parameters to the printf call if I did.	
+<P> 
+	By contrast the awk print command (no trailing ``f'') does add 
+	an ORS (output record separator) character to the end of its line
+	and doesn't treat its first argument as a format specification.
+<P> 	
+     This evening I happened to be cleaning up my home directory (while
+     procrastinating on doing paying work and cleaning the house) I 
+     happened across a copy of this and decided to fix it.
+<PRE> 
+		find . | { while read i ; 
+			do 
+			   [ -d $i ] \
+			   && echo $i/  \
+			   || echo $i 
+			   done } \
+			   | awk -F/ '
+			   	/\/$/ { for (x = 1; x < NF -1 ;x++) {  
+						printf "\t" }; 
+				        print $(NF-1) "/";
+					next;
+					} 
+				{ for (x = 1; x < NF; x++) {  
+					printf "\t" } 
+				  print $NF }' 
+</PRE> 
+	
+	Note that the original script: 'find ....| awk -F/ ...'
+	is mostly still there.  But the script has gone from 
+	one line to eleven -- all to get that silly little slash
+	character on the end of each directory name.
+<P> 
+	(If anyone as a shorter program -- I'd like to see it
+	-- there's probably a fairly quick way to do this using 
+	perl and find2perl)
+<P> 
+	The main thing I've added is the while loop which works
+	like this:
+<P> 
+		find's output is piped into a group of commands
+		(that's what the braces are for).
+
+		That group of commands starts with a bash "while...
+		do" loop.  The bash "while...do" loop works like this:
+<PRE> 
+			'while'
+				some command returns no error
+				'do'
+				some commands
+</PRE> 				'done'
+
+		Note that, unlike C or Pascal programming the
+		``condition'' for the while loop is actually any
+		command (or group of commands -- enclosed in 
+		braces or parentheses).  The fact that programs
+		return values (called errorlevels in DOS and 
+		some Mainframe OS) makes all commands implicitly
+		``conditions.''  (Actually C allows a variety of 
+		function calls within conditionals -- but we
+		won't go into that).
+<P> 
+		Note that some commands might not return values that
+		make any sense -- so those would not be suitable
+		for use with any of the conditional contexts in any
+		shell.
+<P> 
+		The command I'm using is bash' internal ``read''
+		command which just takes a variable name as an 
+		argument.  Note that I don't say ``read $i'' -- 
+		the shell would then fill the value of $i into 
+		the command (i.e it would ``dereference'' it) and 
+		the read command would have no arguments.  If you 
+		give the read command no argument it simply reads 
+		a value and throws it away (no error).  
+<P> 
+		When you set values in bash (or Bourne shell, or zsh
+		etc) you also don't ``dereference'' it.  $i=foo would be
+		an error unless you actually wanted to set the 
+		value of some variable -- whose name was currently stored
+		in $i to be set to foo.
+<P> 
+		Back to our script.  When the find command stops printing
+		filenames into the pipe, the 'read i' command will fail
+		to get any value -- so the body of the do loop will be 
+		skipped.
+<P> 
+		The 'do' keyword just marks the end of the list of 
+		commands in the conditional section and the beginning
+		of the body of the loop (big surprise -- huh?).
+<P> 
+		The next three lines of the script are another common
+		shell construct -- 
+<ol> 
+			<li>[ is really an alias for or link to the 'test'
+			command.
+<P> 
+			<li>-d is a parameter to 'test' that is true if
+			the next parameter ($i) is a directory.
+<P> 
+			<li>That line ends with a ``\'' (backslash) to mark
+			a continuation character.  This causes the shell
+			to treat the next line as an extension of this
+			one.
+</ul>
+<P> 
+			I could certainly have put all of this one line.
+			However, for readability I broke it up and formatted
+			it with leading tabs -- otherwise *I* couldn't read
+			it, much less expect anyone else to do so.
+<P> 
+			The next line (continuation) starts with the '&&'
+			operator.  In bash and related shells you have things
+			like the familiar ``|'' (pipe) and ``;'' semicolon which are
+			called operators.  This operator means ``if that last command
+			was O.K. -- returned no error -- then ...''
+<P> 
+			You can think of the '&&' operator as do this ``and''
+			to that (in the *conditional* sense of the the word
+			and).
+<P> 
+			The next line uses the '||' operator -- which is,
+			as you might expect, similar to the '&&' operator except
+			it means -- ``if the last command executed returned an
+			error then ...''  This is roughly analogous to the English
+			``or'' (again, it the conditional sense).
+<P> 
+			Of course I could have wrapped this in an 'if ....; 
+			then ....; else...'  construct -- but I'm used to the '&&'
+			and '||' as are most shell programmers.
+<P> 
+			So far all we've done is added a ``/'' character to the end
+			of each directory.
+<P> 
+	Now I'm left with a print out of full paths with directories ending in 
+	``/'' (slashes) and other files printed normally -- back to replacing all 
+	but the last thing with tabs -- so we pipe the 'while' loop's output
+	into the same awk script we were using before.
+<P> 
+	Ooops!  Well, almost the same script -- it turns out that awk -F is 
+	happy to consider the trailing slash as a blank field on the end of a 
+	line.  Hmm.  O.K.  we add an extra condition to the awk script.
+<P> 
+		An awk script consists of condition-action pairs.  The most
+		common awk ``conditions'' are patterns. That is so say that they
+		are regular expressions (like the things you use grep to search
+		for).  A pattern is usually delimited by slashes (a mnemonic to 
+		the users of ed, later upgraded ex, later upgraded to vi) although
+		you can also ``match'' against strings that are enclosed in quotes.
+<P> 
+		Actions in awk are enclosed in braces.
+<P> 
+		Awk is an extremely forgiving language.  If you leave out the 
+		``condition'' or ``pattern'' it will execute the action on that 
+		line for every record (line) that it comes across.  That's 
+		what my first script did.
+<P> 
+		If you leave off the action (i.e. if you have a line that 
+		consists just of a condition) then awk will simply print
+		the record.  In other words the default action is {print}.
+<P> 
+		When I was a regular in the comp.lang.awk newsgroup (and 
+		alt.lang.awk that preceded it) I used to enjoy pointing out
+		that the shorted awk programs in the work are:
+<PRE> 
+			1
+
+			and 
+
+			.
+</PRE> 
+		(The first one just prints every line it sees since ``1'' is 
+		a ``true'' condition; the second program (a dot) prints every
+		line that has at least one character -- since that is the 
+		regular expression for ``any character''.  The second program
+		actually does filter out blank lines since awk doesn't count
+		the record separator as part of the line).
+<P> 
+		So, the modification of my awk script for this purpose is
+		to add a condition that handles any record that *ends* with a 
+		slash.  In those cases I convert all *but* the next-to-last field
+		to a tab, and print that ``next-to-last'' field.  I also have to 
+		add the ``/'' character to the end of that since awk doesn't consider
+		the field separator to be part of any field.  
+<P> 
+		Finally I add a 'next' command which tells awk not to look 
+		for any more pattern-action pairs with *this* record.  If I 
+		didn't do that than awk would execute the action for each 
+		``directory'' line -- and also execute the other action for it
+		(i.e. it would print a blank line after printing each directory
+		line).
+
+<P> 
+	Is the extra 10 lines of code worth it just to add a slash to the end
+	of the directory names in our outline?  Depends on how much your customer
+	is willing to pay -- or how much grief it causes you, your boss or your
+	users.  
+<P> 
+	Mostly I decided to work on this as a training example.  I think there are
+	some neat constructs that every budding shell programmer might benefit 
+	from learning.
+<P> 
+	The ``find .... | {while read i .... do ... done}'' construct is well worth
+	remember for other cases.  It allows you to do complex operations on 
+	large numbers of files without resorting to writing a temporary file and 
+	having to clean up after it.  
+<P> 
+	When you write scripts that explicitly create temporary files you suddenly 
+	have a host of new concerns -- what do I name it? where do I put it? 
+	don't forget to remove it! do I have enough space for it? what if my 
+	script gets interrupted? etc.
+<P> 
+	To be sure there are answers to each of these.  For example I 
+	suggest ~/tmp/$0.`date +%Y%m%d`.$$ for a generic temporary filename 
+	for any script -- it gives the name of your script, the date in 
+	YYYYMMDD format and the process ID of the current instance of your 
+	script as the filename.  It puts that into the temporary directory 
+	under your home (which no one else should have access to).  There is 
+	virtually no chance of a name collision using this scheme (particularly
+	if you change the date format to +%s which is the total number of seconds
+	since midnight on Jan. 1, 1970).  You can use the 'trap' command to
+	ensure that your temp files are cleaned in all but the most extreme
+	cases etc.
+<P> 
+	However, as I've said, it's worth understanding how to avoid temporary
+	files -- and usually your scripts will execute faster as a result.
+<P> 
+	The [ ... ] && ... || ... construct is absolutely essential to 
+	any Unix sysadmin.  Many of legacy scripts (particularly those in 
+	/etc/rc.d/ -- or it's local equivalent) rely on these operators and 
+	the test or '[' command.
+<P> 
+	Finally there is 'awk'.  I've heard it argued that awk is a dinosaur
+	and that we should convert all the awk code to perl (and presumably most
+	of the Bourne shell and sed code with it).  I won't argue that point 
+	here.  Suffice it to say that anything you learn how to do in awk will 
+	just make learning perl that much easier when you get to it.  awk is a 
+	much simpler language and is phenomenally easy to integrate into shell scripts
+	(as you can see here).
+<P> 
+Jim Dennis, Starshine Technical Services
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<center><H5>Copyright &copy; 1997, James T. Dennis <BR> 
+Published in Issue 14 of the Linux Gazette</H5></center>
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<A HREF="./index.html"><IMG ALIGN=BOTTOM SRC="../gx/indexnew.gif" 
+ALT="[ TABLE OF CONTENTS ]"></A>
+<A HREF="../index.html"><IMG ALIGN=BOTTOM SRC="../gx/homenew.gif"
+ALT="[ FRONT PAGE ]"></A>
+<A HREF="./dired.html"><IMG SRC="../gx/back2.gif"
+ALT=" Back "></A>
+<A HREF="./gm.html"><IMG SRC="../gx/fwd.gif" ALT=" Next "></A>
+<P> <hr> <P> 
+</BODY>
+</HTML> 

@@ -1,0 +1,64 @@
+#!/bin/sh
+#
+# magic script for UHS NT Rollout
+#
+# Gilbert Ramirez
+# Technical Services
+# University Health System
+
+# I run fdisk to get INFO *before* the clear because the machine
+# might have an empty CD-ROM in it. fdisk will try to probe the cdrom
+# and the kernel will spit out error messages about missing media.
+# therefore, I clear the screen real quick.
+
+INFO=`fdisk -l | head -6 | grep ^Disk`
+clear
+
+HEADS=`echo $INFO | sed -e "s/^.*: //" | sed -e "s/ heads.*//"`
+
+SECTORS=`echo $INFO | sed -e "s/^.*heads, //" | sed -e "s/ sectors.*//"`
+
+CYLINDERS=`echo $INFO | sed -e "s/^.*sectors, //" | sed -e "s/ cylinders.*//"`
+
+echo This disk has $CYLINDERS cylinders, $HEADS heads, and $SECTORS sectors.
+
+echo Running fdisk to make one gigantic FAT partition.
+fdisk /dev/hda > /dev/null 2> /dev/null <<COMMANDS
+d
+1
+d
+2
+d
+3
+d
+4
+n
+p
+1
+1
+$CYLINDERS
+t
+1
+6
+a
+1
+w
+COMMANDS
+
+
+CYLCALC=`cylcalc 500 $HEADS $SECTORS`
+echo Formatting 500MB FAT filesystem with $CYLCALC cylinders out of $CYLINDERS.
+mformat -t $CYLCALC -h $HEADS -s $SECTORS -H $SECTORS c:
+sync
+
+echo Fixing boot sector.
+fixbs /dev/hda1
+
+sync
+
+echo
+echo
+echo Place the next floppy in the drive and press \<ENTER\> to reboot...
+
+read JUNK
+reboot

@@ -1,0 +1,328 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Generating other feed types with Perl LG #109</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="odonovan.html" >&lt;-- prev</A> | <A HREF="oregan2.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Generating other feed types with Perl</h1>
+<p id="by"><b>By <A HREF="../authors/oregan.html">Jimmy O'Regan</A></b></p>
+
+<p>
+<p>Last month I wrote about <a href="../108/oregan2.html">screen
+scraping with Perl</a>, but all of my examples used RSS. Linux
+Gazette also offers an Atom feed, as well as a JavaScript that can
+be used to include each month's headlines, so I thought it would be
+nice to write about generating these formats.</p>
+
+<h3>Atom</h3>
+
+<p>I described Atom before, in my article about <a href=
+"../105/oregan2.html">feed readers</a>. I haven't received any
+complaints about the description I gave, so I assume it's OK, but
+I'm not going to repeat myself; I'll just say that Atom is the main
+competition of RSS and is gaining popularity.</p>
+
+<p>Atom, in my opinion, is a more difficult format to work with
+than RSS, and this is reflected in Perl's modules: RSS can be
+generated from a single module, but even the simplest tasks in Atom
+require the use of two modules. (Three if you need to use links!).
+To be fair, this Yet Another Example of TMTOWTDI -- Atom could
+easily be generated using an interface like that of XML::RSS, and
+the Atom interface is as easy to use, if a bit more verbose.</p>
+
+<p>I'm using my <a href="http://www.userfriendly.org/">User
+Friendly</a> scraper as my example, because it's the simplest
+scraper I have.</p>
+
+<p>(<a href="misc/oregan/uf.pl.txt">text</a>).</p>
+
+<pre class="code">
+#!/usr/bin/perl -w
+
+use strict;
+use LWP::Simple;
+use XML::Atom::Feed;
+use XML::Atom::Entry;
+use XML::Atom::Link;
+use Date::Format;
+
+# These regexes taken from Dailystrips
+my $patternpre = "&lt;img.+?src=\"(http://www\.userfriendly\.org/cartoons/archives/%y.+?/uf.+?\.gif)\"";
+my $urlpre = "http://ars.userfriendly.org/cartoons/?id=%Y%m%d&amp;mode=classic";
+
+my $pattern = time2str ($patternpre, time);
+my $url = time2str ($urlpre, time);
+
+my $page = get($url);
+
+my $atom = XML::Atom::Feed-&gt;new;
+my $entry = XML::Atom::Entry-&gt;new;
+
+$atom-&gt;title('User Friendly');
+my $link = XML::Atom::Link-&gt;new;
+$link-&gt;type('text/html');
+$link-&gt;rel('alternate');
+$link-&gt;href('http://userfriendly.org/');
+$atom-&gt;add_link($link);
+      
+if ($page =~ /$pattern/ig)
+{
+        $entry-&gt;title(time2str("CARTOON FOR %a %b, %Y",time));
+        my $itemlink = XML::Atom::Link-&gt;new;
+        $itemlink-&gt;type('text/html');
+        $itemlink-&gt;rel('alternate');
+        $itemlink-&gt;href($url);
+        $entry-&gt;add_link($itemlink);
+        $atom-&gt;add_entry($entry);
+}
+        
+print $atom-&gt;as_xml;
+</pre>
+
+<p>OK, so the <code>$link-&gt;type</code> and <code>-&gt;rel</code>
+calls are probably not necessary, but it is a bit longer than
+generating RSS. Happily, both Atom and RSS generating code can live
+in the same script.</p>
+
+<h3>Javascript</h3>
+
+<p>There are also modules available that let you generate
+JavaScript from feeds. <tt>XML::RSS::JavaScript</tt> is a subclass
+of <tt>XML::RSS</tt>, so the JavaScript generation step happens at
+the same time as RSS generation, you simply change modules, and add
+a call to <code>$rss-&gt;save_javascript(file)</code> or
+<code>$rss-&gt;as_javascript</code>.</p>
+
+<p>(<a href="misc/oregan/telsa-js.pl.txt">text</a>).</p>
+
+<pre class="code">
+#!/usr/bin/perl -w
+
+use strict;
+use XML::RSS::JavaScript;
+use LWP::Simple;
+use HTML::Entities;
+use HTML::TokeParser::Simple;
+
+my $rss = XML::RSS::JavaScript-&gt;new;
+my $url = "http://www.linux.org.uk/~telsa/Diary/diary.html";
+my $page = get($url);
+my $stream = HTML::TokeParser::Simple-&gt;new(\$page);
+my $tag;
+
+$rss-&gt;channel(title       =&gt; "The more accurate diary. Really.",
+              link        =&gt; $url,
+              description =&gt; "Telsa's diary of life with a hacker:" 
+                             . " the current ramblings");
+
+while ($tag = $stream-&gt;get_tag('a'))
+{
+        next unless $tag-&gt;return_attr("name") ne "";
+        my $link = $tag-&gt;return_attr("name");
+        $tag = $stream-&gt;get_tag ('strong');
+        $tag = $stream-&gt;get_token;
+        my $title = $tag-&gt;as_is;
+        $tag = $stream-&gt;get_tag ('dd');
+        my $content = "";
+        $tag = $stream-&gt;get_token;
+        until ($tag-&gt;is_end_tag('/dd'))
+        {
+                $content .= $tag-&gt;as_is;
+                $tag = $stream-&gt;get_token;
+                next;
+        }
+        $rss-&gt;add_item(title       =&gt; $title,
+                       link        =&gt; "$url#$link",
+                       description =&gt; encode_entities($content));
+}
+
+print $rss-&gt;as_javascript;
+# We can also use $rss-&gt;save('file.xml') 
+# as well as $rss-&gt;save_javascript('file.js')
+# to have this script write files.
+</pre>
+
+<p>If you want to generate JavaScript from an existing RSS feed,
+it's simply done. This script gives me a JavaScript version of my
+<a href="http://del.icio.us">del.icio.us</a> feed:</p>
+
+<p>(<a href="misc/oregan/rsstojs.pl.txt">text</a>, <a href=
+"misc/oregan/delicious.js.txt">output</a>).</p>
+
+<pre class="code">
+#!/usr/bin/perl
+
+use warnings;
+use strict;
+
+use LWP::Simple;
+use XML::RSS::JavaScript;
+
+my $feed = get('http://del.icio.us/rss/jimregan');
+my $rss = XML::RSS::JavaScript-&gt;new;
+
+$rss-&gt;parse($feed);
+print $rss-&gt;as_javascript;
+</pre>
+
+<p><tt>XML::Atom::Feed::JavaScript</tt> works like the last
+example: it converts an existing Atom feed to JavaScript. This
+isn't a problem, it can simply be called at the end of the Atom
+generation phase.</p>
+
+<p>This script converts my blog's Atom feed to Javascript:
+(<a href="misc/oregan/atomtojs.pl.txt">text</a>).</p>
+
+<pre class="code">
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+
+use XML::Atom::Client;
+use XML::Atom::Feed::JavaScript;
+
+my $client = XML::Atom::Client-&gt;new();
+my $feed = $client-&gt;getFeed('http://xpko.blogspot.com/atom.xml');
+print $feed-&gt;asJavascript();
+</pre>
+
+<p>I did run into a slight problem using version 0.4 of the module:
+the item links from my blog weren't being fully converted -- I was
+getting hashrefs to
+<tt>XML::Atom::Link</tt>s instead of the link (<a href=
+"misc/oregan/atomtojs.out.txt">output</a>). With a simple <a href=
+"misc/oregan/atom-js.diff.txt">patch</a> I was soon getting the
+correct <a href="misc/oregan/atomtojs.out2.txt">output</a>.
+(<a href="http://hello.typepad.com/">David Jacobs</a>, the module's
+author, managed to beat publication time with the release of 0.5. 
+Thanks David).</p>
+
+<h3>Next Month</h3>
+
+<p>Next month, it's back to the task of scraping: (I can say this
+for certain, because the bulk of the article has already been
+written) <a href="../authors/okopnik.html">Ben</a> and I will be
+taking a look at WWW::Mechanize.</p>
+
+<p>Until then, take care!</p>
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<P>
+<img ALIGN="LEFT" ALT="[BIO]" SRC="../gx/2004/authors/oregan.jpg" class="bio">
+<em>
+<!-- ../110/lg_laundrette.html#nottag.15 :) -->
+Jimmy is a single father of one, who enjoys long walks... Oh, right.
+
+<p> Jimmy has been using computers from the tender age of seven, when his father 
+inherited an Amstrad PCW8256. After a few brief flirtations with an Atari ST
+and numerous versions of DOS and Windows, Jimmy was introduced to Linux in 1998
+and hasn't looked back.
+
+<p> In his spare time, Jimmy likes to play guitar and read: not at the same time, 
+but the picks make handy bookmarks.
+</em>
+<br CLEAR="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2004, Jimmy O'Regan. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 109 of Linux Gazette, December 2004
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="odonovan.html" >&lt;-- prev</A> | <A HREF="oregan2.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">December 2004 (#109)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/2003/sit3-shine.7-2.gif" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

@@ -1,0 +1,178 @@
+<!--startcut ==========================================================-->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML>
+<HEAD>
+<title>Serializing Web Application Requests LG #33</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#A000A0"
+ALINK="#FF0000">
+<!--endcut ============================================================-->
+
+<H4>
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<h1><font color="maroon">Serializing Web Application Requests</font></h1>
+<H4>By <a href="mailto:colin@u.washington.edu">Colin C. Wilson</a></H4>
+</center>
+<P> <HR> <P>  
+
+Web application servers are an extremely useful extension of the basic web
+server concept. Instead of presenting fairly simple static pages or the
+results of database queries, a complex application can be made available
+for access across the network. One problem with serving applications
+is that processing on the back end may take a significant amount of time
+and server resources--leading to slow response times or failures due to
+memory limitations when multiple users submit requests simultaneously.
+<p>
+There are essentially three basic strategies for handling web requests
+which cannot be satisfied immediately: ignore the issue, use unbuffered
+no-parsed-header (NPH) CGI code to emit ``Processing'' while the back
+end completes, or issue an immediate response which refers the user to
+a result page created upon job completion. In my experience, the first
+option is not effective. Without feedback, users invariably resubmit
+their requests thinking there was a failure in the submission.
+The redundant requests will exacerbate the problem if they aren't
+eliminated. To make matters worse, the number of these redundant requests will
+peak precisely at peak usage times. NPH CGI is most useful when the
+processing times are short and the server can handle many simultaneous
+instances of the application. It has the drawback that users must sit
+and wait for the processing to complete and cannot quickly refer back to the
+page. My preferred method is referral to a dynamic page,
+combined with a reliable method of serializing requests.
+<p>
+<h3>Description</h3>
+<p>
+<A HREF="./wilson_s1.html">Origins of Generic NQS</A> 
+<p>
+As an example, I will describe my use of Generic NQS (GNQS)
+(see http://www.shef.ac.uk/~nqs/ and http://www.gnqs.org)
+to perform serialization and duplicate job elimination in a robust
+fashion for a set of web application servers at the University of
+Washington Genome Center. GNQS is an Open Source queueing package
+available for Linux as well as a large number of other UNIX platforms.
+It was written primarily to optimize utilization of supercomputers and
+large server farms, but it is also useful on single machines as well.
+It is currently maintained by Stuart Herbert (S.Herbert@Sheffield.ac.uk).
+<p>
+At the genome center, we have developed a number of algorithms for the
+analysis of DNA sequence. Some of these algorithms are CPU- and
+memory-intensive and require access to large sequence databases. In addition
+to distributing the code, we have made several of these programs
+available via a web and e-mail server for scientists worldwide. Anyone with access
+to a browser can easily analyze their sequence without the need to
+have UNIX expertise on-site, and most importantly for our application,
+without maintaining a local copy of the database. Since the sequence
+databases are large and under continuing revision, maintaining copies
+can be a significant expense for small research institutions.
+<p>
+The site was initially implemented on a 200MHz Pentium pro with 128MB
+of memory, running Red Hat 4.2 and Apache, which was more than
+adequate for the bulk of the processing requests. Most submissions to
+our site could be processed in a few seconds, but when several large
+requests were made concurrently, response times became unacceptable.
+As the number of requests and data sizes increased, the
+server was frequently being overwhelmed. We considered reducing the maximum size
+problem that we would accept, but we knew that, as the Human Genome
+Project advanced, larger data sets would become increasingly common.
+After analyzing the usage logs, it became apparent that, during peak
+periods, people were submitting multiple copies of requests when the
+server didn't return results quickly. I was faced with this performance
+problem shortly after our web site went on-line.
+<p>
+<h3>Implementation</h3>
+<p>
+<A HREF="./wilson_l1.html">Listing 1. Sample GNQS Commands</A> 
+<p>
+Instead of increasing the size of the web server, I felt that robust
+serialization would solve the problem. I installed GNQS version 3.50.2
+on the server and wrote small extensions to the CGI scripts to queue the
+larger requests, instead of running them immediately.
+Instead of resorting to NPH CGI scripts which would lock up a user's
+web page for several minutes while the web
+server processed, I could write a temporary page containing a message
+that the server was still processing and instructions to reload the
+page later. By creating a name for the dynamic page from an md5 sum of
+the request parameters and data, I was able to completely eliminate the
+problem of multiple identical requests. Finally, all web requests were
+serialized in a single job queue, and an additional low priority queue
+was used for e-mail requests. It was a minor enhancement to allow
+requests submitted to the web server for responses via e-mail to simply
+be queued into the low priority e-mail queue. Consequently, processor
+utilization was increased and job contention was reduced.
+<p>
+While this proved quite effective from a machine utilization standpoint,
+the job queue would get so long during peak periods that users
+grew impatient. An additional enhancement was made which reported the
+queue length when the request was initially queued. This gave users
+a more accurate expectation about completion time. Additionally,
+when a queued job was resubmitted, the current position in the queue would
+now be displayed. These changes completely eliminated erroneous inquiries
+regarding the status of the web server.
+<p>
+After over a year of operation, we had an additional application to
+release and decided to migrate the server to a Linux/Alpha system running
+Red Hat 5.0. The switch to glibc exposed a bug in GNQS that was initially
+difficult to find. However, since the source code was available, I was
+able to find and fix the problem myself. I have since submitted the patch
+to Stuart for inclusion in the next release of GNQS and contributed a
+source RPM
+(ftp://ftp.redhat.com/pub/contrib/SRPMS/Generic-NQS-3.50.4-1.src.rpm) to the
+Red Hat FTP site.
+<p>
+<h3>Future Directions</h3>
+<p>
+Queuing requests with GNQS allows another interesting option which we may
+pursue in the future as our processing demands increase. Instead of
+migrating the server again to an even more powerful machine or to the
+complexity of an array of web servers, we could retain the existing
+web server as a front-end server. Without any changes in the CGI scripts
+on the web server, GNQS could be reconfigured to distribute queued jobs
+across as many additional machines as necessary to meet our response
+time requirements. Since GNQS can also do load balancing, expansion can be
+done easily, efficiently and dynamically with no server down time.
+The number of queue servers would be completely transparent to the
+web server.
+<p>
+<h3>Evaluation</h3>
+<p>
+There are a number of ways to handle web applications which require
+significant back-end processing time. Optimizing application servers
+requires different techniques than optimizing servers for high hit rates.
+For application servers, the limiting resource may be CPU, memory or
+disk I/O, rather than network bandwidth. Response times to given
+requests are expected to be relatively slow, and informing waiting users
+of the status of their jobs is important. Queuing requests with GNQS
+and referring the user to a results page has proven to be an effective,
+easily implemented and robust technique.
+<p>
+<h3>Acknowledgements</h3>
+<p>
+Thanks to Stuart Herbert, GNQS maintainer.
+<p>
+This work was partly supported by grants from the Department of Energy
+and the National Human Genome Research Institute.
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<center><H5>Copyright &copy; 1998, Colin C. Wilson <BR> 
+Published in Issue 33 of <i>Linux Gazette</i>, October 1998</H5></center>
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<A HREF="./index.html"><IMG ALIGN=BOTTOM SRC="../gx/indexnew.gif" 
+ALT="[ TABLE OF CONTENTS ]"></A>
+<A HREF="../index.html"><IMG ALIGN=BOTTOM SRC="../gx/homenew.gif"
+ALT="[ FRONT PAGE ]"></A>
+<A HREF="./bentson.html"><IMG SRC="../gx/back2.gif"
+ALT=" Back "></A>
+<A HREF="./defurne.html"><IMG SRC="../gx/fwd.gif" ALT=" Next "></A>
+<P> <hr> <P> 
+<!--startcut ==========================================================-->
+</BODY>
+</HTML>
+<!--endcut ============================================================-->

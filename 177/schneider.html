@@ -1,0 +1,319 @@
+<!DOCTYPE html
+	PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+	 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="utf-8" xml:lang="utf-8">
+<head>
+<title>Installing Windows Server 2003 with Linux + PXE + DHCP + TFTP LG #177</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link rel="stylesheet" href="../lg.css" type="text/css" media="screen, projection"  />
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="../lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="../lg.rdf" />
+<!-- link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" / -->
+<link rel="shortcut icon" href="../favicon.ico" />
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+</head>
+<body>
+
+<a href="../">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+<div id="navigation">
+<table summary="masthead" width="100%">
+<tr>
+<td align="center" colspan="3" style="font-size: 10px; font-weight: bold">
+<a href="../index.html">Home</a>
+<a href="http://linuxgazette.net">Main Site</a>
+<a href="../faq/index.html">FAQ</a>
+
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/listinfo.cgi">Mailing Lists</a>
+<a href="../jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+<hr width="99%" style="border: 1px inset #000033">
+</td>
+</tr>
+<tr>
+<td width="40%" align="left" style="font-size: 10px; font-weight: bold">
+The Free International Online Linux Monthly
+</td>
+<td width="20%" align="center" style="font-size: 10px; font-weight: bold">
+ISSN: 1934-371X
+</td>
+<td width="40%" align="right" style="font-size: 10px; font-weight: bold">
+Main site: <a href="http://linuxgazette.net">http://linuxgazette.net</a> 
+</td>
+</table>
+</div>
+
+
+<div id="breadcrumbs1">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">August 2010 (#177)</a> &gt; 
+Article
+
+</div>
+
+<div class="articlecontent1">
+<div class="content">
+
+<div id="previousnexttop">
+<A HREF="hoogland.html" >&lt;-- prev</A> | <A HREF="silva.html" >next --&gt;</A>
+</div>
+
+<h1>Installing Windows Server 2003 with Linux + PXE + DHCP + TFTP</h1>
+<p id="by"><b>By <a href="../authors/schneider.html">Will Schneider</a></b></p>
+
+
+<h3>What and why?</h3>
+
+<p>
+This procedure is for installing Windows Server 2003 over the network.
+However, I believe I've invented a new way of doing a network installation
+and wanted to share it with anyone who might find it useful. My quest to
+install Windows with a PXE/TFTP/DHCP system started after I tinkered around
+with the <a href="http://unattended.sourceforge.net">Unattended</a> package
+and I found it lacking. Specifically, it's a giant hacky mess of Perl
+scripts, and it only handles 32 bit Windows installs. It essentially boots
+a DOS environment, creates a FAT32 partition, copies the Windows setup
+files, and then reboots and converts the partition to NTFS before finishing
+the install. It's a neat way of bootstrapping Windows from a Linux
+environment, but when I found out that MEMDISK can boot an ISO, I had the
+crazy idea of mapping an ISO image of the Windows setup CD as a RAMdisk
+and running the installation from there.
+</p>
+
+<h3>Stuff You Will Need</h3>
+<UL>
+<LI>Enough RAM to load the full Windows setup .iso image (&gt;=1 GB is enough).
+<LI>A working Linux + DHCP + PXE + TFTP server. There is a good guide to getting started <a href="http://linuxgazette.net/175/grebler.html">here</a>.
+<LI>The <a href="http://www.boot-land.net/forums/index.php?showtopic=8168">winvblock</a> driver (registration required).
+<LI>A VLK installation CD for Windows Server 2003. You can use Web, Std. x86, or Std. x86_64 with this guide. I haven't tested Enterprise or Data Center editions but it should be applicable to any W2K3 version.
+<LI>The unpacked ISO image on your local hard disk.
+<LI>Experience working with Windows installation CDs. I've used <a href="http://www.nliteos.com/">nLite</a>, <a href="http://unattended.msfn.org/unattended.xp/view/web/8/">CDimage</a>, and the <a href="http://www.microsoft.com/downloads/details.aspx?FamilyId=3E90DC91-AC56-4665-949B-BEDA3080E0F6&displaylang=en">XP SP2 Deployment Tools</a> to build my image.
+<LI>Optional, but this site served as an invaluable resource for slipstreaming SP2, hotfixes, device drivers, and creating an answer file for an unattended installation. I would recommend following the guide here to prepare an unattended ISO image that you're happy with, and testing it with an actual CD-ROM before proceeding with the following steps: <a href="http://unattended.msfn.org/unattended.xp/view/web/1/">MSFN Unattended</a>.
+</UL>
+
+
+
+<h3>Getting Dirty</h3>
+
+<p>
+To make the MEMDISK-booted ISO -&gt; RAMdisk -&gt; Windows Setup chain
+work, we'll need to integrate a driver into the Windows setup image that
+will enable Windows to use the RAMdisk as an installation source. It's
+called <a
+href="http://www.boot-land.net/forums/index.php?showtopic=8168">winvblock</a>,
+and it enables Windows to use a RAMdisk as a virtual block device.
+</p>
+
+<p>
+To insert it into the CD, we'll need to manually modify /i386/txtsetup.sif,
+the configuration file for the text mode installation portion of Windows
+setup. The file is divided into separate sections with lists of definitions
+in the following format:
+</p>
+
+<pre>
+[Header]
+definition 1
+definition 2
+</pre>
+
+<p>
+So, to integrate the driver add the following lines in the appropriate sections:
+</p>
+
+<pre>
+[SourceDisksFiles]
+wvblk32.sys = 1,,,,,,4_,4,1,,,1,4
+
+[SCSI.Load]
+wvblk32 = wvblk32.sys,4
+
+[SCSI]
+wvblk32 = "WinVBlock RAMdisk driver"
+</pre>
+
+<p>
+Next, you need to compress the driver; unzip the driver pack and run the
+following command at a Windows command prompt:
+</p>
+<pre>
+makecab WVBlk32.sys WVBLK32.SY_
+</pre>
+
+<p>
+Take the compressed driver and place it into the /i386 directory on the
+setup disk. Note that these instructions are for a 32 bit install image,
+however the 64 bit process is exactly the same, except for replacing "32"
+with "64" and placing the driver/modifying txtsetup.sif in the /amd64
+directory.
+</p>
+
+<p>
+These modifications will allow Windows setup to install from the RAMdisk.
+Now, there is one more caveat to deal with; this is the reboot after the
+text mode setup when Windows boots off the local disk that has been
+pre-populated with some installation files and a bootloader. Rebooting the
+machine will drop the RAMdisk from memory, and we need it re-mapped to
+finish the process. Dealing with this quirk is done by manipulating a
+bootloader hack that resides on the Windows setup CD. The binary
+/i386/BOOTFIX.BIN is the guy responsible for that annoying message that
+says "press any key to boot from CD" with a time-out. If the file is
+present on the disk, the message will appear. If it is removed, there is no
+prompt and the CD boots immediately with no way to stop that.
+</p>
+
+<p>
+There are 2 ways to handle this final quirk I've found. I'm lazy, and don't
+like waiting around to press a key when the machine <b>has</b> to boot from
+the CD in the first phase of setup. So I created an ISO without
+BOOTFIX.BIN and called it "Stage 1". I then created a second ISO with
+BOOTFIX.BIN and called it "Stage 2". On Stage 2 of the setup, you simply
+load the ISO from the PXE server and let the prompt time-out, so the
+machine defaults to booting from the local hard disk with the RAMdisk
+loaded into memory again.
+</p>
+
+<h3>Wrapping up</h3>
+
+<p>
+At this point, the optional unattended answer file will take over and you
+can grab a coffee or make fun of the guy with the giant CD book as your net
+install finishes.
+</p>
+
+<p>
+Finally, here are some sample entries for your PXE server (usually set up
+under /tftpboot/pxelinux.cfg/default):
+</p>
+
+<pre>
+label Windows 2003 Std x86 Text (stage 1)
+ menu label ^Windows 2003 Std x86 Text (stage 1)
+ kernel memdisk
+ append raw iso
+ initrd images/w2k3std_stage1.iso
+
+label Windows 2003 Std x86 Graphical (stage 2)
+ menu label ^Windows 2003 Std x86 Graphical (stage 2)
+ kernel memdisk
+ append raw iso
+ initrd images/w2k3std_stage2.iso
+</pre>
+
+<p>
+I hope that explains the process in enough detail to replicate the setup.
+I've successfully installed all the i386 and amd64 flavors of Windows 2003
+with this setup and I think it's a neat hack. Especially so since it's done
+with all open-source tools from a Linux server. Take that, RIS/WDS!
+</p>
+
+
+<br clear="all" />
+
+<table align='center' cellspacing='10'>
+<tr>
+<td>
+<script type='text/javascript'>
+digg_url = 'http://linuxgazette.net/177/schneider.html';
+digg_title = 'Installing Windows Server 2003 with Linux + PXE + DHCP + TFTP';
+digg_bodytext = '<p> This procedure is for installing Windows Server 2003 over the network by using Linux. I believe I\'ve invented a new way of doing a network installation and wanted to share it with anyone who might find it useful.</p> ';
+digg_topic = 'linux_unix';
+</script>
+<script src="http://digg.com/tools/diggthis.js" type="text/javascript"></script>
+</td>
+<td>
+<a name="fb_share" type="box_count" href="http://www.facebook.com/sharer.php">Share</a>
+<script src="http://static.ak.fbcdn.net/connect.php/js/FB.Share" type="text/javascript"></script>
+</td>
+<td>
+<a href="http://twitter.com/home?status=Currently%20reading:%20http://linuxgazette.net/177/schneider.html%20at%20Linux%20Gazette%20%23linuxgazette" title="Click to share this post on Twitter"><img src="../gx/twitter.png" width="50" height="85" border="0"></a>
+</td>
+</tr>
+</table>
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:177/schneider.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<hr>
+<p>
+<img align="left" alt="Bio picture" src="../gx/authors/schneider.jpg" class="bio">
+</p>
+
+<em>
+<p>
+Will a system engineer working in the webhosting industry. He enjoys
+ automating things in strange ways, or when that fails he installs Gentoo
+ on it.
+</p>
+
+
+
+</em>
+
+<br clear="all">
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2010, Will Schneider. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication License</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 177 of Linux Gazette, August 2010
+</p>
+
+</div>
+
+<div id="previousnextbottom">
+<A HREF="hoogland.html" >&lt;-- prev</A> | <A HREF="silva.html" >next --&gt;</A>
+</div>
+
+</div>
+</div>
+
+<script src="http://www.google-analytics.com/urchin.js"
+type="text/javascript">
+</script>
+<script type="text/javascript">
+_uacct = "UA-1204316-1";
+urchinTracker();
+</script>
+
+
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+</body>
+</html>
+

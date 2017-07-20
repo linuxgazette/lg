@@ -1,0 +1,579 @@
+
+<!DOCTYPE html
+	PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+	 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en-US" xml:lang="en-US">
+<head>
+<title>Keymap and IOCTLs LG #136</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link rel="stylesheet" href="../lg.css" type="text/css" media="screen, projection"  />
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+<link rel="shortcut icon" href="../favicon.ico" />
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+</head>
+<body>
+
+<a href="../">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+<div class="content articlecontent1">
+
+<div id="previousnexttop">
+<A HREF="lg_bytes.html" >&lt;-- prev</A> | <A HREF="kapil.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Keymap and IOCTLs</h1>
+<p id="by"><b>By <a href="../authors/anonymous.html">Anonymous</a></b></p>
+
+<p>
+In issue #86 of the <em>Linux Gazette</em> there's a nice example of how to
+remap keys from a C application:
+</p>
+
+<p>
+<a href="../issue86/misc/bint/kbe.c.txt">http://linuxgazette.net/issue86/misc/bint/kbe.c.txt</a>
+</p>
+
+<p>
+The author, the late <a href="../authors/bint.html">Stephen Bint</a>,
+was working on an editor for the text console and a library for such
+an editor. He didn't like to have the screen "dirtied" when pressing
+&lt;PgUp&gt; or &lt;PgDn&gt; while also pressing the &lt;Shift&gt; key.
+Indeed, that combination is reserved by default to scroll backward or
+forward through console output: the kernel will intervene and do things
+before the editor comes to know what keys you have pressed.  </p>
+
+<p>
+There is a way around it: redefine the keys temporarily,
+restoring them when exiting your application. Of course, if
+you can understand the C source for loadkeys and dumpkeys,
+you can skip both Stephen's examples and what follows. However,
+since I had problems getting even a vague idea of what loadkeys
+and dumpkeys do, I decided to write down a few details, to
+complement the old <em>LG</em> article referenced above.
+</p>
+
+<p>
+All of this is relevant only for the GNU/Linux text console.
+You can forget about anything this "simple" if you work only under X11.
+</p>
+
+
+<h3>1. Introduction</h3>
+
+<p>
+A PC keyboard sends signals to the Linux kernel - more
+precisely, to the kernel keyboard driver - telling it that a
+certain key has been pressed or released. Normally,
+applications let the kernel translate those signals into
+strings using the current (screen) character set and the
+traditional ASCII encoding, where one character equals one
+byte. This used to be the normal approach, until recently.
+Nowadays, Unicode is spreading, and you are now likely to
+have Unicode for the screen, rather than a character set as in
+the old days. The keyboard will then produce Unicode strings, using
+the UTF-8 encoding, where one character may need more than
+one byte. For the purpose of this article, however, there is no
+difference between the two modes; we refer to them both as
+translation mode.
+</p>
+
+<p>
+Direct handling of keyboard signals (raw and semi-raw mode)
+by the application is rare.
+</p>
+
+<p>
+The <em>keymap</em> tells you about the translation the kernel is doing for
+you. However, if you want to know what's going on, don't look into the
+local keymap: It is not complete, since it includes other files; it is
+formatted in an inconvenient way; and your distro may have modified it at
+boot time anyway. If you want to know what is really in force, and be able
+to read it, issue
+</p>
+
+<pre>
+    dumpkeys -1 &gt; my_keymap.txt
+</pre>
+
+<p>
+at the shell prompt and examine (the nicely formatted)
+my_keymap.txt. Consider the following:
+</p>
+
+<ul>
+<li> some keys insert characters: you press &lt;a&gt; and
+    you see an 'a' inserted at the cursor.
+<li> some keys insert nothing but have some effect:
+    you press &lt;left&gt;, the cursor usually moves one space to the left.
+<li>   some keys are defined as 'VoidSymbol', no action will be
+    taken on them.
+<li> some keys are listed but do not seem to exist. Indeed,
+    they do not exist, since the Linux keymap also applies to
+    keyboards different from the standard PC keyboard you are
+    using.
+</ul>
+
+<p>
+Whatever the keys do, they do it on the basis of an 'action
+code' assigned to them. For keymap programming, you must
+know these action codes. How do you get them? Issue
+</p>
+
+<pre>
+    dumpkeys --long-info &gt; actioncodes.txt
+</pre>
+
+<p>
+at the prompt. You get a list of action codes (left column)
+and the key labels for them (right column). Some labels have
+synonyms: for instance, the action code for &lt;PgUp&gt; is 0x0118,
+but you will not read 'PgUp' next to it; you will see the
+label 'Prior'. 
+</p>
+
+<p>
+Keys like &lt;Left&gt; may not insert anything, but still they have
+their effects:
+</p>
+
+<ul>
+<li>(i)   caused directly by the kernel keyboard driver
+<li>(ii)  caused by the application as soon it understands that
+      a certain key was pressed.
+</ul>
+
+<p>
+An example of the first kind is &lt;Shift&gt;&lt;PgUp&gt; where the
+console output is scrolled bypassing the current
+application.
+</p>
+
+<p>
+However, more often than not we are concerned about (ii). We
+press &lt;Left&gt;, the cursor moves one space to the left, the
+application is in control. That implies the application has
+been notified that &lt;Left&gt; was pressed. How was it notified?
+The keyboard driver knows the action code for the key
+&lt;Left&gt;. Although it does not arrange directly for the cursor
+movement, the action code arranges for a string to be sent
+to the application, so the application can do the right thing.
+The string for &lt;Left&gt; is normally "\033[D", where the octal
+\033 represents the escape character. It is the application
+that decides to move the cursor left upon receiving
+"\033[D".
+</p>
+
+<p>
+In translation mode, the application receives strings of one
+character, normally for insertion of that character, or
+multi-character strings for functional keys triggering some
+action. They are called functional keys because they
+are not just the F1 to F12 keys across the upper row of the
+keyboard; the &lt;Left&gt; key is also a functional key.
+Unfortunately, the keymap utilities say 'function keys' - i.e.,
+&lt;Left&gt; is a function key to them. To put it mildly, this is just a
+bit confusing.
+</p>
+
+<p>
+So, beside those few exceptions like &lt;Shift&gt;&lt;PgUp&gt;, the
+application is running the show. It receives strings of one
+or more characters. The one-character strings are very often
+for insertion, but not always so. You surely have been
+exposed to old-style user interaction: press 'a' for All or
+'c' for Cancel.
+</p>
+
+<p>
+OK, but where do those strings like "\033[D" for &lt;Left&gt; come
+from?
+</p>
+
+<p>
+For that, look into the local keymap - e.g., the US default
+keymap. Almost at the top of the keymap, you will see a line that says
+</p>
+
+<pre>
+    strings as usual
+</pre>
+
+<p>
+and that's it. That line defines the strings for F1-F20 and
+for Home, End,..., Left, Right, and so on. The strings
+originate from DEC hardware, and are still around after DEC
+passed away in the mid-90s.
+</p>
+
+<p>
+Now, why is the keymap defining F1-F20, if the keyboard has
+only F1-F12? Because Unix keyboards were not PC keyboards.
+The default Linux keymaps (any language) set
+</p>
+
+<pre class="code">
+    shift keycode 59 = F13      (physical F1 key)
+    shift keycode 60 = F14      (physical F2 key)
+    ...
+    shift keycode 66 = F20      (physical F8 key)
+</pre>
+
+<p>
+So F13-F20 are not useless; actually they are not enough.
+Indeed, you will notice that
+</p>
+
+<pre class="code">
+    control keycode 59 = F25    (physical F1 key)
+    control keycode 60 = F26    (physical F2 key)
+    ...
+    control keycode 88 = F36    (physical F12 key)
+</pre>
+
+<p>
+are defined in the US keymap, although no strings are
+assigned to F21 and up. These entries mean, e.g., that
+&lt;Shift&gt;&lt;F1&gt; will give F13 and &lt;Ctrl&gt;&lt;F1&gt; will give F25. However,
+since F25 has an empty string, an empty string is forwarded
+to the application, and the application does exactly nothing.
+</p>
+
+<p>
+Why is it so? Why are those keys set to send an empty
+string? Well, Linux 1.0 had a default keymap where
+&lt;Ctrl&gt;&lt;F1&gt; was same as F1 - and so on. Sometime down the
+road, there was a change, for reasons which to me do not seem
+worth an investigative effort. Just note that the Russian
+Linux keymap has not changed on this point, and that FreeBSD
+has low-level operations on &lt;Ctrl&gt;&lt;F1&gt; to &lt;Ctrl&gt;&lt;F10&gt;.
+</p>
+
+<p>
+Summing up, the keys not used by the kernel for its own
+purposes send a standard string to the application, possibly
+an empty string. Other keys are just void - i.e., undefined.
+</p>
+
+<div class="pullquotes">
+<a name="pullquote_136_anonymous_1"></a>
+<table border="2" summary="pullquote1">
+<tr>
+<td align="left" bgcolor="#e5942c">
+<sup>Category: Programming</sup>
+<br />
+<strong>
+Whatever the keys do, they do it on the basis of an 'action code' assigned to them. For keymap programming, you must know these action codes.
+</strong>
+</td>
+</tr>
+</table>
+</div>
+
+
+<h3>2. Changing the keymap</h3>
+
+<p>
+Before we get into some C code, let's mention the obvious: You can modify
+your keymap in an editor and then activate it.  You are supposed to be
+already in the know, in this respect, otherwise you would not be able to
+understand what this article is about.
+</p>
+
+<p>
+For instance, take those shifted &lt;PgUp&gt; and &lt;PgDn&gt; for
+scrolling the console. You edit the keymap to
+</p>
+
+<pre class="code">
+    shift keycode 104       = Prior
+    control alt keycode 104 = Scroll_Backward
+
+    shift keycode 109       = Next
+    control alt keycode 109 = Scroll_Forward
+</pre>
+
+<p>
+save it, load it with loadkeys and the console scrolling
+will be done with &lt;Alt&gt;&lt;Ctrl&gt;&lt;PgUp&gt;, &lt;Alt&gt;&lt;Ctrl&gt;&lt;PgDn&gt; , which
+is not in anybody's way.
+</p>
+
+<p>
+This is, of course, a lot easier to do and to understand
+than Stephen's code; however, Stephen gave a nice example of how
+to use ioctls, and here is where we resume his efforts. We'll
+add a little example, and show how to use a couple of those
+ioctls.
+</p>
+
+<p>
+We want to assign a string to &lt;Ctrl&gt;&lt;Enter&gt; so as to be able
+to tell &lt;Enter&gt; from &lt;Ctrl&gt;&lt;Enter&gt; - in the default
+keymap, these are the same. Here are all the details required:
+</p>
+
+<pre class="code">
+    physical key        &lt;Ctrl&gt;&lt;Enter&gt;
+    keycode             28
+    action code label   F50
+    action code         0x013b
+    associated string   "\033[M~4"
+</pre>
+
+<ol>
+<li>Where does the keycode come from? From the keymap.
+<li>Where does F50 come from? It's arbitrary. The keymap
+understands F1-F255, but only F1-F20 are fully defined with
+strings. F25-F36 are there but not fully defined. F50 should
+not encroach on anything. Needless to say, it can be
+changed.
+<li>Where does the action code come from? From the file
+'actioncodes.txt' that we generated a couple of paragraphs
+upstream.
+<li>Where does the associated string come from? It's
+arbitrary; you are welcome to replace it with whatever you like.
+<li>In a first step, we insert a couple of headers and
+definitions in our code (if not already there):
+
+<pre class="code">
+    #include &lt;linux/kd.h&gt;
+    #include &lt;linux/keyboard.h&gt;
+    struct kbentry ke;
+    struct kbsentry ks;
+</pre>
+
+<p>
+In a second step, we instruct the keyboard driver to
+associate our string with F50:
+</p>
+
+<pre class="code">
+    ks.kb_func   = 50;
+    ks.kb_string = "\033[M~4";
+    ioctl(fileno(stdin), KDSKBSENT, &amp;ks);
+    //  if assignment fails, an error will be set
+    //  in global variable ERR
+</pre>
+
+<p>
+This and the kbentry/kbsentry structures are scantily
+documented in the manpage console_ioctl, written in 1995 and
+never updated. Same for KDSKBSENT, which can be memorized as
+'Keyboard Driver Set KeyBoard String ENTry'.
+</p>
+
+<li>
+Finally, we bind F50 to &lt;Ctrl&gt;&lt;Enter&gt;:
+
+<pre class="code">
+    ke.kb_table = 4;
+    ke.kb_index = 28;
+    ke.kb_value = 0x013b;
+</pre>
+
+<p>
+The kb_table is determined by the modifier used. We are
+pressing two keys, &lt;Ctrl&gt; and &lt;Enter&gt;, so we are using
+modifier &lt;Ctrl&gt; which has number 4 in the keymap.
+</p>
+
+<p>
+The kb_index is the keycode, the kb_value is the action
+code, both already explicitly stated above.
+</p>
+
+<p>
+We use yet another ioctl call:
+</p>
+
+<pre class="code">
+    ioctl(fd,KDSKBENT,&amp;ke);
+    // if assignment fails, an error will be set
+    // in global variable ERR
+</pre>
+
+<p>
+and we are done - just pay attention when typing KDSKBSENT
+vs. KDSKBENT. F50 is now associated with the string of our
+choice. This string is sent to the application when
+&lt;Ctrl&gt;&lt;Enter&gt; is pressed.
+</p>
+</ol>
+
+<h3>3. Moral</h3>
+
+<p>
+Essentially, what we have done is to allow for
+</p>
+
+<pre>
+    &lt;Enter&gt;
+    &lt;Ctrl&gt;&lt;m&gt;
+    &lt;Ctrl&gt;&lt;Enter&gt;
+</pre>
+
+<p>
+to be all distinct. Think about it: The first two send
+the same string, namely "^M", character 13. They can be told
+apart by checking the modifier, since the first one is produced
+with 1 key, while the second one needs 2 keys.
+</p>
+
+<p>
+The third entry, &lt;Ctrl&gt;&lt;Enter&gt;, can not, by default, be
+distinguished from &lt;Ctrl&gt;&lt;m&gt;, since both produce "^M", and
+both signal that &lt;Ctrl&gt; was pressed. (You would have to move
+to raw or semi-raw mode to find out - not recommended.) With
+our little modification, we now have all our ducks in a row. Also,
+the trick can be applied elsewhere, for instance, to &lt;Tab&gt;,
+&lt;Ctrl&gt;&lt;i&gt;, &lt;Ctrl&gt;&lt;Tab&gt;.
+</p>
+
+<p>
+Note that applications other than the one you are working
+on may rely on the keymap defaults, and get confused by your
+ioctls intervention. A well-behaved application should thus
+reverse the changes made. However, if the application
+crashes for whatever reasons, the reversing code will not
+be executed, and the keyboard will not be reset.
+</p>
+
+<p>
+In other words: when you exit this application, just reload
+the default keymap. For that, the command will be
+</p>
+
+<pre>
+    loadkeys us
+</pre>
+
+<p>
+or 'uk' or 'fr' or 'ge', or whatever you are using.
+</p>
+
+
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:136/anonymous.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<!-- ============================================================= -->
+<!-- *** BEGIN bio *** -->
+<hr>
+
+<p>
+<img ALIGN="LEFT" ALT="Bio picture" SRC="../gx/2002/note.png" class="bio">
+<em>
+
+A. N. Onymous has been writing for LG since the early days - generally by
+sneaking in at night and leaving a variety of articles on the Editor's
+desk. A man (woman?) of mystery, claiming no credit and hiding in
+darkness... probably something to do with large amounts of treasure in an
+ancient Mayan temple and a beautiful dark-eyed woman with a snake tattoo
+winding down from her left hip. Or maybe he just treasures his privacy. In
+any case, we're grateful for his contribution.<br>
+ -- Editor, Linux Gazette
+
+</em>
+<br CLEAR="all">
+
+<!-- *** END bio *** -->
+
+<!-- ============================================================= -->
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2007, Anonymous. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication License</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 136 of Linux Gazette, March 2007
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="lg_bytes.html" >&lt;-- prev</A> | <A HREF="kapil.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+<div id="navigation">
+<table summary="masthead" width="100%">
+<tr>
+<td align="center" colspan="3" style="font-size: 10px; font-weight: bold">
+<a href="../index.html">Home</a>
+<a href="http://linuxgazette.net">Main Site</a>
+<a href="../faq/index.html">FAQ</a>
+
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/mailman/listinfo/">Mailing Lists</a>
+<a href="../jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+<hr width="99%" style="border: 1px inset #000033">
+</td>
+</tr>
+<tr>
+<td width="40%" align="left" style="font-size: 10px; font-weight: bold">
+The Free International Online Linux Monthly
+</td>
+<td width="20%" align="center" style="font-size: 10px; font-weight: bold">
+ISSN: 1934-371X
+</td>
+<td width="40%" align="right" style="font-size: 10px; font-weight: bold">
+Main site: <a href="http://linuxgazette.net">http://linuxgazette.net</a> 
+</td>
+</table>
+</div>
+
+
+
+
+
+<div id="breadcrumbs1">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">March 2007 (#136)</a> &gt; 
+Article
+
+</div>
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+</body>
+</html>
+

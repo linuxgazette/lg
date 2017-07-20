@@ -1,0 +1,59 @@
+#!/bin/sh
+
+# Make sure that a block device was specified
+[ -b "$1" ] || { printf "Usage: ${0##*/} <cd_device>\n" >&2; exit 1; }
+
+# Read the entire header - actually sector 16 of the disc (2K sectors)
+# All character codes in the "control" region (0-31 decimal) are folded
+# into the character '.' - these control codes seem to upset bash's
+# variable sub-string functions (${var:start:length}) quite badly )-:
+dd if=$1 bs=1 skip=32768 count=2048 >/tmp/cdinfo$$ 2>/dev/null
+if [ $? -ne 0 ] ; then
+   rm -rf /tmp/cdinfo$$
+   printf "Error: Unable to open device\n" >&2
+   exit 1
+fi
+data=`cat /tmp/cdinfo$$ |tr '[\\000-\\037]' '.*'`
+rm -rf /tmp/cdinfo$$
+
+# Define some useful functions for prettifying the output
+tidy_print()
+{
+   # Really cheap way of folding whitespace
+   echo $*
+}
+
+
+date_print()
+{
+   if [ "${1}" == "00000000000000" ]
+   then
+     echo "-"
+   else
+     # try to parse the date,  but fail gracefully if too hard
+     date=`date --date="${1:6:2}/${1:4:2}/${1:0:4}
+${1:8:2}:${1:10:2}:${1:12:2}" --utc 2> /dev/null`
+     if [ $? -eq 0 ]
+     then
+       echo ${date}
+     else
+       echo "-"
+     fi
+   fi
+}
+
+if [ "${data:1:5}" == "CD001" ] ; then
+   echo "Volume:      `tidy_print ${data:40:32}`"
+   echo "Publisher:   `tidy_print ${data:318:128}`"
+   echo "Preparer:    `tidy_print ${data:446:128}`"
+   echo "Application: `tidy_print ${data:574:128}`"
+   echo "System:      `tidy_print ${data:8:32}`"
+   echo "Created:     `date_print ${data:813:14}`"
+   echo "Modified:    `date_print ${data:830:14}`"
+   echo "Expires:     `date_print ${data:847:14}`"
+   echo "Effective:   `date_print ${data:864:14}`"
+else
+   printf "Type: ${data:0:5}\n" >&2
+   printf "Error: Unknown device format. Only supports iso9660.\n" >&2
+   exit 1
+fi

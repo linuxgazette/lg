@@ -1,0 +1,356 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>Linux Line Printing Daemon for Mainframe Application "Print-to-Email" LG #77</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<CENTER>
+<A HREF="http://www.linuxgazette.net/">
+<IMG ALT="LINUX GAZETTE" SRC="../gx/lglogo.png" 
+	WIDTH="600" HEIGHT="124" border="0"></A> 
+<BR>
+
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="lechnyr.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../lg_faq.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="sunil.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+<P>
+</CENTER>
+
+<!--endcut ============================================================-->
+
+<H4 ALIGN="center">
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H1><font color="maroon">Linux Line Printing Daemon for Mainframe Application "Print-to-Email"</font></H1>
+<H4>By <a href="mailto:lpitcher@sympatico.ca">Lew Pitcher</a></H4>
+</center>
+<P> <HR> <P>  
+
+<!-- END header -->
+
+
+
+
+<dl>
+<dt><h2><font color="green">Introduction</font></h2></dt>
+<dd><p>In the middle months of 2000, a colleague came to me with a question. He wanted to know
+if there was any way that we could have our mainframe host systems email their reports to selected
+email addresses.  After some investigation, I had to tell him that, with existing, approved tools,
+there was no way that we could arrange to have a mainframe application send email.
+<i>&quot;However,&quot;</i> I said, <i>&quot;there is a way to do this through the back door.&quot;</i>
+I explained that the mainframe supports various modes of printing, and that with suitable arrangement,
+it could be persuaded to direct print output to a Unix system that could then email the data as it
+saw fit.</p>
+
+<p>Although this back-door approach was not acceptable to the situation that he was investigating at
+the time, the idea stayed with me. A year later, the question came up again, but this time the
+situation was not as critical and I was given some latitude to investigate the possibilities. My
+co-workers (Rob Corr and Phil Robson) and I crafted two &quot;proof-of-concept&quot; implementations,
+one using tools that, while they weren't approved for our use, were built to provide mainframe application
+access to email, and the other being the 'back-door' approach that I had suggested the previous year.  This
+paper describes how we implemented our 'back-door' proof-of-concept mainframe &quot;print-to-email&quot;
+using a spare Linux box, some simple tools, and a bit of knowledge.
+</p></dd><!-- end of the Introduction section -->
+
+<dt><h2><font color="green">Beginnings</font></h2></dt>
+<dd><p>Our goal was to be able to have host output, generated from an IMS transaction, a CICS
+transaction, or a batch job, routed to an arbitrary, application selected email address.  As there
+was no direct route from the host online systems to our email service, we decided to try an indirect
+route through a spare Linux box on our LAN. This proof-of-concept was not meant to be a production-ready
+facility, but instead was intended simply to assist in determining what problems would have to be
+resolved, and how a production-ready facility would have to be built.</p>
+
+<p>At our disposal were:
+<ul>
+ <li>an MVS/JES2 Operating System and the facilities and systems within it (IMS, CICS, batch)</li>
+ <li>the VPS mainframe print spooling package, and it's associated Windows NT protocol converter,</li>
+ <li>LAN-based Linux facilities, including Unix Line Printing Daemon (lpd) and Unix email client
+    (fastmail and sendmail), and</li>
+ <li>connectivity to the Internet through the corporate firewall</li>
+</ul>
+
+<p>In theory, it should have been possible to &quot;print to email&quot; using these existing MVS/JES and
+Unix facilities. The process would be:
+<ul>
+ <li>Application generates a printed report which is written to a JES2 print spool,</li>
+ <li>the JES2 print spooler 'prints' the report on a JES2 printer, which is implemented in software
+     on the MVS system</li>
+ <li>The MVS software printer (a pseudo-printer) uses  (in our case) VPS  to transmit the print data
+     to a Unix 'lpd' (RFC1179-compliant) print spooler (implemented on a Linux system),</li>
+ <li>The Linux lpd daemon processes the print data through other unix tools to email the print to an
+     arbitrary email userid</li>
+ <li>Linux email (sendmail) sends  the print data email to the target email address</li>
+</ul>
+
+<p>In general, the flow of print data from sending application to receiving
+client looks like
+<A HREF="misc/pitcher/flowchart.png">this diagram</A>.
+</dd><!-- end of the Beginnings section -->
+
+<dt><h2><font color="green">Linux</font></h2></dt>
+<dd><p>Our Linux system was a minimal installation of Slackware 7.0 on a spare Pentium 90 processor.
+We had used this system for a number of proof-of-concept tests and it was sitting idle and available
+for our print-to-email trial. We  configured the system to accept lpd spool requests from the host
+(indirectly, from the NT &quot;protocol converter&quot; system), process the print into emailable
+text, and email the text according to the requirements embedded in the print
+data's <a href="misc/pitcher/Jes_Flash_Page.html#flashpage">JES2 flash page</a><p>
+
+<p>In order to permit the Windows NT protocol converter access to the Linux lpd resources, we had
+to add the NT  system to the lpd security files. Since the NT system was assigned a DHCP IP address
+but no dynamic DNS (dDNS) hostname, we included it's IP address to the
+<a href="misc/pitcher/Files_in_etc.html#hosts"><tt>/etc/hosts</tt></a> file along with a fake hostname, and added the
+fake hostname to the <a href="misc/pitcher/Files_in_etc.html#lpdhosts"><tt>/etc/hosts.lpd</tt></a></p>
+
+<p>Next, the lpd printer 'jesprt' was defined in the <a href="misc/pitcher/Files_in_etc.html#printcap"><tt>
+/etc/printcap</tt></a> file. This definition includes details on the spool directory
+(<tt>/var/spool/lpd/jesprt</tt>) and spool filter program (<tt>/var/spool/lpd/jesprt.filter</tt>) to be used
+to process print to email.</p>
+
+<p>Finally, the print filter
+(<a href="misc/pitcher/Print_Filter_Files.html#filter"><b><tt>/var/spool/lpd/jesprt.filter</tt></b>)</a>
+and it's support programs were written. jesprt.filter respooled the print data to a temporary file,
+then extracted the destination email address and other details from the spooled data. Once all the
+particulars had been established, the temporary file was emailed to the destination and the local
+copy was deleted.</p>
+
+<p>I wrote four support modules for this filter:
+<ul>
+<li><a href="#collapse"><tt>/usr/local/bin/collapse</tt></a></li>
+<li><a href="#mailto"><tt>/var/spool/lpd/tools/jesprt.mailto.awk</tt></a></li>
+<li><a href="#subject"><tt>/var/spool/lpd/tools/jesprt.subject.awk</tt></a>, and</li>
+<li><a href="#notice"><tt>/var/spool/lpd/tools/jesprt.notice.text</tt></a></li>
+</ul>
+
+<p><a name="collapse"><a href="misc/pitcher/Print_Filter_Files.html#collapse">
+<b><tt>/usr/local/bin/collapse</tt></b></a> took the print data prepared by the NT
+&quot;protocol converter&quot; program and reformatted it into text lines. This was necessary
+because the protocol conversion generated large print files where <a href="misc/pitcher/Jes_Flash_Page.html#od">
+each print line consisted of many lines overprinting each other</a>. As the print filter extracted
+information from the print data, this overprinting had to be 'collapsed' into single print lines.
+Additionally, the protocol conversion performed a unique form of overprinting, where each pair of
+blocks of overprint were positioned 1 character to the right of the previous pair., which, if not
+accommodated, would lead to errors in the resulting print data.</p>
+
+<p><a name="mailto"><a href="misc/pitcher/Print_Filter_Files.html#mailto">
+<b><tt>/var/spool/lpd/tools/jesprt.mailto.awk</tt></b></a> looked through the leading flashpage,
+and extracted a destination email address from the data. It checked in three places for the target
+email address:
+<ol>
+<li>Stand-alone in the flashpage, prefixed with a &quot;<tt>EMAIL</tt>&quot; sentinel text, or
+<li>as the first line of the &quot;<tt>ADDRESS: </tt>&quot;line, prefixed with a &quot;<tt>EMAIL:</tt>&quot;
+sentinel text, or
+<li>derived from the username that follows the &quot;<tt>USERID:</tt>&quot; sentinel text.
+</ol>
+
+<p>The &quot;<tt>USERID:</tt>&quot; username was fixed at MVS/JES2 job submission time. However,
+the &quot;<tt>EMAIL:</tt>&quot; email addresses were dynamically assigned through one of four
+<tt>ADDRESS</tt> parameters passed to the JES2 print spooling system. The two possibilities
+accounted for in the awk script accommodated the placement of the email address in the first
+or the second and subsequent <tt>ADDRESS</tt> parameters. If the email address text was passed through
+the <i>first</i> <tt>ADDRESS</tt> parameter, then that text would be found in the flash page as part of
+the first line of the &quot;<tt>ADDRESS:</tt>&quot; line, and prefixed with a &quot;<tt>EMAIL:</tt>&quot;
+sentinel text. However, if the email address text was passed through a subsequent <tt>ADDRESS</tt> parameter,
+then the email address would be found in the flash page as a stand-alone line and prefixed with a
+&quot;<tt>EMAIL:</tt>&quot; sentinel text.
+
+<p>Finally, no email address text were passed in any of the <tt>ADDRESS</tt> parameters, then the email
+address would default to the MVS LOGONID for the job, which was found as the username that follows the
+&quot;<tt>USERID:</tt>&quot; sentinel text in the flashpage.
+
+<p><a name="subject"><a href="misc/pitcher/Print_Filter_Files.html#subject">
+<b><tt>/var/spool/lpd/tools/jesprt.subject.awk</tt></b></a></a>
+looked through the leading flashpage, and extracted an email subject line from the data. It obtained
+this information from the text that follows the &quot;<tt>TITLE:</tt>&quot; sentinel text in the flash
+page. Any text populated to the <tt>TITLE</tt> parameter was  placed here by JES2. For example, if the
+host program set the <tt>TITLE</tt> to the text string &quot;<tt>email subject goes here</tt>&quot;, JES2
+would populate it to the flashpage, and <tt>/var/spool/lpd/tools/jesprt.subject.awk</tt> would extract
+the text <b>&quot;<tt>email subject line goes here</tt>&quot;</b>from the flashpage. This text was then
+be used to prepare the email subject line. If no text was found, the email subject line would just indicate
+the source jobname, jobnumber, and system, as found on the flashpage.</p>
+
+<p><a name="notice"><a href="misc/pitcher/Print_Filter_Files.html#notice">
+<b><tt>/var/spool/lpd/tools/jesprt.notice.text</tt></b></a></a>
+carried a notice text that is appended to the end of every report respooled by this print filter. This
+allows us to add a &quot;message of the day&quot; to each print report indicating the processing performed
+on it, if we desire.</p>
+</dd><!-- end of the Linux section -->
+
+<dt><h2><font color="green">NT Protocol Converter</font></h2></dt>
+<dd><p>The VPS print spool package on the host communicated using SNA LU1 to a package running on a
+Microsoft Windows NT system .  This package reprocessed the print data using Window NT printer drivers
+to communicate with the LAN-attached printers.  We arranged for the owners of this system to setup the
+connection between JES2 remote <b><tt>PTE01</tt></b> and our Linux <b><tt>jesprt</tt></b> lpd printer.
+On the Windows NT side, this printer was configured as a <tt>&quot;Generic&quot; /
+&quot;Generic/Text Only&quot;</tt> print driver using a local &quot;Microsoft LPR&quot; port connected
+to printer <tt>jesprt</tt> on the Linux server.
+
+<p>The Windows NT protocol converter was configured so as <i>not to</i> suppress the JES2 flashpages
+(suppression is the default setting), so that the Linux side could retrieve the email subject and address
+metadata from the JES2 flash page text. Host applications would be expected to generate their output and
+direct it to a JES2 &quot;SYSOUT&quot;. JES2 &quot;SYSOUT&quot;s act like pipes into the print spooling
+system.
+</dd><!-- end of the VPS Protocol converter section -->
+
+<dt><h2><font color="green">JES2 Host Printing</font></h2></dt>
+<dd><p>On the MVS/JES2 side, applications can use one of three different methods of spooling print output,
+depending on their environmental requirements: BATCH print spooling, IMS &quot;Spool API&quot; print
+spooling, and CICS &quot;Spool API&quot; print spooling.
+
+<dl><dt><h4>BATCH Print Spooling</h4></dt>
+<dd>
+<p>MVS/JES2 supports a background processing system that uses <a href="misc/pitcher/JES2_Spooling.html#Batch_JCL">
+JCL (or &quot;Job Control Language&quot;)</a> instructions to control the execution of programs and the
+distribution of their print data. In this environment, print data is referred to as &quot;SYSOUT&quot;, which
+stands for &quot;System Output&quot;.
+<p>Any SYSOUT directed to (in our case) printer <tt>DEST=PTE01</tt> would be respooled (by JES2) to VPS,
+and on to the lpd support on our Linux system. The JES2 OUTPUT JCL statement was used to set the email subject
+line and target email address for the report.
+<p>The format and use of the JCL <tt>OUTPUT</tt> statement is documented in <u>Chapter 22</u> of the
+<a href="misc/pitcher/Bibliography.html#JCL_Ref">OS/390 V2R10 MVS JCL Reference</a>, while the format and use of the
+<tt>DD SYSOUT</tt> is documented in <u>Chapter 12</u> of <a href="misc/pitcher/Bibliography.html#JCL_Ref">the same manual</a>.
+</dd><!-- end of the BATCH SPOOL subsection -->
+
+<dt><h4>IMS &quot;Spool API&quot; Print Spooling</h4></dt>
+<dd><p>For our IMS transaction to print to the JES2 spool (and thus onwards to email), it had to perform DLI
+<tt>CHNG</tt> and <tt>ISRT</tt> calls to <a href="misc/pitcher/JES2_Spooling.html#IMS_PCB">a modifiable alternate
+non-express PCB</a>.
+
+<p>First, the transaction's application code prepared <a href="misc/pitcher/JES2_Spooling.html#IMS_CHNG_WS">specific
+<tt>WORKING-STORAGE</tt> variables</a> and <a href="misc/pitcher/JES2_Spooling.html#IMS_CHNG_PD">performed a
+<tt>CHNG</tt> call</a> to redirect the alternate modifiable non-express PCB (in this case PCB <tt>APM00001</tt>) 
+to the IMS Spool interface.
+
+<p>Then, the application performed one or more ISRT calls to send print data to the PCB. The print data was
+placed in <a href="misc/pitcher/JES2_Spooling.html#IMS_ISRT_WS">a structure</a> which was passed through the IMS  
+<a href="misc/pitcher/JES2_Spooling.html#IMS_ISRT_PD"><tt>ISRT</tt> call</a> to the JES2 print queue.
+
+<p>This <a href="misc/pitcher/JES2_Spooling.html#IMS_ISRT_PD"><tt>ISRT</tt></a> was repeated for each line of the text
+to be emailed. The email would be released to the spool at the end of the Unit of Work (at <tt>COMMIT</tt>
+or at the next <tt>GU</tt> on the <tt>IOPCB</tt>), or when the next <tt>CHNG</tt> call to the modifiable
+alternate non-express PCB was executed.
+
+<p><u>Appendix A</u> of the <a href="misc/pitcher/Bibliography.html#IMS_Design">&quot;IMS Version 7 Application Programming:
+Design Guide&quot;</a> provides a technical overview of the IMS SPOOL API and it's use in a JES2 environment. 
+Sections <u>1.3.2</u> and <u>1.3.7</u> from the <a href="misc/pitcher/Bibliography.html#IMS_TM">
+&quot;IMS Version 7 Application Programming: Transaction Manager&quot;</a> manual provides details on
+the specific IMS DLI calls necessary to spool output to MVS, and section <u>1.56</u> of the
+<a href="misc/pitcher/Bibliography.html#TSO_CL">TSO/E V2R5 Command Reference</a> manual provides the format and
+values of the spool control parameters.
+</dd><!-- end of the IMS SPOOL API subsection -->
+
+<dt><h4>CICS &quot;Spool API&quot; Print Spool</h4></dt>
+<dd><p>For a CICS transaction to print to the JES2 spool (and onward to email), it must use the CICS SPOOL
+API. The documentation here in the "CICS Application Programming Reference" describes the 
+SPOOLOPEN/SPOOLWRITE/SPOOLCLOSE verbs that must be used to create a JES2-spooled report.
+
+<p>First, the application must SPOOLOPEN the printer. This is a bit tricky because the SPOOLOPEN verb
+requires the <a href="misc/pitcher/JES2_Spooling.html#CICS_SPOOLOPEN_WS">print options parameter</a> to be an
+indirect pointer to the print options list.  To enable this, the program 
+<a href="misc/pitcher/JES2_Spooling.html#CICS_SPOOLOPEN_PD">must execute logic to</a> GETMAIN some storage,
+manipulate the returned pointer to the GETMAINed memory to conform with CICS requirements, move 
+<a href="misc/pitcher/JES2_Spooling.html#CICS_SPOOLOPEN_WS">the print options list</a> into the GETMAINed memory,
+use the GETMAINed area in the SPOOLOPEN verb, and FREEMAIN the print options storage once the 
+SPOOLOPEN is complete.
+<p>Once this is done, the program can repeatedly load a <a href="misc/pitcher/JES2_Spooling.html#CICS_SPOOLWRITE_WS">
+print buffer</a> with text data and <a href="misc/pitcher/JES2_Spooling.html#CICS_SPOOLWRITE_PD">EXECutes the SPOOLWRITE 
+function</a> to write each line of report data to the spool.
+<p>When all the print data has been spooled, the program then 
+<a href="misc/pitcher/JES2_Spooling.html#CICS_SPOOLCLOSE_PD">EXECutes the SPOOLCLOSE function</a> to close the spool
+and send the spooled output onward to the printer.
+<p><u>Section 5.6</u> of the <a href="misc/pitcher/Bibliography.html#CICS_Guide">CICS TS for OS/390 V1R3 Application
+Programming Guide</a> provides an overview of the CICS SPOOL API and examples of it's use, while
+<u>Sections 1.227 through 1.231</u> of the <a href="misc/pitcher/Bibliography.html#CICS_Ref">CICS TS for OS/390 V1R3
+Application Programming Reference</a> provides details on the specifics of the various EXEC SPOOLxxxx
+calls necessary to spool output to MVS, while section <u>1.56</u> of the
+<a href="misc/pitcher/Bibliography.html#TSO_CL">TSO/E V2R5 Command Reference</a> manual provides the format and
+values of the spool control parameters used in the EXEC SPOOLOPEN call.
+
+</dd><!-- end of the CICS SPOOL API subsection -->
+
+</dl><!-- end of JES2 spool api list -->
+</dd><!-- end of JES2 HOST PRINTING section -->
+
+<dt><h2><font color="green">Conclusions</font></h2></dt>
+<dd>In all, this exercise took about a month to go from inception to implementation, with most of that
+time spent in the development of the CICS and IMS interfaces. Our tests of the 'print to email' process
+proved that the facility worked well for our limited requirements. Volume testing was not performed, and
+this print-to-email solution remains a proof-of-concept, for now.
+<p>From this exercise, we not only established that a &quot;print-to-email&quot; facility <em>could</em> be built
+without intrusion into the realm of MVS system programming, we also established that it was <em>easy</em> to
+build such a system. Even if we shelve this project, the techniques we learned (IMS and CICS SPOOLING APIs,
+JES2 printer setup, Linux and BSD LPD print spooler setup, etc.) can easily be applied to other projects in
+our domain.
+<p>For what it's worth, we learned a lot. We stood on the shoulders of giants
+and saw further than we could have on our own. Perhaps we too have now given our
+successors a footing from which to climb to greater heights.
+<p>So, do you feel like doing a bit of climbing?
+<p>
+</dd><!-- end of Conclusions section -->
+</dl><!-- end of the sectioned document --> 
+<hr>
+<h4>Copyright (&copy;) Lew Pitcher, March 2002</h4>
+<hr>
+<p>This article has several supplemental files which are linked extensively in the text.
+For convenience, here's a listing of all the files:
+<dl>
+<dt><a href="pitcher.html">pitcher.html</a> and <a
+href="misc/pitcher/flowchart.png">flowchart.png</a></dt>
+    <dd>This is the main page of the document, and its single illustration</dd>
+<dt><a href="misc/pitcher/Files_in_etc.html">Files_in_etc.html</a></dt>
+    <dd>This page describes the files in /etc that were changed to enable the print-to-email
+    printer.</dd>
+<dt><a href="misc/pitcher/Print_Filter_Files.html">Print_Filter_Files.html</a></dt>
+    <dd>This page describes the files that made up the linux print-to-email print filter.</dd>
+<dt><a href="misc/pitcher/Jes_Flash_Page.html">Jes_Flash_Page.html</a></dt>
+    <dd>This page describes the format of the JES2 flash page that the email subject and address
+    were extracted from.</dd>
+<dt><a href="misc/pitcher/JES2_Spooling.html">JES2_Spooling.html</a></dt>
+    <dd>This page describes the COBOL coding techniques needed in IMS and CICS to generate and
+    spool print to the print-to-email server.</dd>
+<dt><a href="misc/pitcher/Bibliography.html">Bibliography.html</a></dt>
+    <dd>This page carries links to the reference documentation that we used in building this
+    print-to-email solution.</dd>
+</dl>
+
+
+
+
+<!-- *** BEGIN bio *** -->
+<SPACER TYPE="vertical" SIZE="30">
+<P> 
+<H4><IMG ALIGN=BOTTOM ALT="" SRC="../gx/note.gif">Lew Pitcher</H4>
+Canadian by birth, and living in Brampton, Ontario, I am a career techie
+working at a major Canadian bank. For over 25 years, I've programmed on
+all sorts of systems, from Z80 CP/M up to OS/390. Primarily, I develop
+OS/390 MVS applications for banking services, and have incorporated
+Linux into my development environment.
+
+<!-- *** END bio *** -->
+
+<!-- *** BEGIN copyright *** -->
+<P> <hr> <!-- P --> 
+<H5 ALIGN=center>
+
+Copyright &copy; 2002, Lew Pitcher.<BR>
+Copying license <A HREF="../copying.html">http://www.linuxgazette.net/copying.html</A><BR> 
+Published in Issue 77 of <i>Linux Gazette</i>, April 2002</H5>
+<!-- *** END copyright *** -->
+
+<!--startcut ==========================================================-->
+<HR><P>
+<CENTER>
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="lechnyr.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../lg_faq.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="sunil.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+</CENTER>
+</BODY></HTML>
+<!--endcut ============================================================-->

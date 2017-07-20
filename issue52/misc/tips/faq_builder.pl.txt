@@ -1,0 +1,228 @@
+#!/usr/bin/perl
+
+
+printf( "<!-- \$Id: faq_builder.pl.txt,v 1.1.1.1 2002/08/14 22:27:42 dan Exp $ -->\n" );
+printf( "<!-- FAQ, created with faq_builder -->\n" );
+printf( "<!-- faq_builder is available at http://leb.net/pub/blinux/hacks -->\n" );
+printf( "<!-- faq_builder is released under the GNU Public License (GPL) -->\n" );
+printf( "<!-- Send improvements to me, that's Hans Zoebelein hzo\@goldfish.cube.net hzo\@gmx.de -->\n" );
+printf( "<!-- Enjoy! -->\n\n" );
+ 
+
+# Take ASCII text and build a HTML formatted FAQ with index and content.
+# Syntax faq_builder your_FAQ_ASCII_file.txt > your_FAQ.html 
+# 
+# Written to make things easier for those who are writing FAQs
+# I didn't check whether similar tools exist (I'm pretty sure) 
+# Writing some Perl stuff is too much fun to not use the opportunity :)
+
+
+# Formatting of ASCII:
+# Levels of indentation are determined by the number of $LEVEL_CHARs 
+# in front of the headers.
+# You'll get a menu section and an output section which are numbered.
+# The menu section has a link to the output section.
+# If you choose '§' as $LEVEL_CHAR then
+
+# 	§ This is a main title
+# 	§§ This is subtitle A
+# 	§§§ This is question no 1
+# 	This is the answer to question 1
+# 	§§§ This is question 2
+# 	This is answer to question no 2
+# 	This is still answer to question 2
+#	§§ This is subtitle B
+
+# will give you
+
+# 	1. This is a main title
+#	   1.1 This is subtitle A
+#	      1.1.1 This is question no 1
+#	      1.1.2 This is question no 2
+#	   1.2 This is subtitle B
+#
+#
+#       1. This is a main title
+#       1.1 This is subtitle A
+#       1.1.1 This is question no 1
+#       This is the answer to question 1 
+#
+#       1.1.2 This is question no 2
+#       This is answer to question no 2
+#       This is still answer to question 2
+#
+#	1.2 This is subtitle B
+
+# You can put comments into your input file which will be ignored by the
+# formatter. A comment line begins with '#'. You'll eventually have to
+# change '%' signs into '%%' to make them shine up, if I recall right.
+# Simply check it out.
+
+# Please send comments and suggestions. 
+# My email:  Hans Zoebelein <hzo@gmx.de> or <hzo@goldfish.cube.net>
+# 
+# Enjoy!
+# Hans
+ 
+
+
+# Var defs
+$LEVEL_CHAR ='§';		# Each char stands for a digit. # == n. ## == n.m 
+$LEVEL = 0;			# Current count of digits
+$LEVEL_LAST =0;			# Last count of digits
+
+$REG_OPN_LEVEL1 = "<h4>";	# # Level 1 register opening
+$REG_CLS_LEVEL1 = "</h4>";
+$REG_OPN_LEVEL2 = "<li>";
+$REG_CLS_LEVEL2 = "</li>";
+
+$CONT_HD_OPN_LEVEL1 = "<br><br><h3>";
+$CONT_HD_CLS_LEVEL1 = "</h3>";
+$CONT_HD_OPN	    = "<h3>";
+$CONT_HD_CLS	    = "</h3>";
+
+
+
+$CONTENT  = 0;	# Indicates whether last line was content
+$REGISTER = 0;	# Indicates whether last line was register
+$HEADER   = 0;	# Indicates that last line was a header
+@LINEBUF  ="";
+
+
+#printf( "$ARGV[0]\n" );
+#printf( "$ARGV[1]\n" );
+
+
+#Syntax check 
+if( ! $ARGV[0] ){
+	printf( "Syntax faq_builder <FAQ_file_in_ASCII.txt> > FAQ.html\n" );
+	exit(1);
+}
+
+
+# Read file
+open( INFILE, "$ARGV[0]" ) || die( "Could not open -$ARGV[0]- for read\n");
+while( !eof( INFILE )){
+	@LINEBUF = <INFILE>;
+}
+close( INFILE );
+chomp( @LINEBUF );
+
+
+# Prepare lists etc.
+# Open <ul> list in @REGISTER
+#push ( @REGISTER, "<b><ul>" );
+
+
+#Transform
+foreach $LINE (@LINEBUF )
+{
+
+	# Ignore comment lines beginning with '#'
+	next if ( $LINE =~ /^#/ );
+
+	# Check for $LEVEL_CHAR
+	$LEVEL = 0;
+	if( $LINE =~ /^$LEVEL_CHAR/ ){
+		$LEVEL = $LINE =~ s/$LEVEL_CHAR//g;
+	}
+
+	if( $LEVEL > 0 ){
+		# When we are writing the content, we want to remember
+		# whether we are writing the first line of content.
+		$HEADER = 1;
+	
+		if( $LEVEL == $LEVEL_LAST + 1 ){
+			# New sub chapter
+			$PREFIX[$LEVEL] = 1;
+		}
+		elsif( $LEVEL == $LEVEL_LAST ){
+			# Same chapter
+			$PREFIX[$LEVEL] ++;
+		}
+		elsif( $LEVEL < $LEVEL_LAST ){
+			# New main chapter
+			$PREFIX[$LEVEL] ++;
+		}
+		else{
+			die( "Error: Please check number around -$LINE-\n" ); 
+		}
+		
+		# Create prefix
+		$PRE_STR="";
+		for( $H = 1; $H <= $LEVEL; $H++ ){
+			$PRE_STR = $PRE_STR . $PREFIX[$H] . '.';
+		}
+
+		# Make sure that 1.2.3. becomes 1.2.3
+		if( ( $PRE_STR =~ s/\././g ) > 1 && $PRE_STR =~ /\.$/ ){
+			chop( $PRE_STR );
+		}
+
+		# Open/close list
+		if( $LEVEL >= 2 && $LEVEL > $LEVEL_LAST ){
+			push( @REGISTER, "<ul>");
+		}
+
+		if( $LEVEL < $LEVEL_LAST ){
+			for( $H = $LEVEL_LAST; $H > $LEVEL; $H-- ){
+				push( @REGISTER, "</ul>");
+			}
+		}
+
+		# Create register line with URL
+		$LINE_REG = "$REG_OPN_LEVEL1<a href=\"#toc$PRE_STR\">$PRE_STR $LINE</a>$REG_CLS_LEVEL1" if( $LEVEL == 1 );
+		$LINE_REG = "$REG_OPN_LEVEL2<a href=\"#toc$PRE_STR\">$PRE_STR $LINE</a>$REG_CLS_LEVEL2" if( $LEVEL >= 2 );
+
+		# Create content line with name
+		$LINE_CONT = "$CONT_HD_OPN_LEVEL1<a name=\"toc$PRE_STR\">$PRE_STR $LINE</a>$CONT_HD_CLS_LEVEL1" if( $LEVEL == 1 );
+		$LINE_CONT = "$CONT_HD_OPN<a name=\"toc$PRE_STR\">$PRE_STR $LINE</a>$CONT_HD_CLS" if( $LEVEL >= 2 );
+
+
+		# Add to register and content
+		push( @REGISTER, $LINE_REG  );
+
+		# When last line was content, then close paragraph
+		if( $CONTENT == 1 ){
+			$CONTENT = 0;
+			push( @CONTENT, "</p>" );
+		}
+		push( @CONTENT , "\n\n$LINE_CONT" );
+		
+		$LEVEL_LAST = $LEVEL;
+	}
+	else{
+		# ordinary line of content
+		$CONTENT = 1;
+		# When first content line, open paragraph
+		if( $HEADER == 1 ){
+			$HEADER = 0;
+			push( @CONTENT, "<p>" );
+		}	
+		push( @CONTENT, "$LINE" );
+	}
+}	
+
+# If LEVEL >= 2 then we still have an open list in the REGISTER
+# which we`ll close now.
+push( @REGISTER, "</ul>");
+
+
+
+# Prepare lists etc.
+# Open </ul> list in @REGISTER
+#push ( @REGISTER, "</ul></b>" );  
+
+
+# Output
+
+foreach $LINE (@REGISTER){
+	printf( "$LINE\n" );
+}
+
+printf("\n\n\n" );
+
+foreach $LINE (@CONTENT){
+        printf( "$LINE\n" );
+}
+

@@ -1,0 +1,262 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Using DCOP from the command line LG #97</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="oregan.html" >&lt;-- prev</A> | <A HREF="pramode.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Using DCOP from the command line</h1>
+<p id="by"><b>By <A HREF="../authors/oregan.html">Jimmy O'Regan</A></b></p>
+
+<p>
+<h2>Introduction</h2>
+
+<p>DCOP is KDE's IPC/RPC mechanism. If you understood that sentence, please feel free to skip the next paragraph.</p>
+
+<p>DCOP stands for Desktop COmmunications Protocol, IPC stands for Inter-Process Communication; RPC stands for Remote 
+Procedure Call. In essence, they are means by which two programs can communicate, whether on the same machine or across 
+a network. In this regard, DCOP is similar to Microsoft's OLE Automation: it provides a simple way for developers to 
+provide access to the functions available in an application.</p>
+
+<p>KDE was originally attempting to build a CORBA-based component system (the GNOME project originally started as this 
+project, but became a desktop project in a disagreement over the license the Qt widget set was using), but it was decided 
+that CORBA was too complicated, and two simpler systems were introduced; KParts, for embedded components; and DCOP.</p>
+
+<p>A DCOP enabled application registers at launch time with the DCOP daemon, and registers its functions. When queried, 
+the dcop daemon provides a list of running processes and the functions they provide. This enables a range of applications, 
+such as the DCOP browser, or the DCOP to XMLRPC daemon; but the one I'm going to look at is 'dcop', which allows shell 
+access to DCOP.</p>
+
+<p>Unlike other systems, such as GNOME's Bonobo or Microsoft's Automation, DCOP does not provide an activation system;
+only running processes are listed by DCOP. Activating the application is left up to the user.</p>
+
+<p>This article is about using DCOP to control KDE applications from the command line; links are provided at the end of the
+page to developer information for those who wish to delve deeper into this technology.</p>
+
+<h2>Using DCOP from the command line</h2>
+
+<p>The 'dcop' program provides command line access to the DCOP system. The syntax is:</p> 
+<pre>dcop [application] [object] [function] [arguments ...]</pre>
+
+<p>To see which applications are available, enter 'dcop' with no arguments</p>
+
+<pre>
+$ dcop
+khelpcenter
+kwin
+kicker
+kword-4354
+kded
+knotify
+kio_uiserver
+kalarmd
+kcookiejar
+konsole-4300
+korgac
+klauncher
+kdesktop
+klipper
+ksmserver
+</pre>
+
+<p>Let's have a look at klipper, the KDE clipboard service:</p>
+<pre>
+$ dcop klipper
+qt
+klipper
+</pre>
+
+<p>We can assume that klipper is the object we're looking for here; the default object (i.e., the one you want, to control
+the application) is normally given the same name as the application, with or without "IFace" appended, or is marked as
+"default":</p>
+<pre>
+$dcop klipper klipper
+QCStringList interfaces()
+QCStringList functions()
+QString getClipboardContents()
+void setClipboardContents(QString s)
+void clearClipboardContents()
+int newInstance()
+void quitProcess()
+</pre>
+
+<p>Now, I think the most interesting functions here are setClipboardContents and getClipboardContents. In fact, I've been 
+using setClipboardContents in a konsole window to add the shell output above:</p>
+<pre>dcop klipper klipper setClipboardContents "$(dcop klipper klipper)"</pre>
+
+<p>Now, to be honest, this isn't the best example, as it's a lot quicker to use the mouse than to type that, but it can 
+become a lot more useful if set as an alias, e.g.</p>
+<pre>alias klip="dcop klipper klipper setClipboardContents"</pre>
+
+<p>I've always thought it would be useful to have post-it notes available from the shell - DCOP makes that possible.</p>
+
+<pre>
+$dcop knotes KNotesIface
+QCStringList interfaces()
+QCStringList functions()
+int newNote(QString name,QString text)
+int newNoteFromClipboard(QString name)
+ASYNC showNote(int noteId)
+ASYNC hideNote(int noteId)
+ASYNC killNote(int noteId)
+QMap<int,QString> notes()
+ASYNC setName(int noteId,QString newName)
+ASYNC setText(int noteId,QString newText)
+QString text(int noteId)
+ASYNC sync(QString app)
+bool isNew(QString app,int noteId)
+bool isModified(QString app,int noteId)
+</pre>
+
+<p>So let's add a note:</p>
+<pre>dcop knotes KNotesIface newNote "A note" "Stuff I want to keep track of"</pre>
+
+<p>Sure enough, a bright yellow note pops up. </p>
+
+<p>Let's see what notes are available:</p>
+
+<pre>
+$dcop knotes KNotesIface notes
+1->A note
+</pre>
+
+<p>After adding a few more nonsense notes, maybe I want to have them in a text file, so I wrote a silly script to go 
+with a silly idea:</p>
+
+<pre>
+#!/bin/bash
+n=$(dcop knotes KNotesIface notes|awk -F- '{print $1}'|tail -1)
+dcop knotes KNotesIface notes &gt; $1
+echo &gt;&gt; $1
+for ((i=1;i<=$n;i++));do echo -n "$i: "; dcop knotes KNotesIface text $i;echo;done &gt;&gt; $1
+</pre>
+
+<h2>Summary</h2>
+
+<p>DCOP is a powerful means to control KDE applications. As more and more developers recognise its usefulness, we get 
+closer to a nice blend of desktop eye candy and scriptability.</p>
+
+<h2>Links</h2>
+<ul>
+<li><a href="http://developer.kde.org/documentation/library/kdeqt/dcop.html">Programming with DCOP</a>
+<li><a href="http://developer.kde.org/documentation/books/kde-2.0-development/ch13.html">Chapter from KDE 2.0 Development</a>
+</ul>
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<P>
+<img ALIGN="LEFT" ALT="[BIO]" SRC="../gx/2004/authors/oregan.jpg" class="bio">
+<em>
+<!-- ../110/lg_laundrette.html#nottag.15 :) -->
+Jimmy is a single father of one, who enjoys long walks... Oh, right.
+
+<p> Jimmy has been using computers from the tender age of seven, when his father 
+inherited an Amstrad PCW8256. After a few brief flirtations with an Atari ST
+and numerous versions of DOS and Windows, Jimmy was introduced to Linux in 1998
+and hasn't looked back.
+
+<p> In his spare time, Jimmy likes to play guitar and read: not at the same time, 
+but the picks make handy bookmarks.
+</em>
+<br CLEAR="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2003, Jimmy O'Regan. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 97 of Linux Gazette, December 2003
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="oregan.html" >&lt;-- prev</A> | <A HREF="pramode.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">December 2003 (#97)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/2003/sit3-shine.7-2.gif" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

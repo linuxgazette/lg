@@ -1,0 +1,245 @@
+<!--startcut ======================================================= -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<html>
+<head>
+<META NAME="generator" CONTENT="lgazmail v1.3E.e">
+<TITLE>The Answer Gang 58: More on: Shell Variable Scoping</TITLE>
+</HEAD><BODY BGCOLOR="#FFFFFF" TEXT="#000000"
+	LINK="#3366FF" VLINK="#A000A0">
+<!-- ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::: -->
+<P> <hr> 
+<CENTER>
+<!-- *** BEGIN navbar *** -->
+<!-- *** END navbar *** -->
+</CENTER>
+</p>
+<P> <hr> <P>
+<!-- ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::: -->
+<center>
+<H1><A NAME="answer">
+	<img src="../../gx/dennis/qbubble.gif" alt="(?)" 
+		border="0" align="middle">
+	<font color="#B03060">The Answer Gang</font>
+	<img src="../../gx/dennis/bbubble.gif" alt="(!)" 
+		border="0" align="middle">
+</A></H1> 
+<BR>
+<H4>By James T. Dennis,
+	<a href="mailto:tag@lists.linuxgazette.net">tag@lists.linuxgazette.net</a><BR>
+	LinuxCare,
+	<A HREF="http://www.linuxcare.com/">http://www.linuxcare.com/</A> 
+</H4>
+</center>
+
+<p><hr><p>
+<!--  endcut ======================================================= -->
+<!-- begin 10 -->
+<H3 align="left"><img src="../../gx/dennis/qbubble.gif" 
+	height="50" width="60" alt="(?) " border="0"
+	>More on: Shell Variable Scoping</H3>
+
+
+<p><strong>From Curtis J Blank on Mon, 04 Sep 2000  
+</strong></p>
+<p align="right">Answered by: Jim Dennis</p>
+<!-- ::
+More on: Shell Variable Scoping
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+:: -->
+<P><STRONG>
+Thanks for the answer, that did not dawn on me, I'm perfectly aware of
+how things exist in an environment and the need to export them. I guess
+I'd have to say it didn't dawn on me because of the fact that it works
+in a ksh environment on Solaris and Tru64 UNIX and I wasn't thinking
+along the lines of forked processes.
+</STRONG></P>
+<BLOCKQUOTE><IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	>
+You were observing the behavior without understanding the
+underlying mechanisms.
+</BLOCKQUOTE>
+<P><STRONG><IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	>
+I'm curious as to why it does work there though, what magic is the shell
+doing so that the variables exist that were used in the read when the
+forked read process no longer exists and control returns to the parent?
+Is the shell transposing the two commands and doing the read in the
+context of the parent and forking the function so that the variables
+remain?  ...
+</STRONG></P>
+<BLOCKQUOTE><IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	>
+You still don't understand.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+A pipe operator (|) indicates a<TT> fork()</TT>.  However, it
+doesn't necessitate an <tt>exec*()</tt>.  External commands require
+an <tt>exec*()</tt>.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+In the cases of newer ksh (Korn '93 and later?) and zsh
+the<TT> fork()</TT> is on the left of the pipe operator.  That is to
+say that the commands on the left of the operator are
+performed by a child process.  In the other cases the commands
+on the right are performed by the child.  In either case the
+child executes the commands and exits.  Meanwhile the parent
+parent executes the other set of commands and continues to live.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+Thus the question is whether the parent (current process) or a
+child will be sending data into pipes or reading data from
+each pipe.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+Arguably it makes more sense for the parent to receive data
+from the children, as the data is likely to be of persistent
+use.  Of course it also stands to reason that we may want to
+read the data into a variable --- or MORE IMPORTANTLY into a
+list of variables.  This is why the Korn shell (and zsh) model
+is better.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+In the case of a single variable we can always just restructure
+the command into a set of backtick operators (also known as a
+"command substitution expression").  For example:
+</BLOCKQUOTE>
+<BLOCKQUOTE><BLOCKQUOTE><CODE>
+foo | read bar
+</CODE></BLOCKQUOTE></BLOCKQUOTE>
+<BLOCKQUOTE>
+... can always be expressed as:
+</BLOCKQUOTE>
+<BLOCKQUOTE><BLOCKQuote><code>
+bar=$( foo )    # (or bar=`foo` in older shells and csh)
+</code></BLOCKQuote></BLOCKQUOTE>
+<BLOCKQUOTE>
+However this doesn't work for multiple variables:
+</BLOCKQUOTE>
+<BLOCKQUOTE><BLOCKQUOTE><CODE>
+foo | read bar bang
+</CODE></BLOCKQUOTE></BLOCKQUOTE>
+<BLOCKQUOTE>
+... cannot be  written in any command substitution form.
+Thus we end up trying to execute the rest our script inside of
+the subshell (enclosing the 'read bar bang' command in a set of
+braces or parentheses to group it with a series of other commands
+in our subshell), or we resort of saving all of command 'foo's
+output into one variable and and fussing with it.  That greatly
+limits the flexibility of the 'read' command and makes the IFS
+(inter-field separator: a list of characters on which token
+splitting will be done for the read command) variable almost
+worthless.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+One way to handle this would be to write the output of 'foo'
+to a temporary file, and then read with with simple re-direction:
+</BLOCKQUOTE>
+<BLOCKQUOTE><BLOCKQuote><code>
+foo &gt; /tmp/somefile.$$ ; read bar bang &lt; /tmp/somefile.$$
+</code></BLOCKQuote></BLOCKQUOTE>
+<BLOCKQUOTE>
+... but this introduces a host of potential race conditions and
+security issues; requires that we clean up the temp file, suggests
+that we should create a 'trap' (signal handler) to perform the
+cleanup even if we are hit with a deadly signal, and is generally
+inelegant.  We could also create a named pipe, but that has most
+of the same problems as a temporary file.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+So we end up using the process subsitution expression as
+I described (and as you mention below):
+</BLOCKQUOTE>
+<P><STRONG><IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	>
+... The real use of this technique is in the example script given
+that includes the function. I was able to get it to work when I did it
+per your suggestion:
+</STRONG></P>
+<Pre><STRONG>read a b c &lt; &lt;( dafunc )
+</STRONG></Pre>
+<P><STRONG>
+-Curt Blank
+</STRONG></P>
+<BLOCKQUOTE><IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	>
+Of course.  This is the same as '<tt>read a b c &lt; /tmp/somefile.$$</TT>'
+except that we are substituting a file for a filename.  Thus
+the <tt>&lt;( ... )</tt> expression returns a filename.  That file is a
+virtual file --- that is to say that it is a file descriptor
+connected to another process (just like a pipe) but it can be
+represented (on many UNIX systems, including Linux) as an entry
+under <TT>/def/fd/</TT> (the "file descriptor" directory).  Under Linux
+<TT>/dev/fd/</TT> is a symlink to <TT>/proc/self/fd.</TT>  Under other forms of
+UNIX it might have different underlying mechanics.  It might
+actually appear as a directory with a bunch of character mode
+device nodes or it might be some sort of virtual filesystem
+(like <TT>/proc</TT>, <TT>/dev/pts</TT>, etc).
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+I still think that bash should switch to the Korn shell
+semantics.  The <tt>&lt;(...)</tt> is sufficient to provide the features.
+However, it seems to be unique to bash.  For bash to offer the
+best portability it seems that it should conform to the latest
+Korn shell design.  (BTW: If the switch was to break some script
+that depended on the old semantics, on the subshell "leaning" to
+the right --- than that script was already broken under different
+versions of ksh.  However, I could certainly see a good argument
+for having a shell option (shopt?) that would set this back
+to the old semantics if that was necessary.  I have yet to see a
+case where the old semantics are actually more desirable than
+the new ones --- but I haven't really tried to find one either.
+</BLOCKQUOTE>
+
+<!-- sig -->
+
+<!-- end 10 -->
+<!--startcut ======================================================= -->
+<P> <hr> </p>
+<H5 align="center"><a href="http://www.linuxgazette.net/copying.html"
+	>Copyright &copy;</a> 2000, James T. Dennis 
+<BR>Published in the <I>Linux Gazette</I> Issue 58 October 2000</H5>
+<H6 ALIGN="center">HTML transformation  by
+	<A HREF="mailto:star@tuxtops.com">Heather Stern</a> of
+	Tuxtops, Inc.,
+	<A HREF="http://www.tuxtops.com/">http://www.tuxtops.com/</A> 
+</H6>
+<P> <hr> 
+<!-- begin tagnav ::::::::::::::::::::::::::::::::::::::::::::::::::-->
+<p align="center">
+<table width="100%" border="0"><tr>
+<td align="right" valign="center"
+	><IMG ALT="" SRC="../../gx/navbar/left.jpg"
+        WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="middle" border="0">
+<A HREF="../lg_answer58.html"
+	><IMG SRC="../../gx/dennis/answertoc.jpg" align="middle"
+              ALT="[ Answer Guy Current Index ]" border="0"></A></td>
+<td align="center" valign="center"><A HREF="../lg_answer58.html#greeting"><img align="middle"
+	src="../../gx/dennis/smily.gif" alt="greetings" border="0"></A> &nbsp;
+  <A HREF="1.html">1</A> &nbsp;
+  <A HREF="2.html">2</A> &nbsp;
+  <A HREF="3.html">3</A> &nbsp;
+  <A HREF="4.html">4</A> &nbsp;
+  <A HREF="5.html">5</A> &nbsp;
+  <A HREF="6.html">6</A> &nbsp;
+  <A HREF="7.html">7</A></td>
+<td align="left" valign="center"><A HREF="../../tag/kb.html"
+	><IMG SRC="../../gx/dennis/answerpast.jpg" align="middle"
+              ALT="[ Index of Past Answers ]" border="0"></A>
+<IMG ALT="" SRC="../../gx/navbar/right.jpg" align="middle"
+        WIDTH="14" HEIGHT="45" BORDER="0"></td></tr></table>
+</p>
+<!-- end tagnav ::::::::::::::::::::::::::::::::::::::::::::::::::::-->
+<P> <hr> 
+<CENTER>
+<!-- *** BEGIN navbar *** -->
+<!-- *** END navbar *** -->
+</CENTER>
+</p>
+<!-- ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::: -->
+</BODY></HTML>
+<!--endcut ========================================================= -->

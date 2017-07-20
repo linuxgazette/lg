@@ -1,0 +1,80 @@
+#include <linux/init.h>
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/sched.h>
+#include <linux/fs.h>
+#include <linux/spinlock.h>
+#include <asm/uaccess.h>
+
+static int major;
+static char *name = "foo";
+
+static unsigned volatile short count[2] = {0, 0};
+static unsigned volatile int prev_sum = 0, curr_sum = 0;
+
+#define N 0xfffffff
+
+int 
+foo_open(struct inode* inode, struct file *filp)
+{
+	return 0;
+}
+	
+ssize_t 
+foo_read(struct file *filp, char *buf, 
+	size_t n, loff_t *offp)
+{
+	unsigned int i;
+	for(i = 0; i < N; i++) {
+		curr_sum = count[1] + (count[0]<<16);
+		if(curr_sum < prev_sum) {
+			printk("error:curr=%x, prev=%x\n", curr_sum, prev_sum);
+			break;
+		}
+		prev_sum = curr_sum;
+	}
+	return 0;
+}
+
+ssize_t 
+foo_write(struct file *filp, const char *buf, 
+	size_t n, loff_t *offp)
+{
+	int i;
+	for(i = 0; i < N; i++) {
+		if (count[1] == 0xffff) {
+			count[1] = 0;
+			count[0]++;
+
+		} else  count[1]++;
+	}
+	
+	return n;	
+}
+
+struct file_operations fops = {
+		.open = foo_open, 
+		.read = foo_read, 
+		.write = foo_write
+};
+
+static int hello_init(void)
+{
+	printk("loading..\n");
+	major = register_chrdev(0,name, &fops);
+	printk("got major = %d\n", major);
+	if (major < 0) return major;
+	return 0;
+}
+
+static void hello_exit(void)
+{
+	unregister_chrdev(major, name);
+	printk("Hello cleaning up...\n");
+}
+
+module_init(hello_init);
+module_exit(hello_exit);
+
+MODULE_LICENSE("GPL");
+

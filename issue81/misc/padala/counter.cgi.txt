@@ -1,0 +1,144 @@
+#!/usr/local/bin/perl -wT
+##---------------------------------------------------------------------------##
+##  Author:
+##      Pradeep Padala, ppadala@cise.ufl.edu
+##  Description:
+##      Program to create a graphical counter
+##---------------------------------------------------------------------------##
+##    Copyright (C) 2002 Pradeep Padala, ppadala@cise.ufl.edu
+##
+##    This program is free software; you can redistribute it and/or modify
+##    it under the terms of the GNU General Public License as published by
+##    the Free Software Foundation; either version 2 of the License, or
+##    (at your option) any later version.
+##
+##    This program is distributed in the hope that it will be useful,
+##    but WITHOUT ANY WARRANTY; without even the implied warranty of
+##    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+##    GNU General Public License for more details.
+##
+##    You should have received a copy of the GNU General Public License
+##    along with this program; if not, write to the Free Software
+##    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
+##    02111-1307, USA
+##---------------------------------------------------------------------------##
+
+use CGI ':standard';
+use GD;
+use strict;
+
+my($LOCK_SH, $LOCK_EX, $LOCK_NB, $LOCK_UN);
+
+$LOCK_SH = 1;
+$LOCK_EX = 2;
+$LOCK_NB = 4;
+$LOCK_UN = 8;
+
+select(STDOUT);
+$| = 1;
+
+&main;
+
+sub main {
+    my($id, $iformat, $show);
+
+    $id = param("id");
+    $iformat = param("iformat");
+    
+    my($counter_value);
+    $counter_value = &update_counter_value($id);
+
+    chomp($counter_value);
+    if($iformat eq "jpg" || $iformat eq "png") {
+        &print_counter($iformat, $counter_value);
+    }
+    else {
+        &print_error_image("Image format $iformat not supported");
+    }
+}
+
+sub print_counter {
+    my($iformat, $counter_value) = @_;
+    my($COUNTER_SIZE) = 4;
+
+    my($im) = GD::Image->new("${iformat}s/0.${iformat}");
+    if(!defined($im)) {
+        &print_error_image("\$im couldn't be initialized");
+        exit;
+    }
+
+    my($w, $h) = $im->getBounds();
+    undef $im;
+    
+    my($printim) = GD::Image->new($w * $COUNTER_SIZE, $h);
+    $printim->colorAllocate(255, 255, 255);
+
+    my($pos, $l, $temp, $digit, $x, $srcim);
+    $x = 0;
+    for($pos = $COUNTER_SIZE - 1; $pos >= 0; $pos--) {
+        if($pos > length($counter_value) - 1) {
+            $digit = 0;
+        }
+        else {
+            $l = length($counter_value);
+            $temp = $l - $pos - 1;
+            $digit = substr($counter_value, $temp, 1);
+        }
+        $srcim = GD::Image->new("${iformat}s/${digit}.${iformat}");
+        $printim->copy($srcim, $x, 0, 0, 0, $w, $h);
+        $x += $w;
+        undef $srcim;
+    }
+    if($iformat eq "jpg") {
+        print "Content-type: image/jpeg\n\n";
+        print $printim->jpeg(100);
+    }
+    else {
+        print "Content-type: image/png\n\n";
+        print $printim->png;
+    }
+}
+
+sub print_error_image {
+
+    my $error_string = $_[0];
+    my $im = new GD::Image(
+    gdMediumBoldFont->width * length($error_string), 
+    gdMediumBoldFont->height);
+
+    $im->colorAllocate(255, 255, 255);
+    my $red = $im->colorAllocate(255, 0, 0);
+    $im->string(gdMediumBoldFont, 0, 0, $error_string, $red);
+    print "Content-type: image/jpeg\n\n";
+    print $im->jpeg(100); 
+    exit;
+}
+
+sub update_counter_value {
+    my($file_name, $counter_value);
+
+    $file_name = "$_[0].counter"; 
+    if ($file_name =~ /^([-\@\w.]+)$/) {   # For the tainting stuff
+        $file_name = $1;
+    }
+    else {
+        exit; # Should never happen
+    }
+    if(open(COUNTERFILE, "+<$file_name") == 0) {
+        # Getting accessed for the first time
+        open(COUNTERFILE, ">$file_name");
+        print COUNTERFILE "1";
+        close(COUNTERFILE);
+        return 1;
+    }
+    
+    flock(COUNTERFILE, $LOCK_EX);
+    $counter_value = <COUNTERFILE>;
+    seek(COUNTERFILE, 0, 0);
+    ++$counter_value;
+    print COUNTERFILE $counter_value;
+    flock(COUNTERFILE, $LOCK_UN);
+
+    close(COUNTERFILE);
+    return($counter_value - 1);
+}

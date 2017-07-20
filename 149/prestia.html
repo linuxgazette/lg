@@ -1,0 +1,441 @@
+<!DOCTYPE html
+	PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+	 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="utf-8" xml:lang="utf-8">
+<head>
+<title>Joey's Notes: Setting Up Disk Quotas LG #149</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link rel="stylesheet" href="../lg.css" type="text/css" media="screen, projection"  />
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<!-- link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" / -->
+<link rel="shortcut icon" href="../favicon.ico" />
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+</head>
+<body>
+
+<a href="../">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+<div id="navigation">
+<table summary="masthead" width="100%">
+<tr>
+<td align="center" colspan="3" style="font-size: 10px; font-weight: bold">
+<a href="../index.html">Home</a>
+<a href="http://linuxgazette.net">Main Site</a>
+<a href="../faq/index.html">FAQ</a>
+
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/mailman/listinfo/">Mailing Lists</a>
+<a href="../jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+<hr width="99%" style="border: 1px inset #000033">
+</td>
+</tr>
+<tr>
+<td width="40%" align="left" style="font-size: 10px; font-weight: bold">
+The Free International Online Linux Monthly
+</td>
+<td width="20%" align="center" style="font-size: 10px; font-weight: bold">
+ISSN: 1934-371X
+</td>
+<td width="40%" align="right" style="font-size: 10px; font-weight: bold">
+Main site: <a href="http://linuxgazette.net">http://linuxgazette.net</a> 
+</td>
+</table>
+</div>
+
+
+<div id="breadcrumbs1">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">April 2008 (#149)</a> &gt; 
+Article
+
+</div>
+
+<div class="articlecontent1">
+<div class="content">
+
+<div id="previousnexttop">
+<A HREF="pfeiffer.html" >&lt;-- prev</A> | <A HREF="unnikrishnan.html" >next --&gt;</A>
+</div>
+
+<h1>Joey's Notes: Setting Up Disk Quotas</h1>
+<p id="by"><b>By <a href="../authors/prestia.html">Joey Prestia</a></b></p>
+
+<img src="../../gx/minilogos/joeys_notes.png" alt="Joey's Notes image" align="left" />
+
+<p>
+Setting up disk quotas for users and groups is very important - critically
+necessary, in fact, if you don't want to run out of room on the server you
+are maintaining. They are commonly used for machines run as Web servers
+with ftp access, to prevent any one client from uploading beyond the amount
+of space that they have purchased in their contract. Disk quotas can also
+be used on Samba servers for users' home directories and NFS filesystems.
+Your Linux server can easily be configured to keep your users within
+specified limits and to keep them from filling up the partition. Some
+people will surf the Internet and download videos and mp3s carelessly
+during their lunch breaks, running other users out of space for their work
+files. To prevent this kind of activity, we set up user and group quotas to
+keep the users within boundaries.  </p> 
+
+<p>
+Quotas are set on a per-partition basis, so, if we were going to set them
+up on a Web server (or NFS or Samba server), we need to find out if the
+area we are concerned with is on its own partition. In this tutorial, we
+will examine an ordinary setup with multiple users.
+</p> 
+
+<p>
+The first step is to find out if our home partition is on a separate
+partition - on most production servers, it is on its own partition (a
+dedicated partition). So, let's see what our partitioning looks like.  </p> 
+
+<pre>
+[root@station17 ~]# df -h
+Filesystem            Size  Used Avail Use% Mounted on
+/dev/sda3             2.9G  205M  2.6G   8% /
+/dev/sda1             289M   17M  258M   6% /boot
+none                 1013M     0 1013M   0% /dev/shm
+/dev/sda5             2.0G   36M  1.9G   2% /tmp
+/dev/sda2             9.7G  6.2G  3.1G  67% /usr
+/dev/sda7             2.0G  239M  1.6G  13% /var
+/dev/sda8             9.2G   54M  8.7G   1% /home
+[root@station17 ~]#
+</pre> 
+
+<p>
+As you can see from the example above, <code>/home</code> is on a dedicated
+partition.  We now need to put the mount options into the filesystem table,
+<code>/etc/fstab</code>, so whenever the system gets rebooted the quotas
+are still active.  </p>
+
+<pre>
+[root@station17 ~]#  vi /etc/fstab
+
+ # This file is edited by fstab-sync - see 'man fstab-sync' for details
+LABEL=/1                 /          ext3     defaults                        1 1
+LABEL=/boot              /boot      ext3     defaults                        1 2
+none                     /dev/pts   devpts   gid=5,mode=620                  0 0
+none                     /dev/shm   tmpfs    defaults                        0 0
+LABEL=/home              /home      ext3     defaults,usrquota,grpquota      1 2
+none                     /proc      proc     defaults                        0 0
+none                     /sys       sysfs    defaults                        0 0
+LABEL=/tmp               /tmp       ext3     defaults                        1 2
+LABEL=/usr               /usr       ext3     defaults                        1 2
+LABEL=/var               /var       ext3     defaults                        1 2
+LABEL=SWAP-sda6          swap       swap     defaults                        0 0
+/dev/scd0    /media/cdrecorder      auto     pamconsole,exec,noauto,managed  0 0
+
+[root@station17 ~]#
+</pre> 
+
+<p>
+In the above example, you can see where I added <code>usrquota</code> and <code>grpquota</code> to
+the mount options line, in fstab. Now, to enable use of these extra
+options, we need to remount <code>/home</code> with these new options enabled.  </p>
+
+<pre>
+[root@station17 ~]# mount -v -o remount /home
+/dev/sda8 on /home type ext3 (rw,usrquota,grpquota)
+[root@station17 ~]#
+</pre> 
+
+<p>
+Here, we can see that <code>/home</code> has been remounted with the
+additional options of user quotas and group quotas. Using the 'quotacheck'
+command, we create our initial disk quota file. Once this command is run,
+it will create two files located in the <code>/home</code> directory, named
+<code>aquota.user</code> and <code>aquota.group</code>.  They are binary
+files that store our quotas. We will want to run it with '-cug' as the
+command-line options: the 'c' is to perform a new scan and save it to disk,
+the 'u' is for user, and 'g' stands for group. Then, we will turn quotas on
+with the 'quotaon' command, specifying which partition we want to activate
+quotas on.  </p>
+
+<pre>
+[root@station17 ~]# quotacheck -cug /home
+[root@station17 ~]# quotaon /home
+[root@station17 ~]#
+</pre> 
+
+<p>
+At this point, we can edit the users' quotas with the 'edquota' command.
+This will bring up the 'vi' editor, and we will see some columns that need
+a little explaining. The blocks represent the limits for soft and hard size
+quotas, and the inodes column is for a quota configuration based on the
+number of files a user may create. The soft limit may be exceeded for a
+defined grace period, but hitting the hard limit will stop a user dead.
+</p>
+
+<p>
+Let's create a user and restrict them to a set of quotas, just to see just
+how this works. We'll add a user named "sally", and since she 
+won't be logging in, we won't give her a password. Next, we
+will use the 'edquota' command to edit her quotas and give her some disk
+space limits - say, 10 MB soft and 12 MB hard - and write our changes.  </p>
+
+<pre>
+[root@station17 ~]# useradd sally
+[root@station17 ~]# edquota sally
+Disk quotas for user sally (uid 502):
+  Filesystem                   blocks       soft       hard     inodes     soft     hard
+  /dev/sda8                        24      10000      12000          6        0        0
+~
+~
+</pre>
+
+<p>
+Now, sally has a 10MB soft and 12MB hard limit, so we want to switch to
+that account and start creating some data. We can do this with the 'dd'
+command and <code>/dev/zero</code> to see how this works. The 'dd' command
+copies data at a low level, and we will use it here to create a file
+quickly.  </p> 
+
+<pre>
+[root@station17 ~]# su - sally
+[sally@station17 ~]$ dd if=/dev/zero of=data bs=1k count=9500
+9500+0 records in
+9500+0 records out
+9728000 bytes (9.7 MB) copied, 0.0220105 s, 442 MB/s
+[sally@station17 ~]$ 
+[sally@station17 ~]$ quota
+Disk quotas for user sally (uid 502):
+     Filesystem  blocks   quota   limit   grace   files   quota   limit   grace
+      /dev/sda8    9544   10000   12000               8       0       0
+[sally@station17 ~]$
+</pre>
+
+<p>
+Here, sally checks her quota, and can see she still has more room to play,
+since no warning so far or anything else, so let's make some more data,
+and see if we get a warning.  </p>
+
+<pre>
+[sally@station17 ~]$ dd if=/dev/zero of=moredata bs=1k count=500
+sda8: warning, user block quota exceeded.
+500+0 records in
+500+0 records out
+512000 bytes (512 kB) copied, 0.0034606 s, 148 MB/s
+[sally@station17 ~]$
+</pre>
+
+<p>
+This time, we get a warning. Let's see what our quota would look like if
+we were user sally.  </p>
+
+<pre>
+[sally@station17 ~]$ quota
+Disk quotas for user sally (uid 502):
+     Filesystem  blocks   quota   limit   grace   files   quota   limit   grace
+      /dev/sda8   10048*  10000   12000   7days       9       0       0
+[sally@station17 ~]$
+</pre>  
+
+<p>
+Looking at our quota file, we can see we have a grace period that has now
+come in to play. Sally has seven days to get under her limit. However,
+let's say that sally ignores this -- she doesn't care -- and creates
+another file, let's say 3MB, which would put us past our hard limit.
+Shall we see what happens?  </p>
+
+<pre>
+[sally@station17 ~]$ dd if=/dev/zero of=file bs=1k count=3000
+sda8: write failed, user block limit reached.
+dd: writing `file': Disk quota exceeded
+1949+0 records in
+1948+0 records out
+1994752 bytes (2.0 MB) copied, 0.0251631 s, 79.3 MB/s
+[sally@station17 ~]$ quota
+Disk quotas for user sally (uid 502):
+     Filesystem  blocks   quota   limit   grace   files   quota   limit   grace
+      /dev/sda8   12000*  10000   12000            10       0       0
+[sally@station17 ~]$
+</pre>  
+
+<p>
+We can see that sally wrote up to and past the soft limit, since she is
+given a grace period by default - but the hard limit stopped her careless
+activity cold.  It's a good idea to get familiar with disk quotas, since
+they are very common in an enterprise environment, and you will most
+definitely run into them.
+</p>
+
+<p>
+If you have, say, 15 users in a department that
+will all be working on the same project, a group quota would be in order.
+What if we had just 15 users who were in the same department, but working
+separately on different stuff, and were all supposed to get the same
+quota? We could use the 'edquota -up' command to copy sally's quotas to
+the other users. We could then use the 'repquota' command to see our
+users' imposed quota statistics. Let's add a couple of extra
+users and then try this out. Once again, we are not giving these users
+passwords, because this is just a demonstration.  </p>
+
+<pre>
+[sally@station17 ~]$ su -
+Password:
+[root@station17 ~]# useradd tom 
+[root@station17 ~]# useradd dick
+[root@station17 ~]# useradd harry
+</pre>
+
+<p>
+Now that we added some users, we can copy sally's quota to the new users
+on the system.  </p>
+
+<pre>
+[root@station17 ~]# edquota -up sally tom harry
+</pre>
+
+<p>
+Here, we can verify that the users' quotas have been carried over to the
+users we selected on the system.  </p>
+
+<pre>
+[root@station17 ~]# repquota -u /home
+*** Report for user quotas on device /dev/sda8
+Block grace time: 7days; Inode grace time: 7days
+                        Block limits                File limits
+User            used    soft    hard  grace    used  soft  hard  grace
+----------------------------------------------------------------------
+root      --   69832        0       0            4     0     0
+sally     +-   11996    10000   12000  5days    10     0     0
+tom       --      48    10000   12000           12     0     0
+dick      --      24        0       0            6     0     0
+harry     --      24    10000   12000            6     0     0
+</pre>
+
+<p>
+Here, we can see that the imposed limits on sally were copied to the
+other users, and we can see our users' current statistics: space
+used (blocks), soft and hard limits, even the files used (inodes) and
+grace periods.  </p>
+
+<p>
+In addition, users who exceed their quotas will usually not be able to
+run the X Window System, and if they are running X, they would likely have
+other problems, like launching browsers and such.  When copying user
+quotas, remember that if you copy a user's quotas to another user that has
+been on the system for a while, they may be instantly put over the limit,
+so this is an important thing to be aware of. You should always check a
+user's disk usage, if they are an existing user. Another point to be
+aware of - if the filesystem has quotas already on, be sure to turn them
+off prior to executing a quotacheck, because it may damage things.  </p>
+
+<p>
+Commands:
+</p>
+	
+<pre>
+	quotacheck -- scan a filesystem for disk usage, create, check, and repair quota files
+	quotaon ----- turn filesystem quotas on 
+	quotaoff ---- turn filesystem quotas off
+	edquota ----- edit user quotas
+	repquota ---- prints a report of users quota statistics
+	quota ------- command to check quota and disk usage statistics
+</pre>
+
+
+
+<script type='text/javascript'>
+digg_url = 'http://linuxgazette.net/149/prestia.html';
+digg_title = 'Joey\'s Notes: Setting Up Disk Quotas';
+digg_bodytext = '<p> Setting up disk quotas for users and groups is very important - critically necessary, in fact, if you don\'t want to run out of room on the server you are maintaining. They are commonly used for machines run as Web servers with ftp access, to prevent any one client from uploading beyond the amount of space that they have purchased in their contract. Disk quotas can also be used on Samba servers for users\' home directories and NFS filesystems. Your Linux server can easily be configured to keep your users within specified limits and to keep them from filling up the partition. Some people will surf the Internet and download videos and mp3s carelessly during their lunch breaks, running other users out of space for their work files. To prevent this kind of activity, we set up user and group quotas to keep the users within boundaries.  </p>  ';
+digg_topic = 'linux_unix';
+</script>
+<script src="http://digg.com/tools/diggthis.js" type="text/javascript"></script>
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:149/prestia.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/authors/prestia.jpg" class="bio">
+</p>
+
+<em>
+<p>
+Joey was born in Phoenix and started programming at the age fourteen on
+ a Timex Sinclair 1000. He was driven by hopes he might be able to do
+ something with this early model computer. He soon became proficient in
+ the BASIC and Assembly programming languages. Joey became a programmer
+ in 1990 and added COBOL, Fortran, and Pascal to his repertoire of
+ programming languages. Since then has become obsessed with just about
+ every aspect of computer science. He became enlightened and discovered
+ RedHat Linux in 2002 when someone gave him RedHat version six. This 
+ started off a new passion centered around Linux. Currently Joey is 
+ completing his degree in Linux Networking and working on campus
+ for the college's RedHat Academy in Arizona. He is also on the staff of
+ the Linux Gazette as the Mirror Coordinator.
+</p>
+
+
+
+</em>
+
+<br clear="all">
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2008, Joey Prestia. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication License</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 149 of Linux Gazette, April 2008
+</p>
+
+</div>
+
+<div id="previousnextbottom">
+<A HREF="pfeiffer.html" >&lt;-- prev</A> | <A HREF="unnikrishnan.html" >next --&gt;</A>
+</div>
+
+</div>
+</div>
+
+<script src="http://www.google-analytics.com/urchin.js"
+type="text/javascript">
+</script>
+<script type="text/javascript">
+_uacct = "UA-1204316-1";
+urchinTracker();
+</script>
+
+
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+</body>
+</html>
+

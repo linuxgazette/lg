@@ -1,0 +1,95 @@
+#!/usr/bin/perl
+
+use CGI;
+
+print "Content-type: text/html\n\n\n";
+
+my $Home = "/usr/local/apache2/htdocs/fax";
+my $Source = "$Home/source";
+my $Archives = "$Home/archives";
+my $AB_Archives = "$Home/ab";
+my $Display = "$Home/display";
+my $Home_Archives = "$Home/home";
+
+`mkdir -p $Source`;
+`mkdir -p $Archives`;
+`mkdir -p $Display`;
+`rsync -av /var/spool/fax/incoming/fax* $Source`;
+`mkdir -p $AB_Archives`;
+
+#------------------------------------
+my @Files = <$Source/fax*>;
+foreach my $File (@Files) 
+  {
+#  print "$File\n";
+  my (@Temp) = split(/\//, $File);
+  my $File_Name = pop @Temp;
+  if (!(-e "$Archives/$File_Name\.pdf"))
+    {
+    print "<br>Processing new fax: $File\n";
+    my $Command = "tiff2ps $File > $Archives/$File_Name\.ps";
+#    print "$Command\n"; 
+    `$Command`;
+    my $Command = "/usr/bin/ps2pdf $Archives/$File_Name\.ps $Archives/$File_Name\.pdf";
+#    print "$Command\n";
+    `$Command`;
+    `cp $Archives/$File_Name\.pdf $Display/$File_Name\.pdf`;
+
+    }
+  }
+
+#---------------------------------------
+my $query = new CGI;
+my $Action = $query->param('action');
+my $File = $query->param('file');
+$File =~ s/[^a-zA-Z0-9\_\.]//g;
+
+if (!(-e "$Display/$File")) {}
+elsif ($Action eq "archive") 
+  {
+  print "<br>Archiving $File\n";
+  `rm -f $Display/$File`;
+  }
+elsif ($Action eq "archive2")
+  {
+  print "<br>Archiving $File\n";
+  `cp $Display/$File $AB_Archives/`;
+  `rm -f $Display/$File`;
+  }
+elsif ($Action eq "archive_home")
+  {
+  print "<br>Archiving $File\n";
+  `cp $Display/$File $Home_Archives/`;
+  `rm -f $Display/$File`;
+  }
+
+
+print qq(<hr><a href="archives/">Archives</a> -- might be password protected.
+<br><a href="home/">Home Archives</a> -- might be password protected.
+<br><a href="ab/">Audioboomerang Archives</a>\n);
+
+my $Table_Entries = "";
+my @Files = <$Display/fax*>;
+foreach my $File (sort @Files)
+  {
+  my (@Temp) = split(/\//, $File);
+  my $File_Name = pop @Temp;
+  my $Link = "<a href='display/$File_Name'>$File_Name</a>";
+  my $Delete = "<a href='fax.pl?action=archive&file=$File_Name'>archive file</a>";
+  my $AB ="<a href='fax.pl?action=archive2&file=$File_Name'>archive to AB</a>";
+  my $Home ="<a href='fax.pl?action=archive_home&file=$File_Name'>archive for Home</a>";
+
+  $Table_Entries .= qq(<tr><td>$Link</td><td>$Delete</td><td>$Home</td><td>$AB</td></tr>\n);
+  }
+
+print "<table border=1><tr><th>View Fax</th><th>Archive the Fax</th>
+<th>Archive to AudioBoomerang</th></tr>\n";
+print $Table_Entries;
+print "</table>\n";
+
+if (@Files < 1) {print "<h1> No faxes or they are all archived.</h1>\n";}
+
+
+
+
+

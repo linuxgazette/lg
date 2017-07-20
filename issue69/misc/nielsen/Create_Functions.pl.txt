@@ -1,0 +1,247 @@
+#!/usr/bin/perl
+
+#              Create Functions for Perl/PostgreSQL version 0.1
+
+#                       Copyright 2001, Mark Nielsen
+#                            All rights reserved.
+#    This Copyright notice was copied and modified from the Perl 
+#    Copyright notice. 
+#    This program is free software; you can redistribute it and/or modify
+#    it under the terms of either:
+
+#        a) the GNU General Public License as published by the Free
+#        Software Foundation; either version 1, or (at your option) any
+#        later version, or
+
+#        b) the "Artistic License" which comes with this Kit.
+
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See either
+#    the GNU General Public License or the Artistic License for more details.
+
+#    You should have received a copy of the Artistic License with this
+#    Kit, in the file named "Artistic".  If not, I'll be glad to provide one.
+
+#    You should also have received a copy of the GNU General Public License
+#   along with this program in the file named "Copying". If not, write to the 
+#   Free Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 
+#    02111-1307, USA or visit their web page on the internet at
+#    http://www.gnu.org/copyleft/gpl.html.
+
+use strict;
+
+  ### We want to define some variables WHICH YOU SHOULD CHANGE FOR YOUR
+  ### OWN COMPUTER. 
+my $Home = "/tmp/testdir";
+my $File = "$Home/Tables.txt";
+my $Template = "$Home/Generic.fun";
+my $Custom = "$Home/Custom.sql";
+my $Database = "testdatabase";
+ 
+#------------------------------------------------------------------------
+
+my @List = @ARGV;
+
+  ## Let us create the two directories we need if they are not there. 
+if (!(-e "$Home/Tables")) {system "mkdir -p $Home/Tables"}
+if (!(-e "$Home/Backups")) {system "mkdir -p $Home/Backups"}
+
+  ### Open up the template for the functions and the file that contains
+  ### the info to create the tables. 
+open(FILE,$Template); my @Template = <FILE>; close FILE;
+open(FILE,$File); my @File = <FILE>; close FILE;
+open(FILE,$Custom); my @Custom = <FILE>; close FILE;
+
+  ### Filter out lines that have no numbers or letters. 
+@File = grep($_ =~ /[a-z0-9]/i, @File);
+  ### Get rid of any line which contains a #
+@File = grep(!($_ =~ /\#/), @File);
+  ### Get rid of the newline. 
+grep(chomp $_, @File);
+  ### Get rid of tabs and replace with spaces. . 
+grep($_ =~ s/\t/ /g, @File);
+  ### Convert all multiple spaces to one.  
+grep($_ =~ s/  +/ /g, @File);
+  ### Next two lines get rid of spaces and front and end.  
+grep($_ =~ s/^ //g, @File);
+grep($_ =~ s/ $//g, @File);
+  ### Delete any commas at the end, we will put them back on later. 
+grep($_ =~ s/\,$//g, @File);
+
+my $Tables = {};
+my $TableName = "";
+  ### For each line in the file, either make a new array for the table, 
+  ### or store the lines in the array for a table.  
+foreach my $Line (@File)  
+  {
+  my $Junk = "";
+    ### If the line starts with "TABLENAME" then create a new array. 
+  if ($Line =~ /^TABLENAME/) 
+    {
+    ($Junk,$TableName, $Junk) = split(/ /,$Line);
+       ### This creates the aray for the table. 
+    $Tables->{$TableName} = [];
+    }
+  else 
+    {
+       ### Storing lines for the table. 
+    push (@{$Tables->{$TableName}}, $Line) ;
+    }
+  }
+
+    ### If we listed specific tables, then only do those. 
+  if (@List) 
+    {
+    foreach my $TableName (sort keys %$Tables)
+      { if (!(grep($_ eq $TableName, @List))) {delete $Tables->{$TableName};} }
+    }
+
+  ### Get the keys of the reference to an array $Tables
+  ### and get the data for that array, create our file, and then use the file. 
+foreach my $TableName (sort keys %$Tables) 
+  {
+  my @Temp = @{$Tables->{$TableName}};
+
+  my $Backup_Columns = "";  my $Backup_Values = ""; my $Update_Fields = "";
+  my $Field_Copy_Values = "";  my $FieldTypes = "";
+  my $CleanVariables = ""; my $RemakeVariables = ""; 
+    ### The two tables are different in one respect, the backup table 
+    ### does not require uniqueness and it doesn't use a sequence.  
+  my $Table = qq($TableName\_id int4 NOT NULL UNIQUE DEFAULT nextval('$TableName\_sequence'),
+    date_updated  timestamp NOT NULL default CURRENT_TIMESTAMP,
+    date_created  timestamp NOT NULL default CURRENT_TIMESTAMP,
+    active int2 CHECK (active in (0,1)) DEFAULT 0,
+);
+    ## I should allow null for the id instead of 0, but since the sequence
+    ### starts at 1, I use 0 as null. I hate nulls.  
+  my $Table_Backup = qq(backup_id int4 NOT NULL UNIQUE DEFAULT nextval('$TableName\_sequence_backup'), 
+    $TableName\_id int4 NOT NULL DEFAULT 0,
+    date_updated  timestamp NOT NULL default CURRENT_TIMESTAMP,
+    date_created  timestamp NOT NULL default CURRENT_TIMESTAMP,
+    active int2 CHECK (active in (0,1)) DEFAULT 0,
+    );
+
+  print "Creating functions for table '$TableName'\n";
+  my $No = 1;
+    ### For each line for this table do this. 
+    ### We want to create a few variables that are going to be placed into
+    ### the template.  
+  foreach my $Line (@Temp) 
+    {
+    $Table .= "$Line,\n";
+    $Table_Backup .= "$Line,\n";
+    my ($Name,$Type,$Ext) = split(/ /,$Line,3);
+      ### The backup columns
+    $Backup_Columns .= ", $Name"; 
+      ### The update fields
+    $No++; $Update_Fields .= ", $Name = var_$No"; 
+      ### Backup values
+    $Backup_Values .= ", record_backup.$Name";
+      ### Now the fields when we copy stuff in the cyop function. 
+    $Field_Copy_Values .= ", clean_text(record2.$Name)";
+      ### Now the field types for the update function. 
+    $FieldTypes .= ", $Type";
+      ### We need to define the variables for the updating function.
+    $CleanVariables .= "          var_$No $Type;\n";
+      ### We need to define the type, I only check for text and int4 for now. 
+    my $Temp = "\$$No";  
+    if ($Type eq "int4") {$Temp = "clean_numeric($Temp)";}
+    elsif  ($Type eq "text") {$Temp = "clean_text($Temp)";}
+      ### Now we need to set the variables. 
+    $RemakeVariables .= "         var_$No := $Temp;\n";
+
+     ### We also need to add the function to clean out he variables before
+     ### they are submitted. 
+    }
+   ### Record how many rows we had. Make a line for the update command for
+   ### testing. 
+  my $Number_Of_Rows = $No;
+  my $Update_Test = "1";
+  for (my $i = 1; $i < $Number_Of_Rows - 1; $i++) {$Update_Test .= ",$i";}
+
+    ### We need to chop off the last comma. 
+  chomp $Table; chop $Table; chomp $Table_Backup; chop $Table_Backup;
+    ### Now let us setup dropping and creating of the table and backup table. 
+  my $Tables = qq(drop table $TableName;\ncreate table $TableName (\n$Table\n);); 
+  $Tables .= "drop table $TableName\_backup;\n";
+  $Tables .= "create table $TableName\_backup (\n$Table_Backup, error_code text NOT NULL DEFAULT ''\n);\n";
+    ### Let us create a view for active stuff in our table. 
+  $Tables .= "drop view $TableName\_active;\n";
+  $Tables .= "create view $TableName\_active as select * from $TableName
+        where active = 1;\n";
+    ### Create a view for inactive or deleted items. 
+  $Tables .= "drop view $TableName\_deleted;\n";
+  $Tables .= "create view $TableName\_deleted as select * from $TableName
+        where active = 0;\n";
+    ### Create a view for a list of unique backup ids. 
+  $Tables .= "drop view $TableName\_backup_ids;\n";
+  $Tables .= "create view $TableName\_backup_ids as 
+           select distinct $TableName\_id from $TableName\_backup;\n";
+    ### Create a list of purged data (lastest data per id).  
+  $Tables .= "drop view $TableName\_purged;\n";
+  $Tables .= "create view $TableName\_purged as
+   select * from $TableName\_backup where oid = ANY (
+     select max(oid) from $TableName\_backup where $TableName\_id = ANY
+        (
+        select distinct $TableName\_id from $TableName\_backup
+          where $TableName\_backup.error_code = 'purge'
+           and NOT $TableName\_id = ANY (select $TableName\_id from $TableName)
+        )
+        group by $TableName\_id
+     )
+    ;\n";
+
+     ### I use grep commands to search and replace stuff for arrays.
+     ### I could use map, but I like greps.  
+  my @Temp = @Template;
+     ### now add the custom sql commands. 
+  push (@Temp,@Custom);
+
+  grep($_ =~ s/TABLENAME/$TableName/g, @Temp);
+  grep($_ =~ s/BACKUPCOLUMNS/$Backup_Columns/g, @Temp);
+  grep($_ =~ s/BACKUPVALUES/$Backup_Values/g, @Temp);
+  grep($_ =~ s/UPDATEFIELDS/$Update_Fields/g, @Temp);
+  grep($_ =~ s/COPYFIELDS/$Field_Copy_Values/g, @Temp);
+  grep($_ =~ s/FIELDS/$FieldTypes/g, @Temp);
+  grep($_ =~ s/HOME/$Home/g, @Temp);
+  grep($_ =~ s/CLEANVARIABLES/$CleanVariables/g, @Temp);
+  grep($_ =~ s/REMAKEVARIABLES/$RemakeVariables/g, @Temp);
+
+    ### Now move the stuff from the array @Temp to @Template_Copy.
+  my @Template_Copy = @Temp;
+
+    ### Now we save the file. We won't delete it (unless you run this script
+    ### again) so that we can figure out what was done.  
+  open(FILE,">$Home/Tables/$TableName\.table_functions");
+    ### Create the sequence for the table . 
+  print FILE "drop sequence $TableName\_sequence;\n";
+  print FILE "create sequence $TableName\_sequence;\n";
+  print FILE "drop sequence $TableName\_sequence_backup;\n";
+  print FILE "create sequence $TableName\_sequence_backup;\n";
+    ### Print out the table and backup table.   
+  print FILE $Tables;
+    ### Print out the 4 functions, insert, delete, update, and copy. 
+  foreach my $Temp (@Template_Copy) {print FILE "$Temp";} 
+
+  close FILE;
+
+    ### Before we execute, let us backup the table in case some novice 
+    ### executes this on a live server. 
+  my $Backup_File = "$Home/Backups/$TableName\_0.backup";
+  my $No = 0;
+  while (-e $Backup_File)
+    {$No++; $Backup_File = "$Home/Backups/$TableName\_$No\.backup";} 
+    ### Now we have the filename to store the backup, execute it. 
+  system ("pg_dump -t $TableName -f $Backup_File $Database");
+  
+  ### Uncomment this option if you want to see what is in the file. 
+##  system ("cat $Home/Tables/$TableName\.table_functions");
+
+    ### Drop table and functions, create table and functions and backup table. 
+  system ("psql -d $Database -c '\\i $Home/Tables/$TableName\.table_functions'");
+  print "Check the file\n $Home/Tables/$TableName\.table_functions.\n";
+
+  } 
+
+

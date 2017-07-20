@@ -1,0 +1,2664 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Apache2, WebDAV, SSL and MySQL: Life In The Fast Lane LG #131</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+<a href="/">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="lg_tips.html" >&lt;-- prev</A> | <A HREF="howell.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Apache2, WebDAV, SSL and MySQL: Life In The Fast Lane</h1>
+<p id="by"><b>By <A HREF="../authors/cressatti.html">Dominique Cressatti</A></b></p>
+
+<h3>Introduction</h3>
+As part of my work I had&nbsp;to set up an
+upload/download&nbsp;site for our customers
+with the following brief:<br>
+<ul>
+  <li>Part of the Web site
+would have to be accessible by anybody</li>
+  <li>Another part of the Web site
+would need authentication in order
+to download software, patches, etc...</li>
+  <li>Some of the customers should
+be allowed to upload files on
+the Web site - but within a set quota.</li>
+  <li>Uploading, downloading and managing the&nbsp;Web site content
+would
+have to be easy -<br>
+and it was decided that it would have to be done via
+HTTP for several reasons:<br>
+1) in some organizations FTP isn't always allowed and active FTP can
+sometime cause
+a problem with firewalls.<br>
+2) using SFTP or SSH to manage the site would require specialized
+client software.<br>
+  </li>
+</ul>
+We chose to use WebDAV with a patched version of the Apache 2 WebDAV
+module, since we needed quota functionality.<br><br>
+
+Additionally, all the WebDAV traffic and authentication was to be done via
+HTTPS.
+This was required because Windows XP clients simply refuse authentication of a
+WebDAV
+directory, and in any case has the benefit of making the management of
+the site far more
+secure regardless of the WebDAV client and platform used.<br><br>
+
+One thing to bear in mind is that I had to use&nbsp;Apache 2 instead of
+Apache 1.3.x
+as there is no WebDAV patch for&nbsp;Apache 1.3.x.<br><br>
+
+The following article will explain how to set up and configure Apache 2,
+HTTPS,&nbsp; WebDAV. In addition, it will demonstrate how to recompile the
+WebDAV module to support quota and how to use MySQL to provide
+authentication and give arbitrary access control to the various part of the
+site.
+
+
+<h3>Configuration overview</h3>
+The configuration will be done in the following order:
+<ol>
+  <li><a href="#Install_Apache_2_and_the_WebDAV_module">installing
+apache 2 and the WebDAV module</a></li>
+  <li><a href="#Creating_a_certificate_for_the_Web">creating an SSL
+certificate (including setting up the CA) for the
+Web server</a></li>
+  <li><a href="#Configuring_apache_to_serve_HTTPS_pages">configuring
+apache to serve HTTPS pages</a></li>
+  <li><a href="#Enabling_WebDAV_and_configuring_simple">enabling&nbsp;WebDAV
+and configuring simple authentication</a></li>
+  <li><a href="#Recompile_the_apache_WebDAV_module_to">recompiling the
+apache WebDAV module to provide quota</a></li>
+  <li><a href="#Configure_apache_to_use_MySQL_for_more">configuring
+apache to use MySQL for more complex authentication</a></li>
+  <li><a href="#Configure_the_site_to_provide_all_the_t">configuring
+the site to provide all the
+functionalities&nbsp;mentioned
+in
+the introduction.</a></li>
+  <li><a href="#Footnote_commentssuggestions">Footnote,
+comments/suggestions</a></li>
+</ol>
+
+
+<h3><a name="Install_Apache_2_and_the_WebDAV_module"></a>Installing
+Apache 2
+and the WebDAV module</h3>
+
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);">#
+apt-get
+install apache2 libapache-mod-dav<br>
+Reading Package Lists... Done<br>
+Building Dependency Tree... Done<br>
+The following extra packages will be installed:<br>
+&nbsp; apache-common apache2-common apache2-mpm-worker
+apache2-utils
+libapr0 libxmltok1 openssl ssl-cert<br>
+Suggested packages:<br>
+&nbsp; apache apache-ssl apache-perl apache2-doc lynx www-browser
+ca-certificates<br>
+The following NEW packages will be installed:<br>
+&nbsp; apache-common apache2 apache2-common apache2-mpm-worker
+apache2-utils libapache-mod-dav libapr0 libxmltok1 openssl<br>
+&nbsp; ssl-cert<br>
+0 upgraded, 10 newly installed, 0 to remove and 0 not upgraded.<br>
+Need to get 3141kB of archives.<br>
+After unpacking 10.1MB of additional disk space will be used.<br>
+Do you want to continue? [Y/n] y</td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+
+<h3><a name="Creating_a_certificate_for_the_Web"></a>Creating a
+certificate/CA setup for the Web server</h3>
+To serve Web pages with the HTTPS protocol, the Web server will
+require a certificate.
+If you are already familiar with certificate management on Linux
+then skip ahead to
+<a href="#Configuring_apache_to_serve_HTTPS_pages">configure apache to
+serve HTTPS pages</a>, otherwise the following steps will
+explain&nbsp;how
+to set up you own
+certificate authority and then create a certificate for your Web server.
+<h3>Creating a certificate authority</h3>
+<strong>Note:</strong> most of the
+following was copied and slightly modified from Nate Carlson's
+excellent IPSec Web page
+(<a href="http://www.natecarlson.com/linux/ipsec-x509.php">http://www.natecarlson.com/linux/ipsec-x509.php</a>).<br><br>
+
+Edit the&nbsp;file "/usr/lib/ssl/misc/CA.sh", and change the line that
+says 'DAYS="days 365"' to a
+very high number
+(this sets how long the certificate authority's
+certificate is valid.). This is necessary as the certificate authority
+must 
+last longer than the Web server certificate. I
+generally set it to 3560 (which roughly amount to 10 years).
+
+Run the command 'CA.sh -newca'. Follow the prompts, as below.
+Example input is in <span style="color: rgb(255, 0, 0);">red</span>,
+and my comments are in <span style="color: rgb(51, 102, 255);">blue</span>.
+Be sure to not
+use any non-alphanumeric characters, such as dashes, commas, plus
+signs, etc.
+These characters may make things more difficult for you.
+<br>
+<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);"><span
+ class="ipsecExample"><span style="color: rgb(255, 0, 0);"># /usr/</span><span
+ style="color: rgb(255, 0, 0);" class="ipsecExampleInput">lib/ssl/misc/CA.sh
+-newca</span><br>
+CA certificate filename (or enter to create)<br>
+      <span style="color: rgb(255, 0, 0);" class="ipsecExampleInput">(enter)</span><br>
+Making CA certificate ...<br>
+Using configuration from /usr/lib/ssl/openssl.cnf<br>
+Generating a 1024 bit RSA private key<br>
+.............................................................................+++<br>
+........................................+++<br>
+writing new private key to './demoCA/private/./cakey.pem'<br>
+Enter PEM pass phrase:<span style="color: rgb(255, 0, 0);"
+ class="ipsecExampleInput">(enter password)</span> <span
+ style="color: rgb(51, 102, 255);" class="ipsecExampleComment">This is
+the password you will
+need to create any other certificates.</span><br>
+Verifying password - Enter PEM pass phrase:<span
+ style="color: rgb(255, 0, 0);" class="ipsecExampleInput">(repeat
+password)</span><br>
+-----<br>
+You are about to be asked to enter information that will be incorporated<br>
+into your certificate request.<br>
+What you are about to enter is what is called a Distinguished Name or a
+DN.<br>
+There are quite a few fields but you can leave some blank<br>
+For some fields there will be a default value,<br>
+If you enter '.', the field will be left blank.<br>
+-----<br>
+Country Name (2 letter code) [AU]:<span style="color: rgb(255, 0, 0);"
+ class="ipsecExampleInput">US(enter)</span> <span
+ style="color: rgb(51, 102, 255);" class="ipsecExampleComment">Enter
+your country code here</span><br>
+State or Province Name (full name) [Some-State]:<span
+ style="color: rgb(255, 0, 0);" class="ipsecExampleInput">State(enter)</span><span
+ style="color: rgb(51, 102, 255);"> </span><span
+ style="color: rgb(51, 102, 255);" class="ipsecExampleComment">Enter
+your state/province/county here</span><br>
+Locality Name (eg, city) []:<span class="ipsecExampleInput"><span
+ style="color: rgb(255, 0, 0);">City(enter</span>)</span> <span
+ style="color: rgb(51, 102, 255);" class="ipsecExampleComment">Enter
+your city here</span><br>
+Organization Name (eg, company) [Internet Widgits Pty Ltd]:<span
+ class="ipsecExampleInput"><span style="color: rgb(255, 0, 0);">ExampleCo(enter</span>)</span>
+      <span style="color: rgb(51, 102, 255);"
+ class="ipsecExampleComment">Enter your company name here (or leave
+blank)</span><br>
+Organizational Unit Name (eg, section) []:<span
+ style="color: rgb(255, 0, 0);" class="ipsecExampleInput">IT(enter)</span>
+      <span style="color: rgb(51, 102, 255);"
+ class="ipsecExampleComment">OU or department, if you like. You
+can&nbsp;leave it blank if you want.</span><br>
+Common Name (eg, YOUR name) []:<span style="color: rgb(255, 0, 0);"
+ class="ipsecExampleInput">CA(enter)</span> <span
+ style="color: rgb(51, 102, 255);" class="ipsecExampleComment">The name
+of your Certificate
+Authority</span><br>
+Email Address []:<span style="color: rgb(255, 0, 0);"
+ class="ipsecExampleInput">ca@example.com(enter)</span> <span
+ class="ipsecExampleComment"><span style="color: rgb(51, 102, 255);">E-Mail
+Address</span><br>
+      </span></span></td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+<span class="ipsecExample"><span class="ipsecExampleComment"><br>
+</span></span>
+
+<h3><a name="Create_a_certificate_for_your_Web_server"></a><span
+ class="ipsecExample"><span class="ipsecExampleComment">Create
+the certificate for your Web server</span></span></h3>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);">#<span
+ class="ipsecExample"> <span class="ipsecExampleInput">/usr/lib/ssl/misc/CA.sh
+-newreq</span><br>
+Using configuration from /usr/lib/ssl/openssl.cnf<br>
+Generating a 1024 bit RSA private key<br>
+...................................+++<br>
+...............................+++<br>
+writing new private key to 'newreq.pem'<br>
+Enter PEM pass phrase:<span style="color: rgb(255, 0, 0);"
+ class="ipsecExampleInput">(enter password)</span> <span
+ style="color: rgb(51, 102, 255);" class="ipsecExampleComment">Password
+to encrypt the new cert's
+private key with - you'll need this!</span><br>
+Verifying password - Enter PEM pass phrase:<span
+ style="color: rgb(255, 0, 0);" class="ipsecExampleInput">(repeat
+password)</span><br>
+-----<br>
+You are about to be asked to enter information that will be incorporated<br>
+into your certificate request.<br>
+What you are about to enter is what is called a Distinguished Name or a
+DN.<br>
+There are quite a few fields but you can leave some blank<br>
+For some fields there will be a default value,<br>
+If you enter '.', the field will be left blank.<br>
+-----<br>
+Country Name (2 letter code) [AU]:<span style="color: rgb(255, 0, 0);"
+ class="ipsecExampleInput">US(enter)</span><br>
+State or Province Name (full name) [Some-State]:<span
+ style="color: rgb(255, 0, 0);" class="ipsecExampleInput">State(enter)</span><br>
+Locality Name (eg, city) []:<span style="color: rgb(255, 0, 0);"
+ class="ipsecExampleInput">City(enter)</span><br>
+Organization Name (eg, company) [Internet Widgits Pty Ltd]:<span
+ style="color: rgb(255, 0, 0);" class="ipsecExampleInput">ExampleCo(enter)</span><br>
+Organizational Unit Name (eg, section) []:<span
+ style="color: rgb(255, 0, 0);" class="ipsecExampleInput">(enter)</span><br>
+Common Name (eg, YOUR name) []<span style="color: rgb(255, 0, 0);">:</span><span
+ class="ipsecExampleInput"><span style="color: rgb(255, 0, 0);">host.example.com(enter</span>)</span><span
+ style="color: rgb(51, 102, 255);" class="ipsecExampleComment">The host
+name of &nbsp;your Web server</span><br>
+Email Address []:<span class="ipsecExampleInput"><span
+ style="color: rgb(255, 0, 0);">user@example.com(enter)</span> <span
+ style="color: rgb(51, 102, 255);">(optional)</span></span><br>
+      <br>
+Please enter the following 'extra' attributes<br>
+to be sent with your certificate request<br>
+A challenge password []:<span style="color: rgb(255, 0, 0);"
+ class="ipsecExampleInput">(enter)</span><br>
+An optional company name []:<span style="color: rgb(255, 0, 0);"
+ class="ipsecExampleInput">(enter)</span><br>
+Request (and private key) is in newreq.pem<br>
+      </span><br>
+      </td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+
+What we just did is generate a Certificate Request - this is the same
+type of request that you would send to Thawte or Verisign to get a
+generally-accepted SSL certificate. For our uses, however, we'll sign
+it with our own CA:<br>
+<span class="ipsecExample"><br>
+</span>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);"><span
+ class="ipsecExample"><span style="color: rgb(255, 0, 0);"># </span><span
+ style="color: rgb(255, 0, 0);" class="ipsecExampleInput">/usr/lib/ssl/misc/CA.sh
+-sign</span><br>
+Using configuration from /usr/lib/ssl/openssl.cnf<br>
+Enter PEM pass phrase:<span style="color: rgb(51, 102, 255);"
+ class="ipsecExampleInput">(password you
+entered when creating the ca)</span><br>
+Check that the request matches the signature<br>
+Signature ok<br>
+The Subjects Distinguished Name is as follows<br>
+countryName :PRINTABLE:'US'<br>
+stateOrProvinceName :PRINTABLE:'State'<br>
+localityName :PRINTABLE:'City'<br>
+organizationName :PRINTABLE:'ExampleCo'<br>
+commonName :PRINTABLE:'host.example.com'<br>
+emailAddress :IA5STRING:'user@example.com'<br>
+Certificate is to be certified until Feb 13 16:28:40 2012 GMT (3650
+days)<br>
+Sign the certificate? [y/n]<span style="color: rgb(255, 0, 0);">:</span><span
+ style="color: rgb(255, 0, 0);" class="ipsecExampleInput">y(enter)</span><br>
+      <br>
+1 out of 1 certificate requests certified, commit? [y/n]<span
+ style="color: rgb(255, 0, 0);" class="ipsecExampleInput">y(enter)</span><br>
+Write out database with 1 new entries<br>
+Data Base Updated<br>
+      <span style="color: rgb(51, 102, 255);"
+ class="ipsecExampleComment">(certificate snipped)</span><br>
+Signed certificate is in newcert.pem</span></td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+
+Next, move the output files to names that make a bit more sense for
+future reference, where "host.example.com..."&nbsp;
+in the example below is the name of your Web server.<br>
+<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);"><span
+ class="ipsecExample"># mv newcert.pem host.example.com.pem<br>
+# mv newkey.pem host.example.com.key</span></td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+<span class="ipsecExample"></span><br>
+
+<h3><a name="Configuring_apache_to_serve_HTTPS_pages"></a>Configuring
+apache
+to serve HTTPS pages</h3>
+Copy the above 2 certificates files into /etc/apache2/ssl
+and make sure you change the files to be only readable by root.<br>
+<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);"># chmod 400
+/etc/apache2/ssl/host*</td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+For convenience, you may want to remove the passphrase from the
+RSA private key which will
+stop to prompt for the passphrase when starting or restarting apache.
+However if you prefer to keep
+the passphrase, skip to the next step.<br>
+<br>
+First make a backup of the encrypted key:<br>
+<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);"># cp
+/etc/apache2/ssl/host.example.com.key
+/etc/apache2/ssl/host.example.com-bkp</td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+
+Then re-write the key with
+encryption. You will be prompted for the original encrypted key
+passphrase.<br>
+<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);">#&nbsp;openssl
+rsa -in /etc/apache2/host.example.com.key-bkp -out
+/etc/apache2/ssl/host.example.com.key<br>
+Enter pass phrase for /etc/apache2/ssl/host.example.com.key-bkp:<br>
+writing RSA key</td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+
+Edit the file "/etc/apache2/mods-available/ssl.conf" and add the
+following at the bottom.<br>
+<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);">SSLCertificateFile&nbsp;&nbsp;&nbsp;
+/etc/apache2/ssl/host.example.com.pem<br>
+SSLCertificateKeyFile /etc/apache2/ssl/host.example.com.key<br>
+      <br>
+listen 443</td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+Enable HTTPS by creating symbolic links to the "SSL" files:
+<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);"># ln -s
+/etc/apache2/mods-available/ssl.conf /etc/apache2/mods-enabled/ssl.conf<br>
+# ln -s /etc/apache2/mods-available/ssl.load
+/etc/apache2/mods-enabled/ssl.load</td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+Create a site configuration file:<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);"># touch
+/etc/apache2/sites-available/testwebdav</td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+Copy the following stanza into it:<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);">&lt;VirtualHost
+      <span style="font-style: italic;">WEB_server_IP_address</span><span
+ style="font-weight: bold;">:</span>443&gt;<br>
+      <br>
+&nbsp;&nbsp;&nbsp; Servername testwebdav.lansa.co.uk<br>
+&nbsp;&nbsp;&nbsp; Documentroot /var/www/webdav<br>
+&nbsp;&nbsp;&nbsp; CustomLog /var/log/apache2/access.log combined<br>
+      <br>
+&nbsp;&nbsp;&nbsp; &lt;IfModule mod_ssl.c&gt;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; SSLEngine on<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; SetEnvIf User-Agent
+".*MSIE.*" nokeepalive ssl-unclean-shutdown<br>
+&nbsp;&nbsp;&nbsp; &lt;/IfModule&gt;<br>
+      <br>
+&lt;/VirtualHost&gt;<br>
+      </td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+replacing&nbsp;<span style="font-style: italic;">WEB_server_IP_address</span>
+with the IP address of &nbsp;your own server.<br>
+<br>
+Last of all, "enable" the site by creating a&nbsp;symbolic link
+to the configuration file:<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);"># ln -s
+/etc/apache2/sites-available/testwebdav
+/etc/apache2/sites-enabled/testwebdav</td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+
+<h3>WebDAV directory</h3>
+Now we need to create the Webdav directory and create a test file in it
+so we can test
+HTTPS and WebDAV functionality.
+<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);"># mkdir
+/var/www/webdav</td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+Change its ownership to the account and group under which apache
+is running
+(under Debian the apache&nbsp;user and group are both www-data).<br>
+<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);"># chown
+www-data:www-data /var/www/webdav/</td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+Then create a test file in the WebDAV directory.<br>
+<span class="entry"><br>
+</span>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);">#&nbsp;echo
+"hello world" &gt; /var/www/webdav/test.txt<br>
+      <span class="entry"> # chown apache:apache
+/var/www/webdav/test.txt<br>
+      </span><span class="entry"> # chmod 640
+/var/www/webdav/test.txt</span></td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+Now reload apache&nbsp;to make the changes effective.<br>
+<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);">#
+/etc/init.d/apache2 reload</td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+You may want to check that apache is running HTTP and HTTPS by using
+the "netstat -anpt" command:<br>
+<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td>
+      <pre style="font-size: 11px; background-color: rgb(204, 204, 204);"># netstat -anpt<br>Active Internet connections (servers and established)<br>Proto Recv-Q Send-Q Local Address           Foreign Address         State       PID/Program name<br>tcp        0      0 0.0.0.0:111             0.0.0.0:*               LISTEN     1870/portmap<br>tcp        0      0 127.0.0.1:692           0.0.0.0:*               LISTEN     2636/famd<br>tcp        0      0 127.0.0.1:25            0.0.0.0:*               LISTEN     2455/exim4<br>tcp6       0      0 :::80                   :::*                    LISTEN     5395/apache2<br>tcp6       0      0 :::22                   :::*                    LISTEN     2470/sshd<br>tcp6       0      0 :::443                  :::*                    LISTEN     5395/apache2</pre>
+      </td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+If everything is OK, you should see that apache2 is listening on port 80
+and more importantly 
+on port 443, as in the above example. If not, consult your the apache
+log file (/var/log/apache2/) for problem reports.<br><br>
+Now open the following URL in your Web browser:<br>
+<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 255);">https://<span
+ style="font-style: italic;">WEB_server_IP_address</span>/test.txt</td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+replacing <span style="font-style: italic;">"WEB_server_IP_address</span>"
+with either the IP address of your server or its FQDN.
+This should ask you to accept a certificate, and once you have
+accepted, it should display:<br>
+<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(255, 204, 255);">hello world</td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+
+
+<h3><a name="Enabling_WebDAV_and_configuring_simple"></a>Enabling
+WebDAV and configuring simple authentication</h3>
+Enable WebDAV and apache simple authentication by once again creating
+a symbolic link to the modules in /etc/apache2/mods-available to
+/etc/apache2/mods-enabled:<br>
+<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);"># ln -s
+/etc/apache2/mods-available/auth_anon.load
+/etc/apache2/mods-enabled/auth_anon.load<br>
+# ln -s /etc/apache2/mods-available/dav_fs.conf
+/etc/apache2/mods-enabled/dav_fs.conf<br>
+# ln -s /etc/apache2/mods-available/dav_fs.load
+/etc/apache2/mods-enabled/dav_fs.load<br>
+# ln -s /etc/apache2/mods-available/dav.load
+/etc/apache2/mods-enabled/dav.load</td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+Create a simple authentication file and set its permission so only the
+apache account can read it.<br>
+<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);"># htpasswd -c
+/etc/apache2/passwd.dav test<br>
+# chown root:www-data /etc/apache2/passwd.dav<br>
+# chmod 640 /etc/apache2/passwd.dav</td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+Now you need to modify the site configuration file to enable WebDAV
+and authentication..<br>
+Do it according the example below (added directives in <span
+ style="color: rgb(255, 0, 0);">red</span>).<br>
+<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);">&lt;VirtualHost&nbsp;<span
+ style="font-style: italic;">WEB_server_IP_address</span>:443&gt;<br>
+      <br>
+&nbsp;&nbsp;&nbsp; Servername testwebdav.lansa.co.uk<br>
+&nbsp;&nbsp;&nbsp; Documentroot /var/www/webdav<br>
+&nbsp;&nbsp;&nbsp; CustomLog /var/log/apache2/access.log&nbsp;combined<br>
+      <br>
+&nbsp;&nbsp;&nbsp; &lt;IfModule mod_ssl.c&gt;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; SSLEngine on<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; SetEnvIf User-Agent
+".*MSIE.*" nokeepalive ssl-unclean-shutdown<br>
+&nbsp;&nbsp;&nbsp; &lt;/IfModule&gt;<br>
+      <br>
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;
+&lt;Directory /var/www/webdav&gt;</span><br
+ style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+DAV On</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+AuthType Basic</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+AuthName "test"</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+AuthUserFile /etc/apache2/passwd.dav</span><br
+ style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+&lt;Limit PUT POST DELETE PROPFIND PROPPATCH MKCOL COPY MOVE LOCK
+UNLOCK&gt;</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+Require user test</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+&lt;/Limit&gt;</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;
+&lt;/Directory&gt;</span><br>
+      <br>
+&lt;/VirtualHost&gt;</td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+
+Again we need to&nbsp;reload apache&nbsp;to make the changes
+effective:<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);">#
+/etc/init.d/apache2 reload</td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+Now to test WebDAV you need a "WebDAV client".<br>
+<ul>
+  <li>Internet Explorer on Windows 2000 and Windows XP.<br>
+Windows 2000 and XP built in WebDAV support has the
+advantage of&nbsp; having nothing to be installed, however it has
+the disadvantage of not being able to create files but just copy
+or rename them (but all directory operation are supported).
+    <br>
+<br>	
+  </li>
+  <li>Novel Netdrive
+    <a href="http://www.loyola.edu/5555/netdrive/installingnetdrive/">http://www.loyola.edu/5555/netdrive/installingnetdrive/</a><br>
+Novel Netdrive is a "freeware" and unlike Windows' built-in
+WebDAV&nbsp;support,
+Netdrive support
+all files and directories operations. However its
+disadvantage is that you have to
+install it.
+   <br> <br>
+  </li>
+  <li>Other&nbsp;WebDAV clients <a
+ href="http://www.webdav.org/projects/">http://www.webdav.org/projects/</a></li>
+</ul>
+<br>
+I will be using Windows built-in
+WebDAV&nbsp;support through Internet Explorer
+as it is&nbsp;adequate for the remaining of this article.<br>
+<br>
+In&nbsp;Internet Explorer select "File" =&gt; "Open" and open this URL:<br>
+<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 255);">https://<span
+ style="font-style: italic;">WEB_server_IP_address</span>/</td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+<span style="font-weight: bold;">Make sure to tick the check box next to "Open
+as Web Folder" (this is very&nbsp; important; otherwise, it won't
+open the folder using the WebDAV protocol and&nbsp;all you'll be
+able to do is view </span><span style="font-weight: bold;">the
+files but not modify them).</span><br>
+<br>
+Once again you will be prompted to accept a certificate but&nbsp;now
+additionally you will also be prompted to
+provide a user name and password.<br>
+<br>
+<strong>Note:</strong> If you are constantly prompted for the user name and password,
+either they are incorrect or there is a problem with
+authentication. It could be that apache cannot read the password file
+because there is a syntax error or that apache doesn't
+have the permission to read the file. Look in
+"/var/log/apache/error.log" to find out more.<br>
+<br>
+To test WebDAV functionalities, in Internet Explorer, right click on
+"test.txt" (the test file we created earlier),
+select "Rename", rename the file and press the "Enter" key.<br>
+<br>
+<h3>Enabling public browsing access to the site</h3>
+You may want to have your site "browsable" or a least 1 part of the
+site (see later on for more granular access).
+To do so modify the site configuration file to enable WebDAV and
+authentication.
+Do it according the example below (added directive in <span
+ style="color: rgb(255, 0, 0);">red</span>):<br>
+<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);"><span
+ style="color: rgb(255, 0, 0);">&lt;VirtualHost&nbsp;</span><span
+ style="font-style: italic; color: rgb(255, 0, 0);">WEB_server_IP_addres</span><span
+ style="color: rgb(255, 0, 0);">:80&gt;<br>
+      <br style="color: rgb(255, 0, 0);">
+      </span> <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;
+Servername testwebdav.lansa.co.uk</span><br
+ style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;
+Documentroot /var/www/webdav</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);"><br>
+&lt;/VirtualHost&gt;</span><br style="color: rgb(255, 0, 0);">
+      <br>
+&lt;VirtualHost&nbsp;<span style="font-style: italic;">WEB_server_IP_addres</span>:443&gt;<br>
+      <br>
+&nbsp;&nbsp;&nbsp; Servername testwebdav.lansa.co.uk<br>
+&nbsp;&nbsp;&nbsp; Documentroot /var/www/webdav<br>
+&nbsp;&nbsp;&nbsp; CustomLog /var/log/apache2/access.log&nbsp;combined<br>
+      <br>
+&nbsp;&nbsp;&nbsp; &lt;IfModule mod_ssl.c&gt;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; SSLEngine on<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; SetEnvIf User-Agent
+".*MSIE.*" nokeepalive ssl-unclean-shutdown<br>
+&nbsp;&nbsp;&nbsp; &lt;/IfModule&gt;<br>
+      <br>
+&nbsp;&nbsp;&nbsp; &lt;Directory /var/www/webdav&gt;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; DAV
+On<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+AuthType Basic<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+AuthName "test"<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+AuthUserFile /etc/apache2/passwd.dav<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+&lt;Limit PUT POST DELETE <span style="color: rgb(0, 0, 0);">PROPFIND </span>PROPPATCH
+MKCOL COPY MOVE LOCK UNLOCK&gt;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+Require user test<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+&lt;/Limit&gt;<br>
+&nbsp;&nbsp;&nbsp; &lt;/Directory&gt;<br>
+      <br>
+&lt;/VirtualHost&gt;</td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+
+Once again reload apache to make the changes effective:<br>
+<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);">#
+/etc/init.d/apache2 reload</td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+
+Open the following URL&nbsp;in your Web
+browser (but&nbsp;not as a Web Folder).<br>
+<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 255);">http://<span
+ style="font-style: italic;">WEB_server_IP_address</span>/test.txt</td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+
+replacing <span style="font-style: italic;">"WEB_server_IP_address</span>"
+with the IP address of your server or it FQDN.<br><br>
+This&nbsp;should display:<br>
+<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(255, 204, 255);">hello world</td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+
+<span style="font-weight: bold;"></span>
+<h3><a name="Recompile_the_apache_WebDAV_module_to"></a>Recompiling the
+apache WebDAV module to provide quota</h3>
+As a quick overview, in order to provide quota capabilities with WebDAV, you will need the
+apache2 source. You will also need to patch the WebDAV
+modules and recompile them.<br>
+<h3>Recompiling the apache WebDAV modules<br>
+</h3>
+On Debian Sarge, the apache version I used was 2.0.54.<br>
+<ol>
+  <li>Obtain the Apache 2.0.54 source from
+    <a href="http://archive.apache.org/dist/httpd/httpd-2.0.54.tar.gz">http://archive.apache.org/dist/httpd/httpd-2.0.54.tar.gz</a></li>
+  <li>Obtain the Apache WebDAV modules patch from
+    <a href="http://www.geocities.jp/t_sat7/webdav/webdav.html">http://www.geocities.jp/t_sat7/webdav/webdav.html</a><br>
+(I used <a
+ href="http://leche.goodcrew.ne.jp/webdav/webdav-2.0.54-quota-2.3any.txt">http://leche.goodcrew.ne.jp/webdav/webdav-2.0.54-quota-2.3any.txt</a>
+or <a href="webdav-2.0.54-quota-2.3any.txt">webdav-2.0.54-quota-2.3any.txt</a>)</li>
+</ol>
+Note: if you are using a later version of apache 2 than 2.0.54 obtain
+the source from <a href="http://httpd.apache.org/">http://httpd.apache.org/</a>
+and the
+corresponding &nbsp;WebDAV patch from
+<a href="http://www.geocities.jp/t_sat7/webdav/webdav.html">http://www.geocities.jp/t_sat7/webdav/webdav.html</a>.<br>
+<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);"># tar -xvzf
+httpd-2.0.54.tgz<br>
+      <span style="color: rgb(51, 102, 255);">(snip) </span><br>
+# cd httpd-2.0.54<br>
+# patch -p2 &lt;
+/location/where/the/patch/is/webdav-2.0.54-quota-2.3any.txt<br>
+patching file modules/dav/main/mod_dav.c<br>
+patching file modules/dav/main/quotachk.h<br>
+patching file modules/dav/main/quotachk.c<br>
+patching file modules/dav/main/config5.m4<br>
+patching file configure<br>
+# ./configure&nbsp;--enable-modules=most&nbsp;--enable-mods-shared=all<br>
+      <span style="color: rgb(51, 102, 255);">(snip) <br>
+      <span style="color: rgb(0, 0, 0);"># make</span></span><span
+ style="color: rgb(51, 102, 255);"></span><span
+ style="color: rgb(51, 102, 255);"><span style="color: rgb(0, 0, 0);"><br>
+      </span></span></td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+Once the compilation has completed, verify that you have the 2 WebDAV
+modules binaries
+(they should be located in /httpd-2.0.54/modules/dav/).<br>
+&nbsp;<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);"># ls -l
+./modules/dav/fs/.libs/mod_dav_fs.so<br>
+-rwxr-xr-x&nbsp; 1 root root 217493 2006-03-24 10:10
+./modules/dav/fs/.libs/mod_dav_fs.so<br>
+# ls -l ./modules/dav/main/.libs/mod_dav.so<br>
+-rwxr-xr-x&nbsp; 1 root root 417579 2006-03-24 10:09
+./modules/dav/main/.libs/mod_dav.so</td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+Make a backup of the of your current apache modules:
+<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);">#
+mv&nbsp;/usr/lib/apache2/modules/mod_dav.so&nbsp;/usr/lib/apache2/modules/mod_dav.so-bkp<br>
+#
+mv&nbsp;/usr/lib/apache2/modules/mod_dav_fs.so&nbsp;/usr/lib/apache2/modules/mod_dav_fs.so-bkp<br>
+      </td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+and copy the new modules to the apache module directory:
+<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);"># cp
+./modules/dav/main/.libs/mod_dav.so /usr/lib/apache2/modules/mod_dav.so<br>
+# cp ./modules/dav/fs/mod_dav_fs.so
+/usr/lib/apache2/modules/mod_dav_fs.so</td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+<h3>Enabling quota for the site<br>
+</h3>
+To enable quota for the site, use the "DAVSATMaxAreaSize" directive with
+size limit specified in kB.
+Again, the example below shows&nbsp;the&nbsp;added directive in <span
+ style="color: rgb(255, 0, 0);">red</span>.<br>
+<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);">&lt;VirtualHost&nbsp;<span
+ style="font-style: italic;">WEB_server_IP_address</span>:80&gt;<br>
+      <br>
+&nbsp;&nbsp;&nbsp; Servername testwebdav.lansa.co.uk<br>
+&nbsp;&nbsp;&nbsp; Documentroot /var/www/webdav<br>
+      <br>
+&lt;/VirtualHost&gt;<br>
+      <br>
+&lt;VirtualHost&nbsp;<span style="font-style: italic;">WEB_server_IP_address</span>:443&gt;<br>
+      <br>
+&nbsp;&nbsp;&nbsp; Servername testwebdav.lansa.co.uk<br>
+&nbsp;&nbsp;&nbsp; Documentroot /var/www/webdav<br>
+&nbsp;&nbsp;&nbsp; CustomLog /var/log/apache2/access.log combined<br>
+      <br>
+&nbsp;&nbsp;&nbsp; &lt;IfModule mod_ssl.c&gt;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; SSLEngine on<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; SetEnvIf User-Agent
+".*MSIE.*" nokeepalive ssl-unclean-shutdown<br>
+&nbsp;&nbsp;&nbsp; &lt;/IfModule&gt;<br>
+      <br>
+&nbsp;&nbsp;&nbsp; &lt;Directory /var/www/webdav&gt;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; DAV
+On<br>
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+# DAVSATMaxAreaSize: the size is specificed in kBytes</span><br
+ style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+# since each blocks are 4K each</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+# add about 50K above the limit wanted</span><br
+ style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+DAVSATMaxAreaSize 150</span><br style="color: rgb(255, 0, 0);">
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+AuthType Basic<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+AuthName "test"<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+AuthUserFile /etc/apache2/passwd.dav<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+&lt;Limit PUT POST DELETE PROPFIND PROPPATCH MKCOL COPY MOVE LOCK
+UNLOCK&gt;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+Require user test<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+&lt;/Limit&gt;<br>
+&nbsp;&nbsp;&nbsp; &lt;/Directory&gt;<br>
+      <br>
+&lt;/VirtualHost&gt;</td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+<h4>A few words about the quota limit before moving on</h4>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px">
+One important thing you should be aware of is the quota limit is
+dependent on&nbsp;the block size of your
+Web server file
+system and may cause the quota limit to be reached quicker than you
+would expect.
+Here is an example:<br><br>
+If you have set the quota limit to 50 kByte and your file system has a
+block
+size of 4 kByte and say all files in the
+WebDAV directory amount to a total of 48 kByte, when you copy a 1kByte
+text
+file from a windows
+system to
+the WebDAV directory, this 1kByte text file will occupy a 4 kBytes block
+on the WebDAV folder thus
+exceeding
+the
+limit even though you thought you had 2 kBytes free.<br>
+<br>
+An easy workaround is to set the limit a little bit higher than
+required. For example a strict limit for a quota of 150 kByte
+would be to set the quota to 152 kByte. However in practice I
+personally add 50 kBytes over the required limit.<br>
+      </td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+Now this time in order use the "quota enabled" WebDAV modules and quota
+directives for the site,
+you have to restart apache.<br>
+<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);">#
+/etc/init.d/apache2 restart</td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+After that, restart your WebDAV session with Internet Explorer or your
+favorite WebDAV client and copy a file in order
+to exceed the 150 kBytes limit. <br>
+<br>
+At the same time you may want to see what is happening on the server in
+real time:<br>
+<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);">tail
+-f&nbsp;/var/log/apache2/error.log</td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+Once you reach or exceed the quota limit Internet Explorer will report
+the
+message:
+"An error occurred copying some or all&nbsp;of the selected files"
+(NetDrive will properly report that the file copy
+failed because the storage space has been exceeded)
+and
+an error like the following example will appear in
+/var/log/apache2/error.log:<br>
+<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);">[Fri Mar 24
+12:26:13 2006] [error] [client 10.44.10.1] File does not exist:
+/var/www/webdav/impunx.log<br>
+[Fri Mar 24 12:26:13 2006] [error] WebDAV-Quota: Directory
+`/var/www/webdav/' size `404KB' is over `150KB'!</td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+
+
+<h3><a name="Configure_apache_to_use_MySQL_for_more"></a>Configuring
+Apache to use MySQL for more complex authentication
+</h3>
+<h4>Installing MySQL
+</h4>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);"># apt-get
+install mysql-server libapache2-mod-auth-mysql<br>
+Reading Package Lists... Done<br>
+Building Dependency Tree... Done<br>
+The following extra packages will be installed:<br>
+&nbsp; libdbd-mysql-perl libdbi-perl libmysqlclient12
+libnet-daemon-perl libplrpc-perl mysql-client mysql-common<br>
+Suggested packages:<br>
+&nbsp; dbishell mysql-doc<br>
+The following NEW packages will be installed:<br>
+&nbsp; libapache2-mod-auth-mysql libdbd-mysql-perl libdbi-perl
+libmysqlclient12 libnet-daemon-perl libplrpc-perl mysql-client<br>
+&nbsp; mysql-common mysql-server<br>
+0 upgraded, 9 newly installed, 0 to remove and 0 not upgraded.<br>
+Need to get 5233kB of archives.<br>
+After unpacking 12.6MB of additional disk space will be used.<br>
+Do you want to continue? [Y/n] y</td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+<h4>Creating a MySQL database</h4>
+The following steps will outline how to create a MySQL database. This
+is the first of several databases
+that need to be created.<br>
+<br>
+The default database name and table to use with apache are
+respectively: http_auth and mysql_auth,
+however you can use any database name you want providing that you
+specify it the site configuration file
+(more later). In my case the I called the 1st database "sysadmins".<br>
+<span style="font-family: Verdana,Helvetica,Arial;"></span><br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);"># mysqladmin
+-uroot -p create sysadmins<br>
+Enter password::&nbsp;<br>
+      </td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+
+Now create the table.<br>
+<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);"># mysqladmin
+-uroot -p create sysadmins<br>
+# mysql -uroot -p<br>
+      <br>
+mysql&gt; use sysadmins<br>
+Database changed<br>
+mysql&gt; create table mysql_auth<br>
+&nbsp;&nbsp;&nbsp; -&gt; (<br>
+&nbsp;&nbsp;&nbsp; -&gt; username char(50) not null,<br>
+&nbsp;&nbsp;&nbsp; -&gt; passwd char(25),<br>
+&nbsp;&nbsp;&nbsp; -&gt; groups char(25)<br>
+&nbsp;&nbsp;&nbsp; -&gt; );<br>
+Query OK, 0 rows affected (0.01 sec)<br>
+      <br>
+mysql&gt; create unique index mysqlauthix1 on mysql_auth(username);<br>
+Query OK, 0 rows affected (0.01 sec)<br>
+Records: 0&nbsp; Duplicates: 0&nbsp; Warnings: 0<br>
+      </td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+Now create a user which will be used by apache to read the database:<br>
+<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);">mysql&gt; grant
+select on sysadmins<span style="font-weight: bold;">.</span>* to
+apache@localhost identified by '1pach2'; &nbsp;<span
+ style="color: rgb(51, 102, 255);">(apache@localhost&nbsp;user is the
+user and '1pach2' is the
+password)</span><br>
+Query OK, 0 rows affected (0.00 sec)<br>
+      </td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+Now add a user (to be used for WebDAV authentication later.)<br>
+<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);">mysql&gt;
+insert into mysql_auth (username, passwd, groups) values
+('admin','1dm3n','sysadmins');<br>
+Query OK, 1 row affected (0.01 sec)</td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+Log out of mysql and check that everything is OK: try to log
+into mysql as the apache user that was
+just created and verify that you can read the "mysql_auth" table. It should
+allow you to log on (otherwise you have made an error
+with that user name or password), allow you to select the database
+(otherwise there is a grant problem with the database),
+and return the details of the user that was inserted.<br>
+<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);">delldebian:/etc/apache2/mods-enabled#
+mysql -uapache -p<br>
+Enter password:<br>
+Welcome to the MySQL monitor.&nbsp; Commands end with ; or \g.<br>
+Your MySQL connection id is 36 to server version:
+4.0.24_Debian-10sarge1-log<br>
+      <br>
+Type 'help;' or '\h' for help. Type '\c' to clear the buffer.<br>
+      <br>
+mysql&gt; use sysadmins<br>
+Reading table information for completion of table and column names<br>
+You can turn off this feature to get a quicker startup with -A<br>
+      <br>
+Database changed<br>
+mysql&gt; select * from mysql_auth;<br>
++----------+--------+-----------+<br>
+| username | passwd | groups&nbsp;&nbsp;&nbsp; |<br>
++----------+--------+-----------+<br>
+| admin&nbsp;&nbsp;&nbsp; | 1dm3n&nbsp; | sysadmins |<br>
++----------+--------+-----------+<br>
+1 row in set (0.00 sec)<br>
+      </td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+
+<h4>Configuring apache to use MySQL authentication</h4>
+Create the apache mysql configuration file:<br>
+<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);">#
+touch&nbsp;/etc/apache2/mods-available/auth_mysql.conf</td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+Specify the host, user, and password of the apache user created
+earlier to read the databases.<br>
+<br>
+<span style="font-weight: bold;"></span>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);">Auth_MySQL_Info
+localhost apache 1pach2</td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+Now enable the apache mysql authentication modules.<br>
+<br>
+</span>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);"># ln -s
+/etc/apache2/mods-available/auth_mysql.load
+/etc/apache2/mods-enabled/auth_mysql.load<br>
+# ln -s /etc/apache2/mods-available/auth_mysql.conf
+/etc/apache2/mods-enabled/auth_mysql.conf</td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+<h4>Reconfiguring the site to use MySQL authentication</h4>
+Once again in the example below I have added in<span
+ style="color: rgb(255, 0, 0);"> red </span>the extra directives to
+use MySQL authentication
+and which database to use for that particular directory.
+Taking care of which database to use is done with the Auth _MySQL_DB
+parameter followed
+by the database name.
+Also, pay attention to the line in <span
+ style="color: rgb(51, 102, 255);">blue</span> which I have commented
+out (in the production version, I actually deleted it).
+Failure to comment it out or delete it will result in apache still
+using the file "<span style="color: rgb(0, 0, 0);">/etc/apache2/passwd.dav"
+</span>for authentication instead the MySQL database and any
+attempts to authenticate with any user in the
+database will fail.<span style="color: rgb(0, 0, 0);"><br>
+<br>
+</span><span style="color: rgb(255, 153, 255);"><span
+ style="color: rgb(255, 255, 102);"></span></span>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);">&lt;VirtualHost&nbsp;<span
+ style="font-style: italic;">WEB_server_IP_address</span>:80&gt;<br>
+      <br>
+&nbsp;&nbsp;&nbsp; Servername testwebdav.lansa.co.uk<br>
+&nbsp;&nbsp;&nbsp; Documentroot /var/www/webdav<br>
+      <br>
+&lt;/VirtualHost&gt;<br>
+      <br>
+&lt;VirtualHost&nbsp;<span style="font-style: italic;">WEB_server_IP_address</span>:443&gt;<br>
+      <br>
+&nbsp;&nbsp;&nbsp; Servername testwebdav.lansa.co.uk<br>
+&nbsp;&nbsp;&nbsp; Documentroot /var/www/webdav<br>
+&nbsp;&nbsp;&nbsp; CustomLog /var/log/apache2/access.log combined<br>
+      <br>
+&nbsp;&nbsp;&nbsp; &lt;IfModule mod_ssl.c&gt;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; SSLEngine on<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; SetEnvIf User-Agent
+".*MSIE.*" nokeepalive ssl-unclean-shutdown<br>
+&nbsp;&nbsp;&nbsp; &lt;/IfModule&gt;<br>
+      <br>
+&nbsp;&nbsp;&nbsp; &lt;Directory /var/www/webdav&gt;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; DAV
+On<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; #
+DAVSATMaxAreaSize: the size is specificed in kBytes<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; #
+since each blocks are 4K each<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; #
+add about 50K above the limit wanted<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+DAVSATMaxAreaSize 150<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+AuthType Basic<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+AuthName "test"<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span
+ style="color: rgb(255, 153, 255);"> <span
+ style="color: rgb(51, 102, 255);">#AuthUserFile
+/etc/apache2/passwd.dav</span></span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+&lt;Limit PUT POST DELETE PROPFIND PROPPATCH MKCOL COPY MOVE LOCK
+UNLOCK&gt;<br>
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+Auth_MySQL_DB sysadmins</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+Auth_MySQL_Encrypted_Passwords off</span><br
+ style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+Require user admin</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+&lt;/Limit&gt;<br>
+&nbsp;&nbsp;&nbsp; &lt;/Directory&gt;<br>
+      <br>
+&lt;/VirtualHost&gt;</td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+
+Now restart apache to load the MySQL authentication modules and take
+the MySQL directives into account.<br>
+<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);">#
+/etc/init.d/apache2 restart</td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+After that, restart your WebDAV session and log in
+with the "admin" user account&nbsp;created above. <br>
+<br>
+
+<h3><a name="Configure_the_site_to_provide_all_the_t"></a>Configuring
+the site to provide all the
+functions&nbsp;mentioned
+in
+the introduction</h3>
+So far, I have covered the basics. All the extra functions are
+nothing more than&nbsp;a
+variation of what has already been covered.
+The additional capabilities that I'm going to add to the site are:<br>
+<ul>
+  <li>allow and delegate&nbsp;management of some part the site to a
+group of operators</li>
+  <li>make some part of site only visible and accessible to some
+customers</li>
+  <li>allow some customers to upload files (within a set quota) to a
+restricted part of the site<br>
+  </li>
+  <li>use phpmyadmin to allow the people in the operators group to
+manage the list
+of allowed customers. Using phpmyadmin also makes some of database
+management tasks
+much easier and quicker.<br>
+  </li>
+</ul>
+<h3>Installing phpmyadmin</h3>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);"># apt-get
+install phpmyadmin libapache2-mod-php4<br>
+Reading Package Lists... Done<br>
+Building Dependency Tree... Done<br>
+The following extra packages will be installed:<br>
+&nbsp; apache2-mpm-prefork libapache-mod-php4 php4 php4-mysql<br>
+Suggested packages:<br>
+&nbsp; php4-pear php4-gd php5-gd<br>
+The following packages will be REMOVED:<br>
+&nbsp; apache2-mpm-worker<br>
+The following NEW packages will be installed:<br>
+&nbsp; apache2-mpm-prefork libapache-mod-php4 libapache2-mod-php4 php4
+php4-mysql phpmyadmin<br>
+0 upgraded, 6 newly installed, 1 to remove and 0 not upgraded.<br>
+Need to get 1815kB/6220kB of archives.<br>
+After unpacking 17.3MB of additional disk space will be used.<br>
+Do you want to continue? [Y/n] y&nbsp;</td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+Now that phpmyadmin has been installed, is a good idea to secure and
+restrict its access.
+The first thing I do is move the phpmyadmin symbolic link from&nbsp;the
+Web's root directory into
+the WebDAV directory so I can control how it accessed from the site
+configuration file.
+<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);"># mv
+/var/www/phpmyadmin /var/www/webdav/phpmyadmin</td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+Then I modify the site configuration file to restrict the access.
+Again, following is the updated site configuration files with the added
+directive in red which I'll explain after (thought the comments should
+make it
+mostly self explanatory).<br>
+<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);">&lt;VirtualHost&nbsp;<span
+ style="font-style: italic;">WEB_server_IP_address</span>:80&gt;<br>
+      <br>
+&nbsp;&nbsp;&nbsp; Servername testwebdav.lansa.co.uk<br>
+&nbsp;&nbsp;&nbsp; Documentroot /var/www/webdav<br>
+      <br>
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp; #
+Hide restricted access to phpmyadmin</span><br
+ style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+&lt;Directory
+/var/www/webdav&gt;</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+IndexIgnore phpmyadmin</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+&lt;/Directory&gt;</span><br>
+      <br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp; #
+redirect
+http://<span style="font-style: italic;">Site_Name</span>/phpmyadmin to
+https://</span><span style="color: rgb(255, 0, 0);"><span
+ style="font-style: italic;">Site_Name</span></span><span
+ style="color: rgb(255, 0, 0);">/phpmyadmin</span><br
+ style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+redirect /phpmyadmin
+https://</span><span style="color: rgb(255, 0, 0);"><span
+ style="font-style: italic;">Site_Name</span></span><span
+ style="color: rgb(255, 0, 0);">/phpmyadmin</span><br>
+      <br>
+&lt;/VirtualHost&gt;<br>
+      <br>
+&lt;VirtualHost&nbsp;<span style="font-style: italic;">WEB_server_IP_address</span>:443&gt;<br>
+&nbsp;&nbsp;&nbsp; Servername testwebdav.lansa.co.uk<br>
+&nbsp;&nbsp;&nbsp; Documentroot /var/www/webdav<br>
+&nbsp;&nbsp;&nbsp; CustomLog /var/log/apache2/access.log combined<br>
+      <br>
+&nbsp;&nbsp;&nbsp; &lt;IfModule mod_ssl.c&gt;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; SSLEngine on<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; SetEnvIf User-Agent
+".*MSIE.*" nokeepalive ssl-unclean-shutdown<br>
+&nbsp;&nbsp;&nbsp; &lt;/IfModule&gt;<br>
+      <br>
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp; # restrict
+access of phpmyadmin to the sysadmins group</span><br
+ style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp; &lt;Directory
+/var/www/webdav/phpmyadmin&gt;</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+Order Deny,Allow</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+Deny From all</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+allow from <span style="font-style: italic;">IP_address,
+IP_address_range, etc...</span></span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+AuthType Basic</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+AuthName "restricted access
+to phpmyadmin"</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+Auth_MySQL_DB
+sysadmins</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+Auth_MySQL_Encrypted_Passwords off</span><br
+ style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+require group sysadmins</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;
+&lt;/Directory&gt;</span><br>
+      <br>
+&nbsp;&nbsp;&nbsp; &lt;Directory /var/www/webdav&gt;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; DAV
+On<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; #
+DAVSATMaxAreaSize: the size is specificed in kBytes<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; #
+since each blocks are 4K each<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; #
+add about 50K above the limit wanted<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+DAVSATMaxAreaSize 150<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+AuthType Basic<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+AuthName "test"<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+&lt;Limit PUT POST DELETE PROPFIND PROPPATCH MKCOL COPY MOVE LOCK
+UNLOCK&gt;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+Auth_MySQL_DB sysadmins<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+Auth_MySQL_Encrypted_Passwords off<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+Require user admin<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+&lt;/Limit&gt;<br>
+&nbsp;&nbsp;&nbsp; &lt;/Directory&gt;<br>
+      <br>
+&lt;/VirtualHost&gt;</td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+The following prevents indexing the phpmyadmin symbolic link, thus
+hiding it from the root the WebDAV site.<br>
+Mind you if people knew the URL they can still accesss it. However as
+you'll see later, further levels of restriction <br>
+to access the phpmyadmin URL lay ahead.<br>
+<span style="color: rgb(255, 0, 0);"><br>
+</span>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);"><span
+ style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;
+# Hide restricted access to phpmyadmin</span><br
+ style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;Directory
+/var/www/webdav&gt;</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+IndexIgnore phpmyadmin</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;/Directory&gt;</span></td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+<span style="color: rgb(255, 0, 0);"></span><span
+ style="color: rgb(255, 0, 0);"></span>
+For further security we restrict the use of &nbsp;phpmyadmin to only be
+accessible through HTTPS rather than plain HTTP
+and redirect any HTTP access to HTTPS:<br>
+<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);"><span
+ style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp; # redirect
+http://<span style="font-style: italic;">Site_Name</span>/phpmyadmin to
+https://</span><span style="color: rgb(255, 0, 0);"><span
+ style="font-style: italic;">Site_Name</span></span><span
+ style="color: rgb(255, 0, 0);">/phpmyadmin</span><br
+ style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+redirect /phpmyadmin
+https://</span><span style="color: rgb(255, 0, 0);"><span
+ style="font-style: italic;">Site_Name</span></span><span
+ style="color: rgb(255, 0, 0);">/phpmyadmin</span></td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+Then access to&nbsp;phpmyadmin is further restricted to a specific IP
+address or
+range see (http://httpd.apache.org/docs/&nbsp;<br>
+for further details about the "allow, deny apache directives). As well
+we require authentication and only members of<br>
+the "sysadmin" group are allowed to access the phpmyadmin Web page (and
+of course they have log on into phpmyadmin).<br>
+<br>
+After having passed the authentication&nbsp;you will have to the use
+mysql root account to log into phpmyadmin. However later<br>
+we will create an "operators" group which we will
+allow their members to log into phpmyadmin using their own account
+rather<br>
+than using the root account as it is much safer.<br>
+<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);"><span
+ style="color: rgb(255, 0, 0);">&nbsp;&nbsp; # restrict access of
+phpmyadmin to the sysadmins group</span><br
+ style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp; &lt;Directory
+/var/www/webdav/phpmyadmin&gt;</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+Order Deny,Allow</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+Deny From all</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+allow from&nbsp;</span><span style="color: rgb(255, 0, 0);"><span
+ style="font-style: italic;">IP_address, IP_address_range, etc...</span></span><br
+ style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+AuthType Basic</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+AuthName "restricted access
+to phpmyadmin"</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+Auth_MySQL_DB
+sysadmins</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+Auth_MySQL_Encrypted_Passwords off</span><br
+ style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+require group sysadmins</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;
+&lt;/Directory&gt;</span></td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+<h3>Creating the operators and customers groups</h3>
+The purpose of the "operators" group is to provide a segmented part of
+the
+site that they can managed but not the whole site
+(which can only be managed by the "sysadmins"). Therefore you don't
+have to create it if you don't want to.<br>
+<br>
+The procedure for creating the "operators" and "customers"
+groups is almost identical to the procedure for creating
+the "sysadmins" group.<br>
+<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);"># mysqladmin
+-uroot -p create operators<br>
+Enter password:<br>
+      <br>
+# mysqladmin -uroot -p create customers<br>
+Enter password:<br>
+      <br>
+delldebian:/home/dom# mysql -uroot -p<br>
+Enter password:<br>
+Welcome to the MySQL monitor.&nbsp; Commands end with ; or \g.<br>
+Your MySQL connection id is 181 to server version:
+4.0.24_Debian-10sarge1-log<br>
+      <br>
+Type 'help;' or '\h' for help. Type '\c' to clear the buffer.<br>
+      <br>
+mysql&gt; use operators<br>
+Database changed<br>
+mysql&gt; create table mysql_auth<br>
+&nbsp;&nbsp;&nbsp; -&gt; (<br>
+&nbsp;&nbsp;&nbsp; -&gt; username char(50) not null,<br>
+&nbsp;&nbsp;&nbsp; -&gt; passwd char(25),<br>
+&nbsp;&nbsp;&nbsp; -&gt; groups char(25)<br>
+&nbsp;&nbsp;&nbsp; -&gt; );<br>
+Query OK, 0 rows affected (0.01 sec)<br>
+      <br>
+mysql&gt; create unique index mysqlauthix1 on mysql_auth(username);<br>
+Query OK, 0 rows affected (0.02 sec)<br>
+Records: 0&nbsp; Duplicates: 0&nbsp; Warnings: 0<br>
+      <br>
+mysql&gt; grant select on operators.* to apache@localhost identified by
+'1pach2';<br>
+Query OK, 0 rows affected (0.00 sec)<br>
+      <br>
+mysql&gt; insert into mysql_auth (username, passwd, groups) values
+('operator','4p2r1t4r','operators');<br>
+Query OK, 1 row affected (0.00 sec)<br>
+      <br>
+mysql&gt; use customers<br>
+Database changed<br>
+mysql&gt; create table mysql_auth<br>
+&nbsp;&nbsp;&nbsp; -&gt; (<br>
+&nbsp;&nbsp;&nbsp; -&gt;&nbsp; username char(50) not null,<br>
+&nbsp;&nbsp;&nbsp; -&gt;&nbsp; passwd char(25),<br>
+&nbsp;&nbsp;&nbsp; -&gt;&nbsp; groups char(25)<br>
+&nbsp;&nbsp;&nbsp; -&gt;&nbsp; );<br>
+Query OK, 0 rows affected (0.01 sec)<br>
+      <br>
+mysql&gt; create unique index mysqlauthix1 on mysql_auth(username);<br>
+Query OK, 0 rows affected (0.02 sec)<br>
+Records: 0&nbsp; Duplicates: 0&nbsp; Warnings: 0<br>
+      <br>
+mysql&gt; grant select on&nbsp;customers.* to apache@localhost
+identified by
+'1pach2';<br>
+Query OK, 0 rows affected (0.00 sec)<br>
+      <br>
+mysql&gt; insert into mysql_auth (username, passwd, groups) values
+('joe','bl4g','customers');<br>
+Query OK, 1 row affected (0.00 sec)<br>
+      </td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+Once you have created the "operators" and "customers" databases, we
+need to grant&nbsp;the members
+of the "sysadmins" group the privileges to administer to the operator
+and customer database and also
+grant the members of the "operators"&nbsp;group the privileges to
+administer to the&nbsp;customer database.<br>
+<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);">mysql&gt; use
+mysql<br>
+Reading table information for completion of table and column names<br>
+You can turn off this feature to get a quicker startup with -A<br>
+      <br>
+Database changed<br>
+mysql&gt; grant all on operators.* to admin@localhost identified by
+'1dm3n';<br>
+Query OK, 0 rows affected (0.01 sec)<br>
+      <br>
+mysql&gt; grant all on customers.* to admin@localhost identified by
+'1dm3n';<br>
+Query OK, 0 rows affected (0.00 sec)<br>
+      <br>
+mysql&gt; grant all on customers.* to operator@localhost identified by
+'4p2r1t4r';<br>
+Query OK, 0 rows affected (0.00 sec)</td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+Repeat the same grant process for every member of the "sysadmins" or
+"operators" group you are adding
+to either databases. This grant process also allow&nbsp;members of the
+"sysadmins" and
+"operators" groups to log
+into phpmyadmin<br>
+<br>
+Now that we have the "operators" and "customers" databases we can allow
+the members of the "operators"
+group to manage&nbsp;their segmented part of the site and the list of
+customers which are&nbsp;allowed
+to
+download
+files.<br>
+<br>
+<h3>Allowing&nbsp;the "operators" to manage part of the site</h3>
+As always see the example below for the updated site configuration
+file,
+with the added directives in <span style="color: rgb(255, 0, 0);">red</span>
+and the removed/commented out in <span
+ style="color: rgb(51, 102, 255);">blue</span>. Pay particular
+attention the "Auth_MySQL_DB"directive,
+making sure that the correct database is specified. Otherwise this
+will result in failures to log on. <br>
+<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);">&lt;VirtualHost
+      <span style="font-style: italic;">WEB_server_IP_address</span>:80&gt;<br>
+      <br>
+&nbsp;&nbsp;&nbsp; Servername testwebdav.lansa.co.uk<br>
+&nbsp;&nbsp;&nbsp; Documentroot /var/www/webdav<br>
+      <br>
+&nbsp;&nbsp;&nbsp;&nbsp; # Hide restricted access to phpmyadmin<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; &lt;Directory
+/var/www/webdav&gt;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+IndexIgnore phpmyadmin<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; &lt;/Directory&gt;<br>
+      <br>
+&nbsp;&nbsp;&nbsp;&nbsp; # redirect http://<span
+ style="font-style: italic;">Site_Name</span>/phpmyadmin to https://<span
+ style="font-style: italic;">Site_Name</span>/phpmyadmin<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; redirect /phpmyadmin https://<span
+ style="font-style: italic;">Site_Name</span>/phpmyadmin<br>
+      <br>
+&lt;/VirtualHost&gt;<br>
+      <br>
+&lt;VirtualHost&nbsp;<span style="font-style: italic;">WEB_server_IP_address</span>:443&gt;<br>
+      <br>
+&nbsp;&nbsp;&nbsp; Servername testwebdav.lansa.co.uk<br>
+&nbsp;&nbsp;&nbsp; Documentroot /var/www/webdav<br>
+&nbsp;&nbsp;&nbsp; CustomLog /var/log/apache2/access.log combined<br>
+      <br>
+&nbsp;&nbsp;&nbsp; &lt;IfModule mod_ssl.c&gt;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; SSLEngine on<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; SetEnvIf User-Agent
+".*MSIE.*" nokeepalive ssl-unclean-shutdown<br>
+&nbsp;&nbsp;&nbsp; &lt;/IfModule&gt;<br>
+      <br>
+&nbsp;&nbsp; # restrict access to phpmyadmin<br>
+&nbsp;&nbsp; &lt;Directory /var/www/webdav/phpmyadmin&gt;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Order Deny,Allow<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Deny From all<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; allow from <span
+ style="font-style: italic;">IP_address, IP_address_range, etc...</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; AuthType Basic<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; AuthName "restricted access
+to phpmyadmin"<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span
+ style="color: rgb(51, 102, 255);"># Auth_MySQL_DB
+sysadmins</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span
+ style="color: rgb(255, 0, 0);">Auth_MySQL_DB&nbsp;operators</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+Auth_MySQL_Encrypted_Passwords off<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span
+ style="color: rgb(51, 102, 255);"># require group
+sysadmins</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span
+ style="color: rgb(255, 0, 0);">Require group
+operators</span><br>
+&nbsp;&nbsp;&nbsp; &lt;/Directory&gt;<br>
+      <br>
+&nbsp; &nbsp; &nbsp;# give admins full access to the WebDAV root
+directory<br>
+&nbsp; &nbsp; &nbsp;# upload is unlimited<br>
+&nbsp;&nbsp;&nbsp; &lt;Directory /var/www/webdav&gt;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; DAV On<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; # DAVSATMaxAreaSize: the
+size is specificed in kBytes<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; # since each blocks are 4K
+each<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; # add about 50K above the
+limit wanted<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span
+ style="color: rgb(51, 102, 255);"># DAVSATMaxAreaSize 150</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; AuthType Basic<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; AuthName "test"<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+&lt;Limit PUT POST DELETE PROPFIND PROPPATCH MKCOL COPY MOVE LOCK
+UNLOCK&gt;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+Auth_MySQL_DB sysadmins<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+Auth_MySQL_Encrypted_Passwords off<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+      <span style="color: rgb(51, 102, 255);"># Require user admin</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+      <span style="color: rgb(255, 0, 0);">Require group sysadmins</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+&lt;/Limit&gt;<br>
+&nbsp;&nbsp;&nbsp; &lt;/Directory&gt;<br>
+      <br>
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp; # Give
+operators full access to the operator
+directory<br>
+&nbsp; &nbsp; # but not to the parent directory<br
+ style="color: rgb(255, 0, 0);">
+      </span><span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp; #
+upload is limited with quota (DAVSATMaxAreaSize)</span><br
+ style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;
+&lt;Directory /var/www/webdav/downloads&gt;</span><br
+ style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+DAV On</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+# since blocks are 4K each
+add</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+# about 50K above the limit</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+# limit upload size to 2
+Gigs (2 000 000K)</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+DAVSATMaxAreaSize 2000050</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+AllowOverride None</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+Options None</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+AuthType Basic</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+AuthName "Restricted access
+to the</span><span style="color: rgb(255, 0, 0);"> downloads directory</span><span
+ style="color: rgb(255, 0, 0);">"</span><br
+ style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+&lt;Limit GET PUT POST DELETE PROPFIND PROPPATCH MKCOL COPY MOVE LOCK
+UNLOCK&gt;</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+Auth_MySQL_DB operators</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+Auth_MySQL_Encrypted_Passwords off</span><br
+ style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+Require group operators #!! if you copy this make sure the correct DB
+is used (Auth_MySQL_DB)</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+&lt;/Limit&gt;</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;
+&lt;/Directory&gt;</span><br>
+      <br>
+&lt;/VirtualHost&gt;</td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+Once you have updated the site configuration file, reload apache 2 and
+restart your WebDAV session. In
+your browser, select "File" =&gt; "Open" and open this URL:<br>
+<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 255);">https://<span
+ style="font-style: italic;">WEB_server_IP_address</span>/downloads</td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+replacing <span style="font-style: italic;">"WEB_server_IP_address</span>"
+with the IP address of your server or its FQDN (and don't forget to tick
+the
+check box next to "Open
+as Web Folder").<br>
+<br>
+This time when you are prompted for a user name and password,&nbsp;use
+the "operator" account that was created earlier.
+Once in your&nbsp;WebDAV session as an "operator", create the directory
+"restricted" (right click and&nbsp;select "New =&gt; Folder").
+We will use that directory to host files which&nbsp;only authorized
+customers.will be able to download.<br>
+<h3>Allowing&nbsp;customers to download files from the restricted
+part of the site.</h3>
+Restricting access to the "restricted" directory&nbsp;is
+a very much simplified version of the WedDAV
+directive section that was created earlier (added directives shown
+below in <span style="color: rgb(255, 0, 0);">red</span>).
+<br>
+<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);">&lt;VirtualHost&nbsp;<span
+ style="font-style: italic;">WEB_server_IP_address</span>:80&gt;<br>
+      <br>
+&nbsp;&nbsp;&nbsp; Servername testwebdav.lansa.co.uk<br>
+&nbsp;&nbsp;&nbsp; Documentroot /var/www/webdav<br>
+      <br>
+&nbsp;&nbsp;&nbsp; # Hide restricted access to phpmyadmin<br>
+&nbsp;&nbsp;&nbsp; &lt;Directory /var/www/webdav&gt;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; IndexIgnore phpmyadmin<br>
+&nbsp;&nbsp;&nbsp; &lt;/Directory&gt;<br>
+      <br>
+&nbsp;&nbsp;&nbsp; # redirect http://downloads.lansa.co.uk/phpmyadmin
+to https://downloads.lansa.co.uk/phpmyadmin<br>
+&nbsp;&nbsp;&nbsp; redirect /phpmyadmin
+https://delldebian.lansa.co.uk/phpmyadmim<br>
+      <br>
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp; #
+restricted access to "/downloads/restricted" directory</span><br
+ style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp; # require
+authentication against list of customers</span><br
+ style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;
+&lt;Directory /var/www/webdav/downloads/restricted&gt;</span><br
+ style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+AuthType Basic</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+AuthName "Restricted download accesss"<br>
+      </span><span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+Auth_MySQL_DB customers</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+Auth_MySQL_Encrypted_Passwords off</span><br
+ style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+require group customers<br>
+      </span><span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;
+&lt;/Directory&gt;</span><br style="color: rgb(255, 0, 0);">
+      <br style="color: rgb(255, 0, 0);">
+      <br>
+&lt;/VirtualHost&gt;<br>
+      <br>
+&lt;VirtualHost&nbsp;<span style="font-style: italic;">WEB_server_IP_address</span>:443&gt;<br>
+      <br>
+&nbsp;&nbsp;&nbsp; Servername testwebdav.lansa.co.uk<br>
+&nbsp;&nbsp;&nbsp; Documentroot /var/www/webdav<br>
+&nbsp;&nbsp;&nbsp; CustomLog /var/log/apache2/access.log combined<br>
+      <br>
+&nbsp;&nbsp;&nbsp; &lt;IfModule mod_ssl.c&gt;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; SSLEngine on<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; SetEnvIf User-Agent
+".*MSIE.*" nokeepalive ssl-unclean-shutdown<br>
+&nbsp;&nbsp;&nbsp; &lt;/IfModule&gt;<br>
+      <br>
+&nbsp;&nbsp; # restrict access to phpmyadmin<br>
+&nbsp;&nbsp; &lt;Directory /var/www/webdav/phpmyadmin&gt;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Order Deny,Allow<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Deny From all<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; allow from
+10.44.10.1<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; AuthType Basic<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; AuthName "restricted access
+to phpmyadmin"<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; # Auth_MySQL_DB
+sysadmins<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Auth_MySQL_DB
+operators<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+Auth_MySQL_Encrypted_Passwords off<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; # require group
+sysadmins<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Require group
+operators<br>
+&nbsp;&nbsp;&nbsp; &lt;/Directory&gt;<br>
+      <br>
+&nbsp; &nbsp; &nbsp;# give admins full access to the WebDAV root
+directory<br>
+&nbsp; &nbsp; &nbsp;# upload is unlimited<br>
+&nbsp;&nbsp;&nbsp; &lt;Directory /var/www/webdav&gt;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; DAV On<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; # DAVSATMaxAreaSize: the
+size is specificed in kBytes<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; # since each blocks are 4K
+each<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; # add about 50K above the
+limit wanted<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; # DAVSATMaxAreaSize 150<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; AuthType Basic<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; AuthName "test"<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+&lt;Limit PUT POST DELETE PROPFIND PROPPATCH MKCOL COPY MOVE LOCK
+UNLOCK&gt;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+Auth_MySQL_DB sysadmins<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+Auth_MySQL_Encrypted_Passwords off<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+# Require user admin<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+Require group sysadmins<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+&lt;/Limit&gt;<br>
+&nbsp;&nbsp;&nbsp; &lt;/Directory&gt;<br>
+      <br>
+&nbsp;&nbsp;&nbsp; # give operators full access to the operator
+directory<br>
+&nbsp; &nbsp; # but not to the parent directory<br>
+&nbsp;&nbsp;&nbsp; # upload is limited with quota (DAVSATMaxAreaSize)<br>
+&nbsp;&nbsp;&nbsp; &lt;Directory /var/www/webdav/downloads&gt;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; DAV On<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; # since blocks are 4K each
+add<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; # about 50K above the limit<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; # limit upload size to 2
+Gigs (2 000 000K)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; DAVSATMaxAreaSize 2000050<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; AllowOverride None<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Options None<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; AuthType Basic<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; AuthName "Restricted access
+to the downloads directory"<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+&lt;Limit GET PUT POST DELETE PROPFIND PROPPATCH MKCOL COPY MOVE LOCK
+UNLOCK&gt;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+Auth_MySQL_DB operators<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+Auth_MySQL_Encrypted_Passwords off<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+Require group operators #!! if you copy this make sure the correct DB
+is used (Auth_MySQL_DB)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+&lt;/Limit&gt;<br>
+&nbsp;&nbsp;&nbsp;&nbsp; &lt;/Directory&gt;<br>
+      <br>
+&lt;/VirtualHost&gt;</td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+
+Once you have updated the site configuration file and reloaded apache
+2, open the following URL
+(replacing <span style="font-style: italic;">"WEB_server_IP_address</span>"
+with the IP address of your server or its FQDN):<br>
+<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 255);">http://<span
+ style="font-style: italic;">WEB_server_IP_address</span>/downloads/restricted</td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+Then when you are prompted for a user name&nbsp;and password,&nbsp;use
+the "customer" account that was created earlier.<br>
+<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px">Note: as you may have noticed from the above&nbsp;URL, you
+need to specify the full path including the name
+of the&nbsp;directory for which the authentication is performed. This
+is because the restriction directive has the
+effect of &nbsp;hiding that directory.
+      </td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+<h3>Allowing&nbsp;customers to upload files</h3>
+Allowing customers to upload files is fairly easy to achieve and
+uses&nbsp;more or less the same configuration
+as the "operators" section. 
+First, create the upload directory:<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);"># mkdir
+/var/www/webdav/upload<br>
+# chown www-data:www-data /var/www/webdav/upload</td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+(you can also easily do this via a WebDAV session if you're logged in
+as&nbsp;admin).
+Next, modify the site configuration file (added directives shown below
+in <span style="color: rgb(255, 0, 0);">red</span>).<br>
+<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 204);">&lt;VirtualHost&nbsp;<span
+ style="font-style: italic;">WEB_server_IP_address</span>:80&gt;<br>
+      <br>
+&nbsp;&nbsp;&nbsp; Servername testwebdav.lansa.co.uk<br>
+&nbsp;&nbsp;&nbsp; Documentroot /var/www/webdav<br>
+      <br>
+&nbsp;&nbsp;&nbsp; # Hide restricted access to phpmyadmin<br>
+&nbsp;&nbsp;&nbsp; &lt;Directory /var/www/webdav&gt;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; IndexIgnore phpmyadmin<br>
+&nbsp;&nbsp;&nbsp; &lt;/Directory&gt;<br>
+      <br>
+&nbsp;&nbsp;&nbsp; # redirect http://downloads.lansa.co.uk/phpmyadmin
+to https://downloads.lansa.co.uk/phpmyadmin<br>
+&nbsp;&nbsp;&nbsp; redirect /phpmyadmin
+https://delldebian.lansa.co.uk/phpmyadmim<br>
+      <br>
+&nbsp;&nbsp;&nbsp; # restricted access to "/downloads/restricted"
+directory<br>
+&nbsp;&nbsp;&nbsp; # require authentication against list of customers<br>
+&nbsp;&nbsp;&nbsp; &lt;Directory
+/var/www/webdav/downloads/restricted&gt;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; AuthType Basic<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; AuthName "Restricted
+download accesss"<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Auth_MySQL_DB customers<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+Auth_MySQL_Encrypted_Passwords off<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; require group customers<br>
+&nbsp;&nbsp;&nbsp; &lt;/Directory&gt;<br>
+      <br>
+      <br>
+&lt;/VirtualHost&gt;<br>
+      <br>
+&lt;VirtualHost&nbsp;<span style="font-style: italic;">WEB_server_IP_address</span>:443&gt;<br>
+      <br>
+&nbsp;&nbsp;&nbsp; Servername testwebdav.lansa.co.uk<br>
+&nbsp;&nbsp;&nbsp; Documentroot /var/www/webdav<br>
+&nbsp;&nbsp;&nbsp; CustomLog /var/log/apache2/access.log combined<br>
+      <br>
+&nbsp;&nbsp;&nbsp; &lt;IfModule mod_ssl.c&gt;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; SSLEngine on<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; SetEnvIf User-Agent
+".*MSIE.*" nokeepalive ssl-unclean-shutdown<br>
+&nbsp;&nbsp;&nbsp; &lt;/IfModule&gt;<br>
+      <br>
+&nbsp;&nbsp; # restrict access to phpmyadmin<br>
+&nbsp;&nbsp; &lt;Directory /var/www/webdav/phpmyadmin&gt;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Order Deny,Allow<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Deny From all<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; allow from
+10.44.10.1<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; AuthType Basic<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; AuthName "restricted access
+to phpmyadmin"<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; # Auth_MySQL_DB
+sysadmins<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Auth_MySQL_DB
+operators<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+Auth_MySQL_Encrypted_Passwords off<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; # require group
+sysadmins<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Require group
+operators<br>
+&nbsp;&nbsp;&nbsp; &lt;/Directory&gt;<br>
+      <br>
+&nbsp;&nbsp;&nbsp; # give operators full access to the operator
+directory<br>
+&nbsp;&nbsp;&nbsp; # but not to the parent directory<br>
+&nbsp;&nbsp;&nbsp; # upload is limited with quota (DAVSATMaxAreaSize)<br>
+&nbsp;&nbsp;&nbsp; &lt;Directory /var/www/webdav/downloads&gt;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; DAV On<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; # since blocks are 4K each
+add<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; # about 50K above the limit<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; # limit upload size to 2
+Gigs (2 000 000K)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; DAVSATMaxAreaSize 2000050<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; AllowOverride None<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Options None<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; AuthType Basic<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; AuthName "Restricted access
+to the downloads directory"<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+&lt;Limit GET PUT POST DELETE PROPFIND PROPPATCH MKCOL COPY MOVE LOCK
+UNLOCK&gt;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+Auth_MySQL_DB operators<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+Auth_MySQL_Encrypted_Passwords off<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+Require group operators #!! if you copy this make sure the correct DB
+is used (Auth_MySQL_DB)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+&lt;/Limit&gt;<br>
+&nbsp;&nbsp;&nbsp;&nbsp; &lt;/Directory&gt;<br>
+      <br>
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp; # allow
+customers full access to the upload directory</span><br
+ style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp; # but not
+to the parent directory</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp; # upload
+is limited with quota (DAVSATMaxAreaSize)</span><br
+ style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;
+&lt;Directory /var/www/webdav/upload&gt;</span><br
+ style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+DAV On</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+# since blocks are 4K each add</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+# about 50K above the limit</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+# limit upload size to 200 Megs (200 000K)</span><br
+ style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+DAVSATMaxAreaSize 200050</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+AllowOverride None</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+Options None</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+AuthType Basic</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+AuthName "Restricted access to the upload directory"</span><br
+ style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+&lt;Limit GET PUT POST DELETE PROPFIND PROPPATCH MKCOL COPY MOVE LOCK
+UNLOCK&gt;</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+Auth_MySQL_DB customers</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+Auth_MySQL_Encrypted_Passwords off</span><br
+ style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+Require group customers #!! if you copy this make sure the correct DB
+is used (Auth_MySQL_DB)</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+&lt;/Limit&gt;</span><br style="color: rgb(255, 0, 0);">
+      <span style="color: rgb(255, 0, 0);">&nbsp;&nbsp;&nbsp;&nbsp;
+&lt;/Directory&gt;</span><br>
+      <br>
+&lt;/VirtualHost&gt;</td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+Once you have updated your site configuration file, reload apache 2 and
+restart your WebDAVsession. In
+your browser, select "File" =&gt; "Open" and open the following URL:<br>
+<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 255);">https://<span
+ style="font-style: italic;">WEB_server_IP_address</span>/upload</td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+replacing <span style="font-style: italic;">"WEB_server_IP_address</span>"
+with the IP address of your server or its FQDN
+(and don't forget to tick the check box next to "Open
+as Web Folder").<br>
+<br>
+Then when you are prompted for a user name&nbsp;and password,&nbsp;use
+again the "customer" account.<br>
+<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px">Note: with the above configuration, any customers with a
+valid user name and password will be able to upload, download,
+rename and delete files in the upload directory.</td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+<h3>Using phpmyadmin to allow the people in the operators group to manage the list of allowed customers</h3>
+Managing the list of customers using phpmyadmin is fairly easy. However
+for
+those of you
+not familiar with&nbsp;phpmyadmin, here a quick tutorial on how to do
+it. Open the
+following
+URL in your
+Web browser:<br>
+<br>
+<pre>
+<table style="text-align: left; width: 100%;" border="1" cellpadding="2"
+ cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="font-size: 11px; background-color: rgb(204, 204, 255);">https://<span
+ style="font-style: italic;">WEB_server_IP_address</span>/phpmyadmin</td>
+    </tr>
+  </tbody>
+</table>
+</pre>
+replacing <span style="font-style: italic;">"WEB_server_IP_address</span>"
+with the IP address of your server or its FQDN.<br>
+<br>
+Then when you are prompted for a user name&nbsp;and
+password,&nbsp;use&nbsp;the "operator" account to get
+past the authentication at the Web server level. Subsequently you will
+be presented with the 
+phpmyadmin login screen and once again use&nbsp;the "operator" account
+&nbsp;to login.<br>
+<br>
+Once logged into phpmyadmin, click the "customers" database and the
+"browse" icon (1st from the left)
+under the "Action" menu. From there you can add a customer by clicking
+"Insert new row", edit their
+details (password change, etc...) by clicking the "Edit" icon
+(pencil&nbsp;icon)
+or delete them by clicking the
+"Delete" icon (red cross&nbsp;icon) and if you want to disable and
+account either edit its&nbsp;details or delete it.<br>
+<br>
+Lastly, remember the following (which, actually can be used to disable
+an account):<br>
+<ol>
+  <li>user name, password
+and groups are case sensitive</li>
+  <li>make sure that every customer is part
+of the "customers" group
+and likewise any operators are part of the "operators" group.</li>
+</ol>
+Any issue with the above two items will prevent successful logins.<br>
+<br>
+
+
+<h3>Credits</h3>
+I should give credit and thanks to the following; without them I
+would never have 
+been able to achieve my project:
+<ul>
+  <li>Saqib Ali's "Apache based
+WebDAV server with LDAP for
+authentication and SSL" HOWTO
+(<a href="http://www.tldp.org/HOWTO/Apache-WebDAV-LDAP-HOWTO/">http://www.tldp.org/HOWTO/Apache-WebDAV-LDAP-HOWTO/</a>)</li>
+  <li><a href="http://bignosebird.com/notebook/mysqlauth.shtml">http://bignosebird.com/notebook/mysqlauth.shtml</a></li>
+  <li><a
+ href="http://www.twilight-systems.com/flacco/mozcal/mozcal-webdav-apache2-rh9.html">http://www.twilight-systems.com/flacco/mozcal/mozcal-webdav-apache2-rh9.html</a></li>
+  <li>Nate Carlson's IPSec using Openswan "Howto"
+(<a href="http://www.natecarlson.com/linux/ipsec-x509.php">http://www.natecarlson.com/linux/ipsec-x509.php</a>)</li>
+</ul>
+
+
+<h3><a name="Footnote_commentssuggestions"></a>Footnote,
+comments/suggestions</h3>
+I invite all comments and suggestion for improving
+this HOWTO. Please feel free to drop me a line at <a href="mailto:dom2319@yahoo.co.uk">dom2319@yahoo.co.uk</a>.<br>
+
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:131/cressatti.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/authors/cressatti.jpg" class="bio">
+</p>
+
+<p>
+<em>
+I was born in France and moved to the UK in 1993 -
+and, believe it or not, have loved it ever since.
+</p>
+
+<p>
+Back in 1998, a work colleague suggested I look
+at Linux when it was just barely a buzz. Something
+to do in my spare time. I got myself a book with a
+copy of RH 5.0. A few weeks later Mandrake came out,
+and I've been hooked on it ever since.
+</p>
+
+<p>
+In the recent years, I switched to Debian, and
+those days the Debian boxes pop up everyhwhere
+in the company I admin the network for.
+I use it for Web servers, VPN-firewalls, routers, etc...
+but that's never enough, as it even made it on our
+iSeries (also know as AS/400).
+</p>
+
+<p>
+In my free time I like snowboarding, listening
+to house music, and getting a foot into the paranormal.
+</em>
+</p>
+<br clear="all">
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2006, Dominique Cressatti. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 131 of Linux Gazette, October 2006
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="lg_tips.html" >&lt;-- prev</A> | <A HREF="howell.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/mailman/listinfo/">Mailing Lists</a>
+<a href="..//jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">October 2006 (#131)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

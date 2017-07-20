@@ -1,0 +1,282 @@
+<!--startcut ======================================================= -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<html>
+<head>
+<META NAME="generator" CONTENT="lgazmail v1.1J.d">
+<TITLE>The Answer Guy 39: Secure Shutdown from the Console</TITLE>
+</HEAD><BODY BGCOLOR="#FFFFFF" TEXT="#000000"
+	LINK="#3366FF" VLINK="#A000A0">
+<!-- ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::: -->
+<H4>"The Linux Gazette...<I>making Linux just a little more fun!</I>"</H4>
+<P> <hr> <P>
+<!-- ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::: -->
+<center>
+<H1><A NAME="answer">
+	<img src="../../gx/dennis/qbubble.gif" alt="(?)" 
+		border="0" align="middle">
+	<font color="#B03060">The Answer Guy</font>
+	<img src="../../gx/dennis/bbubble.gif" alt="(!)" 
+		border="0" align="middle">
+</A></H1> 
+<BR>
+<H4>By James T. Dennis,
+	<a href="mailto:tag@lists.linuxgazette.net">tag@lists.linuxgazette.net</a><BR>
+	LinuxCare,
+	<A HREF="http://www.linuxcare.com/">http://www.linuxcare.com/</A> 
+</H4>
+</center>
+
+<p><hr><p>
+<!--  endcut ======================================================= -->
+<!-- begin 21 -->
+<H3 align="left"><img src="../../gx/dennis/qbubble.gif" 
+	height="50" width="60" alt="(?) " border="0"
+	>Secure Shutdown from the Console</H3>
+
+
+<p><strong>From Werner Ackerl  on Sun, 28 Mar 1999  
+</strong></p>
+<!-- ::
+Secure Shutdown from the Console
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+:: -->
+<P><STRONG>
+Dear jim,
+<br>I've been using Linux for - well, it must be four years by now,
+and I've finally got around to do my first donation to the community.
+</STRONG></P>
+<P><STRONG>
+I'm a bit concerned about security - part of my tip is about creating
+a new user to run <TT>/sbin/halt</TT> - I just don't want to (re)introduce any
+hazard.
+</STRONG></P>
+<P><STRONG>
+Would you please have a look a it? The text is attached.
+</STRONG></P>
+<P><STRONG>
+thanks, werner
+</STRONG></P>
+<P><STRONG>
+nb: My tip is intended to go to the 2-cent-tip column. I'll be
+glad to include your comments.
+</STRONG></P>
+<BLOCKQUOTE><IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	>
+(Attachment includes a kernel patch to change the
+LED status on kernel halt, and some suggestions on
+create a user account with <TT>/sbin/halt</TT> as a shell, etc
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+This is all in the context of a print server in his
+closet that he wishes to run without the monitor attached
+most of the time.  He also wants it to be shutdown down
+on a nightly basis due to the noise factor).
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+Werner,
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+I didn't attempt to do a thorough code audit of the
+attached file.  However, I do have some ideas on how
+I'd attempt this.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+First, I'd avoid a kernel patch.  I might write a small
+small utility shell script that would cycle among the
+LEDs that might look something like:
+</BLOCKQUOTE>
+
+<blockquote><pre>#!/bin/sh
+trap "/usr/bin/setleds -L" 0 1 2 3 5 6
+
+while /bin/true; do
+        setleds -L +num; setleds -L -num
+        setleds -L +caps; setleds -L -caps
+        setleds -L +scroll; setleds -L -scroll
+        sleep 1
+        done
+setleds -L
+</pre></blockquote>
+<BLOCKQUOTE>
+... this just turns each keyboard LED on then off, in turn,
+waits one second and repeats the process.  The -L causes the
+command to affect only the LED lit status and not the actual
+keyboard lock status.  In other words this blinks the lights
+without actually setting the keyboard CapsLock, NumLock or
+ScrollLock settings. The extra '<tt>setleds -L</tt>' and the trap
+attempt to resync the the LEDs to our actual keyboard lock
+status as we exit the loop and on any common form of
+interrupt signal.  (The part outside the loop is
+non-sensical for this loop, with <TT>/bin/true</TT> as our condition
+--- but would make sense if we added some 'break' test
+inside the loop or changed the loop condition).
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+With that script set up I might invoke it via init
+(<TT>/etc/inittab</TT>) or from a startup script.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+That gives me a constant indicator that the computer is
+still processing user space stuff.  It should also tell me
+when the halt is completed (since the '<tt>cycleleds</tt>' script
+will be killed only a few seconds before the rest of the
+system has been fully halted.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+Instead of the special user in the <TT>/etc/passwd</TT> file (which
+might be remotely accessible) I'd just modify the line in
+<TT>/etc/inittab</TT> that refers to the <TT>/sbin/shutdown</TT> command.  I'd
+change that line from something like:
+</BLOCKQUOTE>
+<BLOCKQUOTE><BlockQuote><Code>
+ca::ctrlaltdel:/sbin/shutdown -r -t 4 now
+</Code></BlockQuote></BLOCKQUOTE>
+<BLOCKQUOTE>
+... to:
+</BLOCKQUOTE>
+<BLOCKQUOTE><BlockQuote><code>
+ca::ctrlaltdel:/sbin/shutdown -h now
+</code></BlockQuote></BLOCKQUOTE>
+<BLOCKQUOTE>
+... and I'd then just use [Ctrl]+[Alt]+[Del] (the
+traditional PC "three finger salute" or "vulcan PC pinch")
+to do my shutdown.
+</BLOCKQUOTE>
+
+<p><em>[ I did this for my laptop, since I'm far more likely to do that
+	in order to pack it away, than to need to to restart it.
+	-- Heather ]</em></p>
+
+<BLOCKQUOTE>
+The advantage to this method is that it doesn't involve any
+login and that it absolutely requires physical access to the
+system to invoke (unless your attacker can employ
+telekinesis, of course).
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+A more elaborate method would be to write a small C program
+that issues the appropriate <tt>ioctl()</tt>'s to cycle the LEDs at
+your desired frequencies, and to have it monitor the
+keyboard for your custom key event.  Have that started from
+<tt>/etc/inittab</tt>.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+You could find out how to control the LEDs by reading the
+sources to the '<tt>setleds</tt>' program (which is in the kbd or
+consoletools packages), and you read up on the shutdown()
+system call from its man page, or read the example in the
+sources to the '<tt>shutdown</tt>' command.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+There is a small package that's included with 
+<A HREF="http://www.debian.org/">Debian</A> 2.x
+that blinks your LEDs based on network traffic.  There's
+also a utility called "<tt>loaddog</tt>" which is a system load
+watchdog.  These are the sorts of things you might use on
+your system to monitor your system's activity without
+turning on the monitor and without connecting to it through
+your LAN from the other systems on your net.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+Of course, if I had this system in my closet and I wanted to
+shut if off, I'd just have a script on my desktop system
+that would perform the desired operation over ssh.  It's
+assume that the system was pretty well done with its
+shutdown by the time I got to it from my desk.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+With newer APM motherboards you can configure you systems to
+power off on shutdown.  I think this is possible even with
+desktop systems that implement APM features.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+I'm not saying that there's anything wrong with your
+approach.  However, it seems like more work and more
+risk than my method.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+As for the noise.  I can understand your concern.
+I have a number of relatively noisy computers around the
+house and am considering trading them out for quieter
+systems.  It's ironic that these systems (like my trusty
+old 386s --- my router and my main mail, news and internal
+web server) are still electronically perfectly suitable
+for my workload and that the only reason I'm considering
+replacing them is to reduce the power consumption, heat
+generation, and noise emanations.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+Luckily I have just enough load on my finances to resist
+the urge to buy couple of rackmounted Corel Netwinders
+and/or Cobalt Raq's.  Those are both very quiet systems
+with much less fan noise than my current systems.  I
+already have most of my current systems in a closet, with
+cables leading out to a switchbox, and thence to my
+keyboard and monitor.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+One of my best customers has his cables poked through a wall
+between his den and the garage.  That room is really quiet.
+unfortunately my house isn't laid out in a way that makes
+that feasible.  The garage is by the kitchen and the den
+and bedrooms are all adjacent to one another.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+As I get richer (or less thrifty) I'll probably get a
+couple of Igel (<A HREF="http://www.igelusa.com"
+	>http://www.igelusa.com</A>) X terminals
+or desktop Netwinders (<A HREF="http://www.hcc.ca"
+	>http://www.hcc.ca</A>) to use at
+my desk and in the living room.
+</BLOCKQUOTE>
+<!-- sig -->
+
+<!-- end 1 -->
+<!--startcut ======================================================= -->
+<P> <hr> <P>
+<H5 align="center"><a href="http://www.linuxgazette.net/copying.html"
+	>Copyright &copy;</a> 1999, James T. Dennis 
+<BR>Published in <I>The Linux Gazette</I> Issue 39 April 1999</H5>
+<P> <hr> <P>
+<!-- begin tagnav ::::::::::::::::::::::::::::::::::::::::::::::::::-->
+<TABLE WIDTH="96%"><TR VALIGN="center" ALIGN="center">
+<TD ROWSPAN="2" WIDTH="30%"><A HREF="../lg_answer39.html"
+	><IMG SRC="../../gx/dennis/answernew.gif"
+              ALT="[ Answer Guy Index ]"></A></td>
+  <TD WIDTH="6%"><A HREF="2.html">2</A></TD>
+  <TD WIDTH="6%"><A HREF="3.html">3</A></TD>
+  <TD WIDTH="6%"><A HREF="4.html">4</A></TD>
+  <TD WIDTH="6%"><A HREF="5.html">5</A></TD>
+  <TD WIDTH="6%"><A HREF="6.html">6</A></TD>
+  <TD WIDTH="6%"><A HREF="7.html">7</A></TD>
+  <TD WIDTH="6%"><A HREF="8.html">8</A></TD>
+  <TD WIDTH="6%"><A HREF="9.html">9</A></TD>
+  <TD WIDTH="6%"><A HREF="10.html">10</A></TD>
+  <TD WIDTH="6%"><A HREF="11.html">11</A></TD>
+</TR><TR VALIGN="center" ALIGN="center">
+  <TD><A HREF="12.html">12</A></TD>
+  <TD><A HREF="13.html">13</A></TD>
+  <TD><A HREF="15.html">15</A></TD>
+  <TD><A HREF="16.html">16</A></TD>
+  <TD><A HREF="18.html">18</A></TD>
+  <TD><A HREF="19.html">19</A></TD>
+  <TD><A HREF="21.html">21</A></TD>
+  <TD><A HREF="22.html">22</A></TD>
+  <TD><A HREF="23.html">23</A></TD>
+</TR></TABLE>
+<!-- end tagnav ::::::::::::::::::::::::::::::::::::::::::::::::::::-->
+<P> <hr> <P>
+<!-- begin lgnav ::::::::::::::::::::::::::::::::::::::::::::::::::: -->
+<A HREF="../index.html"
+	><IMG SRC="../../gx/indexnew.gif" ALT="[ Table Of Contents ]"></A>
+<A HREF="../../index.html"
+	><IMG SRC="../../gx/homenew.gif" ALT="[ Front Page ]"></A>
+<A HREF="../lg_bytes39.html"
+	><IMG SRC="../../gx/back2.gif" ALT="[ Previous Section ]"></A>
+<A HREF="../lg_tips39.html"
+	><IMG SRC="../../gx/fwd.gif" ALT="[ Next Section ]"></A>
+<!-- end lgnav ::::::::::::::::::::::::::::::::::::::::::::::::::::: -->
+<!-- ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::: -->
+</BODY></HTML>
+<!--endcut ========================================================= -->

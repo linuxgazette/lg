@@ -1,0 +1,34 @@
+#!/usr/local/bin/perl -w
+# @(#) SEPclientPGP.pl	Secure Email Print client program. Ref: RFC 3156.
+#			Takes incoming stream and generates PGP-signed message
+#			which is piped to split-and-send program for email
+#			transmission to server. Requires 'pgp' program.
+#			Graham Jenkins, IBM GSA, Dec. 2001. [Rev'd 2001-12-30]
+
+use strict;
+use File::Basename;
+use MIME::Lite;
+use IO::File;
+use Env qw(PGPPASS);
+
+die "Usage: ".basename($0)." kb-per-part destination [passphrase]\n".
+    " e.g.: ".basename($0)." 16 lp3\@pserv.acme.com \"A secret\" < report.ps\n".
+    "       Part-size must be >= 1\n"
+  if ( ($#ARGV < 1) or ($#ARGV > 2) or ($ARGV[0] < 1) );
+
+my $fh = new IO::File "| /usr/local/bin/SplitSend.pl $ARGV[0]";
+if( defined($ARGV[2]) ) {$PGPPASS=$ARGV[2]}
+if( ! defined ($PGPPASS)) {$PGPPASS=""}	# Plant passphrase in environment and
+my $msg = MIME::Lite->new(		# create signed message.
+                To      => $ARGV[1],
+                Subject => 'Secure Email Print Job # '.time,
+                Type    => 'multipart/encrypted');
+$msg->attr  (   "content-type.protocol" => "pgp-encrypted");
+$msg->attach(   Type    => 'application/pgp-encrypted',
+                Encoding=> 'binary',
+                Data    => "Version: 1\n");
+$msg->attach(   Type    => 'application/octet-stream',
+                Encoding=> 'binary',
+                Path    => "/usr/local/bin/pgp -fas - |");
+$msg->print($fh);			# Pipe the signed message into a
+__END__					# split-and-send program.

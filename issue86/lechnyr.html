@@ -1,0 +1,269 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>Security with PHP Superglobals LG #86</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="jenkins.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../lg_faq.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="okopnik.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+
+<!--endcut ============================================================-->
+
+<TABLE BORDER><TR><TD WIDTH="200">
+<A HREF="http://www.linuxgazette.net/">
+<IMG ALT="LINUX GAZETTE" SRC="../gx/2002/lglogo_200x41.png" 
+	WIDTH="200" HEIGHT="41" border="0"></A> 
+<BR CLEAR="all">
+<SMALL>...<I>making Linux just a little more fun!</I></SMALL>
+</TD><TD WIDTH="380">
+
+
+<CENTER>
+<BIG><BIG><STRONG><FONT COLOR="maroon">Security with PHP Superglobals</FONT></STRONG></BIG></BIG>
+<BR>
+<STRONG>By <A HREF="../authors/lechnyr.html">David Lechnyr</A></STRONG>
+</CENTER>
+
+</TD></TR>
+</TABLE>
+<P>
+
+<!-- END header -->
+
+
+
+
+
+
+
+
+
+
+
+<p align="center"><em>"Avoid strange women and temporary variables."</em> -- Anonymous</p>
+
+<p>A few years ago, my wife and I decided to go on a skiing trip up north. To reserve skiing equipment, you had to give 24 hours advance notice using the ski lodge's on-line website. The
+catch was that my wife had asked me to make the reservations 23 hours before the deadline.</p>
+<p>So I got to thinking, and examined the online website, which would not let you make any reservations within the 24 hour timeframe. However, once you selected an appropriate date, I noticed
+that the URL was:</p>
+<blockquote><code>https://www.somewhere.com/reservations.php?date=01-23-01</code></blockquote>
+<p>It occurred to me that, while they had locked down security on what dates I could choose from, the final value was placed into a <strong>GET</strong> statement at the end of the web
+address. I modified the web address to use "date=01-22-01" and indeed, our skies were waiting for us first thing the next morning (we paid for them, of course).</p>
+<p>This innocent yet practical example is just one of the dangers we have to be aware of when using any programming language that can be used in ways that we did not intend, which leads us
+into our discussion on PHP Superglobals.</p>
+<h2>Forms</h2>
+<p>To understand Superglobals, it is <em>critical</em> that you understand how data is passed from one web page to another (e.g., forms). Specifically, you must be aware of two methods known
+as GET and POST. You should also probably be familiar with the HTML &lt;FORM&gt; statement (a good reference is
+<a href="http://www.w3.org/TR/html401/interact/forms.html">http://www.w3.org/TR/html401/interact/forms.html</a>).</p>
+<p>You've probably seen something like this before:</p>
+<blockquote>
+<p><code>&lt;form name="form1" method="post" action="process.php"&gt;<br />
+ &nbsp;&nbsp;&nbsp;&lt;p&gt;Please enter your name:&lt;/p&gt;<br />
+ &nbsp;&nbsp;&nbsp;&lt;p&gt;&lt;input type="text" name="yourname" /&gt;&lt;/p&gt;<br />
+&nbsp;&nbsp;&nbsp;&lt;p&gt;&lt;input type="button" name="Submit" value="Submit" /&gt;&lt;/p&gt;<br />
+ &lt;/form&gt;</code></p></blockquote>
+<p>This is standard, nothing-fancy HTML form code that asks for some information and then submits the data to the file "process.php" . &nbsp;The critical bit here is the
+<strong>method</strong> declaration, which tells the form <strong>how</strong> to submit the data, for which we need to digress for a moment or two (hold your breath):</p>
+<p>For those that recall the early days of HTML, forms were provided by means of the &lt;ISINDEX&gt; HTML tag. By inserting this tag into the HEAD of your HTML documents, a text field appeaed
+where you could fill out input. As the new HTML+ standard evolved, a &lt;FORM&gt; tag was designed and could be used with a METHOD attribute of GET, POST, or PUT. &nbsp;So, this leaves us
+with a few different ways to send our data.</p>
+<h2>GET</h2>
+<p>With GET, variables and their values are sent in the header of the URL request appended as part of the URL itself. &nbsp;The limitation is that web addresses (URLs) are limited to 8,192
+characters; if the amount of data is too long, it will be truncated. Also, even with an SSL connection, the data is not encrypted since it is part of the web address.</p>
+<p>For example, a web page might have a form statement like this:</p>
+<blockquote>
+<p><code>&lt;form name="form1" <strong><font color="#0000FF">method="get"</font></strong> action="process.php"&gt;<br />
+ &nbsp;&nbsp;&nbsp;&lt;p&gt;Please enter your name, e-mail address, and a comment:&lt;/p&gt;<br />
+ &nbsp;&nbsp;&nbsp;&lt;p&gt;&lt;input type="text" name="yourname" /&gt;&lt;/p&gt;<br />
+ &nbsp;&nbsp;&nbsp;&lt;p&gt;&lt;input type="text" name="email" /&gt;&lt;/p&gt;<br />
+ &nbsp;&nbsp;&nbsp;&lt;p&gt;&lt;input type="text" name="comment" /&gt;&lt;/p&gt;<br />
+ &nbsp;&nbsp;&nbsp;&lt;p&gt;&lt;input type="button" name="Submit" value="Submit" /&gt;&lt;/p&gt;<br />
+ &lt;/form&gt;</code></p></blockquote>
+<p>When you clicked <em>Submit</em>, your web browser would take the values you filled out in the form and redirect you to this web address:</p>
+<blockquote><code>http://www.fluffygerbil.com/process.php?yourname=fred+smith&amp;email=fred@nowhere.com&amp;comment=I+have+no+comment</code></blockquote>
+<p>Notice how the values of the form are part of the web address itself? That's the essence of GET.</p>
+<p>For the curious, what is actually sent in the <em>raw</em> HTTP transmission to accomplish this transaction is:</p>
+<blockquote>
+<p><code>GET /process.php?yourname=fred+smith&amp;email=fred@nowhere.com&amp;comment=I+have+no+comment HTTP/1.0<br />
+ Accept: image/gif, image/x-xbitmap, image/jpeg, */*<br />
+ Accept-Language: en-us<br />
+ User-Agent: Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.1; Q312461)<br />
+ Host: www.fluffygerbils.com<br />
+ Connection: keep-alive</code></p></blockquote>
+<h2>POST</h2>
+<p>With <strong>POST,</strong> the variables and their values are sent in the body of the URL request, not the header. &nbsp;The advantages of this type of data transmission is that there is
+no limit to the size of the data being sent since it is contained in the body of the HTTP request, not the header. &nbsp;Also, if you're using an SSL connection, the data will be encrypted
+too, what a deal. 
+<IMG ALT=":)" SRC="../gx/dennis/smily.gif" WIDTH="20" HEIGHT="24">
+&nbsp;For example, a web page that has a form statement like:</p>
+<blockquote>
+<p><code>&lt;form name="form1" <strong><font color="#0000FF">method="post"</font></strong> action="process.php"&gt;<br />
+ &nbsp;&nbsp;&nbsp;&lt;p&gt;Please enter your name, e-mail address, and a comment:&lt;/p&gt;<br />
+ &nbsp;&nbsp;&nbsp;&lt;p&gt;&lt;input type="text" name="yourname" /&gt;&lt;/p&gt;<br />
+ &nbsp;&nbsp;&nbsp;&lt;p&gt;&lt;input type="text" name="email" /&gt;&lt;/p&gt;<br />
+ &nbsp;&nbsp;&nbsp;&lt;p&gt;&lt;input type="text" name="comment" /&gt;&lt;/p&gt;<br />
+ &nbsp;&nbsp;&nbsp;&lt;p&gt;&lt;input type="button" name="Submit" value="Submit" /&gt;&lt;/p&gt;<br />
+ &lt;/form&gt;</code></p></blockquote>
+<p>When you clicked <em>Submit</em>, your web browser would take the values you filled out in the form and redirect you to this web address:</p>
+<blockquote><code>http://www.fluffygerbil.com/process.php</code></blockquote>
+<p>Notice how the values of the form are <em>not</em> part of the web address itself? That's the essence of PUT.</p>
+<p>For the curious, what is actually sent in the <em>raw</em> HTTP transmission to accomplish this transaction is:</p>
+<blockquote>
+<p><code>POST /process.php HTTP/1.0<br />
+ Accept: image/gif, image/x-xbitmap, image/jpeg, */*<br />
+ Accept-Language: en-us<br />
+ Content-Type: application/x-www-form-urlencoded<br />
+ User-Agent: Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.1; Q312461)<br />
+ Host: www.fluffygerbils.com<br />
+ Content-Length: 94<br />
+ Pragma: no-cache<br />
+ Connection: keep-alive<br />
+<br />
+ yourname=fred+smith<br />
+ email=fred@nowhere.com<br />
+ comment=I+have+no+comment</code></p></blockquote>
+<h2>So What?</h2>
+<p>So, why is all this background information useful? When you install PHP 4.2.2 or later, you might happen to notice that when compiling PHP, it states:</p>
+<blockquote><code>+--------------------------------------------------------------------+<br />
+ |&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;***&nbsp;NOTE&nbsp;***&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;|<br />
+
+ |&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;The&nbsp;default&nbsp;for&nbsp;register_globals&nbsp;is&nbsp;now&nbsp;OFF!&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;|<br />
+
+ |&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;|<br />
+
+ |&nbsp;If&nbsp;your&nbsp;application&nbsp;relies&nbsp;on&nbsp;register_globals&nbsp;being&nbsp;ON,&nbsp;you&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;|<br />
+ |&nbsp;should&nbsp;explicitly&nbsp;set&nbsp;it&nbsp;to&nbsp;on&nbsp;in&nbsp;your&nbsp;php.ini&nbsp;file.&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;|<br />
+
+ |&nbsp;Note&nbsp;that&nbsp;you&nbsp;are&nbsp;strongly&nbsp;encouraged&nbsp;to&nbsp;read&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;|<br />
+
+ |&nbsp;http://www.php.net/manual/en/security.registerglobals.php&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;|<br />
+ |&nbsp;about&nbsp;the&nbsp;implications&nbsp;of&nbsp;having&nbsp;register_globals&nbsp;set&nbsp;to&nbsp;on,&nbsp;and&nbsp;&nbsp;&nbsp;|<br />
+ |&nbsp;avoid&nbsp;using&nbsp;it&nbsp;if&nbsp;possible.&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;|<br />
+
+ +--------------------------------------------------------------------+</code></blockquote>
+Which means that PHP will be <em>ultra-paranoid</em> about the data that is passed to it, and will <strong>require that you state which <em>method</em> the data should be coming
+from</strong>. &nbsp;Also, you should be aware that there's more ways to send data to your PHP pages than just via GET and POST:<br />
+<br />
+<img src="misc/lechnyr/php-variables.png" alt="" width="600" height="399" /><br />
+ 
+<h2>Superglobals</h2>
+<p>Which brings us to <strong>Superglobals</strong>, a relatively new concept to PHP. For example, the above diagram presents a slight problem: If you're working with the variable $yourname,
+how do you know that during your script it hasn't been redefined by one of these six other methods of variable assignment by someone attempting to hack into your script? For example, imagine
+having someone who has managed to upload a PHP script to your webserver that performs the following (<a href="http://packetstormsecurity.nl/web/php.hidden-vars.txt">php exploit</a> by Daniel
+Phoenix):</p>
+<blockquote>
+<p><code>&lt;?php<br />
+ setcookie("test","../../../../../../etc/passwd");<br />
+ echo "cookie inserted";<br />
+ ?&gt;</code></p></blockquote>
+<p>Wouldn't it be great to have a way to isolate variables based on how the data gets assigned to it in the first place? Superglobals allow you to specify which variables <strong>received by
+a specific method</strong> should be used.</p>
+<p>Superglobals are PHP's attempt at helping you determine where a particular value comes from. If you haven't heard of this new feature as of PHP 4.1.0, you'll want to start adapting to it.
+Most PHP training books don't touch this subject, so you will need to be aware of how to transition to this new input method. Ultimately, you should re-visit your /usr/local/lib/php.ini file
+and make the following change:</p>
+<blockquote>
+<p>register_globals = Off</p></blockquote>
+<p>This will prevent the ability for any user-submitted variable to be injected into your PHP code and can reduce the amount of variable poisoning a potential attacker may inflict. They will
+have to take the additional time to forge submissions, and your internal variables are effectively isolated from user submitted data. If a user then tried to fill out a form, the server
+wouldn't assign any data to the global variables <code>$name</code>, <code>$email</code>, or <code>$comment</code>. Instead, it would divide up the data into the following hashed arrays:</p>
+<blockquote><code>$_POST['name']<br />
+$_POST['email']<br />
+$_POST['comment']</code></blockquote>
+<p>The main Superglobal arrays are:</p>
+<ol>
+<li>$_GET['<em>variable</em>'] - Variables provided to the script via HTTP GET. Analogous to the deprecated HTTP_GET_VARS array</li>
+<li>$_POST['<em>variable</em>'] - Variables provided to the script via HTTP POST. Analogous to the deprecated $HTTP_POST_VARS array</li></ol>
+<p>The other, less-common Superglobal arrays are:</p>
+<ol>
+<li>$_COOKIE['<em>variable</em>'] - Variables provided to the script via HTTP cookies. Analogous to the deprecated $HTTP_COOKIE_VARS array</li>
+<li>$_REQUEST['<em>variable</em>'] - Variables provided to the script via any user input mechanism (GET, POST, COOKIE) and which therefore cannot be trusted.</li>
+<li>$_GLOBALS['<em>variable</em>'] - Contains a reference to every variable which is currently available within the global scope of the script. The keys of this array are the names of the
+global variables.</li>
+<li>$_SERVER['<em>variable</em>'] - Variables set by the web server or otherwise directly related to the execution environment of the current script. Analogous to the deprecated
+$HTTP_SERVER_VARS array</li>
+<li>$_FILES['<em>variable</em>'] - Variables provided to the script via HTTP post file uploads. Analogous to the deprecated $HTTP_POST_FILES array</li>
+<li>$_ENV['<em>variable</em>'] - Variables provided to the script via the environment. Analogous to the deprecated $HTTP_ENV_VARS array</li>
+<li>$_SESSION['<em>variable</em>'] - Variables which are currently registered to a script's session. Analogous to the deprecated $HTTP_SESSION_VARS array</li></ol>
+<p>For more details, see <a href="http://www.php.net/manual/en/reserved.variables.php">http://www.php.net/manual/en/reserved.variables.php</a>.</p>
+<p>So instead of <code>$name</code> being set to "John", you would either have <code>$_GET['name'] = "John"</code> or possibly <code>$_POST['name'] = "John"</code> depending on how the form
+data was submitted. The advantage is that you will know:</p>
+<ol>
+<li>$name can never be faked; if your script sets its value, that's the value!</li>
+<li>The $_GET and $_POST arrays help you to determine if the user appended the data as part of the URL or as part of the request body; therefore you don't have to worry about having a form
+accepting POST data and having the values change by someone sending a hacked URL with GET data appended to the URL. This will make sense shortly, so hang on...</li>
+<li>These 'superglobals' allow you to 'compartmentalize' not only your variable's values, but how the values were provided to the server in the first place. Someone attempting to hack into
+your server will have a very difficult time bypassing this.</li></ol>
+<h2>Final Thoughts</h2>
+<p>Programming with PHP can be a frustrating experience as of late. Security
+measures prevent data from being easily assigned to variables, ISP's typically
+implement PHP without consideration for their audience, and newcomers to PHP
+tend to be taken aback by such terms as <em>GET</em>, <em>POST</em>,
+<em>Superglobals</em>, and so forth. However, a little knowledge can go a long
+way, and hopefully this article has helped you in your quest.</p>
+<p>This document was prepared based on PHP 4.3.0.</p>
+<h2>Additional Resources</h2>
+<ul>
+<li><a href="http://softwaredev.earthweb.com/script/article/0,,12063_918141,00.html">On the Security of PHP</a>, by Jordan Dimov</li>
+<li><a href="http://www.cgisecurity.com/lib/studyinscarlet.txt">A Study In Scarlet: Exploiting Common Vulnerabilities in PHP Applications</a>, by Shaun Clowes</li>
+</ul>
+
+
+<p><em>This document was lovingly
+handcrafted on a Dell Latitude C400 laptop running Slackware Linux 8.1.</em></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<P>
+<img ALIGN="LEFT" ALT="[BIO]" SRC="../gx/2002/note.png">
+<em>
+David is a Network Manager at the Human Resources department of the
+University of Oregon. He holds a Master's Degree in Social Work along with his
+MCSE+I, CNE, and CCNA certifications. He has been working with Linux for the
+past six years, with an emphasis on systems security, network troubleshooting,
+and PHP/MySQL integration.
+</em>
+<br CLEAR="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+
+<!-- *** BEGIN copyright *** -->
+<hr>
+<CENTER><SMALL><STRONG>
+Copyright &copy; 2003, David Lechnyr.
+Copying license <A HREF="../copying.html">http://www.linuxgazette.net/copying.html</A><BR> 
+Published in Issue 86 of <i>Linux Gazette</i>, January 2003
+</STRONG></SMALL></CENTER>
+<!-- *** END copyright *** -->
+<HR>
+
+<!--startcut ==========================================================-->
+<CENTER>
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="jenkins.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../lg_faq.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="okopnik.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+</CENTER>
+</BODY></HTML>
+<!--endcut ============================================================-->

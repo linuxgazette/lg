@@ -1,0 +1,392 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>Using ssh-agent for SSH1 and OpenSSH LG #67</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<CENTER>
+<A HREF="http://www.linuxgazette.net/">
+<H1><IMG ALT="LINUX GAZETTE" SRC="../gx/lglogo.png" 
+	WIDTH="600" HEIGHT="124" border="0"></H1></A> 
+<BR>
+
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="nazario.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../faq/index.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="nielsen.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+<P>
+</CENTER>
+
+<!--endcut ============================================================-->
+
+<H4 ALIGN="center">
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H1><font color="maroon">Using ssh-agent for SSH1 and OpenSSH</font></H1>
+<H4>By <a href="mailto:jose@cwru.edu">Jose Nazario</a></H4>
+</center>
+<P> <HR> <P>  
+
+<!-- END header -->
+
+
+
+
+<p>
+Recently I was discussing with a friend how to use SSH to achieve secure,
+passwordless authentication. He was looking for a way to automate some
+file transfers and wanted to do it using an expect script (to pump in his
+passphrase when prompted) to automate the process. I suggested
+'ssh-agent', but didn't know quite how to make it work at the time. Since
+then, I've learned, and it's quite easy.
+<p>
+Using the agent for key based authentication is a method to <em>facilitate</em>
+communications. You can use key based authentication without the agent, you
+just have to unlock the key every time you want to use it. Note that by 
+default the ssh client will attempt to authenticate using keys before a
+password. The agent just makes management of this much easier. 
+
+<P> There are several implementations of the ssh protocol, each with its own
+peculiarities of usage and behavior.  The two most common implementations are
+from
+<A HREF="http://openssh.org">openssh.org</A>) and <A
+HREF="http://ssh.com">ssh.com</A>).  OpenSSH was created for OpenBSD and is
+thus free software.  ssh.com's ssh is a commercial product that is no-cost for
+open-source operating systems (and for trial, non-commercial and
+educational use on other OSes).  Each implementation of ssh has some slight
+peculiarities of usage and behavior.
+
+<P> As if multiple implementations weren't enough, there are also two ssh
+protocols, SSH1 and SSH2.
+This article focuses on using the SSH1 protocol, which differs slightly from
+the SSH2 protocol. Previous articles in <I>Linux Gazette</I> have introduced
+the use of ssh-agent for ssh2 (see below). Note that, by default, ssh2 uses
+DSA keys, and different directory and file names from ssh1, though 
+compatability can be introduced. Since most people use the SSH1 protocol (data
+from recent University of Alberta Internet scans using 'scan-ssh'), we will
+focus on this version. OpenSSH follows, almost perfectly, the syntax of 
+the ssh.com ssh1 program for agent based key management. Note that it differs
+for ssh2 handling (not covered here).  
+
+<p>
+The benefits of RSA based authentication are numerous, frankly:
+
+<dl>
+<dt><STRONG>Mutual authentication</STRONG>
+	<DD> In RSA authentication, each side has to verify that they are who
+	they claim to be. The client verifies the server is who they
+	should be (based on their public key, stored in 
+	~/.ssh/known_hosts), and the server verifies the authenticity of
+	the identification of the client via an RSA key. This is used to
+	protect against man-in-the-middle attacks based on the veracity of
+	the server keys.
+<P>
+<DT><STRONG>Stronger passphrase protection</STRONG>
+	<DD> RSA keys can be protected by a passphrase, not a password, which
+	translates into a larger space to search via brute force methods.
+	So, instead of "p@55w0rd" you can use "Toby Betts is David Monk's
+	roommate and is dating F0xT4il." (You should use something 
+	significantly more complex than either of those examples.)	
+<P>
+<DT><STRONG>Stronger authentication</STRONG>
+	<DD> The strength of the authentication means, in this case an RSA
+	keypair, is quite strong. RSA encryption is known to be expensive
+	and infeasible to a brute force attack. Can't say this for
+	passwords.
+<P>
+<DT><STRONG>Easier on the user</STRONG>
+	<DD> Dislike having to type passwords often? Me too. After a few
+	moments of setup (which is about the same number of keystrokes as
+	a password authentication session), its now effortless, just 
+	connect to the remote host and your authentication is taken care
+	of.
+</dl>
+<p>
+Hence, I can't think of any reason (other than not knowing how, which this
+document is trying to teach you) why you shouldn't use it. 
+<p>
+
+<h3>Components</h3>
+<p>
+First up, our cast of characters. These are the components that play in
+this whole thing, so get to know them:
+<p>
+<dl>
+<DT><STRONG>ssh</STRONG>
+	<DD> The client ssh program. In this case we're going to work only
+	with ssh.com's ssh1 program (ie ssh-1.2.30) and OpenSSH (ie
+	openssh-2.5.2). 
+<p>
+<DT><STRONG>sshd</STRONG>
+	<DD> The server program, again a version 1 server or an OpenSSH
+	server.
+<p>
+<DT><STRONG>ssh-agent</STRONG>
+	<DD> The agent program which handles the interaction of your public
+	keys and the ssh client program.
+<p>
+<DT><STRONG>ssh-add</STRONG>
+	<DD> A tool used to load (or unload) RSA private keys into the cache
+	for ssh-agent. They communicate by using a small socket on the
+	client machine.
+<p>
+<DT><STRONG>ssh-keygen</STRONG>
+	<DD> A tool used to generate the public and private keypairs used in
+	RSA based authentication.
+<p>
+<DT><STRONG><tt>~/.ssh/identity</tt></STRONG>
+	<DD> The file containing your private key. Keep this one well guarded!
+<pre>-rw-------   1 jose     users         530 Feb  8 12:14 identity</pre>
+<p>
+<DT><STRONG><tt>~/.ssh/identity.pub</tt></STRONG>
+	<DD> The file containing the public component of your RSA key
+pair.
+<pre>-rw-------   1 jose     users         334 Feb  8 12:14 identity.pub
+</pre>
+<p>
+<DT><STRONG><tt>~/.ssh/authorized_keys</tt></STRONG>
+	<DD> The file containing a list of public keys which match your private
+	keys. This is what's used to match up for your authentication.
+</dl><p>
+
+<h3>Basic Steps in Agent Based Authentication</h3>
+
+OK, let's begin. Our order of operations is quite simple: generate a
+keypair, distribute the public keys to the hosts to which we're going to
+connect, and then set up our agent.
+<p>
+Before we begin, let's make sure the target server allows RSA key based
+authentication:<p>
+<tt>
+$ <strong>grep RSA /etc/sshd_config</strong><br>
+RSAAuthentication yes</tt>
+<p>
+If that says 'no', then this whole thing is moot. Speak to your
+administrator if you need to.
+<p>
+We use <em>ssh-keygen</em> to generate the keypair. A typical session
+looks like this:
+<p>
+<tt>
+$ <strong>ssh-keygen</strong><br>
+Initializing random number generator...<br>
+Generating p:  ............................++ (distance 446)<br>
+Generating q:  ...............++ (distance 168)<br>
+Computing the keys...<br>
+Testing the keys...<br>
+Key generation complete.<br>
+Enter file in which to save the key (/home/jose/.ssh/identity):<br>
+Enter passphrase: </tt><em>(not echoed)</em><tt><br>
+Enter the same passphrase again: </tt><em>(not echoed)</em><tt><br>
+Your identification has been saved in /home/jose/.ssh/identity.<br>
+Your public key is:<br>
+1024 37
+13817424072879097025507991426858228764125028777547883762896424325959758548762313498731030035107110571218764165938469063762187621357098158111964592318604535627188332685173064165286534140697800110207412449607393488437570247411920664869426605834174366309317794215856900173541953917001003859838421924037121230161484169444067380979 jose@biocserver
+<br>
+Your public key has been saved in /home/jose/.ssh/identity.pub<br>
+</tt>
+<p>
+So, now we have the two pieces we need, our public and private keys. Now,
+we have to distribute the public key. This is just like PGP, frankly, you 
+can share this with anyone, then you can login without any hassle. I'll
+use 'scp' to copy it over:<p>
+<tt>
+$ <strong>scp .ssh/identity.pub jon2@li:~/.ssh/biocserver.pub</strong><br>
+jon2@li's password:</tt><em>(not echoed)</em><tt><br>
+identity.pub              |          0 KB |   0.3 kB/s | ETA: 00:00:00 | 100%
+<p></tt>
+Having copied it there, I will now login to the target machine (in this
+case the SCL machine 'li') and add it to the list of keys that are
+acceptable:<p>
+<tt>
+li$ <strong>cat biocserver.pub >> authorized_keys</strong>
+</tt>
+<p>
+OK, now li is all set to let me authenticate using my RSA private key I
+generated above. Let's go back to my client machine and set up ssh-agent.
+First, before I invoke the agent, let's look at a couple of environmental
+variables in my shell:<p>
+<tt>
+$ <strong>env | grep -i SSH</strong><br>
+SSH_TTY=/dev/ttyp3<br>
+SSH_CLIENT=129.22.241.148 785 22<br>
+</tt><p>
+Now let's invoke ssh-agent properly. It starts a subshell, so you have to
+tell it what shell to invoke so it can set it up right.<p>
+<tt>
+$ <strong>ssh-agent /bin/bash</strong><p>
+</tt>
+And it's now set up my environment correctly:
+<p><tt>
+$ <strong>env | grep -i SSH</strong><br>
+SSH_TTY=/dev/ttyp3<br>
+SSH_AGENT_PID=3012<br>
+SSH_AUTH_SOCK=/tmp/ssh-jose/ssh-3011-agent<br>
+SSH_CLIENT=129.22.241.148 785 22<br>
+<p></tt>
+
+The two new variables, <tt>SSH_AGENT_PID</tt> and <tt>SSH_AUTH_SOCK</tt>,
+will allow the agent and accessory applications (ie the ssh client, the
+cache loading tool ssh-add, and such). The sockets are just regular files
+in the /tmp directory:<p><tt>
+
+$ <strong>ls -l /tmp/ssh-jose/</strong><pre>
+total 0
+srwx------   1 jose     users           0 Apr 24 13:36 ssh-3012-agent
+</pre></tt><p>
+
+So, now that the agent is properly set up, load the cache with your
+private key. Remember, the agent communicates with the client to hand off
+your private key when you want to authenticate. Invoking it without any
+arguments assumes the standard, default private keyfile:<p><tt>
+
+$ <strong>ssh-add1</strong><br>
+Need passphrase for /home/jose/.ssh/identity (jose@biocserver).<br>
+Enter passphrase:</tt><em>(not echoed)</em><tt><br>
+Identity added: /home/jose/.ssh/identity (jose@biocserver)</tt><p>
+
+The passphrase you use here is to ensure "yes, it's me, I have a right to
+use this key", and it's the same passphrase you set up above when you ran
+ssh-keygen. Now that the key is loaded, let's look at the cache, using the
+-l (for 'list') option to <em>ssh-add</em>:
+
+<p><tt>
+$ <strong>ssh-add -l</strong><br>
+1024 37 11375588656963284515711893546976216491501314848762129298719958615531627297098741828662897623987120978747144865157469714395736112700558601876305400606604871996923286317135102021232606807975642627653113389875325214757393348628533138103638880715659452391252482099813547642625002508937138181011315411800330612532401318392577 jose@biocserver
+</tt><p>
+Now, when you ssh to another host, you will not get prompted for a
+passphrase, the private key would have been used as your authenticator
+using ssh-agent!<p><tt> 
+
+$ <strong>ssh -l jon2 li</strong><br>
+Last login: Tue Apr 24 14:53:39 2001 from biocserver.bioc.<br>
+You have mail.<br>
+bash-2.03$<br>
+</tt><p>
+Look, Mom, no passphrase needed!
+<p>
+Note that you can alter the above, if you would like, to add some flexibility.
+First, you can use the output of the ssh-agent program (when invoked without
+a shell argument), to modify the current shell and set up the agent socket
+for communication:
+<p><tt>
+$ <strong>eval `ssh-agent`</strong><br>
+Agent pid 19353;
+</tt><p>
+Now you can add keys as described above, and you have not started a subshell,
+only having modified the login shell you are currently using. The eval and
+backticks combination is needed to handle the output that the agent presents
+to modify the shell. This is because child processes cannot modify the parent
+shell's parameters. 
+<p>
+A second modification you can do is to start your X desktop, such as GNOME
+or KDE, as the argument to ssh-agent. This will cause every X client locally
+started to be aware of how to communicate with the agent, allowing for greater
+ease when you use terminals to log in to other hosts. 
+
+
+
+<h3>One important note</h3>
+
+Before we end this, let's say one very important things: the cache is
+loaded and you have authenticated yourself to use your private keys. This
+keeps them in memory. So, what if you walk away from your workstation?
+Anyone would have access to your hosts that let you authenticate using RSA
+keys.
+<p>
+That said, you can unload specific keys using ssh-add's '-d' flag, or you
+can unload all of them using the '-D' flag:<p><tt>
+
+$ <strong>ssh-add -D</strong><br>
+All identities removed.</tt><p>
+
+This is a good thing to do when you walk away from your workstation. It'd
+be neat to have a small idle timeout feature, or link this into the
+screensaver command on your system, or an APM suspend on your laptop. 
+
+<h3>Doing it the wrong way</h3>
+
+Invoking ssh-agent without any arguments, which is to say improperly,
+starts a subshell, but it hasn't set the correct parameters in your shell.
+It will echo what it would have set, but they are not set:<p><tt>
+
+$ <strong>ssh-agent</strong><br>
+SSH_AUTH_SOCK=/tmp/ssh-jose/ssh-3019-agent; export SSH_AUTH_SOCK;<br>
+SSH_AGENT_PID=3020; export SSH_AGENT_PID;<br>
+echo Agent pid 3020;</tt><p>
+
+Let's have a look and see if the correct environmental variables have been
+set in our shell. These are needed for the agent to work properly, as we
+saw above:<p><tt>
+
+$ <strong>env | grep -i ssh</strong><br>
+SSH_TTY=/dev/ttyp3<br>
+SSH_CLIENT=129.22.241.148 785 22</tt><p>
+
+The consequences of this are evident when you try and add keys to the
+cache:<p><tt>
+
+$ <strong>ssh-add</strong><br>
+Need passphrase for /home/jose/.ssh/identity (jose@biocserver).<br>
+Enter passphrase:  </tt><em>(not echoed)</em><tt><br>
+Could not open a connection to your authentication agent.</tt><p>
+
+It can't find the socket or the process ID, which is stored in this
+variable. As such, no keys are available in the cache. 
+
+
+<h3>Conclusion</h3>
+
+This has been the most rudimentary of introductions on how to use
+ssh-agent for strong authentication. You should experiment if you'd like
+to learn more, such as adding non-default keys, and read the excellent
+documentation in the OpenSSH distribution. The O'Reilly snail book, 
+entitles "SSH: Secure Shell, The Definitive Guide", is truly a great
+reference for SSH, and is strongly recomended. 
+
+<H3>Previous <I>LG</I> articles on the ssh suite</H3>
+
+<UL>
+<LI> <A HREF="../issue61/dellomodarme.html">Using ssh</A>
+<LI> <A HREF="../issue64/dellomodarme.html">ssh suite: Sftp, scp and ssh-agent</A>
+</UL>
+
+
+
+
+<!-- *** BEGIN bio *** -->
+<SPACER TYPE="vertical" SIZE="30">
+<P> 
+<H4><IMG ALIGN=BOTTOM ALT="" SRC="../gx/note.gif">Jose Nazario</H4>
+<CITE>Jos&eacute; is a Ph.D. student in the department of biochemistry at Case
+Western Reserve University in Cleveland, OH. He has been using UNIX for
+nearly ten years, and Linux since kernels 1.2.</CITE>
+
+<!-- *** END bio *** -->
+
+<!-- *** BEGIN copyright *** -->
+<P> <hr> <!-- P --> 
+<H5 ALIGN=center>
+
+Copyright &copy; 2001, Jose Nazario.<BR>
+Copying license <A HREF="../copying.html">http://www.linuxgazette.net/copying.html</A><BR> 
+Published in Issue 67 of <i>Linux Gazette</i>, June 2001</H5>
+<!-- *** END copyright *** -->
+
+<!--startcut ==========================================================-->
+<HR><P>
+<CENTER>
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="nazario.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../faq/index.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="nielsen.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+</CENTER>
+</BODY></HTML>
+<!--endcut ============================================================-->

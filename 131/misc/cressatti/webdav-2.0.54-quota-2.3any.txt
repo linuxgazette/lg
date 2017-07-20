@@ -1,0 +1,503 @@
+
+#patch -p2 < [this file]
+see http://www.geocities.jp/t_sat7/webdav/webdav.html
+        satake@goodcrew.ne.jp
+ English page at  http://www.needful.de/docs/projekte/webdav-quota/
+ Thanks to Mr.Marco Gobenich
+
+--- work/httpd-2.0.54/modules/dav/main/mod_dav.c	2005-04-10 08:55:25.000000000 +0900
++++ work/httpd-2.0.54-new/modules/dav/main/mod_dav.c	2005-08-22 21:10:31.528443728 +0900
+@@ -58,6 +58,7 @@
+ #include "util_script.h"
+ 
+ #include "mod_dav.h"
++#include "quotachk.h"		// add by satake@goodcrew.ne.jp
+ 
+ 
+ /* ### what is the best way to set this? */
+@@ -79,6 +80,8 @@
+     const char *dir;
+     int locktimeout;
+     int allow_depthinfinity;
++    int area_size;		// add by satake@goodcrew.ne.jp
++    const char *area_path;	// add by satake@goodcrew.ne.jp
+ 
+ } dav_dir_conf;
+ 
+@@ -163,6 +166,8 @@
+         conf->dir = d;
+     }
+ 
++    conf->area_path = NULL;	// add by satake@goodcrew.ne.jp
++
+     return conf;
+ }
+ 
+@@ -195,6 +200,9 @@
+     newconf->dir = DAV_INHERIT_VALUE(parent, child, dir);
+     newconf->allow_depthinfinity = DAV_INHERIT_VALUE(parent, child,
+                                                      allow_depthinfinity);
++    /* add by satake@goodcrew.ne.jp */
++    newconf->area_size = DAV_INHERIT_VALUE( parent , child , area_size );
++    newconf->area_path = DAV_INHERIT_VALUE( parent , child , area_path );
+ 
+     return newconf;
+ }
+@@ -212,6 +220,22 @@
+     return conf->provider;
+ }
+ 
++/** add by satake@goodcrew.ne.jp */
++const int   dav_get_area_size( request_rec *r ) {
++
++    dav_dir_conf *conf = ap_get_module_config( r->per_dir_config , &dav_module );
++    return  conf->area_size;
++
++}
++
++/** add by satake@goodcrew.ne.jp */
++const char *dav_get_dir( request_rec *r ) {
++
++    dav_dir_conf *conf = ap_get_module_config( r->per_dir_config , &dav_module );
++    return  conf->area_path;
++
++}
++
+ DAV_DECLARE(const dav_hooks_locks *) dav_get_lock_hooks(request_rec *r)
+ {
+     return dav_get_provider(r)->locks;
+@@ -302,6 +326,23 @@
+ }
+ 
+ /*
++ * Command handler for DAVSATMaxAreaSize directive, which is TAKE1
++ *		add by satake@goodcrew.ne.jp
++ */
++static const char *dav_cmd_davareasize( cmd_parms *cmd , void *config , const char *arg1 ) {
++
++    dav_dir_conf *conf = ( dav_dir_conf * )config;
++
++    conf->area_size = atoi( arg1 );
++    if ( conf->area_size < 0 )
++        return "DAVSATMaxAreaSize requires a non-negative integer.";
++
++    conf->area_path = cmd->path;
++    return NULL;
++
++}
++
++/*
+ ** dav_error_response()
+ **
+ ** Send a nice response back to the user. In most cases, Apache doesn't
+@@ -920,6 +961,15 @@
+         return dav_handle_err(r, err, multi_response);
+     }
+ 
++/**
++    check for disk space is enough
++            add by satake@goodcrew.ne.jp
++*/
++    if ( dav_qchk_checksize( r )==DAV_QCHK_NG )
++        return dav_error_response(r, HTTP_INSUFFICIENT_STORAGE,
++                                     "There is not enough storage to write to "
++                                     "this resource.");
++
+     /* make sure the resource can be modified (if versioning repository) */
+     if ((err = dav_auto_checkout(r, resource,
+                                  0 /* not parent_only */,
+@@ -2476,6 +2526,15 @@
+         return dav_handle_err(r, err, NULL);
+     }
+ 
++/**
++    check for disk space is enough
++            add by satake@goodcrew.ne.jp
++*/
++    if ( dav_qchk_checksize( r )==DAV_QCHK_NG )
++        return dav_error_response(r, HTTP_INSUFFICIENT_STORAGE,
++                                     "There is not enough storage to write to "
++                                     "this resource.");
++
+     /* try to create the collection */
+     resource->collection = 1;
+     err = (*resource->hooks->create_collection)(resource);
+@@ -2761,6 +2820,15 @@
+         return result;
+     }
+ 
++/**
++    check for disk space is enough
++            add by satake@goodcrew.ne.jp
++*/
++    if ( dav_qchk_checksize( r )==DAV_QCHK_NG )
++        return dav_error_response(r, HTTP_INSUFFICIENT_STORAGE,
++                                     "There is not enough storage to write to "
++                                     "this resource.");
++
+     if ((err = dav_open_lockdb(r, 0, &lockdb)) != NULL) {
+         /* ### add a higher-level description? */
+         return dav_handle_err(r, err, NULL);
+@@ -4785,7 +4853,7 @@
+ static const command_rec dav_cmds[] =
+ {
+     /* per directory/location */
+-    AP_INIT_TAKE1("DAV", dav_cmd_dav, NULL, ACCESS_CONF,
++    AP_INIT_TAKE1("DAV", dav_cmd_dav, NULL, ACCESS_CONF|OR_ALL,
+                   "specify the DAV provider for a directory or location"),
+ 
+     /* per directory/location, or per server */
+@@ -4793,6 +4861,12 @@
+                   ACCESS_CONF|RSRC_CONF,
+                   "specify minimum allowed timeout"),
+ 
++    /* per directory/location */
++    /*	add by satake@goodcrew.ne.jp */
++    AP_INIT_TAKE1("DAVSATMaxAreaSize", dav_cmd_davareasize, NULL,
++                  ACCESS_CONF|OR_ALL,
++                  "max size of user storage area, per KByte"),
++
+     /* per directory/location, or per server */
+     AP_INIT_FLAG("DAVDepthInfinity", dav_cmd_davdepthinfinity, NULL,
+                  ACCESS_CONF|RSRC_CONF,
+--- work/httpd-2.0.54/modules/dav/main/quotachk.h	1970-01-01 09:00:00.000000000 +0900
++++ work/httpd-2.0.54-new/modules/dav/main/quotachk.h	2005-08-22 21:10:31.529443540 +0900
+@@ -0,0 +1,15 @@
++/**
++    disk quota check modules for WebDAV service
++                        author: satake@goodcrew.ne.jp
++*/
++#define     DAV_QCHK_OK     0
++#define     DAV_QCHK_NG     -1
++
++/** set your storage cluster size */
++#ifndef     DAV_CLUSTER_SIZE
++    #define     DAV_CLUSTER_SIZE    4096
++#endif
++
++int         dav_qchk_checksize( request_rec * );
++const int   dav_get_area_size( request_rec * );
++const char *dav_get_dir( request_rec * );
+--- work/httpd-2.0.54/modules/dav/main/quotachk.c	1970-01-01 09:00:00.000000000 +0900
++++ work/httpd-2.0.54-new/modules/dav/main/quotachk.c	2005-08-22 21:11:06.178946579 +0900
+@@ -0,0 +1,298 @@
++/**
++    disk quota check modules for WebDAV service
++                        author: satake@goodcrew.ne.jp
++*/
++#include "apr_lib.h"            /* for apr_is* */
++#include "apr_tables.h"         /* for apr_is* */
++#include "apr_file_info.h"
++#include "apr_errno.h"
++#include "apr_strings.h"
++#include "httpd.h"
++#include "http_log.h"
++
++#include "mod_dav.h"
++#include "quotachk.h"
++
++#define VERSION2_3      1
++
++#if VERSION2_3
++/**
++    get slash block number
++    @param dirname  string
++    @return block number
++*/
++static  int     getSlashBlockNum( const char *dirname ) {
++
++    int retnum = 0;
++    while ( *dirname ) {
++
++        if ( *dirname=='/' )
++            retnum++;
++
++        dirname++;
++
++    }
++    return  retnum;
++
++}
++
++/**
++    get real dirname
++    @param  pool    apr_pool_t
++    @param  dirname extend dirname
++    @param  filepath filepath
++    @return real dirname
++*/
++static const char    *dav_getreal_path( apr_pool_t *pool , const char *dirname , const char *filepath ) {
++
++    int     blknum;
++    char    *retnum;
++    char    *moto;
++    char    *saki;
++    int     bn;
++
++    if ( strstr( dirname , "*" )==NULL )
++        return  dirname;
++
++    blknum = getSlashBlockNum( dirname );
++    retnum = apr_palloc( pool , strlen( filepath ) );
++    *retnum = 0;
++
++    moto = ( char * )filepath;
++    saki = retnum;
++    bn   = 0;
++    while ( *moto ) {
++
++        *saki = *moto;
++        if ( *saki=='/' ) {
++
++            bn++;
++            if ( bn==blknum ) {
++
++                saki++;
++                break;
++
++            }
++
++        }
++        moto++;
++        saki++;
++
++    }
++    *saki = 0;
++
++    return  retnum;
++
++}
++#endif
++
++/**
++    plain size -> cluster size per 512bytes
++*/
++static  int     dav_convert_size_cluster( int size )
++{
++
++    return  ( ( size + DAV_CLUSTER_SIZE - 1 ) / DAV_CLUSTER_SIZE ) * ( DAV_CLUSTER_SIZE / 512 );
++
++}
++
++/**
++    apr_dir_read wrapper
++*/
++static  apr_status_t    dav_apr_dir_read( apr_finfo_t *finfo , apr_dir_t *thedir )
++{
++
++    apr_status_t    retnum = apr_dir_read( finfo , APR_FINFO_NORM , thedir );
++    if ( retnum==APR_SUCCESS )
++        finfo->csize = dav_convert_size_cluster( finfo->size );
++
++    return  retnum;
++
++}
++
++/**
++    apr_lstat wrapper
++*/
++static  apr_status_t    dav_apr_lstat( apr_finfo_t *finfo , const char *fname , apr_pool_t *pool )
++{
++
++    apr_status_t    retnum = apr_lstat( finfo , fname , APR_FINFO_NORM , pool );
++
++    if ( retnum==APR_SUCCESS )
++        finfo->csize = dav_convert_size_cluster( finfo->size );
++
++    return  retnum;
++
++}
++
++/**
++    get (dirname) total size ( per 512byte )
++    @param  dirname directory name
++    @return block size
++*/
++static  int     get_dir_size( const char *dirname , apr_pool_t *pool )
++{
++
++    apr_dir_t       *dir;
++    apr_finfo_t     status;
++    int             size = 0;
++    char            *buffer;
++
++    if ( apr_dir_open( &dir , dirname , pool )!=APR_SUCCESS )
++        return  0;
++
++    while ( dav_apr_dir_read( &status , dir )==APR_SUCCESS ) {
++
++        if ( ( !strcmp( status.name , "." ) ) || ( !strcmp( status.name , ".." ) ) )
++            continue;
++
++        size += status.csize;
++        if ( status.filetype == APR_DIR ) {
++
++            if ( !status.size )
++                size += DAV_CLUSTER_SIZE / 512;
++
++            apr_filepath_merge( &buffer , dirname , status.name , 0 , pool );
++            size += get_dir_size( buffer , pool );
++
++        }
++
++    }
++    apr_dir_close( dir );
++
++    return  size;
++
++}
++
++/**
++    return  directory total disk space.
++    same as 'du -sk dirname' command.
++    @param  dirname     directory
++    @return     total space
++*/
++static  int     dav_qchk_du( const char *dirname , apr_pool_t *pool )
++{
++
++    apr_finfo_t status;
++
++    if ( dav_apr_lstat( &status , dirname , pool )!=APR_SUCCESS )
++        return  0;
++
++    return  ( ( status.filetype == APR_DIR ) ? get_dir_size( dirname , pool ) : 0 ) / 2;
++
++}
++
++/**
++    check size
++    return  0: OK , else: NG
++*/
++int     dav_qchk_checksize( request_rec *request )
++{
++
++    int                 maxsize;
++    int                 nowsize;
++    int                 putsize;
++    int                 retnum;
++    const char          *conlen;
++    const char          *dirname;
++    dav_lookup_result   res;
++#if VERSION2_3
++    const char          *dirnameex;
++    int                 errflag1;
++#endif
++
++    /** set default return */
++    retnum = DAV_QCHK_OK;
++
++    /** get max area size */
++    maxsize = dav_get_area_size( request );
++    if ( !maxsize )
++        return  retnum;
++
++    /** get <Directory> directive's parameter */
++    dirname = dav_get_dir( request );
++    if ( dirname == NULL ) {
++
++        ap_log_error(APLOG_MARK, APLOG_NOTICE, 0, NULL, "WebDAV-Quota: Directory not detect" );
++        return  retnum;
++
++    }
++
++    /** if <Location> directive then no function */
++#if VERSION2_3
++
++    dirnameex = apr_pstrcat( request->pool , dirname , "*" , NULL );
++    if ( ap_strcmp_match( request->filename , dirnameex )!=0 ) {
++
++#else
++
++    if ( strstr( request->filename , dirname )!=request->filename ) {
++
++#endif
++
++        /** try uri->filename convert */
++        res = dav_lookup_uri( dirname , request , 0 );
++        if ( ( res.err.status )||( res.rnew==NULL ) ) {
++
++            if ( res.err.desc!=NULL )
++                ap_log_error(APLOG_MARK, APLOG_NOTICE, 0 , NULL,
++                    apr_psprintf( request->pool , "WebDAV-Quota: [%d]: %s\n" , res.err.status , res.err.desc )
++                );
++            return  retnum;
++
++        }
++
++        dirname = res.rnew->filename;
++#if VERSION2_3
++        errflag1 = ( dirname==NULL );
++        if ( !errflag1 ) {
++
++            dirnameex = apr_pstrcat( request->pool , dirname , "*" , NULL );
++            errflag1 = ( ap_strcmp_match( request->filename , dirnameex )!=0 );
++
++        }
++        if ( errflag1 ) {
++#else
++        if ( ( dirname==NULL )||( strstr( request->filename , dirname )!=request->filename ) ) {
++#endif
++
++            ap_log_error(APLOG_MARK, APLOG_NOTICE, 0, NULL,
++                            "WebDAV-Quota: Quota directory not match request file path."
++                            );
++            return  retnum;
++
++        }
++
++    }
++
++#if VERSION2_3
++    dirname = dav_getreal_path( request->pool , dirname , request->filename );
++#endif
++
++    /** get now user used size */
++    nowsize = dav_qchk_du( dirname , request->pool );
++
++    /** get put size */
++    conlen = NULL;
++    putsize = 0;
++    if ( request->headers_in != NULL )
++        conlen = apr_table_get( request->headers_in , "content-length" );
++    if ( conlen!=NULL )
++        putsize = dav_convert_size_cluster( atoi( conlen ) ) / 2;
++
++    /** check size */
++    retnum = ( nowsize + putsize >= maxsize ) ? DAV_QCHK_NG : DAV_QCHK_OK;
++    if ( retnum==DAV_QCHK_NG ) {
++
++        ap_log_error(APLOG_MARK, APLOG_ERR, 0, NULL,
++                        apr_psprintf(
++                            request->pool ,
++                            "WebDAV-Quota: Directory `%s' size `%dKB' is over `%dKB'!" ,
++                            dirname , nowsize + putsize , maxsize
++                            )
++                        );
++
++    }
++    return  retnum;
++
++}
+--- work/httpd-2.0.54/modules/dav/main/config5.m4	2004-11-25 04:31:09.000000000 +0900
++++ work/httpd-2.0.54-new/modules/dav/main/config5.m4	2005-08-22 21:10:31.530443353 +0900
+@@ -2,7 +2,7 @@
+ 
+ APACHE_MODPATH_INIT(dav/main)
+ 
+-dav_objects="mod_dav.lo props.lo util.lo util_lock.lo liveprop.lo providers.lo std_liveprop.lo"
++dav_objects="mod_dav.lo props.lo util.lo util_lock.lo liveprop.lo providers.lo std_liveprop.lo quotachk.lo"
+ 
+ if test "$enable_http" = "no"; then
+   dav_enable=no
+--- work/httpd-2.0.54/configure	2005-04-12 06:04:54.000000000 +0900
++++ work/httpd-2.0.54-new/configure	2005-08-22 21:10:31.541441290 +0900
+@@ -13470,7 +13470,7 @@
+   > $modpath_current/modules.mk
+ 
+ 
+-dav_objects="mod_dav.lo props.lo util.lo util_lock.lo liveprop.lo providers.lo std_liveprop.lo"
++dav_objects="mod_dav.lo props.lo util.lo util_lock.lo liveprop.lo providers.lo std_liveprop.lo quotachk.lo"
+ 
+ if test "$enable_http" = "no"; then
+   dav_enable=no

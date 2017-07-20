@@ -1,0 +1,437 @@
+<pre>
+<a name="HF_su"></a>
+<h3>BSD_su HP_su Linux_su</h3>
+#----------------------------------------------------------------------#
+#	Handle some annoying su situations
+#----------------------------------------------------------------------#
+
+HP_su () {
+	if [ "$1" = "-" ]
+	then
+		/bin/su "$@"
+	else
+	        if [ "$1" = "" ]
+	        then
+	                p1=root
+	        else
+	                p1=$1
+	        fi
+        	/bin/su $p1 -rcfile $HMGHOME/.bashrc
+	fi
+}
+
+#----------------------------------------------------------------------#
+Linux_su () {
+	if [ "$1" = "-" ]
+	then
+		/bin/su "$@"
+	else
+	        if [ "$1" = "" ]
+	        then
+	                command su -p
+	        else
+	                command su -p $1
+	        fi
+	fi
+}
+
+#----------------------------------------------------------------------#
+BSD_su () {
+	if [ "$1" = "-" ]
+	then
+		/usr/bin/su "$@"
+	elif [ "$1" = "" ]
+        then
+                command su -m root -c /usr/local/bin/bash
+        else
+                command su -m root "$@"
+        fi
+
+}
+
+#----------------------------------------------------------------------#
+
+<a name="HF_set"></a>
+<h3>Set the alias <tt>su</tt> according to the current platform</h3>
+#----------------------------------------------------------------------#
+	uname=`uname -s`
+	case "$uname" in
+		HP-UX)	alias su HP_su;;
+		Linux)	alias su Linux_su
+			ulimit -Sc 0	# avoid core files
+			;;
+		FreeBSD)
+			alias su BSD_su
+			ulimit -Sc 0	# avoid core files
+			unset TERMCAP
+			;;
+	esac
+
+#----------------------------------------------------------------------#
+
+<a name="HF_alias"></a>
+<h3>alias</h3>
+
+#----------------------------------------------------------------------#
+function alias () {
+
+  local name=$1
+
+  if [ "$name" = "" ]; then
+    builtin alias
+  else
+    shift
+    local value="$*"
+    if [ "$value" = "" ]; then
+      builtin alias $name
+    else
+      builtin alias $name="$value"
+    fi
+  fi
+}
+
+#----------------------------------------------------------------------#
+
+<a name="HF_cutf"></a>
+<h3>cutf</h3>
+
+#----------------------------------------------------------------------#
+cutf () 
+{ 
+    awk '{print $'$1'}'
+}
+
+#----------------------------------------------------------------------#
+
+<a name="HF_dc"></a>
+<h3>dc</h3>
+
+#----------------------------------------------------------------------#
+function dc {
+        if [ $# -eq 1 -a -d "$1" ]
+        then
+                /bin/echo '\007'"you probably mean 'cd' not 'dc'"
+                cd $1
+        else
+                command dc $*
+        fi
+}
+
+##----------------------------------------------------------------------#
+
+<a name="HF_dirs"></a>
+<h3>dirs dsd dsdc dth files links</h3>
+
+##----------------------------------------------------------------------#
+function dirs {
+        ls -la $* | grep "^d" | more
+}
+
+##----------------------------------------------------------------------#
+# Conditional definition of dsd
+
+        if [ `uname` = SunOS ]
+        then
+                if [ `uname -r | cut -d. -f1` -lt 5 ]
+                then
+                        platform=sunos4
+                fi
+        fi
+
+        if [ "$platform" = sunos4 ]
+        then    #--------------------------------------------------------
+
+function dsd {
+        F=Ag
+        ls -l$F "$@" | grep -v '~$' | cut -c1-28,34- | more
+        stty cs8
+}
+
+        else    #--------------------------------------------------------
+
+function dsd {
+        F=A
+        ls -l$F "$@" | grep -v '~$' | more
+}
+        fi
+
+##----------------------------------------------------------------------#
+
+function dsdc {
+        dsdc_today="`date '+%b %e'`"
+        dsd $* | grep "$dsdc_today"
+}
+
+##----------------------------------------------------------------------#
+function dth {
+        case $1 in
+                +*)     lines=-`echo $1 | cut -c2-`;shift;;
+        esac
+        ls -lat "$@" | head $lines
+}
+
+##----------------------------------------------------------------------#
+function files {
+        ls -la $* | grep "^-" | grep -v "~$" | more
+}
+
+##----------------------------------------------------------------------#
+function links {
+        ls -la $* | grep "^l" | more
+}
+
+##----------------------------------------------------------------------#
+
+<a name="HF_gt"></a>
+<h3>gt_doit gttv gttvu gtx</h3>
+
+##----------------------------------------------------------------------#
+export GNUTAR=`$HOME/.ENV./set_gnutar.sh`
+echo GNUTAR set to $GNUTAR. Use export GNUTAR=xxx to change.
+
+function gt_doit {
+        case $p1 in
+                *.bz2)  gzip=bzip2;;
+        esac
+        command nice $gzip -$garg $p1 | $GNUTAR -$targ - $*
+}
+
+function gttv  {
+        if echo $1 | grep '\.uu$' > /dev/null 2>&1
+        then
+                precmd="uudecode -p $1 | "
+                shift
+        fi
+        gzip=gzip; garg=vdc; targ=tvf; p1=$1; shift
+        eval $precmd gt_doit| $PAGER
+}
+
+# gttvu doesn't need the file to have a .uu filetype
+
+function gttvu  {
+        if [ `uname` = Linux ]
+        then
+                precmd="uudecode -o /dev/stdout $1  | "
+        else
+                precmd="uudecode -p $1 | "
+        fi
+        gzip=gzip; garg=vdc; targ=tvf; p1=; shift
+        eval $precmd gt_doit | $PAGER
+}
+
+function gtx  {
+        p1=$1
+        shift
+        gzip=gzip; garg=dc; targ=xpf; gt_doit $*
+#               command nice gzip -dc $p1 | /bin/nice $GNUTAR -xpf - $*
+}
+
+#----------------------------------------------------------------------#
+
+<a name="HF_help"></a>
+<h3>help</h3>
+
+#----------------------------------------------------------------------#
+function help {
+# Assume no arg means standard help
+
+        if [ "$1" = "" ]
+        then
+                builtin help
+                return
+        fi
+        echo 'For bash help, use builtin help'
+
+# avoid backup files:
+        files=`ls ~/help*/help_*${1}* 2>/dev/null | grep -v "~$"`
+        if [ "$files" = '' ]
+        then                    # no matches: try for bash help
+                builtin help $1
+                return
+        fi
+        echo "$files"
+        echo 'ls ~/help*/help_*'${1}'* | grep -v "~$"'
+        less $files
+}
+
+#----------------------------------------------------------------------#
+
+<a name="HF_lesh"></a>
+<h3>lesh</h3>
+#----------------------------------------------------------------------#
+#       lesh - less the most recent file(s)
+
+# Usage:        lesh [+n] [args]
+#       n       number of files (default: 1)
+
+# Other args    become args of ls so eg -c
+
+function lesh () {
+        lines=-1
+        case $1 in
+                +*)     lines=-`echo $1 | cut -c2-`;shift;;
+        esac
+        if [ $# -eq 0 ]
+        then
+                args=.
+        else
+                args="$*"
+        fi
+        __files=`find $args -maxdepth 1 -type f`
+        less `ls -trd $__files | tail $lines`
+        unset lines __files
+}
+
+#----------------------------------------------------------------------#
+
+<a name="HF_lest"></a>
+<h3>lest</h3>
+
+#----------------------------------------------------------------------#
+function lest () {
+        x='`'
+        ans=`type $1`
+        if [ $? -eq 0 ]
+        then
+                less `type $1   | cut -d\( -f2 | cut -d\) -f1 \
+                        | cut -d$x -f2 | cut -d"'" -f1 | awk '{print $NF}'`
+        fi
+        unset x ans
+}
+
+#----------------------------------------------------------------------#
+
+<a name="HF_loc"></a>
+<h3>loc</h3>
+
+#----------------------------------------------------------------------#
+function loc  {
+        dir=.
+        case $# in
+                0)      echo Needs at least one arg
+                        return
+                        ;;
+                1)      ;;
+                2)      dir="$1"
+                        shift
+                        ;;
+                *)      echo Too many args
+                        return
+                        ;;
+        esac
+        (set -x; command nice find $dir $xdev -name \*$1\* -print)
+}
+
+# locl = locate locally
+
+function locl {
+        xdev='-xdev'
+        loc "$@"
+}
+
+#----------------------------------------------------------------------#
+
+<a name="HF_mangl"></a>
+<h3>mangl</h3>
+#----------------------------------------------------------------------#
+function mangl () {
+        nroff -man $* | less -is
+}
+
+#----------------------------------------------------------------------#
+
+<a name="HF_mcd"></a>
+<h3>mcd</h3>
+
+#----------------------------------------------------------------------#
+function mcd () {
+        mkdir $*
+        n=`expr $# - 1`
+        shift $n
+        cd $1
+}
+
+#----------------------------------------------------------------------#
+
+<a name="HF_ping"></a>
+<h3>ping</h3>
+
+#----------------------------------------------------------------------#
+if [ `uname` = SunOS ]; then if [ `uname -r | cut -f1 -d.` -ge 5 ]
+then
+        function ping {
+                command ping -s $1 56 1
+        }
+fi;fi
+
+
+if [ `uname` = Linux -o `uname` = FreeBSD -o `uname` = Darwin ]
+then
+        function ping {
+                command ping -c 1 $1
+        }
+fi
+
+#----------------------------------------------------------------------#
+
+<a name="HF_truss"></a>
+<h3>truss</h3>
+
+#----------------------------------------------------------------------#
+function truss {
+        if [ $# -lt 1 ]
+        then
+                cat >&2 &lt;&lt;XXX
+Usage (for function): truss &lt;command>
+which creates /tmp/&lt;command>.truss
+Otherwise use `command -v truss`
+XXX
+                return
+        fi
+        if [ "$1" = '-p' ]
+        then
+                output=/tmp/pid_$2.truss
+        else
+                p1=`basename $1`
+                output=/tmp/$p1.truss
+        fi
+        echo "Use less '+/execve|open.*= [^-]' $output" >&2
+        if [ "`uname`" = SunOS ]
+        then
+                command truss -o $output -fall -rall -wall -vall "$@"
+        elif [ "`uname`" = FreeBSD ]
+        then
+                command truss -o $output -fae "$@"
+        else
+# at the moment means linux
+                strace -o $output -f "$@"
+        fi
+}
+
+#----------------------------------------------------------------------#
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</pre>

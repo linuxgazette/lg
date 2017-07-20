@@ -1,0 +1,200 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<html>
+<head>
+<title>Building an Audio CD Player, Listing 2</title>
+</head>
+<body bgcolor="#FFFFFF" text="000000">
+<p><HR> <P> 
+<h3>Listing 2. Drive.java</h3>
+<p><HR> <P> 
+<pre>
+package Jcd;                                //   1
+/**                                              3
+  Jcd - Java CD Audio Player                     4
+  Michael Hamilton (michael@actrix.gen.nz).      5
+  All rights reserved.  See the README for details 
+ */                                         //   7
+class Drive {                               //  11
+  public static final int FRAMES_PER_SECOND = 75;  
+      // Lead out is always track 0xAA      //  15
+      // regardless of the actual number of //  16
+      // tracks.                            //  17
+  public static final int LEAD_OUT = 0xAA;  //  18
+      // Status values returned by the      //  20
+      // status() method. Currently these   //  21
+      // correspond to those values defined //  22
+      // in &lt;linux/cdrom.h>.  Must match    //  23
+      // with those in DriveLib.c           //  24
+  public static final int STATUS_INVALID   = 0x00;
+  public static final int STATUS_PLAY      = 0x11;
+  public static final int STATUS_PAUSED    = 0x12;
+  public static final int STATUS_COMPLETED = 0x13;
+  public static final int STATUS_ERROR     = 0x14;
+  public static final int STATUS_NOSTATUS  = 0x15;
+      // Device flag values - bit string.   //  32
+  public static final int FLAG_NONE      = 0x00;
+      // Needs stop() before play()         //  34
+  public static final int FLAG_STOP_PLAY = 0x01; 
+      // For now I'll keep the following private.
+      // Would expand this to include more  //  37
+      // status info if we ever want to support
+      // multiple CD drives in the same PC. //  39
+  String device_name  = &quot;/dev/cdrom&quot;;       //  41
+  int    device_flags = FLAG_NONE;          //  42
+  int fd = -1; // File descriptor.          //  44
+  int audio_status = Drive.STATUS_INVALID;  //  46
+  int number_of_tracks = 0;                 //  48
+  int current_track = 0;                    //  49
+  int current_index = 0;                    //  50
+  int current_address = 0; // number of frames
+  public Drive()                            //  53
+  {                                         //  54
+    this(&quot;/dev/cdrom&quot;, &quot;Jcd_Drive.so&quot;, 0);  //  55
+  }                                         //  56
+  public Drive(String dev,String module,int flags)
+  {                                         //  59
+    System.load(module);                    //  60
+    device_name = dev;                      //  61
+    device_flags = flags;                   //  62
+    try {                                   //  63
+        // Force an attempt to obtain the device.  
+      initDrive();                          //  64
+    }                                       //  65
+    catch (DriveException de) {             //  66
+    }                                       //  67
+  }                                         //  68
+  native void initDrive() throws DriveException;
+      // Origin 1.                          //  72
+  public native synchronized int currentTrack()   
+    throws DriveException;
+      // Must call currentTrack() before calling
+      // currentIndex().                    //  76
+  public native synchronized int currentIndex()  
+    throws DriveException; 
+  public native synchronized int numberOfTracks()
+    throws DriveException;
+      // Addresses can vary for the same CD //  81
+      // produced in different countries.   //  82
+      // Expressed in frame units - 75      //  83
+      // frames per second.                 //  84
+  public native synchronized int currentAddress()  
+    throws DriveException;
+  public native synchronized int cdEndAddress()     
+    throws DriveException;
+  public native synchronized int            //  87
+    trackAddress(int n)
+      throws DriveException;
+  public native synchronized int            //  88
+    trackLength(int n)
+      throws DriveException;
+  public int trackAddress() throws DriveException
+  {                                         //  91
+    return trackAddress(currentTrack());    //  92
+  }                                         //  93
+                                            //  94
+  public int trackEndAddress(int n) 
+    throws DriveException
+  {                                         //  96
+    return n >= numberOfTracks() ?          //  97
+      cdEndAddress() : trackAddress(n + 1) - 1;
+  }                                         //  98
+  public int trackEndAddress() 
+    throws DriveException                   // 100
+  {                                         // 101
+    return trackEndAddress(currentTrack()); // 102
+  }                                         // 103
+  public int trackLength() throws DriveException
+  {                                         // 106
+    return trackLength(currentTrack());     // 107
+  }                                         // 108
+      // xjcd cddb address -                // 110
+      // see http://sunsite.unc.edu~/cddb/xjcd/
+  public native synchronized String cddbID() 
+    throws DriveException;                  // 112
+      // CD's product code (might be different
+      // for the same CD produced in different
+      // countries?                         // 116
+  public native synchronized String productCode()
+    throws DriveException;
+      // One of the values defined above.   // 119
+      // Active query of drive.  May result // 120
+      // in drive closing.                  // 121
+  public native synchronized int status()
+    throws DriveException;                  // 122
+      // Play from start to end inclusive.  // 124
+  public native synchronized void 
+  play(int startTrack,                      // 125
+       int startIndex,                      // 126
+       int endTrack,                        // 127
+       int endIndex) throws DriveException; // 128
+  public native synchronized void stop()  
+    throws DriveException;                  // 130
+  public native synchronized void pause()
+    throws DriveException;                  // 131
+  public native synchronized void resume()
+    throws DriveException;                  // 132
+  public native synchronized void eject()
+    throws DriveException;                  // 133
+  public native synchronized void 
+  setVolume(int volume) throws DriveException;
+  public native synchronized int volume() 
+    throws DriveException;                  // 137
+  public void play(int n) throws DriveException
+  {  // Play from n to the end.             // 140
+    play(n, 1, numberOfTracks(), 0);        // 141
+  }                                         // 142
+  public void play(int n, int i) 
+    throws DriveException                   // 144
+  {  // Play from n,i to the end.           // 145
+    play(n, i, numberOfTracks(), 0);        // 146
+  }                                         // 147
+  public void single(int n) throws DriveException
+  {  // Play a single track                 // 150
+    play(n, 1, n, 0);                       // 151
+  }                                         // 152
+}                                           // 154
+class DriveException extends Exception {    // 157
+  DriveException() { super(); }             // 158
+  DriveException(String s) { super(s); }    // 159
+}                                           // 160
+class TrackAddressException extends DriveException 
+{                                           // 162
+  TrackAddressException() { super(); }      // 163
+  TrackAddressException(String s) { super(s); }
+}                                           // 165
+class PlayException extends DriveException {
+  PlayException() { super(); }              // 168
+  PlayException(String s) { super(s); }     // 169
+}                                           // 170
+class StopException extends DriveException {
+  StopException() { super(); }              // 173
+  StopException(String s) { super(s); }     // 174
+}                                           // 175
+class PauseException extends DriveException {
+  PauseException() { super(); }             // 178
+  PauseException(String s) { super(s); }    // 179
+}                                           // 180
+class ResumeException extends DriveException {
+  ResumeException() { super(); }            // 183
+  ResumeException(String s) { super(s); }   // 184
+}                                           // 185
+class EjectException extends DriveException {
+  EjectException() { super(); }             // 188
+  EjectException(String s) { super(s); }    // 189
+}                                           // 190
+class VolumeException extends DriveException { 
+  VolumeException() { super(); }            // 193
+  VolumeException(String s) { super(s); }   // 194
+}                                           // 195
+class SetVolumeException extends DriveException {
+  SetVolumeException() { super(); }         // 198
+  SetVolumeException(String s) { super(s);} // 199
+}                                           // 200
+class ProductCodeException extends DriveException 
+{                                           // 202
+  ProductCodeException() { super(); }       // 203
+  ProductCodeException(String s) { super(s); }
+}                                           // 205
+</pre>
+</body>
+</html>

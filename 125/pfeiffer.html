@@ -1,0 +1,367 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Digging Secure Tunnels with IPsec LG #125</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="mishra.html" >&lt;-- prev</A> | <A HREF="pramode.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Digging Secure Tunnels with IPsec</h1>
+<p id="by"><b>By <A HREF="../authors/pfeiffer.html">Ren&eacute; Pfeiffer</A></b></p>
+
+<p>
+<h3>
+Introduction
+</h3>
+
+<p>
+The Internet was born using plain text and no encryption. For a long time the TCP/IP protocol
+suite had no mechanism for cryptographically protecting transported data. Encryption was
+added at the application layer &mdash; Netscape's Secure Socket Layer (SSL) being a famous example.
+The design process of IPv6 incorporated encryption into the protocol itself, and the IPsec
+(IP security) framework came into existence. IPsec provides encryption and authentication at the
+packet level. While IPsec is obligatory for IPv6, you can optionally use it with IPv4. The Linux
+2.6.x kernel series added full IPsec functionality to the main source tree. In this article we will
+explore how we can use IPsec to build encrypted data paths between networked machines.
+</p>
+
+<h3>
+The Parts of IPsec
+</h3>
+
+<p>
+IPsec consists of a number of protocols. Encryption was not the only design criteria.
+Protection against replay attacks, detection of unauthorised packet modification and
+correctly authenticating the communication partners are also included in the design requirements.
+IPSec also offers methods to manage keys used for encrypted communication. The
+protocols by name have the following task.
+<ul>
+<li> Authentication Header (AH)<br>
+     This protocol protects against replay attacks and makes
+     sure that the communication partners are "correct" (it verifies authentication).</li>
+<li> Encapsulating Security Payload (ESP)<br>
+     This protocol provides encryption. It also
+     protects against replay attacks and in addition ensures authentication.</li>
+<li> Internet Key Exchange (IKE)<br>
+     This is a hybrid protocol that establishes the security
+     policies between two IPsec endpoints and provides the authentication keys for
+     services such as IPsec. If you provide the keys manually, you don't need to use
+     IKE.</li>
+</ul>
+AH and ESP packets transport data. Both are new protocols whose protocol numbers can
+be found in <tt>/etc/protocols</tt>. AH and ESP are
+managed by the kernel, while IKE is managed by a userspace program.
+</p>
+
+<h3>
+Preparing Kernel and System
+</h3>
+
+<p>
+In order to use IPsec your kernel needs to have some code options enabled. Most modern GNU/Linux
+distributions have IPsec-capable kernels. If you want to compile your own, make sure that
+you have the following options set:
+<ul>
+<li> IPsec user configuration interface</li>
+<li> PF_KEY sockets</li>
+<li> IP: AH transformation</li>
+<li> IP: ESP transformation</li>
+<li> IP: IPComp transformation</li>
+<li> IP: tunnel transformation</li>
+</ul>
+These options can be found in the section <i>Networking --&gt; Networking options</i>.
+You also have to enable some or all cryptographic ciphers in the <i>Cryptographic
+options</i> submenu. You will need at least MD5, SHA1, HMAC, DES, Triple DES EDE and AES.
+Remember, the encryption is handled by the kernel. If the kernel doesn't know about a
+cipher, it cannot use it. This is important in case you want to speak to other IPsec
+devices or hosts (such as MS Windows or Cisco machines). 
+If you want to
+use IPsec with IPv6, then you have to make sure the IP transformations are set for IPv6 as
+well. I have two screenshots for you where you can see the <i>make menuconfig</i> menu:
+<a href="misc/pfeiffer/kernel_ipsec1.png">screenshot 1</a> and 
+<a href="misc/pfeiffer/kernel_ipsec2.png">screenshot 2</a>. If your machine acts as a
+router, you might wish to consider activating the <i>IP: advanced router</i> option, too.
+The kernel treats packet queues differently if you use the advanced routing option.
+</p>
+<p>
+Now our kernel can handle IPsec. We now need some tools to make it work. We will need at least
+the <i>ipsec-tools</i> package. This is the name of the project and the Debian
+package. If we want to deal with key management and IKE, we need another program.
+The Linux IPsec stack can work together with <i>pluto</i> from the Openswan project,
+OpenBSD's <i>isakmpd</i> or <i>racoon</i> from the KAME project. The use of IKE is
+optional though. We will use <i>racoon</i> in our examples.
+</p>
+
+<h3>
+Manual Keying, Policies, Tunnel and Transport Mode
+</h3>
+
+<p>
+IPsec can be used to link networks via tunnels by using the so-called <i>tunnel mode</i>. In its
+simplest form it can also be used to encrypt network traffic between two or more hosts by using the
+<i>transport mode</i>. The only things you need for that are the keys and a way to tell the kernel
+which packets need to be sent via IPsec. The 2.6.x kernels have no special device for handling IPsec
+packets. Everything is sent over the already existing network interfaces. The Security Policy Database (SPD)
+decides which packets are to be handled by IPsec. In order to manipulate this database you need the 
+<b>setkey</b> command from the <i>ipsec-tools</i> package. Usually you prepare a file with all the
+settings and activate it by using <b>setkey -f /etc/setkey.conf</b>. As an
+example, let's say we want to enable IPsec between the machines 10.0.0.23
+and 10.0.0.42. The policy for telling the kernel looks like this:
+
+<pre class="code">
+#!/usr/sbin/setkey -f
+#
+# SPD for 10.0.0.23
+#
+spdadd 10.0.0.23 10.0.0.42 any -P out ipsec
+       esp/transport//require
+       ah/transport//require;
+
+spdadd 10.0.0.42 10.0.0.23 any -P in ipsec
+       esp/transport//require
+       ah/transport//require;
+</pre>
+The first policy states that any packet coming from 10.0.0.23 and leaving for 10.0.0.42 has to be
+encapsulated in IPsec packets. Transport mode has to be used. The policy is valid for ESP and AH
+packets alike (that's why we have to use <i>spdadd</i> twice). IPsec is mandatory as indicated by the keyword
+"require". If one of the hosts lacks the right key or hasn't initialised its SPD, there won't be any
+traffic because it can't be encrypted. The second policy is the first one reversed.
+The IP addresses are swapped and the direction is changed from <i>out</i> to <i>in</i>.
+</p>
+<p>
+So the kernel knows when to use IPsec. There are still no keys. Apart from that I told you about
+authentication checks that the IPsec protocols can do for us. Our <b>setkey.conf</b> needs to be
+extended to include this information as well. <b>setkey</b> also defines the Security Association
+Database (SAD). The SAD tells the kernel who our neigbours are and how we can make sure that we are not
+talking to an impostor. Extending our <b>setkey.conf</b> by the following lines enables
+authentication and encryption. In addition to that we supply the keys for every host.
+
+<pre class="code">
+# AH SAD entries with 160 bit keys
+add 10.0.0.23 10.0.0.42 ah 0x200 -A hmac-sha1 0x46915c30ed7e2465b42861b6ab19f2772813020c;
+add 10.0.0.42 10.0.0.23 ah 0x300 -A hmac-sha1 0xc4dac594f8228e0b94a54758f7fbf2fdf4e37f3e;
+
+# ESP SAD entries with 192 bit keys
+add 10.0.0.23 10.0.0.42 esp 0x201 -E rijndael-cbc 0xa3993b3dfc41ef0a1aa8d168a8bf2c27e48249ac17b61e09;
+add 10.0.0.42 10.0.0.23 esp 0x301 -E rijndael-cbc 0x8f6498928ba354bd45cfad147f54c67b3b742896b3bafc02;
+</pre>
+
+Again we have a line for every direction. The IP addresses are reversed, but we use a different key
+for every IP and protocol. The bit length of the key corresponds to the authentication or encryption
+algorithm used. The switches <i>-A</i> and <i>-E</i> indicate the algorithm to use for AH and ESP
+respectively. <i>hmac-sha1</i> requires a key length of 160 bits or 20 bytes. <i>rijndael-cbc</i> can be used with
+128, 192 or 256 bits. The example uses 192 bits or 24 bytes. The man page of <b>setkey</b> has a
+table with all possible values for every supported algorithm. Bear in mind that the kernel must also
+have a module for the algorithm in its cryptographic options or else you cannot use this particular
+algorithm. The hexadecimal value behind the protocol name is called Security Parameters Index (SPI).
+The SPI identifies a set of parameters used for the IPsec connection in combination with the IP
+addresses involved. When doing manual keying, make sure that the SPIs are unique. Speaking of
+unique, make sure that your keys are <i>unique</i> and <i>random</i>. Never use any keys that have
+been published! I used Ralf's method from the IPsec HOWTO to extract the sample keys from the Linux
+random device.
+
+<pre class="code">
+# dd if=/dev/random count=24 bs=1 | xxd -ps
+24+0 records in
+24+0 records out
+8f6498928ba354bd45cfad147f54c67b3b742896b3bafc02
+24 bytes transferred in 0.000180 seconds (133298 bytes/sec)
+</pre>
+
+Set <b>count</b> to the desired byte amount. The command <b>xxd</b> used to convert the binary output
+from the device is part of the <b>vim</b> package.
+</p>
+
+<h3>
+Testing Transport Mode
+</h3>
+
+<p>
+We are now ready to test our configuration. In order to do this you will need the
+<a href="misc/pfeiffer/setkey_transport.conf.txt">full setkey.conf</a>. I only added two lines that
+clear the SAD and SPD before loading new rules, just to be sure.
+
+<pre class="code">
+flush;
+spdflush;
+</pre>
+
+Copy it to your hosts. Be careful, we've only created the <b>setkey.conf</b> for 10.0.0.23. If you use
+this file on 10.0.0.42 you have to swap the policy for the direction of the packet flow (the
+<i>in</i> and <i>out</i> keywords for the SPD). Now use a root shell on 10.0.0.23 and enter the
+command:
+
+<pre>
+setkey -f /path/to/setkey.conf
+</pre>
+
+Check if you can ping 10.0.0.42. This should not be possible, because we told 10.0.0.23 to
+communicate with 10.0.0.42 over IPsec only. If you run the <b>setkey</b> command on 10.0.0.42 as
+well, you should be able to ping 10.0.0.42 from 10.0.0.23. Take a look with your favourite sniffer
+in order to make sure the kernel isn't playing unencrypted tricks on you. If you use an ICMP ping,
+the sniffer should only show you encrypted AH or ESP packets. The same goes for TCP and UDP
+transmissions.
+</p>
+<p>
+Next time we will configure an IPsec tunnel to connect two different networks and we will take a
+look at automatic keying with X.509 certificates.
+</p>
+
+<h3>
+Further reading
+</h3>
+
+<p>
+<ul>
+<li> <a href="http://www.ipsec-howto.de/">The official IPsec Howto for Linux</a></li>
+<li> <a href="http://www.cisco.com/warp/public/105/IPSECpart1.html">An Introduction to IP Security (IPSec) Encryption</a></li>
+<li> <a href="http://ipsec-tools.sourceforge.net/">IPsec-Tools</a></li>
+<li> <a href="http://www.kame.net/">KAME Project</a></li>
+<li> <a href="http://www.openswan.org/">Openswan</a></li>
+</ul>
+</p>
+
+
+</p>
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:125/pfeiffer.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<!-- *** BEGIN bio *** -->
+<hr>
+<p>
+
+<img align="left" alt="[BIO]" src="../gx/authors/pfeiffer.jpg" class="bio">
+
+</p>
+<em>
+
+<p>
+Ren&eacute; was born in the year of Atari's founding and the release of the game Pong.
+Since his early youth he started taking things apart to see how they work. He
+couldn't even pass construction sites without looking for electrical wires that
+might seem interesting. The interest in computing began when his grandfather
+bought him a 4-bit microcontroller with 256 byte RAM and a 4096 byte operating
+system, forcing him to learn assembler before any other language.
+</p>
+
+<p>
+After finishing school he went to university in order to study physics. He then
+collected experiences with a C64, a C128, two Amigas, DEC's Ultrix, OpenVMS and
+finally GNU/Linux on a PC in 1997. He is using Linux since this day and still
+likes to take things apart und put them together again. Freedom of tinkering
+brought him close to the Free Software movement, where he puts some effort into
+the right to understand how things work. He is also involved with civil liberty
+groups focusing on digital rights.
+</p>
+
+<p>
+Since 1999 he is offering his skills as a freelancer. His main activities
+include system/network administration, scripting and consulting. In 2001 he
+started to give lectures on computer security at the Technikum Wien. Apart from
+staring into computer monitors, inspecting hardware and talking to network
+equipment he is fond of scuba diving, writing, or photographing with his digital
+camera. He would like to have a go at storytelling and roleplaying again as soon
+as he finds some more spare time on his backup devices.
+</p>
+
+</em>
+</p>
+<br clear="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2006, Ren&eacute; Pfeiffer. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 125 of Linux Gazette, April 2006
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="mishra.html" >&lt;-- prev</A> | <A HREF="pramode.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">April 2006 (#125)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

@@ -1,0 +1,84 @@
+#define MODULE 
+
+#include <linux/kernel.h>
+#include <linux/module.h>
+
+#include <rtai.h>
+#include <rtai_sched.h>
+#include <rtai_fifos.h>
+
+#include <asm/io.h>
+
+#define rdtsc(low,high) \       /*define rdtsc(low,high)*/
+__asm__ __volatile__("rdtsc" : "=a" (low), "=d" (high))
+
+#define TICK_PERIOD 1000000     /*1ms*/
+#define TASK_PRIORITY 5
+#define STACK_SIZE 4096
+#define FIFO 0
+#define LPT_IRQ 7
+#define LPT_BASE 0x378
+
+static unsigned int cpu_clock_count;
+static RT_TASK rt_task;
+static RTIME tick_period;
+
+static void fun(int t) {
+        int count=0;
+        while(1) {
+                rtf_put(FIFO, &cpu_clock_count, sizeof(cpu_clock_count));
+                if(count==450) {
+                        rtf_reset(FIFO);
+                        count=0;
+                }
+                rt_task_wait_period();
+        }
+}
+
+static void lpt_irq_handler(void) {
+        static unsigned int low1,high1,low2,high2,count=0;
+        if(count==0)
+                rdtsc(low1,high1);
+        else {
+                rdtsc(low2,high2);
+                if(count==100)
+                        count=1;
+                cpu_clock_count=low2-low1;
+                low1=low2;
+                high1=high2;
+        }
+        count ++;
+        rt_ack_irq(7);
+}
+
+int init_module(void) {
+        RTIME now;
+        int result;
+        outb(0x0,LPT_BASE);
+        result = rt_request_global_irq(LPT_IRQ, lpt_irq_handler);
+        if(result) {
+                rt_printk("rt_request_global_irq [7]......[failed]\n");
+                        return result;
+        }
+        rt_enable_irq(LPT_IRQ);
+        outb(inb(0x37a)|0x10, 0x37a);
+        rt_printk("rt_request_global_irq [7].....    [ OK ]\n");
+        rt_set_periodic_mode();
+        rtf_create(FIFO, 4000);
+        rt_task_init(&rt_task, fun, 0, STACK_SIZE, TASK_PRIORITY, 0, 0);
+        tick_period = start_rt_timer(nano2count(TICK_PERIOD));
+        now = rt_get_time();
+        rt_task_make_periodic(&rt_task, now + tick_period, tick_period);
+        return 0;
+}
+
+void cleanup_module(void) {     
+        outb(inb(0x37a)&~0x10, 0x37a);
+        rt_printk("rt_free_global_irq [7]....    [ OK ]\n",
+        rt_free_global_irq(LPT_IRQ));
+        stop_rt_timer();
+        rt_printk("stop_rt_timer .....     [ OK ]\n");
+        rtf_destroy(FIFO);
+        rt_busy_sleep(10000000);
+        rt_task_delete(&rt_task);
+}

@@ -1,0 +1,193 @@
+<!--startcut ==========================================================-->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML>
+<HEAD>
+<title>Finding All Filenames with Identical I-Node Numbers LG #44</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!--endcut ============================================================-->
+
+<H4>
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H1><font color="maroon">
+Finding All Filenames with Identical I-Node Numbers</font></H1>
+<H4>By <a href="mailto:soneill@netaxs.com">Steve O'Neil</a></H4>
+</center>
+<P> <HR> <P>  
+
+
+<P> Here are a couple of scripts, one shell script, and one awk script, that
+will find all file names that have identical inode numbers in your system.
+Why would you want to know this?  Well, there are three reasons I can
+think of. 
+
+<P> First, it's generally useful when you're administering a system to
+know where all of your file links are. Since an inode in Linux isn't freed
+until the last link to it is removed, it can be helpful to know how many
+filenames have to be removed in order to _really_ kill a particular file.
+
+<P> Second, knowing all of the hard links in your system can be useful when you
+have an intrusion. Suppose someone breaks into your system and installs a
+packet sniffer, keystroke sniffer, or some other nasty piece of work. If he
+wants to guarantee that he'll be able to carry on his business even if you
+find his program, he might just create some hard links to it in some out of
+the way places in the system. Then, even if you find his original program
+and kill it, he can simply start it running again under one of the alternate
+file names he created, assuming he can still access your system. However, if
+you look at the inode number of the original program, then run these
+scripts, any links to the file will be immediately evident. Granted, you can
+get the same effect by running "find", if you know the inode number you're
+looking for, but this won't get you information about _all_ the links in
+your system, which leads me to the final reason for doing this ...
+
+<P> If you're going to take a proactive approach to system security, you'll be
+running a lot of file testing and scanning programs, to guard against
+tampering. If you run these scripts on your system when you're sure it's
+"pristine", and keep this list of hard links secure, you can run the scripts
+on your system periodically, perhaps once a day, and compare the new list of
+links to the baseline. Any differences seen, especially in the "system"
+directories, such as /bin, /lib, /etc, and so on, should be investigated
+without delay.
+
+<P> The scripts should run on any system using bash or zsh, and every Linux
+distrbution provides some version of awk. The file listing mechanism does,
+however, rely on the use of Mark Baranowski and James Gleason's Enhanced ls
+program, els. Unlike ls, els gives you complete control over the output
+format of the file listing. This is an amazing program, and I recommend
+getting it whether you use my scripts or not. Its only shortcoming is that
+it doesn't display different file types in different colors, but, this is a
+minor point in light of the program's power. It's available by ftp at
+<A HREF=ftp://perseus.elen.utah.edu/pub/markb/els.tar.Z>
+ftp://perseus.elen.utah.edu/pub/markb/els.tar.Z</A>. The current version is 1.44.
+
+<P> Below are the scripts. Adjust the list of directories in "findhardlinks.sh"
+to suit your preferences, and adjust the location of the awk interpreter in 
+"showsame.awk" to match what you have.
+
+<P> To use them, first run "findhardlinks.sh" from the command line, as root. A
+file called "allfiles.lst.srt" will be created in /temp(or whatever other
+directory you'd like) . Be patient; if you have a lot of files and
+directories, this could take a few minutes. When this is done, copy
+"showsame.awk" to the same directory as "allfiles.lst.srt" and run
+<PRE>
+	showsame.awk allfiles.lst.srt
+</PRE>
+
+<P> This will create a file called "outfile.txt", which contains the list of
+identical links. Run this through "uniq" to eliminate duplicated lines, like
+so
+<PRE>
+	uniq outfile.txt &gt; outfile.nodup
+</PRE>
+
+<P> and you're done. The file "outfile.nodup" is the list of links you want.
+And yes, I could have put all this together into one big script, but I
+wanted to show how the pieces work. Feel free to combine and streamline
+these scripts to your heart's content.
+
+<P> One last point: hard links only make sense between filenames on the _same_
+filesystem, so when you put your list of directories into the shell script, 
+be sure they're all part of the same filesystem, such as "/".
+
+<HR> <!-- ******************************************************** -->
+
+<H3>findhardlinks.sh</H3>
+
+<PRE>
+#These directories are all under "/" on my system; you may have to change
+#the list to suit your configuration. 
+
+for i in bin boot etc home lib opt root sbin tmp usr var
+	do
+
+#This line generates a file listing for all the specified directories and
+#their subdirectories, showing each files i-node number, and its complete
+#path name, and puts all of it into "allfiles.lst"
+
+	els -a -i +R +NF $i &gt;&gt; /temp/allfiles.lst
+	done
+cd /temp
+sort allfiles.lst &gt; allfiles.lst.srt 
+rm allfiles.lst
+</PRE>
+
+<HR> <!-- ***************************************************** -->
+
+<H3>showsame.awk</H3>
+
+<PRE>
+#! /usr/bin/awk -f
+BEGIN {
+
+	getline  #get the first line of the file, then,
+	n1=split($0, test1) #put its fields into an array, then,
+
+#increment the line pointer by one
+
+}
+{
+#this is the i-node comparison loop
+
+	n2=split($0, test2) #put the next line into an array
+	if (test1[1] == test2[1]) { #see if the i-node numbers of the two
+				    #lines are the same(field 1 of both
+				    #strings)
+
+#if they're the same, print the contents of both arrays
+
+		for (i=1; i &lt;= n1; i++) {
+			printf ("%s ", test1[i]) &gt;&gt; "outfile.txt"
+					} #note (space) after %s; this puts
+					  #back spaces between fields lost
+					  #when the strings were split into
+					  #the arrays
+
+			printf ("\n") &gt;&gt; "outfile.txt"
+		for (i=1; i &lt;= n2; i++)  {
+			printf ("%s ", test2[i]) &gt;&gt; "outfile.txt"
+				        }
+			printf ("\n") &gt;&gt; "outfile.txt"	
+				   }
+
+#Now put the most recent string into the array that holds the previous
+#string; this allows us to do comparison between each line and the one
+#before it.
+
+	for (i=1; i &lt;= n2; i++) { 
+		test1[i] = test2[i]
+				}
+	n1 = n2 #set the count of fields in the array that is holding what
+		#is now the previous string to the number of fields in that
+		#string
+
+	next	#go get the next string and do it again
+}
+</PRE>
+
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<center><H5>Copyright &copy; 1999, Steve O'Neill <BR> 
+Published in Issue 44 of <i>Linux Gazette</i>, August 1999</H5></center>
+
+<!--===================================================================-->
+<!--startcut ==========================================================-->
+<P> <hr> <P> 
+<A HREF="index.html"><IMG ALIGN=BOTTOM SRC="../gx/indexnew.gif" 
+ALT="[ TABLE OF CONTENTS ]"></A>
+<A HREF="../index.html"><IMG ALIGN=BOTTOM SRC="../gx/homenew.gif"
+ALT="[ FRONT PAGE ]"></A>
+<A HREF="nielsen.html"><IMG SRC="../gx/back2.gif"
+ALT=" Back "></A>
+<A HREF="pollman/dns.html"><IMG SRC="../gx/fwd.gif" ALT=" Next "></A>
+<P> <hr> <P> 
+</BODY>
+</HTML>
+<!--endcut ============================================================-->

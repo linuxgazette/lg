@@ -1,0 +1,42 @@
+#!/bin/sh
+# IP masquerade script.
+
+INTERNAL_NETWORK=10.0.0.0
+	# The private IP range we're using, usually 10.0.0.0 or 192.168.1.0.
+INTERNAL_CIDR=8
+	# 8 for 10.0.0.0, 24 for 192.168.1.0.
+PUBLIC_IP=63.63.63.63
+	# Assigned by your ISP.  This assumes a static IP.
+INTERNAL_INTERFACE=eth1
+PUBLIC_INTERFACE=eth0
+
+xx() { echo ">> $*" ; eval "$*" ; }
+
+modules () {
+        xx modprobe ip_nat_ftp
+}
+
+v22 () {
+        xx ipchains -P forward DENY
+        xx ipchains -A forward -s $INTERNAL_NETWORK/$INTERNAL_CIDR -j MASQ
+}
+
+v24 () {
+        xx iptables -P FORWARD DROP
+        xx iptables -t nat -A POSTROUTING -s $INTERNAL_NETWORK/$INTERNAL_CIDR -j SNAT --to-source $PUBLIC_IP
+        xx iptables -A FORWARD -i $INTERNAL_INTERFACE -o $PUBLIC_INTERFACE -j ACCEPT
+        xx iptables -A FORWARD -m state --state ESTABLISHED -j ACCEPT
+}
+
+all () {
+        xx echo "1" > /proc/sys/net/ipv4/ip_forward
+        #xx echo "1" > /proc/sys/net/ipv4/ip_dynaddr
+}
+
+modules
+if [ kernelversion == '2.2' ] ;then
+        v22
+else
+        v24
+fi
+all

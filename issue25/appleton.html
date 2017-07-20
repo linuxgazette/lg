@@ -1,0 +1,422 @@
+<!--startcut ==========================================================-->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML>
+<HEAD>
+<title>Gathering Usage Stats Issue 25</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#A000A0"
+ALINK="#FF0000">
+<!--endcut ============================================================-->
+
+<H4>
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H2> Gathering Usage Stats</H2>
+<H4>By <a href="mailto:randy@euclid.acs.nmu.edu">Randy Appleton</a></H4>
+</center>
+<P> <HR> <P>  
+
+<H3>
+Intro</H3>
+Here in the Linux Laboratory at Northern Michigan University, we have quite
+a few users and quite a few computers for them to use. It is important
+for laboratoies like us to quantify usage. This
+data can be used to justify expansion of a computer laboratory, describe
+who is actually using the machines, which machines are being used,
+or just satisfy simple curiosity.
+
+<P>Being the curious type, I sat down to write a program that would gather
+usage information. The information I wanted includes:
+<UL>
+<LI>
+How much time each user spends online.</LI>
+
+<LI>
+How much time each computer spends being used.</LI>
+
+<LI>
+How often the computer is up.</LI>
+
+<LI>
+User total usage time divided by weeks (to see long term trends).</LI>
+
+<LI>
+User total usage time divided by day for the last couple of days (to see
+current trends).</LI>
+</UL>
+
+<H3>
+Methodology</H3>
+My first thought was to just stick my head in at odd times and count users.
+But for such a strategy to work, I would have to count users at various
+times in the day, including times I might not otherwise be inclined to
+visit the lab (like early mornings). Further, I would miss users
+using the lab remotely, over the internet.
+
+<P>My second thought was to use the "w" command. This command reads
+a log file (normally /var/log/wtmp) and produces a line of output for every
+logon event in the past, describing who was logged on and for how long.
+My hope was that a summary of this information would provide the usage
+statistics I was looking for. Unfortunately, this command does not
+produce foolproof output. If the machine crashes while someone is
+logged on, then "w" will sometimes produce the wrong total time online.
+Even worse, if a person is logged on but idle, this idle time still counts
+as usage as computed by "w".
+
+<P>Counting idle time was unacceptable to me. We have several
+users with computers in their offices, and they are essentially logged
+on 24 hours per day 7 days per week. Their usage is nowhere near
+this level (yes, even college professors go to sleep!)
+
+<P>Luckily , there was an alternative to "w". The easiest way to
+find out who is currently logged onto a computer is to use finger, a program
+designed for just this purpose. The command "finger @hostname"
+will describe who is logged on to "hostname", and how long since they actually
+typed a command (i.e. finger knows their idle time).
+
+<P>Finger produces a header line, and the one line for every person logged
+on. Eliminating the users with a high idle time will provide a list
+of users who are using the computer at any given moment. A log file
+of such lists, gathered at regular intervals, will describe usage over
+the time the log file was gathered.
+
+<P>There is an important statistical assumption here. We assume that
+a set of entries will accurately describe usage over the whole time period,
+not just the precise moments when those entries occur. For
+this assumption to be valid the entries should be gathered at regular intervals.
+<H3>
+Defining Usage</H3>
+The other complicated issue is to define usage. Often a single computer
+will have several users logged on simultaneously, and often a single user
+will be logged on to multiple computers at once (as I am now). It
+becomes important to carefully define usage in these cases. I adopted
+the following definitions.
+<UL>
+<LI>
+A computer is in use if and only if there is at least one user using that
+computer.</LI>
+
+<LI>
+A user is logged on if and only if the user is logged onto at least one
+computer.</LI>
+
+<LI>
+A computer is up if and only if it responds to the finger command at all,
+and is otherwise down. Note that a computer that is currently running
+Windows will NOT respond, and will therefore be counted as down (which
+makes sense to me!).</LI>
+</UL>
+Given these definition, it becomes important not double count users where
+they are logged in more than once, and to not double count computers when
+they have more than one user. Correct programming eliminates these
+double countings (see the source code below).
+<BR>
+<H3>
+The Log file</H3>
+The log file contains a series of records, each one of which is a description
+of the results of running finger on the set of hosts. The size of
+each entry is minimized, since many entries will be gathered yet the log
+file should remain modest in size. The top of each entry contains the date
+and time the entry was gathered, which is important for gathering time
+and date based statistics. The log file entry below shows that it
+is 11 45 in the evening on 10/11/97, and that I am the only one logged
+in besides root. Root and I are using the computers ogaa and ogimaa.
+Also shown is that the computer nigig is down, since it is not listed at
+all.
+<UL>
+<TABLE BORDER COLS=1 WIDTH="200" NOSAVE >
+<TR NOSAVE>
+<TD NOSAVE>Date 97 10 11 23 45
+<BR>Host ogimaa 1
+<BR>Host bine 0
+<BR>Host gaag 0
+<BR>Host makwa 0
+<BR>Host mooz 0
+<BR>Host zagime 0
+<BR>Host ogaa 1
+<BR>Host euclid 0
+<BR>Host euler 0
+<BR>Host fermat 0
+<BR>User randy
+<BR>User root
+<BR>Total 2 users</TD>
+</TR>
+</TABLE>
+</UL>
+
+<H3>
+The Program</H3>
+The program is named fingersummarize, since its job is to summarize a set
+of results from the finger command. It is written in Perl, since
+Perl offers wonderful support for associative arrays (where the usage stats
+are stored) and working with strings (from the log file and the output
+of finger).
+
+<P>There are two basic tasks of fingersummarize. These functions could
+easily be done with two separate programs, but I find it easier to have
+one program with options rather than two executables.
+<UL>
+<LI>
+It should gather finger results, and store them in a log file. (fingersummarize
+-probe)</LI>
+
+<LI>
+It should read the log file and produce the usage statistics. (fingersummarize
+-print)</LI>
+</UL>
+Fingersummarize can be installed easily. Just follow the instructions
+below.
+<OL>
+<LI>
+Copy the executable to someplace on your system, such as /usr/local/bin.</LI>
+
+<BR><TT>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; cp /tmp/fingersummarize /usr/local/bin;
+chmod 755 /usr/local/bin/fingersummarize</TT>
+<LI>
+Edit the top of the executable so that fingersummarize will probe your
+machines instead of mine. This should be very easy to do.</LI>
+
+<BR>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+<TT>vi /usr/local/bin/fingersummarize</TT>
+<LI>
+Make a blank log file and put that log file somewhere. Often /var/log/fingersummarize
+is a reasonable place.</LI>
+
+<BR><TT>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; echo > /var/log/fingersummarize;
+chmod 600 /var/log/fingersummarize</TT>
+<LI>
+Install a line in cron so that fingersummarize will run in probe mode at
+regular intervals. Below is the line I use, which runs fingersummarize
+every fifteen minutes for every hour.</LI>
+
+<BR>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+<TT>0,15,30,45 * * * * /usr/local/bin/fingersummarize -probe >> /var/log/fingersummarizelog</TT></OL>
+That's it. Now, whenever you want to see a current summary of the
+usage data, just run
+<BR>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+<TT>fingersummarize -print &lt; /var/log/fingersummarizelog</TT>
+<H3>
+Example Output</H3>
+Here is some sample output. A current example for my lab can he had
+at <A HREF="http://euclid.nmu.edu/fingerprobe.txt">http://euclid.nmu.edu/fingerprobe.txt</A>
+. The executable itself can be had at <A HREF="http://euclid.nmu.edu/~randy/Papers/fingerprobe">http://euclid.nmu.edu/~randy/Papers/fingerprobe</A>
+. Note that the total number of hours computers were in use (12.8
+hours/week) exceeds the total number of hours that people were using computers
+(10.8hours/week). This just means there were times that some person
+was using more than one computer at a time. Also, note that the useage
+spikes at 10am, since a particular class sometimes meets in the lab at
+10am.
+<BR>
+<BR>
+<TABLE BORDER COLS=2 WIDTH="80%" NOSAVE >
+<TR NOSAVE>
+<TD><TT>Stats by user</TT>
+<BR><TT>User&nbsp;&nbsp;&nbsp; Total&nbsp;&nbsp; Usage&nbsp;&nbsp; Hours</TT>&nbsp;
+<BR><TT>Name&nbsp;&nbsp;&nbsp; Observ. Percent /Day</TT>&nbsp;
+<BR><TT>abasosh 47&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 4&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+0.42</TT>
+<BR><TT>agdgdfg 54&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 4.6&nbsp;&nbsp;&nbsp;&nbsp;
+0.49</TT>
+<BR><TT>arnelso 7&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 0.6&nbsp;&nbsp;&nbsp;&nbsp;
+0.06</TT>
+<BR><TT>bparton 2&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 0.1&nbsp;&nbsp;&nbsp;&nbsp;
+0.01</TT>
+<BR><TT>bob&nbsp;&nbsp;&nbsp;&nbsp; 28&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 2.4&nbsp;&nbsp;&nbsp;&nbsp;
+0.25</TT>
+<BR><TT>brandk&nbsp; 101&nbsp;&nbsp;&nbsp;&nbsp; 8.7&nbsp;&nbsp;&nbsp;&nbsp;
+0.92</TT>
+<BR><TT>btsumda 37&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 3.2&nbsp;&nbsp;&nbsp;&nbsp;
+0.33</TT>
+<BR><TT>chgijs&nbsp; 1&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 0&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+0</TT>
+<BR><TT>clntudp 1&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 0&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+0</TT>
+<BR><TT>daepke&nbsp; 2&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 0.1&nbsp;&nbsp;&nbsp;&nbsp;
+0.01</TT>
+<BR><TT>dan&nbsp;&nbsp;&nbsp;&nbsp; 93&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 8&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+0.84</TT>
+<BR><TT>dfliter 17&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 1.4&nbsp;&nbsp;&nbsp;&nbsp;
+0.15</TT>
+<BR><TT>gclas&nbsp;&nbsp; 43&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 3.7&nbsp;&nbsp;&nbsp;&nbsp;
+0.39</TT>
+<BR><TT>goofy&nbsp;&nbsp; 15&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 1.3&nbsp;&nbsp;&nbsp;&nbsp;
+0.13</TT>
+<BR><TT>gypsy&nbsp;&nbsp; 2&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 0.1&nbsp;&nbsp;&nbsp;&nbsp;
+0.01</TT>
+<BR><TT>jadsjhf 2&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 0.1&nbsp;&nbsp;&nbsp;&nbsp;
+0.01</TT>
+<BR><TT>jbsdjh&nbsp; 2&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 0.1&nbsp;&nbsp;&nbsp;&nbsp;
+0.01</TT>
+<BR><TT>jdefgg&nbsp; 2&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 0.1&nbsp;&nbsp;&nbsp;&nbsp;
+0.01</TT>
+<BR><TT>jeffpat 6&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 0.5&nbsp;&nbsp;&nbsp;&nbsp;
+0.05</TT>
+<BR><TT>jpaulin 7&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 0.6&nbsp;&nbsp;&nbsp;&nbsp;
+0.06</TT>
+<BR><TT>jstyle&nbsp; 4&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 0.3&nbsp;&nbsp;&nbsp;&nbsp;
+0.03</TT>
+<BR><TT>jstamo&nbsp; 17&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 1.4&nbsp;&nbsp;&nbsp;&nbsp;
+0.15</TT>
+<BR><TT>jwilpin 37&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 3.2&nbsp;&nbsp;&nbsp;&nbsp;
+0.33</TT>
+<BR><TT>jwilpou 79&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 6.8&nbsp;&nbsp;&nbsp;&nbsp;
+0.72</TT>
+<BR><TT>kangol&nbsp; 39&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 3.3&nbsp;&nbsp;&nbsp;&nbsp;
+0.35</TT>
+<BR><TT>matt&nbsp;&nbsp;&nbsp; 58&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 5&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+0.52</TT>
+<BR><TT>mhgihjj 8&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 0.6&nbsp;&nbsp;&nbsp;&nbsp;
+0.07</TT>
+<BR><TT>randy&nbsp;&nbsp; 187&nbsp;&nbsp;&nbsp;&nbsp; 16.2&nbsp;&nbsp;&nbsp;
+1.7</TT>
+<BR><TT>rbush&nbsp;&nbsp; 2&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 0.1&nbsp;&nbsp;&nbsp;&nbsp;
+0.01</TT>
+<BR><TT>root&nbsp;&nbsp;&nbsp; 22&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 1.9&nbsp;&nbsp;&nbsp;&nbsp;
+0.2</TT>
+<BR><TT>rpijj&nbsp;&nbsp; 2&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 0.1&nbsp;&nbsp;&nbsp;&nbsp;
+0.01</TT>
+<BR><TT>sbeyne&nbsp; 17&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 1.4&nbsp;&nbsp;&nbsp;&nbsp;
+0.15</TT>
+<BR><TT>sdajani 1&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 0&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+0</TT>
+<BR><TT>sdalma&nbsp; 28&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 2.4&nbsp;&nbsp;&nbsp;&nbsp;
+0.25</TT>
+<BR><TT>ship&nbsp;&nbsp;&nbsp; 1&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 0&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+0</TT>
+<BR><TT>skinny&nbsp; 48&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 4.1&nbsp;&nbsp;&nbsp;&nbsp;
+0.43</TT>
+<BR><TT>stacey&nbsp; 2&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 0.1&nbsp;&nbsp;&nbsp;&nbsp;
+0.01</TT>
+<BR><TT>tbutler 35&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 3&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+0.31</TT>
+<BR><TT>tmarsha 5&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 0.4&nbsp;&nbsp;&nbsp;&nbsp;
+0.04</TT>
+<BR><TT>tpauls&nbsp; 34&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 2.9&nbsp;&nbsp;&nbsp;&nbsp;
+0.31</TT>
+<BR><TT>vladami 30&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 2.6&nbsp;&nbsp;&nbsp;&nbsp;
+0.27</TT>
+<BR><TT>xetroni 26&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 2.2&nbsp;&nbsp;&nbsp;&nbsp;
+0.23</TT>
+<BR><TT>---------------------------------</TT>
+<BR><TT>Overall 1151&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+10.24</TT>
+<BR>
+
+<P><TT>Stats by Host</TT>
+<BR><TT>Host&nbsp;&nbsp;&nbsp; Total&nbsp;&nbsp; Percent Percent Hours</TT>&nbsp;
+<BR><TT>Name&nbsp;&nbsp;&nbsp; Observ. Up&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+Busy&nbsp;&nbsp; /Day</TT>&nbsp;
+<BR><TT>bine&nbsp;&nbsp;&nbsp; 131&nbsp;&nbsp;&nbsp;&nbsp; 100%&nbsp;&nbsp;&nbsp;
+4.9%&nbsp;&nbsp;&nbsp; 1.194</TT>&nbsp;
+<BR><TT>euclid&nbsp; 152&nbsp;&nbsp;&nbsp;&nbsp; 100%&nbsp;&nbsp;&nbsp;
+5.7%&nbsp;&nbsp;&nbsp; 1.386</TT>&nbsp;
+<BR><TT>euler&nbsp;&nbsp; 7&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 89.3%&nbsp;&nbsp;
+0.2%&nbsp;&nbsp;&nbsp; 0.068</TT>&nbsp;
+<BR><TT>fermat&nbsp; 52&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 100%&nbsp;&nbsp;&nbsp;
+2.1%&nbsp;&nbsp;&nbsp; 0.506</TT>&nbsp;
+<BR><TT>gaag&nbsp;&nbsp;&nbsp; 202&nbsp;&nbsp;&nbsp;&nbsp; 36.5%&nbsp;&nbsp;
+7.6%&nbsp;&nbsp;&nbsp; 1.842</TT>&nbsp;
+<BR><TT>maang&nbsp;&nbsp; 118&nbsp;&nbsp;&nbsp;&nbsp; 100%&nbsp;&nbsp;&nbsp;
+4.4%&nbsp;&nbsp;&nbsp; 1.076</TT>&nbsp;
+<BR><TT>makwa&nbsp;&nbsp; 77&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 100%&nbsp;&nbsp;&nbsp;
+2.9%&nbsp;&nbsp;&nbsp; 0.702</TT>&nbsp;
+<BR><TT>mooz&nbsp;&nbsp;&nbsp; 92&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 100%&nbsp;&nbsp;&nbsp;
+3.4%&nbsp;&nbsp;&nbsp; 0.839</TT>&nbsp;
+<BR><TT>nigig&nbsp;&nbsp; 81&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 100%&nbsp;&nbsp;&nbsp;
+3%&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 0.738</TT>&nbsp;
+<BR><TT>ogaa&nbsp;&nbsp;&nbsp; 48&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 100%&nbsp;&nbsp;&nbsp;
+1.8%&nbsp;&nbsp;&nbsp; 0.437</TT>&nbsp;
+<BR><TT>ogimaa&nbsp; 374&nbsp;&nbsp;&nbsp;&nbsp; 100%&nbsp;&nbsp;&nbsp;
+14.2%&nbsp;&nbsp; 3.411</TT>&nbsp;
+<BR><TT>waabooz 28&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 100%&nbsp;&nbsp;&nbsp;
+1%&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 0.255</TT>
+<BR><TT>zagime&nbsp; 38&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 100%&nbsp;&nbsp;&nbsp;
+1.4%&nbsp;&nbsp;&nbsp; 0.346</TT>&nbsp;
+<BR><TT>------------------------</TT>
+<BR><TT>Overall 2551&nbsp;&nbsp;&nbsp;&nbsp; 94.2%&nbsp; 4.1%&nbsp;&nbsp;&nbsp;
+12.807</TT></TD>
+
+<TD NOSAVE><TT>Stats by the Week</TT>
+<BR><TT>Week&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+User</TT>
+<BR><TT>Starting&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Hours</TT>&nbsp;
+<BR><TT>97 10 04&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 74.5705816481128</TT>&nbsp;
+<BR><TT>97 09 28&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 55.9130434782609</TT>&nbsp;
+<BR><TT>97 09 21&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 64.7</TT>&nbsp;
+<BR><TT>97 09 14&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 113.023956442831</TT>&nbsp;
+<BR>
+
+<P><TT>Last Two Weeks</TT>
+<BR><TT>Day&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; User</TT>&nbsp;
+<BR><TT>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Hours</TT>&nbsp;
+<BR><TT>97 10 11 7.05882352941176</TT>
+<BR><TT>97 10 10 16.75</TT>
+<BR><TT>97 10 09 4.25</TT>
+<BR><TT>97 10 08 1.5</TT>
+<BR><TT>97 10 07 5.25</TT>
+<BR><TT>97 10 06 8.25</TT>
+<BR><TT>97 10 05 13.8947368421053</TT>
+<BR><TT>97 10 04 17.6170212765957</TT>
+<BR><TT>97 10 03 9.91304347826087</TT>
+<BR><TT>97 10 02 0.75</TT>
+<BR><TT>97 10 01 1</TT>
+<BR><TT>97 09 31 12</TT>
+<BR><TT>97 09 30 9.75</TT>
+<BR><TT>97 09 29 12.75</TT>
+<BR>
+
+<P><TT>Stats by the Hour</TT>
+<BR><TT>Hour&nbsp;&nbsp;&nbsp; Avg Users</TT>
+<BR><TT>00&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 0.151</TT>
+<BR><TT>01&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 0.163</TT>
+<BR><TT>02&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 0.151</TT>
+<BR><TT>03&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 0.053</TT>
+<BR><TT>04&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 0.036</TT>
+<BR><TT>06&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 0.027</TT>
+<BR><TT>07&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 0.055</TT>
+<BR><TT>08&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 0.175</TT>
+<BR><TT>09&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 0.75</TT>
+<BR><TT>10&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 1.398</TT>
+<BR><TT>11&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 1.171</TT>
+<BR><TT>12&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 0.972</TT>
+<BR><TT>13&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 0.814</TT>
+<BR><TT>14&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 0.775</TT>
+<BR><TT>15&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 0.778</TT>
+<BR><TT>16&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 0.607</TT>
+<BR><TT>17&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 0.526</TT>
+<BR><TT>18&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 0.459</TT>
+<BR><TT>19&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 0.455</TT>
+<BR><TT>20&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 0.232</TT>
+<BR><TT>21&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 0.321</TT>
+<BR><TT>22&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 0.339</TT>
+<BR><TT>23&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 0.196</TT>
+<P>
+</TD>
+</TR>
+</TABLE>
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<center><H5>Copyright &copy; 1998, Randy Appleton<BR> 
+Published in Issue 25 of <i>Linux Gazette</i>, February 1998</H5></center>
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<A HREF="./index.html"><IMG ALIGN=BOTTOM SRC="../gx/indexnew.gif" 
+ALT="[ TABLE OF CONTENTS ]"></A>
+<A HREF="../index.html"><IMG ALIGN=BOTTOM SRC="../gx/homenew.gif"
+ALT="[ FRONT PAGE ]"></A>
+<A HREF="./marsden.html"><IMG SRC="../gx/back2.gif"
+ALT=" Back "></A>
+<A HREF="./gm.html"><IMG SRC="../gx/fwd.gif" ALT=" Next "></A>
+<P> <hr> <P> 
+<!--startcut ==========================================================-->
+</BODY>
+</HTML>
+<!--endcut ============================================================-->
+

@@ -1,0 +1,590 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN"> 
+<html>
+<head>
+<title>Procmail Mini-Tutorial: Automated Mail Handling</title>
+</head>
+
+<BODY BGCOLOR=#C0C0C0 TEXT=#000000 LINK=#0000FF VLINK=#0020F0
+ALINK=#FF0000 >
+<H4>&quot;Linux Gazette...<I>making Linux just a little more lovable!</I>&quot;
+<IMG ALIGN=MIDDLE SRC="../gx/heart.gif">
+</H4>
+<P> <hr> <P> 
+
+<!-- =====================================================================  -->
+<center>
+	<h2 align="center">Procmail Mini-Tutorial:</h2>
+	<h3 align="center">Automated Mail Handling</h3>
+<font size=2><p align="center">by 
+	<a href="mailto:jim@starshine.org">Jim Dennis</a>, Proprietor, 
+	<a href="http://www.starshine.org/">Starshine Technical Services</a></p>
+
+	<p align="center">Converted to HTML by 
+	<a href="mailto:star@starshine.org">Heather Stern</a></p>
+</font>
+</center>
+<hr>
+<p>procmail is the mail processing utility language
+	written by 
+<a href="mailto:berg@pool.informatik.rwth-aachen.de">Stephen van den Berg</a> 
+        of Germany.  This article provides a bit of background for
+	the intermediate Unix user on how to use procmail.</p>
+
+<p>As a &quot;little&quot; language (to use the academic term)
+	procmail lacks many of the features and constructs
+	of traditional, general-purpose languages.  It has
+	no &quot;while&quot; or &quot;for&quot; loops.  However it &quot;knows&quot;
+	a lot about Unix mail delivery conventions and 
+	file/directory permissions -- and in particular 
+	about file locking.</p>
+
+<p>Although it is possible to write a custom mail
+	filtering script in any programming language
+	using the facilities installed on most Unix
+	systems -- we'll show that procmail is the tool
+	of choice among sysadmins and advanced Unix 
+	users.</p>
+
+<p>Unix mail systems consist of MTA's (mail 
+	transport agents like sendmail, smail, qmail
+	mmdf etc), MDA's (delivery agents like
+	sendmail, deliver, and procmail), and MUA's
+	(user agents like elm, pine, /bin/mail, mh,
+	Eudora, and Pegasus).</p>
+
+<p>On most Unix systems on the Internet sendmail
+	is used as an integrated transport and delivery
+	agent.  sendmail and compatible MTA's have the 
+	ability to dispatch mail *<strong>through</strong>* a 
+	custom filter or program through either of 
+	two mechanisms: aliases and <tt>.forwards</tt>.  </p>
+	
+<p>The aliases mechanism uses a single file
+	(usually <tt>/etc/aliases</tt> or <tt>/usr/lib/aliases</tt>)
+	to redirect mail.  This file is owned and 
+	maintained by the system administrator.
+	Therefore you (as a user) can't modify it.</p>
+
+<p>The &quot;<tt>.forward</tt>&quot; mechanism is decentralized.
+	Each user on a system can create a file
+	in their home directory named <tt>.forward</tt>
+	and consisting of an address, a filename,
+	or a program (filter).  Usually the file 
+	*<strong>must</strong>* be owned by the user or root and 
+	*<strong>must not</strong>* be &quot;writeable&quot; by other users 
+	(good versions of sendmail check these factors 
+	for security reasons).</p>
+	
+<p>It's also possible, with some versions of 
+	sendmail, for you to specify multiple addresses,
+	programs, or files, separated with commas.  However
+	we'll skip the details of that.</p>
+
+<p>You could forward your mail through any 
+	arbitrary program with a <tt>.forward</tt> that consisted
+	of a line like:</p>
+
+<blockquote><code>"|$HOME/bin/your.program -and some arguments"
+	</code></blockquote>
+
+<p>Note the quotes and the &quot;pipe&quot; character. They are
+	required.</p>
+
+<p>&quot;Your.program&quot; could be a Bourne shell script,
+	an awk or perl script, a compiled C program or 
+	any other sort of filter you wanted to write.</p>
+
+<p>However &quot;your.program&quot; would have to be written to 
+	handle a plethora of details about how sendmail would 
+	pass the messages (headers and body) to it, how you would 
+	return values to sendmail, how you'd handle file locking 
+	(in case mail came in while &quot;your.program&quot; was still 
+	processing one, etc).  </p>
+
+<p>That's what procmail gives us.</p>
+
+<p>What I've discussed so far is the general information
+	that applies to all sendmail compatible MTA/MDA's.</p>
+
+<p>So, to ensure that mail is passed to procmail for 
+	processing the first step is to create the .forward
+	file.  (This is safe to do before you do any configuration
+	of procmail itself -- assuming that the package's binaries
+	are installed).  Here's the canonical example, pasted from
+	the procmail man pages:</p>
+
+<blockquote><code>"|IFS=' '&amp;&amp;exec /usr/local/bin/procmail -f-||exit 
+							75 #YOUR_USERNAME"
+	</code></blockquote>
+
+<p>This seems awfully complicated compared to my
+	earlier example.  That's because my example was
+	flawed for simplicity's sake.</p>
+
+<p>What this mess means to sendmail (paraphrasing into
+	English) is:</p>
+<ul>
+	<li>Pipe the mail to the following command(s):
+
+	<li>Set the shell's &quot;inter-field seperator&quot; (<tt>IFS</tt>) 
+		to a space, and -- if that went O.K. (<tt>&amp;&amp;</tt>) execute
+		the program named &quot;<tt>/usr/local/bin/procmail</tt>&quot;
+
+		<br>(yours may need to be different -- try the 
+		command '<tt>which procmail</tt>' to see if it's
+		on the path or '<tt>locate procmail</tt>' if your 
+		system maintains a file locator database).
+
+	<li>The procmail program is being passed a 
+		set of switches: &quot;<tt>-f-</tt>&quot; which tells it to
+		&quot;update timestamp in the leading the 'From'
+		line in the header&quot;
+
+		<br>(this last bit is rather obscure and has
+		to do with how messages are normally 
+		stored in your &quot;incoming&quot; or mail file
+		or &quot;spool&quot; as we Unix hacks like to call it).
+
+	<li>The next part of this <tt>.forward</tt> command is
+		the Bourne shell's &quot;<tt>||</tt>&quot; operator which is
+		basically a continuation from the &quot;and&quot; 
+		(<tt>&amp;&amp;</tt>) operator that we used before.  It
+		says &quot;or&quot; (if that command didn't work --
+		i.e. it returned any error) then &quot;<tt>exit</tt>&quot;
+		(stop processing) and return an error
+		number <tt>75</tt> (which we presume is meaningful
+		to sendmail -- the program that called
+		this command).
+
+	<li>The last part of this <tt>.forward</tt> expression
+		is a comment which according to the man
+		pages:
+
+<blockquote>&quot;<em>is not actually a parameter that is required by 
+	procmail,  in fact, it will be discarded by sh before procmail
+	     ever sees it; it is however  a  necessary  kludge  against
+	     overoptimising sendmail programs:</em>&quot;</blockquote><br>
+
+	<li>You should just change the phrase YOUR_NAME
+		to your login name on that system.
+</ul>
+
+<p>This complicated line can be just pasted into most
+	<tt>.forward</tt> files, minimally edited and forgotten.</p>
+
+<p>If you did this and nothing else your mail would
+	basically be unaffected.  procmail would just 
+	look for its default recipe file (<tt>.procmailrc</tt>) and
+	finding none -- it would perform its default action
+	on each messages.  In other words it would append new 
+	messages into your normal spool file.</p>
+
+<p>If your ISP uses procmail as its local delivery
+	agent then you can skip the whole part of about
+	using the <tt>.forward</tt> file -- or you can use it anyway.</p>
+
+<p>In either event the next step to automating your
+	mail handling is to create a <tt>.procmailrc</tt> file in 
+	your home directory.  You could actually call 
+	this file anything you wanted -- but then you'd
+	have to slip the name explicitly into the <tt>.forward</tt>
+	file (right before the &quot;<tt>||</tt>&quot; operator).  Almost 
+	everyone just uses the default.</p>
+
+<p>Now we can get to a specific example.  So far all
+	we've talked about it how everything gets routed
+	to procmail -- which mostly involves sendmail and 
+	the Bourne shell's syntax.  Almost all sendmail's
+	are configured to use <tt>/bin/sh</tt> (the Bourne shell)
+	to interpret alias and <tt>.forward</tt> &quot;pipes.&quot;</p>
+
+<p>So, here's a very simple <tt>.procmailrc</tt> file:</p>
+
+<blockquote><code>:0c:
+	<br>$HOME/mail.backup
+	</code></blockquote>
+
+<p>This just appends an extra copy of all incoming 
+	mail to a file named &quot;<tt>mail.backup</tt>&quot; in your 
+	home directory.</p>
+
+<p>Note that a bunch of environment variables are preset
+	for you.  It's been suggested that you should
+	explicity set <tt>SHELL=/bin/sh</tt> (or the closest 
+	derivative to Bourne Shell available on your system).
+	I've never had to worry about that since the shells
+	I use on most systems are already Bourne compatible.</p>
+		
+<p>However, <tt>csh</tt> and other shell users should take note
+	that all of the procmail recipe examples that I've 
+	ever seen use Bourne syntax. </p>
+
+<p>The <tt>:0</tt> line marks the beginning of a &quot;recipe&quot;
+	(procedure, clause, whatever.  <tt>:0</tt> can be followed
+	be any of a number of &quot;flags.&quot;  There is a literally
+	dizzying number of ways to combine these flags.  The
+	one flag we're using in this example is '<tt>c</tt>' for 
+	&quot;copy.&quot;  </p>
+
+<p>You might ask why the recipe starts with a <tt>:0</tt>.
+	Historically you used to use <tt>:x</tt> (where x was a
+	number).  This was a hint to procmail that the 
+	next x lines were conditions for this recipe.  Later,
+	the option was added to precede conditions with a 
+	leading asterisk -- so they didn't have to be manually
+	counted.  <tt>:0</tt> then came to mean something like: 
+	&quot;count them yourself.&quot;</p>
+
+<p>The second colon on this line marks the end of 
+	the flags and the beginning of the name for a 
+	lockfile.  Since no name is given procmail will
+	pick one automatically.</p>
+
+<p>This bit is a little complicated.  Mail might arrive
+	in bursts.  If a new message arrives while your script
+	is still busy processing the last message -- you'll
+	have multiple sendmail processes.  Each will be dealing
+	with one message.  This isn't a problem by itself.
+	However -- if the two processes might try to write
+	into one file at the same time they are likely to 
+	get jumbled in unpredictable ways (the result will 
+	not be a properly formatted mail folder).  </p>
+
+<p>So we hint to procmail that it will need the check
+	for and create a lockfile.  In this particular case
+	we don't care what the name of the lock file would 
+	be (since we're not going to have *other* programs
+	writing into the backup file).  So we leave the 
+	last field (after the colon) blank.  procmail will
+	then select its own lockfile name.</p>
+
+<p>If we leave the <tt>:</tt> off of the recipe header line 
+	(ommitting the last field entirely) then no lockfile 
+	is used.  </p>
+
+<p>This is appropriate whenever we intend to only 
+	read from the files in the recipe -- or in cases 
+	where we intend to only write short, single line
+	entries to a file in no particular order (like
+	log file entries).</p>
+
+<p>The way procmail works is: </p>
+
+<p>It receives a single message from sendmail
+	(or some sendmail compatible MTA/MDA).  There
+	may be several procmail processing running 
+	currently since new messages may be coming 
+	in faster than they are being processed.</p>
+
+<p>It opens its recipe file (<tt>.procmailrc</tt> by default
+	or specified on its command line) and parses
+	each recipe from the first to the last
+	until a message has been &quot;delivered&quot; (or 
+	&quot;disposed of&quot; as the case may be).  </p>
+
+<p>Any recipe can be a &quot;disposition&quot; or &quot;delivery&quot; 
+	of the message.  As soon as a message is 
+	&quot;delivered&quot; then procmail closes its files, removes 
+	its locks and exits.</p>
+
+<p>If procmail reaches the end of it's rc file
+	(and thus all of the INCLUDE'd files) without
+	&quot;disposing&quot; of the message -- than the message
+	is appended to your spool file (which looks
+	like a normal delivery to you and all of your
+	&quot;mail user agents&quot; like Eudora, <tt>elm</tt>, etc).</p>
+
+<p>This explains why procmail is so forgiving
+	if you have *<strong>no</strong>* <tt>.procmailrc</tt>.  It simply
+	delivers your message to the spool because
+	it has reached the end of all its recipes
+	(there were none).</p>
+
+<p>The '<tt>c</tt>' flag causes a recipe to work on a &quot;copy&quot;
+	of the message -- meaning that any actions
+	taken by that recipe are not considered to be
+	&quot;dispositions&quot; of the message.  </p>
+
+<p>Without the '<tt>c</tt>' flag this recipe would catch 
+	all incoming messages, and all your mail would 
+	end up in mail.backup.  None of it would get 
+	into your spool file and none of the other recipes 
+	would be parsed.</p>
+
+<p>The next line in this sample recipe is simply
+	a filename.  Like sendmail's aliases and <tt>.forward</tt>
+	files -- procmail recognizes three sorts of 
+	disposition to any message.  You can append it 
+	to a file, forward it to some other mail address,
+	or filter it through a program.  </p>
+
+<p>Actually there is one special form of &quot;delivery&quot; 
+	or &quot;disposition&quot; that procmail handles.  If you
+	provide it with a directory name (rather than a
+	filename) it will add the message to that directory
+	as a separate file.  The name of that file will be
+	based on several rather complicated factors that
+	you don't have to worry about unless you use
+	the Rand MH system, or some other relatively 
+	obscure and &quot;exotic&quot; mail agent.</p>
+
+<p>A procmail recipe generally consists of three
+	parts -- a start line (<tt>:0</tt> with some flags) some
+	conditions (lines starting with a '<tt>*</tt>' -- asterisk --
+	character) and one &quot;delivery&quot; line which can be 
+	file/directory name or a line starting with a '<tt>!</tt>' --
+	bang -- character or a '<tt>|</tt>' -- pipe character.</p>
+
+<p>Here's another example:</p>
+
+<blockquote><code>:0
+		<br>* ^From.*someone.i.dont.like@somewhere.org
+		<br>/dev/null
+		</code></blockquote>
+
+<p>This is a simple one consisting of no flags,
+	one condition and a simple file delivery.  It simply
+	throws away any mail from &quot;someone I don't like.&quot;
+	(<tt>/dev/null</tt> under Unix is a &quot;bit bucket&quot; -- a bottomless
+	well for tossing unwanted output DOS has a similar
+	concept but it's not nearly as handy).</p>
+
+<p>Here's a more complex one:</p>
+
+<blockquote><code>:0
+		<br>* !^FROM_DAEMON 
+		<br>* !^FROM_MAILER
+		<br>* !^X-Loop: myaddress@myhost.mydomain.org
+		<br>| $HOME/bin/my.script
+		</code></blockquote>
+
+<p>This consists of a set of negative conditions (notice
+	that the conditions all start with the '<tt>!</tt>' character).
+	This means: for any mail that didn't come from a
+	&quot;<em>daemon</em>&quot; (some automated process) and didn't come 
+	a &quot;<em>mailer</em>&quot; (some other automated process) and which
+	doesn't contain any header line of the form:
+	&quot;<tt>X-Loop: myadd</tt>...&quot; send it through the script in
+	my bin directory.</p>
+
+<p>I can put the script directly in the rc file
+	(which is what most procmail users do most of the 
+	time).  This script might do anything to the mail.
+	In this case -- whatever it does had better be good
+	because procmail way will consider any such mail
+	to be delivered and any recipes after this will
+	only be reached by mail from <tt>DAEMON</tt>s, <tt>MAILER</tt>s
+	and any mail with that particular <tt>X-Loop:</tt> line 
+	in the header.</p>
+
+<p>These two particular <tt>FROM_</tt> conditions are actually
+	&quot;special.&quot; They are preset by procmail and actually
+	refer to a couple of rather complicated regular
+	expressions that are tailored to match the sorts of
+	things that are found in the headers of most mail
+	from daemons and mailers.</p>
+
+<p>The <tt>X-Loop:</tt> line is a normal procmail condition.
+	In the RFC822 document (which defines what e-mail
+	headers should look like on the Internet) any line
+	started with <tt>X-</tt> is a &quot;custom&quot; header.  This means
+	that any mail program that wants to can add pretty
+	much any <tt>X-</tt> line it wants.</p>
+
+<p>A common procmail idiom is to add an <tt>X-Loop:</tt> line
+	to the header of any message that we send out --
+	and to check for our own <tt>X-Loop:</tt> line before
+	sending out anything.  This is to protect against
+	&quot;mail loops&quot; -- situations where our mail gets
+	forwarded or &quot;bounced&quot; back to us and we endlessly
+	respond to it.</p>
+
+<p>So, here's a detailed example of how to 
+	use procmail to automatically respond to mail
+	from a particular person.  We start with
+	the recipe header.</p>
+
+<blockquote><code>:0
+		</code></blockquote>
+
+<p>... then we add our one condition (that the mail
+	appears to be from the person in question):</p>
+
+<blockquote><code>* ^FROMharasser@spamhome.com
+		</code></blockquote>
+
+<p><tt>FROM</tt> is a &quot;magic&quot; value for procmail -- it checks
+	from, resent-by, and similar header lines. You could
+	also use <tt>^From:</tt> -- which would only match the header
+	line(s) that start with the string &quot;<tt>From:</tt>&quot;</p>
+
+<p>The <tt>^</tt> (hiccup or, more technically &quot;caret&quot;) 
+	<!-- Actually, at the top of a line or over a letter it
+		is a circumflex; at the bottom of a line as used
+		in mathematics it is a caret.  Here it is
+		neither a diacritical mark nor mathematical.
+		Call it whatever you want. -->
+	is a &quot;regular expression anchor&quot; (a techie phrase that 
+	means &quot;it specifies *<strong>where</strong>* the pattern must be
+	found in order to match.&quot;  There is a whole book 
+	on regular expression (O'Reilly &amp; Associates). 
+	&quot;regexes&quot; permeate many Unix utilities, scripting
+	languages, and other programs.  There are slight
+	differences in &quot;regex&quot; syntax for each application.
+	However the man page for '<tt>grep</tt>' or '<tt>egrep</tt>' is an
+	excellent place to learn more.</p>
+
+<p>In this case the hiccup means that the pattern
+	must occur at the beginning of a line (which is 
+	its usual meaning in grep, ed/sed, awk, and other
+	contexts).</p>
+
+<p>... and we add a couple of conditions to avoid
+	looping and to avoid responding to automated systems</p>
+
+<blockquote><code>* !^FROM_DAEMON 
+		<br>* !^FROM_MAILER
+		</code></blockquote>
+
+<p>(These are a couple more &quot;magic&quot; values.  
+	The man pages show the exact regexes that are
+	assigned to these keywords -- if you're curious or
+	need to tweak a special condition that is 
+	similar to one or the other of these).</p>
+
+<p>... and one more to prevent some tricky loop:</p>
+
+<blockquote><code>* !^X-Loop: myaddress@myhost.mydomain.org
+		</code></blockquote>
+
+<p>(All of these patterns start with &quot;bangs&quot; (exclammation
+	points) because the condition is that *<strong>no</strong>* line of the
+	header start with any of these patterns.  The 'bang' in
+	this case (and most other regex contexts) &quot;negates&quot; or 
+	&quot;reverses&quot; the meaning of the pattern).</p>
+
+<p>... now we add a &quot;disposition&quot; -- the autoresponse.</p>
+
+<blockquote><code>| (formail -rk \
+		<br>-A "X-Loop: yourname@youraddress.com" \
+		<br>-A "Precendence: junk"; \
+	        <br>echo "Please don't send me any more mail";\
+		<br>echo "This is an automated response";\
+		<br>echo "I'll never see your message";\
+		<br>echo "So, GO AWAY" ) | $SENDMAIL -t -oi
+		</code></blockquote>
+
+<p>This is pretty complicated -- but here's how it works:</p>
+<ul>
+	<li>The pipe character tells procmail that 
+		it should launch a program and feed the 
+		message to it.
+
+	<li>The open parenthesis is a Bourne shell construct
+		that groups a set of commands in such a way as
+		to combine the output from all of them into
+		one &quot;stream.&quot;  We'll explain this more later.
+
+	<li>The '<tt>formail</tt>' command is a handy program that
+		is included with the procmail package.  It
+		&quot;formats&quot; mail headers according to its 
+		command line switches and its input.
+		<ul>
+			<li><tt>-rk</tt> tells '<tt>formail</tt>' 
+			    to format a
+			    &quot;reply&quot; and to &quot;keep&quot; the message body.
+			    With these switches formail expects
+			    a header and body as input.
+
+			<li>The <tt>-A</tt> parameters tells formail
+			    to &quot;add&quot; the next parameter as a
+			    header line.  The parameters
+			    provided to the <tt>-A</tt> switch must be
+			    enclosed in quotes so the shell
+			    treats the whole string (spaces 
+			    and all) as single parameters.
+
+			<li>The backslashes at the end of each 
+			    line tell procmail mail to treat
+			    the next line as part of this one.
+			    So, all of the lines ending in 
+			    backslashes are passed to the shell
+			    as one long line.
+
+			<li>This &quot;trailing backslash&quot; or &quot;line
+			    continuation&quot; character is a common
+			    Unix idiom found in a number of 
+			    programming languages and configuration
+			    file formats.
+
+			<li>The semicolons tell the shell 
+			    to execute another command -- they
+			    allow several commands to be issued
+			    on the same command line.
+
+			<li>Each of the echo commands should be
+			    reasonably self-explanatory.  We
+			    could have used a '<tt>cat</tt>' command
+			    and put our text into a file if we
+			    wanted.  We can also call other programs
+			    here -- like '<tt>fortune</tt>' or '<tt>date</tt>' 
+			    and their output would be combined with
+			    the rest of this).
+
+			<li>Now we get to the closing parenthesis.
+			    This marks the end of the block of 
+			    commands that we combined.  The output
+			    from all of those is fed into the 
+			    next pipe -- which starts the local
+			    copy of sendmail (note that this is
+			    another variable that procmail 
+			    toughtfully presets for us).
+
+			<li>The <tt>-t</tt> switch on sendmail tell it to 
+			    take the &quot;<tt>To:</tt>&quot; address from the header 
+			    of it's input (where '<tt>formail -r</tt>' put
+			    it) and the <tt>-oi</tt> switch enables the
+			    sendmail &quot;option&quot; to &quot;ignore&quot; lines
+			    that consist only of a 'dot' (don't
+			    worry about the details on that).
+		</ul>
+</ul>
+<p>Most of the difficulty in understanding procmail
+	as nothing to do with procmail itself.  The intricacies
+	of regular expressions (those wierd things on the
+	'<tt>*</tt>' -- conditional lines) and shell quoting and 
+	command syntax, and how to format a reply header that
+	will be acceptable to sendmail (the '<tt>formail</tt>' and 
+	'<tt>sendmail</tt>' stuff) are the parts that require so 
+	much explanation.</p>
+
+<p>The best info on mailbots that I've found used to be 
+	maintained by Nancy McGough (sp??) at the Infinite Ink
+	web pages:</p>
+<blockquote><a href="http://www.jazzie.com/ii/">http://www.jazzie.com/ii/</a>
+	</blockquote>
+
+ <P>
+ More information about procmail can be found in
+ Era Eriksson's "Mini-FAQ." at
+ <A href="http://www.iki.fi/~era/procmail/mini-faq.html">
+ http://www.iki.fi/~era/procmail/mini-faq.html</a><P>
+ <P>
+ I also have a few procmail and SmartList links off of 
+ <A href="http://www.starshine.org/e-mail">my own web 
+ pages</a>.</P>
+
+<!--================================================================-->
+<P> <hr> <P> 
+<center><H5>Copyright &copy; 1997, James T. Dennis <BR> 
+Published in Issue 14 of the Linux Gazette</H5></center>
+
+<P> <hr> <P> 
+<!--================================================================-->
+<A HREF="./index.html"><IMG SRC="../gx/indexnew.gif" ALT="[ TABLE OF 
+CONTENTS ]"></A> <A HREF="../index.html"><IMG SRC="../gx/homenew.gif" 
+ALT="[ FRONT PAGE ]"></A> 
+<A HREF="./philosophy.html"><IMG SRC="../gx/back2.gif" ALT=" Back "></A>
+<A HREF="./pilot.html"><IMG SRC="../gx/fwd.gif" ALT=" Next "></A>
+</td></tr></table>
+			</BODY></HTML>	

@@ -1,0 +1,232 @@
+<!--startcut ==========================================================-->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML>
+<HEAD>
+<title>More Adventures with SAMBA Issue 24</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#A000A0"
+ALINK="#FF0000">
+<!--endcut ============================================================-->
+
+<H4>
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H2>More Adventures with SAMBA</H2>
+<H4>By <a href="mailto:nelson@er.doe.gov">Dave Nelson</a></H4>
+</center>
+<P> <HR> <P>  
+If you haven't networked your small office/home office computers,
+ethernet prices are now so cheap you can't afford not to! I
+recently installed a three-computer LAN, including my dual-
+boot Linux/Win95 box (named Dave), my wife's WfW 3.11 box (named
+Kathy), and my Linux/Win95 portable. We share files among the
+three computers and print to the laser printer on Dave from
+within Windows.  
+<P>
+The SMB protocol (server message blocks) does all this over IP.
+SMB/IP is built into Win95 and WfW; Linux uses the Samba program
+to talk SMB. A special challenge was to get Dave to look the same
+to Kathy whether Dave is booted in Linux or Win95. This technique
+could also be helpful if you are changing from a Windows server
+to a Linux server, and you don't want to redo the settings on
+each client. All the software is free, once you own the operating
+systems. My total hardware costs were under $100, including a
+five port 10 base T hub, network interface cards, and
+twisted-pair cables.
+<P>
+John Fisk's article on Samba in LG issue 20 was a great
+introduction to Samba. I used it to get started. Then I added
+printing from Windows to Linux, solved some file permission
+problems, and figured out how to make Dave look the same to Kathy
+under Linux or Win95. I'm sure what I did could be improved on --
+I am new to Samba and only a journeyman at Linux, but this way
+works. If you worry about security, you may want to add
+passwords. Between my wife and me security isn't a problem ;-) 
+<P>
+An example of Samba's power: my wife runs Quicken on Kathy under
+Windows. She transparently uses the Quicken data file stored in a
+DOS partition on Dave running Linux. She transparently prints
+from Quicken to the laser printer on Dave. She doesn't have to
+change any settings on Kathy when I switch Dave between Linux and
+Win95. And my settings on Dave are handled automatically on
+bootup. Way cool!
+<P>
+Here's how I did it:
+<P>
+I used System Commander to dual boot My box (Dave)to Win95 or
+Linux. I installed networking on both operating systems, using
+the same IP addresses. I named my SMB group "home." Fisk's
+article shows how to do most of this. My Linux release (Caldera)
+comes with Samba installed. Probably your release does too. Samba
+runs as two daemons: smbd and nmbd. Find them by typing
+<PRE>
+which smbd; which nmbd
+</PRE>
+If they are installed, they are probably in /usr/sbin. If not,
+install them. Caldera Linux starts them on bootup by running the
+script /etc/rc.d/init.d/smb. Note that if you change the Samba
+configuration file, it isn't necessary to reboot (at least using
+Caldera or Red Hat.) Just issue the commands
+<PRE>
+/etc/rc.d/init.d/smb stop
+/etc/rc.d/init.d/smb start
+</PRE>
+and Samba will be reconfigured. Fisk's article points out that
+Samba may also be started by init.d. You don't want to start
+Samba twice, so check your settings after reading Fisk.
+<P>
+I created the following /etc/smb.conf file on Dave:
+<PRE>
+[global]
+   workgroup = home
+   printing = bsd
+   printcap name = /etc/printcap
+   load printers = yes
+   guest account = dos
+
+[printers]
+   comment = All Printers
+;   print command = cp %s /tmp/tmp.print
+   print command = lpr -Pepson -b %s
+   browseable = yes
+   printable = yes
+   public = yes
+   writable = no
+   create mode = 0700
+
+[d]
+   comment = DOS Disk d:
+   path = /mnt/diskd/
+   public = yes
+   writable = yes
+   printable = no
+   guest ok = yes
+</PRE>
+The [global] section of smb.conf tells Samba that my workgroup is
+called "home," the printer description file is /etc/printcap, and
+the user (or guest account) for dos services is "dos." To set up
+the user "dos" run the program "adduser dos" or just edit the
+/etc/passswd file. I had to edit /etc/passwd after running
+adduser to get things right. My /etc/passwd file has the
+following line for the user dos:
+<PRE>
+dos::501:500:DOS files:/home/dos:/bin/false
+</PRE>
+In order of fields this line says the user is dos; dos needs no
+passwd; its user number is 501; its group number is 500; it is
+called DOS files (this field is just a comment); its home
+directory is /home/dos; and it has no shell privileges. The user
+and group number were assigned by adduser; they don't have to be
+501,500. To test that the user dos is set up right, change
+/bin/false to /bin/bash and log on as dos.  You shouldn't need a
+password and should get a bash shell prompt. Then change back to
+/bin/false to close the security hole. When I ran adduser, I told
+it that dos belongs to group DOS, and it added the group DOS to
+the /etc/group file with the line
+<PRE>
+DOS::500:
+</PRE>
+The [printers] section sets up printing for DOS. The commented-
+out line "print command = cp %s /tmp/tmp.print" is a great way to
+debug Samba printing. I found this in the help file
+"Printing.txt" that comes in the Samba package. If this line is
+uncommented and the next one commented out, the print file from
+Kathy appears on Dave as /tmp/tmp.print rather than being sent to
+the printer. You can check whether it arrived OK and try printing
+it by running lpr. The line "print command = lpr -Pepson -b %s"
+does the actual printing.  The option "-Pepson" says to use the
+"epson" printer description in /etc/printcap. My laser printer on
+Dave is called "epson" under Win95, and Kathy expects to see the
+same name under Linux. The option "-b" tells lpr to accept the
+binary print files that Windows produces. Otherwise lpr chokes
+because its default is to expect ASCII files, and the printer
+does nothing. (Maybe this fix is the same as what is called raw
+mode printing?) The "%s" parameter represents the file name being
+sent to Samba.
+<P>
+I created a section in /etc/printcap for the epson printer: 
+<PRE>
+epson:\
+        :sd=/var/spool/lpd/lp:\
+        :mx#0:\
+        :lp=/dev/lp1:\
+        :sh:
+</PRE>
+Notice there is no "if=" line, i.e. no input filter that
+processes the binary print file. My printer is an Epson 7000,
+basically a HPIIp clone, so it expects the DOS convention of CRLF
+at line's end.  If I tried to use this printer description when
+printing under Linux, which only sends the Unix standard LF, I
+would see the dreaded staircase effect.
+<P>
+The [d] section of smb.conf describes the shared disk that Kathy
+expects to be called "d," the same as drive D: under DOS. I mount
+it as /mnt/diskd in Linux. 
+<P>
+I ran into a puzzling problem with user permissions (probably
+either my ignorance of standard Unix practice, or something weird
+about msdos filetype.) The user dos needs to have write
+privileges to the directory /mnt/diskd and all its files. But I
+couldn't make that happen using chmod, chown, or chgrp. As soon
+as I would reboot and mount the file system, /mnt/diskd would
+revert to the following privileges: 
+<PRE> 
+drwxr-xr-x  44 root  root  18432 Dec 31  1969 diskd/
+</PRE> 
+The missing "w" for group and others did me in as long as root
+owned the directory.
+<P>
+I fixed this by editing the line in /etc/fstab for /mnt/diskd to
+be the following:
+<PRE> 
+/dev/hda5  /mnt/diskd  msdos   user,noauto   0     0
+</PRE> 
+The important field is user,noauto, which means mountable by a
+user and don't automatically mount on bootup. The I added a line
+to /etc/rc.d/rc.local to mount diskd as user dos:
+<PRE> 
+mount -ouid=501,gid=500 /mnt/diskd
+</PRE> 
+This says mount /mnt/diskd with option (-o) of user id 501 and
+group id 500, which correspond to the user dos. If your adduser
+gives dos a different uid and gid, just change this line
+appropriately. If you have trouble mounting diskd on bootup, try
+logging in as dos (after changing the /etc/passwd line for dos to
+/bin/bash) and mounting diskd manually. When that works, go back
+and get the rc.local line to work right. 
+<P>
+As John Fisk wrote: one thing about Linux, it hones your problem
+solving skills. If you have problems, look in Samba's logs and
+message files. On my system the logs are in /var/log/smbd and
+/var/log/nmbd. Messages are in the directory var/samba.
+<P>
+That's all it took for me to set up Samba. The Samba
+documentation shows a wealth of different configurations. At
+first I found them all daunting, but by chipping away, one
+problem at a time, things came more easily. I hope this article
+helps you get started. Who needs NT servers anyway?
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<center><H5>Copyright &copy; 1998, Dave Nelson <BR> 
+Published in Issue 24 of <i>Linux Gazette</i>, January 1998</H5></center>
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<A HREF="./index.html"><IMG ALIGN=BOTTOM SRC="../gx/indexnew.gif" 
+ALT="[ TABLE OF CONTENTS ]"></A>
+<A HREF="../index.html"><IMG ALIGN=BOTTOM SRC="../gx/homenew.gif"
+ALT="[ FRONT PAGE ]"></A>
+<A HREF="./smith.html"><IMG SRC="../gx/back2.gif"
+ALT=" Back "></A>
+<A HREF="./campo.html"><IMG SRC="../gx/fwd.gif" ALT=" Next "></A>
+<P> <hr> <P> 
+<!--startcut ==========================================================-->
+</BODY>
+</HTML>
+<!--endcut ============================================================-->

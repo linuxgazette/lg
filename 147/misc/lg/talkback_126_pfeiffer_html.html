@@ -1,0 +1,417 @@
+<!DOCTYPE html
+	PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+	 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en-US" xml:lang="en-US">
+<head>
+<title>Talkback:126/pfeiffer.html</title>
+<link rel="stylesheet" type="text/css" href="../../../lg.css" />
+<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1" />
+</head>
+<body>
+<a href="../../../"><img alt="Linux Gazette" src="../../../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" /></a><img alt="Tux" src="../../../gx/tux_86x95_indexed.png" id="tux" /><p id="fun">...making Linux just a little more fun!</p><div class='content articlecontent'><a name="top"></a><h3>Talkback:126/pfeiffer.html</h3>
+<p><b>[ In reference to "<a href='../../../126/pfeiffer.html'>Digging More Secure Tunnels with IPsec</a>" in LG#126 ]</b></p><p>
+<b><p>
+Tim Chappell [tchappe1 at timchappell.plus.com]
+</p>
+</b><br />
+<b>Wed, 9 Jan 2008 20:40:07 -0000</b>
+</p>
+
+<p>
+Hi,
+</p>
+
+<p>
+Having read your ipsec articles (125/126) I've been attempting to get a
+similar system going.
+ 
+I wonder if you can help? I'm trying to setup an ipsec VPN (tunnel mode)
+between two networks which are both behind DSL routers. I've managed to get
+it going successfully without the modems, but once they're in place it
+doesn't appear to work. Is such a thing possible? The modems both have ports
+500/4500 open to allow NAT-T through (and AH/ESP passthrough).
+</p>
+
+<p>
+ 
+Here's a rough outline:
+<pre class="code">
+#                    IPSEC TUNNEL
+#          .......................................................
+#          :                                                     :
+#          :                                                     :
+#          :                        INTERNET                     :
+#      +----------+                   ----                   +----------+
+#      | local    | IP1+-------+ EIP1/    \ EIP2+-------+ IP2| remote   |
+#      | server   |----|-Modem-|----|      |----|-Modem-|----| server   |
+#      |          |    +-------+     \    /     +-------+    |          |
+#      +---+------+                   ----                   +---+------+
+#          |                                                     |
+#          |    192.168.103.0/24                                 | 192.168.100.0/24
+#          |    +--------------+                                 | +--------------+
+#          |    | local client |-+                               |    | remote client|-+
+#          +----+ pool         | |                               +----+ pool | |
+#               +--------------+ | +--------------+ |
+#                 +--------------+ +---------------+
+ 
+Strategic parts of racoon.conf
+ 
+listen
+{
+        isakmp IP1 ;
+        isakmp_natt IP1 [4500];
+        adminsock "/var/run/racoon/racoon.sock" "root" "users" 660;
+}
+ 
+timer
+{
+        natt_keepalive  10sec ;
+ 
+        # These value can be changed per remote node.
+        counter 5;              # maximum trying count to send.
+        interval 20 sec;        # maximum interval to resend.
+        persend 1;              # the number of packets per a send.
+ 
+        # timer for waiting to complete each phase.
+        phase1 30 sec;
+        phase2 15 sec;
+}
+ 
+remote EIP2 [500]
+{
+        exchange_mode main;
+        nat_traversal on ;
+ 
+        certificate_type x509 "vpnserver_cert.pem" "vpnserver_key.txt" ;
+        # can't set this on because racoon attempts to verify with root ca
+        verify_cert off;
+ 
+        my_identifier asn1dn;
+        peers_identifier asn1dn;
+        verify_identifier on;
+ 
+        proposal {
+                encryption_algorithm 3des;
+                hash_algorithm md5;
+                authentication_method rsasig ;
+                dh_group modp1024;
+        }
+}
+ 
+## local pool (192.168.103.0/24) and remote pool (192.168.100.0/24)
+sainfo address 192.168.103.0/24 any address 192.168.100.0/24 any
+{
+        pfs_group modp768;
+        lifetime time 10 minutes ;
+        encryption_algorithm 3des;
+        authentication_algorithm hmac_md5;
+        compression_algorithm deflate;
+}
+</pre>
+ From the two servers' perspectives it appears that you should define the
+tunnel endpoints in setkey.conf as IP1-EIP2 and IP2-EIP1 (IP1 and IP2 are
+unique internal 192.168.x.254 addresses and the default route on each server
+is the IP address of the DSL router) and (EIP1 and EIP2 are two different
+external static IP addresses):
+</p>
+
+<p>
+E.g. (only one shown to save the typing):
+</p>
+
+<pre>
+spdadd 192.168.103.0/24 192.168.100.0/24 any -P out ipsec
+esp/tunnel/IP1-EIP2/require
+Ah/tunnel/IP1-EIP2/require;
+</pre>
+The server at the other end is setup with reversed addresses, etc. as
+required. As I say this worked without the DSL routers.
+</p>
+
+<p>
+Excerpt from racoon.log:
+</p>
+
+<pre>
+Jan  8 08:30:53 server racoon: alg_oakley_hmacdef_one(hmac_md5 size=128):
+0.000026
+Jan  8 08:30:53 server racoon: alg_oakley_hmacdef_one(hmac_md5 size=145):
+0.000007
+Jan  8 08:30:53 server racoon: alg_oakley_hmacdef_one(hmac_md5 size=161):
+0.000007
+Jan  8 08:30:53 server racoon: alg_oakley_hmacdef_one(hmac_md5 size=161):
+0.000007
+Jan  8 08:30:53 server racoon: alg_oakley_hmacdef_one(hmac_md5 size=1):
+0.000007
+Jan  8 08:30:53 server racoon: alg_oakley_hmacdef_one(hmac_md5 size=16):
+0.000006
+Jan  8 08:30:53 server racoon: alg_oakley_hmacdef_one(hmac_md5 size=500):
+0.000008
+Jan  8 08:30:53 server racoon: alg_oakley_encdef_encrypt(3des klen=192
+size=1160): 0.000109
+Jan  8 08:30:53 server racoon: phase1(ident I msg3): 0.013579
+Jan  8 08:30:53 server racoon: alg_oakley_encdef_decrypt(3des klen=192
+size=1080): 0.000085
+Jan  8 08:30:53 server racoon: alg_oakley_hmacdef_one(hmac_md5 size=475):
+0.000009
+Jan  8 08:30:53 server racoon: oakley_validate_auth(RSA signatures):
+0.000292
+Jan  8 08:30:53 server racoon: phase1(ident R msg3): 0.000807
+Jan  8 08:30:53 server racoon: phase1(Identity Protection): 0.230708
+Jan  8 08:30:53 server racoon: alg_oakley_hmacdef_one(hmac_md5 size=32):
+0.000007
+Jan  8 08:30:53 server racoon: alg_oakley_encdef_encrypt(3des klen=192
+size=56): 0.000011
+Jan  8 08:30:53 server racoon: INFO: ISAKMP-SA established
+IP1[4500]-EIP2[4500] spi:4d8718e1f5de6 2ad:be6f6325dd03507c
+Jan  8 08:30:53 server racoon: alg_oakley_encdef_decrypt(3des klen=192
+size=56): 0.000010
+Jan  8 08:30:53 server racoon: alg_oakley_hmacdef_one(hmac_md5 size=32):
+0.000013
+Jan  8 08:30:54 server racoon: INFO: initiate new phase 2 negotiation:
+IP1[4500]&lt;=&gt;EIP2[4500]
+Jan  8 08:30:54 server racoon: INFO: NAT detected -&gt; UDP encapsulation
+(ENC_MODE 1-&gt;3).
+Jan  8 08:30:54 server racoon: INFO: NAT detected -&gt; UDP encapsulation
+(ENC_MODE 1-&gt;3).
+Jan  8 08:30:54 server racoon: oakley_dh_generate(MODP768): 0.003996
+Jan  8 08:30:54 server racoon: alg_oakley_hmacdef_one(hmac_md5 size=244):
+0.000009
+Jan  8 08:30:54 server racoon: alg_oakley_encdef_encrypt(3des klen=192
+size=264): 0.000029
+Jan  8 08:30:54 server racoon: phase2(quick I msg1): 0.004238
+Jan  8 08:31:09 server racoon: ERROR: EIP2 give up to get IPsec-SA due to
+time up to wait.
+</pre>
+Any pointers or is this just not feasible with NAT at both ends?
+</p>
+
+<p>
+Thanks,
+</p>
+
+<p>
+Tim.
+ 
+</p>
+
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_talkback.html#mb-talkback_126_pfeiffer_html">Back</a><hr width="50%" align="left" /><p><br /></p><p>
+<b><p>
+Ren&eacute; Pfeiffer [lynx at luchs.at]
+</p>
+</b><br />
+<b>Wed, 9 Jan 2008 23:36:20 +0100</b>
+</p>
+
+<p>
+Hello, Tim!
+</p>
+
+<p>
+On Jan 09, 2008 at 2040 -0000, Tim Chappell appeared and said:
+</p>
+
+<pre>
+&gt; [...]
+&gt; I wonder if you can help?=20
+</pre>
+
+<p>
+Me too. ;-)
+</p>
+
+
+<pre>
+&gt; I'm trying to setup an ipsec VPN (tunnel mode) between two networks
+&gt; which are both behind DSL routers. I've managed to get it going
+&gt; successfully without the modems, but once they're in place it doesn't
+&gt; appear to work. Is such a thing possible?
+</pre>
+
+<p>
+In theory it is possible, but there are some important details that
+have to be checked.
+</p>
+
+
+<pre>
+&gt; The modems both have ports 500/4500 open to allow NAT-T through (and
+&gt; AH/ESP passthrough).
+</pre>
+
+<p>
+Do you know what kinds of modems you use? Some modems/routers have bugs
+in their firmware that make setups such as yours unusable. Another thing
+to check is the "ports 500/4500 open" configuration. In order for key
+exchange to work the ports must stay the same for 500/UDP and 4500/UDP
+(both source and destination). If any intermediate NAT device uses port
+pools and changes either port the key exchange will fail.
+</p>
+
+
+<pre>
+&gt; Here's a rough outline:
+&gt; [...]
+</pre>
+
+<p>
+The diagram got a bit broken due to wrapping, but thanks! That's great
+for understanding your setup.
+</p>
+
+
+<pre>
+&gt; Strategic parts of racoon.conf
+&gt; listen
+&gt; {
+&gt;         isakmp IP1 ;
+&gt;         isakmp_natt IP1 [4500];
+&gt;         adminsock "/var/run/racoon/racoon.sock" "root" "users" 660;
+&gt; }
+&gt; timer
+&gt; {
+&gt;         natt_keepalive  10sec ;
+&gt;         # These value can be changed per remote node.
+&gt;         counter 5;              # maximum trying count to send.
+&gt;         interval 20 sec;        # maximum interval to resend.
+&gt;         persend 1;              # the number of packets per a send.
+&gt;         # timer for waiting to complete each phase.
+&gt;         phase1 30 sec;
+&gt;         phase2 15 sec;
+&gt; }
+&gt; remote EIP2 [500]
+&gt; {
+&gt;         exchange_mode main;
+&gt;         nat_traversal on ;
+</pre>
+
+<p>
+Looks ok so far.
+Does "nat_traversal force;" make a difference?
+</p>
+
+
+<pre>
+&gt;         certificate_type x509 "vpnserver_cert.pem" "vpnserver_key.txt" ;
+&gt;         # can't set this on because racoon attempts to verify with root ca
+&gt;         verify_cert off;
+</pre>
+
+<p>
+How did you create the certificates?
+</p>
+
+
+<pre>
+&gt; [...]
+&gt; From the two servers' perspectives it appears that you should define the
+&gt; tunnel endpoints in setkey.conf as IP1-EIP2 and IP2-EIP1 (IP1 and IP2 are
+&gt; unique internal 192.168.x.254 addresses and the default route on each server
+&gt; is the IP address of the DSL router) and (EIP1 and EIP2 are two different
+&gt; external static IP addresses):
+&gt; E.g. (only one shown to save the typing):
+&gt; spdadd 192.168.103.0/24 192.168.100.0/24 any -P out ipsec
+&gt; esp/tunnel/IP1-EIP2/require
+&gt; Ah/tunnel/IP1-EIP2/require;
+</pre>
+
+<p>
+Looks ok, too.
+</p>
+
+
+<pre>
+&gt; The server at the other end is setup with reversed addresses, etc. as
+&gt; required. As I say this worked without the DSL routers.
+</pre>
+
+<p>
+I smell the conspiracy of fiendish firmware at work. <img src="../gx/smile.png" alt=":)">
+</p>
+
+
+<pre>
+&gt; Excerpt from racoon.log:
+&gt; Jan  8 08:30:53 server racoon: alg_oakley_hmacdef_one(hmac_md5 size=3D128):
+&gt; 0.000026
+&gt; Jan  8 08:30:53 server racoon: alg_oakley_hmacdef_one(hmac_md5 size=3D145):
+&gt; 0.000007
+&gt; Jan  8 08:30:53 server racoon: alg_oakley_hmacdef_one(hmac_md5 size=3D161):
+&gt; 0.000007
+&gt; Jan  8 08:30:53 server racoon: alg_oakley_hmacdef_one(hmac_md5 size=3D161):
+&gt; 0.000007
+&gt; Jan  8 08:30:53 server racoon: alg_oakley_hmacdef_one(hmac_md5 size=3D1):
+&gt; 0.000007
+&gt; Jan  8 08:30:53 server racoon: alg_oakley_hmacdef_one(hmac_md5 size=3D16):
+&gt; 0.000006
+&gt; Jan  8 08:30:53 server racoon: alg_oakley_hmacdef_one(hmac_md5 size=3D500):
+&gt; 0.000008
+&gt; Jan  8 08:30:53 server racoon: alg_oakley_encdef_encrypt(3des klen=3D192
+&gt; size=3D1160): 0.000109
+&gt; Jan  8 08:30:53 server racoon: phase1(ident I msg3): 0.013579
+&gt; Jan  8 08:30:53 server racoon: alg_oakley_encdef_decrypt(3des klen=3D192
+&gt; size=3D1080): 0.000085
+&gt; Jan  8 08:30:53 server racoon: alg_oakley_hmacdef_one(hmac_md5 size=3D475=):
+&gt; 0.000009
+&gt; Jan  8 08:30:53 server racoon: oakley_validate_auth(RSA signatures):
+&gt; 0.000292
+&gt; Jan  8 08:30:53 server racoon: phase1(ident R msg3): 0.000807
+&gt; Jan  8 08:30:53 server racoon: phase1(Identity Protection): 0.230708
+&gt; Jan  8 08:30:53 server racoon: alg_oakley_hmacdef_one(hmac_md5 size=3D32):
+&gt; 0.000007
+&gt; Jan  8 08:30:53 server racoon: alg_oakley_encdef_encrypt(3des klen=3D192
+&gt; size=3D56): 0.000011
+&gt; Jan  8 08:30:53 server racoon: INFO: ISAKMP-SA established
+&gt; IP1[4500]-EIP2[4500] spi:4d8718e1f5de6 2ad:be6f6325dd03507c
+&gt; Jan  8 08:30:53 server racoon: alg_oakley_encdef_decrypt(3des klen=3D192
+&gt; size=3D56): 0.000010
+&gt; Jan  8 08:30:53 server racoon: alg_oakley_hmacdef_one(hmac_md5 size=3D32):
+&gt; 0.000013
+&gt; Jan  8 08:30:54 server racoon: INFO: initiate new phase 2 negotiation:
+&gt; IP1[4500]&lt;=3D&gt;EIP2[4500]
+&gt; Jan  8 08:30:54 server racoon: INFO: NAT detected -&gt; UDP encapsulation
+&gt; (ENC_MODE 1-&gt;3).
+&gt; Jan  8 08:30:54 server racoon: INFO: NAT detected -&gt; UDP encapsulation
+&gt; (ENC_MODE 1-&gt;3).
+&gt; Jan  8 08:30:54 server racoon: oakley_dh_generate(MODP768): 0.003996
+&gt; Jan  8 08:30:54 server racoon: alg_oakley_hmacdef_one(hmac_md5 size=3D244=):
+&gt; 0.000009
+&gt; Jan  8 08:30:54 server racoon: alg_oakley_encdef_encrypt(3des klen=3D192
+&gt; size=3D264): 0.000029
+&gt; Jan  8 08:30:54 server racoon: phase2(quick I msg1): 0.004238
+&gt; Jan  8 08:31:09 server racoon: ERROR: EIP2 give up to get IPsec-SA due to
+&gt; time up to wait.
+</pre>
+
+<p>
+It seems it breaks in phase 2. Can you check with ethereal/wireshark if
+you see any packets similar to the listing at the end of
+<a href="http://www.ipsec-howto.org/x304.html">http://www.ipsec-howto.org/x304.html</a> somewhere on your links?
+</p>
+
+
+<pre>
+&gt; Any pointers or is this just not feasible with NAT at both ends?
+</pre>
+
+<p>
+It should work, but we need to find out what the two routers do with the
+packets.
+</p>
+
+<p>
+Best regards,
+Ren&eacute;.
+</p>
+
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_talkback.html#mb-talkback_126_pfeiffer_html">Back</a><hr width="50%" align="left" /><p><br /></p></div>
+</body>
+</html>

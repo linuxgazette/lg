@@ -1,0 +1,513 @@
+<html>
+<head>
+<title>JES2 Spooling</title>
+</head>
+<body bgcolor="linen">
+<h1><center>JES2 Spool examples</center></h1>
+<p>Here,you will find some of the host (MVS) programming details for printing-to-email
+from the MVS/JES2 host system.
+<hr>
+<sl>
+<li><a href="#Batch_JCL">Example Batch JCL for Email Print</a>
+<hr>
+<li><a href="#IMS_PCB">Example IMS PCB for IMS Email Print</a>
+<li><a href="#IMS_CHNG_WS">Example of the WORKING-STORAGE needed for the
+IMS CHNG call</a>
+<li><a href="#IMS_CHNG_PD">Example of the PROCEDURE DIVISION code needed for
+the IMS CHNG call</a>
+<li><a href="#IMS_ISRT_WS">Example of the WORKING-STORATE needed for the IMS
+ISRT call</a>
+<li><a href="#IMS_ISRT_PD">Example of the PROCEDURE DIVISION code needed for
+the IMS ISRT call</a>
+<hr>
+<li><a href="#CICS_SPOOLOPEN_WS">Example of the WORKING-STORAGE needed for the
+CICS SPOOLOPEN call</a>
+<li><a href="#CICS_SPOOLOPEN_PD">Example of the PROCEDURE DIVISION code needed
+for the CICS SPOOLOPEN call</a>
+<li><a href="#CICS_SPOOLWRITE_WS">Example of the WORKING-STORAGE needed for the
+CICS SPOOLWRITE call</a>
+<li><a href="#CICS_SPOOLWRITE_PD">Example of the PROCEDURE DIVISION code needed
+for the CICS SPOOLWRITE call</a>
+<li><a href="#CICS_SPOOLCLOSE_PD">Example of the PROCEDURE DIVISION code needed
+for the CICS SPOOLCLOSE call</a>
+</sl>
+
+<hr>
+
+<dl>
+<dt><a name="Batch_JCL"><h2><font color=green>Batch JCL for Email Print</font></h2></a></dt>
+<dd>
+<p>The following is an example of MVS JES2 JCL that can use the
+<tt>PTE01</tt> print-to-email setup.
+<table>
+<tr><td width="50"></td>
+<td bgcolor="LightBlue">
+<pre>
+//JOBNAME JOB (9999),'JOB DESCRIPTION',CLASS=E,MSGCLASS=A,PRTY=8 
+//*<b>
+//EMAIL OUTPUT TITLE='email subject line',
+//             ADDRESS=('EMAIL: target_email@address')</b> 
+//*
+//STEPONE EXEC PGM=SOMEPGM
+//SYSOUT  DD   SYSOUT=A,DEST=<b>PTE01</b>,OUTPUT=<b>EMAIL</b> 
+//
+</pre>
+</td></tr>
+</table>
+<p>The <b><tt>//EMAIL OUTPUT</tt></b> directive provides report distribution parameters for any report that
+choosed to use them. In this case, it specifies a report title that (when interpreted by the Linux
+<tt>jesprt</tt> lpd printer filter) will be used as an email subject line, and a report distribution
+address that (again, when interpreted by the lpd filter) will be used as an email address.
+<p>The <b><tt>DEST=PTE01</tt></b> parameter of the <tt>SYSOUT</tt> statement directs the output to be spooled to
+the <tt>PTE01</tt> pseudo-printer, which ultimately routes the print data to the Linux <tt>jesprt</tt> lpd
+printer.
+<p>The <b><tt>OUTPUT=EMAIL</tt></b> parameter of the <tt>SYSOUT</tt> statement ensures that the output will carry
+flash page parameters derived from the <tt>//EMAIL OUTPUT</tt> directive, so that the Linux <tt>jesprt</tt>
+lpd printer can properly route the print to the proper email address.
+<p>
+</dd>
+<hr>
+
+<dt><a name="IMS_PCB"><h2><font color="green">PCB for IMS Email Print</font></h2></a></dt>
+<dd>
+<p>In IMS, every transaction lists it's databases in a PSB. In our case, we had to access a special
+database, called a modifiable alternate non-express PCB, so our PSB had to include this special PCB.
+<p>
+<table>
+<tr><td width="50"></td>
+<td bgcolor="LightBlue">
+<pre>
+*---------------------------------------------------------------------* 
+*  PSB "<b>SAMPLE</b>" for IMS tx "<b>SAMPLE</b>"                                   *
+*                                                                     *
+*   PCB "<b>APM00001</b>" is a modifiable alternate non-express PCB          *
+*---------------------------------------------------------------------*
+*
+         PCB    TYPE=TP,MODIFY=YES,PCBNAME=<b>APM00001</b>,EXPRESS=NO
+*	
+	 PSBGEN LANG=COBOL,PSBNAME=SAMPLE,CMPAT=YES
+*---------------------------------------------------------------------*
+         END
+</pre>
+</td></tr>
+</table>
+<p>The format and use of the <tt>PSB</tt> and it's parameters (including the definition of the
+modifiable alternate non-express PCB) can be found in <b><u>Section 1.2</u></b> of the
+<a href="Bibliography.html#IMS_Utils">IMS Version 7  Utilities Reference: System</a> manual.
+</dd>
+<hr>
+
+<dt><a name="IMS_CHNG_WS"><h2><font color="green">IMS CHNG call WORKING-STORAGE</font></h2></a></dt>
+<dd>
+<p>The IMS <tt>CHNG</tt> call takes a number of parameters, three of which are
+defined by the application program. The critical parameter here is the
+<tt>WS-PTE-OPTS</tt> variable which carries settings for report management and
+distribution that will ultimately be placed on the JES2 flash page. These values
+are then used by the <tt>jesprt</tt> print filter to determine the email
+destination and subject.
+<p>The <tt>WORKING-STORAGE</tt> for the <tt>CHNG</tt> call looks like:<p>
+<table>
+<tr><td width="50"></td>
+<td bgcolor="LightBlue">
+<pre>
+       01  WS-PRINT-TO-EMAIL.
+
+           03    WS-PTE-LTERM            PIC X(8)       VALUE 'PTE01'.
+
+	   03    WS-PTE-OPTS.
+	    05   WS-PTE-OPTS-LL          PIC S9(4) COMP VALUE +107.
+	    05   FILLER                  PIC S9(4) COMP VALUE ZERO.
+	    05   WS-PTE-IAFP             PIC X(8)       VALUE 'IAFP=N1M'.
+	    05   WS-PTE-PRTO             PIC X(6)       VALUE ',PRTO='.
+	    05   WS-PTE-PRTO-LL          PIC S9(4) COMP VALUE +87.
+	    05   WS-PTE-PRTO-TEXT.
+	     07  FILLER                  PIC X(09)      VALUE 'CLASS(A),'.
+	     07  FILLER                  PIC X(12)      VALUE 'DEST(PTE01),'.
+	     07  FILLER                  PIC X(28)      VALUE 'TITLE(''email subject line''),'.
+	     07  FILLER                  PIC X(38)      VALUE 'ADDRESS(''EMAIL: target_email@address'')'. 	    
+
+           03    WS-PTE-FDBK            PIC X(40)       VALUE SPACES.
+</pre>
+</td></tr>
+</table>
+<p>where
+<ul>
+ <li><tt><b>WS-PTE-LTERM</b></tt> contained the name of the IMS LTERM to be used in the <tt>CHNG</tt> call,
+ <li><tt><b>WS-PTE-OPTS</b></tt> contained the print options to be passed to the IMS Spool API
+ <ul>
+  <li><tt><b>WS-PTE-OPTS-LL</b></tt> was the length (in bytes) of the entire <tt>WS-PTE-OPTS</tt> area,
+  <li><tt><b>WS-PTE-IAFP</b></tt> contained the IAFP options for the print stream
+  <ul>
+   <li><tt><b>N</b></tt> indicated that <b>no</b> line control characters would be presented in the data
+   <li><tt><b>1</b></tt> indicated that the output would be placed on the SYSOUT HOLD queue until spooling
+       completed successfully, and
+   <li><tt><b>M</b></tt> indicated that IMS would manage error processing
+  </ul>
+  <li><tt><b>WS-PTE-PRTO</b></tt> contained the introduction text for the <tt>PRTO</tt> options, which were
+  similar to the <tt>OUTPUT</tt> JCL statement options,
+  <li><tt><b>WS-PTE-PRTO-LL</b></tt> was the length (in bytes) of the WS-PTE-PRTO-TEXT area,
+  <li><tt><b>WS-PTE-PRTO-TEXT</b></tt> (and it's subordinate variables) contained the individual <tt>PRTO</tt>
+  options, including the printer <tt>DEST</tt> (<tt>PTE01</tt>), the <tt>TITLE</tt> (containing our email
+  subject line), and the <tt>ADDRESS</tt> (containing our target email address).
+ </ul>
+ <li>and <tt><b>WS-PTE-FDBK</b></tt> was the feedback area for the IMS DLI calls
+</ul>
+<p>The definition of the <tt>PRTO</tt> option can be found in Section <u>1.3.2</u> of the
+<a href="Bibliography.html#IMS_TM">IMS Version 7 Application Programming: Transaction Manager</a>
+manual. Additional material defining the parameters that may be included in the <tt>PRTO</tt> option
+can be found in Section <u>1.56</u> of the <a href="Bibliography.html#TSO_CL">TSO/E V2R5 Command Reference</a>
+manual.
+</dd>
+<hr>
+
+<dt><a name="IMS_CHNG_PD"><h2><font color="green">IMS CHNG call PROCEDURE DIVISION logic</font></h2></a></dt>
+<dd>
+<p>The modifiable non-express alternate PCB can be used for a number of different database and
+data communications tasks. Here, we want to use it to spool output to JES2, so we must alter it's
+settings using an IMS <tt>CHNG</tt> call.
+<p>The <tt>CHNG</tt> call will use the parameters prepared above to instruct IMS to send any data
+to the JES2 print spool. This code looks like:<p>
+<table>
+<tr><td width="50"></td>
+<td bgcolor="LightBlue">
+<pre>
+      *    *********************************************************** 
+      *    * IF NOT ALREADY SET, SET LENGTHS IN WS-PTE-OPTS          *
+      *    ***********************************************************
+           MOVE LENGTH OF WS-PTE-OPTS      TO WS-PTE-OPTS-LL.
+	   MOVE LENGTH OF WS-PTE-PRTO-TEXT TO WS-PTE-PRTO-LL.
+
+      *    ***********************************************************
+      *    *  SWITCH ALTPCB TO IMS SPOOL, USING PRINT-TO-EMAIL PARMS *
+      *    ***********************************************************
+           CALL 'CBLTDLI' USING IMS-CHNG,
+	                        CALTPCB,
+				WS-PTE-LTERM,
+				WS-PTE-OPTS,
+				WS-PTE-FDBK
+	   END-CALL.
+      *    ***********************************************************
+</pre>
+</td></tr>
+</table>
+where
+<ul>
+ <li><tt><b>IMS-CHNG</b></tt> was the IMS-defined opcode for the <tt>CHNG</tt> call,
+ <li><tt><b>CALTPCB</b></tt> was the IMS-defined PSB for the <tt>APM00001</tt> modifiable alternate non-express
+ PCB we used to interact with the IMS Spool API, 
+ <li><tt><b>WS-PTE-LTERM</b></tt> was the destination LTERM (as defined in the <tt>WORKING-STORAGE</tt> above),
+ <li><tt><b>WS-PTE-OPTS</b></tt> was the Spool API management and report distribution options (also defined in
+ the <tt>WORKING-STORAGE</tt> above), and
+ <li><tt><b>WS-PTE-FDBK</b></tt> was the IMS CALL feedback area (also defined in the <tt>WORKING-STORAGE</tt> above)
+</ul>
+<p>Instructions on the definition and use of the <tt>CHNG</tt> call can be found in Section <u>1.3.2</u>
+of the <a href="Bibliography.html#IMS_TM">IMS Version 7 Application Programming: Transaction Manager</a> manual.
+</dd>
+<hr>
+
+<dt><a name="IMS_ISRT_WS"><h2><font color="green">IMS ISRT call WORKING-STORAGE</font></h2></a></dt>
+<dd>
+<p>JES2 expects that print data released to the spool through the IMS SPOOL API will be formatted as
+variable length records within variable length blocks. Thus, each block of print data must be prefixed
+with a &quot;block length&quot, and each line of print data within the block must be prefixed with a
+&quot;line length&quot;. Here, we intend to spool one line per block (because of the nature of the
+print service our code provided), so our block (<tt>WS-EMAIL-LINE</tt>) contains only one line
+of print data (<tt>WS-EMAIL-BSAM-DATA</tt>).
+<p>
+<table>
+<tr><td width="50"></td>
+<td bgcolor="LightBlue">
+<pre>
+       01  WS-EMAIL-LINE.
+           03    WS-EMAIL-BDW-LL         PIC S9(4) COMP VALUE +88.
+	   03    FILLER                  PIC S9(4) COMP VALUE ZERO. 
+	   03    WS-EMAIL-BSAM-DATA.
+	    05   WS-EMAIL-BSAM-RDW-LL    PIC S9(4) COMP VALUE +84.
+	    05   FILLER                  PIC S9(4) COMP VALUE ZERO.
+	    05   WS-EMAIL-BSAM-TEXT      PIC X(80).
+</pre>
+</td></tr>
+</table>
+where
+<ul>
+<li><tt><b>WS-EMAIL-LINE</b></tt> held the IMS Spool API description of one block of print text,
+<li><tt><b>WS-EMAIL-BDW-LL</b></tt> contained the length of the <tt>WS-EMAIL-LINE</tt> block,
+<li><tt><b>WS-EMAIL-BSAM-DATA</b></tt> held the IMS Spool API description of one line of print text,
+<li><tt><b>WS-EMAIL-BSAM-RDW-LL</b></tt> contained the length of the <tt>WS-EMAIL-BSAM-DATA</tt> line, and
+<li><tt><b>WS-EMAIL-BSAM-TEXT</b></tt> contained the line of text to be spooled
+</ul>
+</dd>
+<hr>
+
+<dt><a name="IMS_ISRT_PD"><h2><font color="green">IMS ISRT call PROCEDURE DIVISION logic</font></h2></a></dt>
+<dd>
+<p>The logic necessary to spool lines of output is moderately simple. The text to be spooled must be placed
+into the WORKING-STORAGE workarea, the line and block lengths are then computed and set, and the block of
+print data is <tt>ISRT</tt>ed into the print spool.
+<p>
+<table>
+<tr><td width="50"></td>
+<td bgcolor="LightBlue">
+<pre>
+      *    *********************************************************** 
+      *    * SET THE CONTENTS OF THE LINE TO BE EMAILED              *
+      *    ***********************************************************
+           MOVE <i>'text to be emailed'</i>         TO WS-EMAIL-BSAM-TEXT.
+	   
+      *    ***********************************************************
+      *    * IF NOT ALREADY SET, SET LENGTHS IN WS-EMAIL-LINE        *
+      *    ***********************************************************
+           MOVE LENGTH OF WS-EMAIL-LINE      TO WS-EMAIL-BDW-LL.
+	   MOVE LENGTH OF WS-EMAIL-BSAM-DATA TO WS-EMAIL-BSAM-RDW-LL.
+
+      *    ***********************************************************
+      *    *  SPOOL ONE LINE OF PRINT TO THE PRINT-TO-EMAIL PCB      *
+      *    ***********************************************************
+           CALL 'CBLTDLI' USING IMS-ISRT,
+	                        CALTPCB,
+				WS-EMAIL-LINE
+	   END-CALL.
+      *    ***********************************************************
+</pre>
+</td></tr>
+</table>
+where
+<ul>
+ <li><tt><b>IMS-ISRT</b></tt> was the IMS-defined opcode for the <tt>ISRT</tt> call,
+ <li><tt><b>CALTPCB</b></tt> was the IMS-defined PSB for the <tt>APM00001</tt> modifiable alternate non-express
+ PCB we used to interact with the IMS Spool API, and
+ <li><tt><b>WS-EMAIL-LINE</b></tt> was the spool print line defined in the <tt>WORKING-STORAGE</tt> above
+</ul>
+<p>Instructions on the definition and use of the <tt>ISRT</tt> call can be found in Section <u>1.3.7</u>
+of the <a href="Bibliography.html#IMS_TM">IMS Version 7 Application Programming: Transaction Manager</a> manual.
+</dd>
+<hr>
+
+<dt><a name="CICS_SPOOLOPEN_WS"><h2><font color="green">CICS SPOOLOPEN call WORKING-STORAGE</font></h2></a></dt>
+<dd>
+<p>The <tt>WORKING-STORAGE</tt> for the <tt>SPOOLOPEN</tt> call looks like:<p>
+<table>
+<tr><td width="50"></td>
+<td bgcolor="LightBlue">
+<pre>
+        01    FILLER.
+          03  WS-JES-TOKEN                   PIC X(8).
+
+           03  WS-JES-OUTDESC-PTR            USAGE IS POINTER.
+           03  WS-JES-OUTDESC-ADDR
+	       REDEFINES WS-JES-OUTDESC-PTR  PIC 9(9) COMP.
+
+           03  WS-JES-OUTDESC.
+            05   WS-JES-OUTDESC-LEN          PIC 9(9) COMP VALUE +82.
+            05   WS-JES-OUTDESC-TXT.
+             07  FILLER                      PIC X(12)     VALUE 'DEST(PTE01) '.
+             07  FILLER                      PIC X(28)     VALUE 'TITLE(''email subject line'') '.
+             07  FILLER                      PIC X(38)     VALUE 'ADDRESS(''EMAIL: target_email@address'')'. 
+
+
+       LINKAGE SECTION.
+
+          01  LS-OUTDESC.                                        
+              03  LS-OUTDESC-ADDR            PIC 9(9) COMP. 
+              03  LS-OUTDESC-TEXT            PIC X(1020).   
+</pre>
+</td></tr>
+</table>
+where
+<ul>
+<li><b><tt>WS-JES-TOKEN</tt></b> was used to store a spooling &quot;handle&quot; generated by the CICS
+SPOOL API when the spool was opened,
+<li><b><tt>WS-JES-OUTDESC-PTR</tt></b> and <b><tt>WS-JES-OUTDESC-ADDR</tt></b> were used to store the address of
+the block of memory allocated to store the spool parameters for the CICS SPOOL API,
+<li><b><tt>WS-JES-OUTDESC</tt></b> contains the <tt>PRTO</tt> print options to be passed to the CICS SPOOL API:
+<ul>
+<li><b><tt>WS-JES-OUTDESC-LEN</tt></b> contained the length of the entire <tt>PRTO</tt> option block, including itself
+<li><b><tt>WS-JES-OUTDESC-TXT</tt></b> (and it's subordinate variables) contained the individual <tt>PRTO</tt>
+  options, including the printer <tt>DEST</tt> (<tt>PTE01</tt>), the <tt>TITLE</tt> (containing our email
+  subject line), and the <tt>ADDRESS</tt> (containing our target email address).
+</ul>
+<li><b><tt>LS-OUTDESC</tt></b> and it's subordinate variables were used to provide an indirect reference
+  to the <tt>PRTO</tt> option block prepared from the <tt>WS-JES-OUTDESC</tt> WORKING-STORAGE variables.
+</ul>
+<p>The definition of the <tt>PRTO</tt> option can be found in Section <u>1.229</u> of the
+<a href="Bibliography.html#CICS_Ref">CICS TS for OS/390 V1R3 Application Programming Reference</a>
+  manual. Additional material defining the parameters that may be included in the <tt>PRTO</tt> option
+  can be found in Section <u>1.56</u> of the <a href="Bibliography.html#TSO_CL">TSO/E V2R5 Command Reference</a>
+  manual.
+</dd>
+<hr>
+
+<dt><a name="CICS_SPOOLOPEN_PD"><h2><font color="green">CICS SPOOLOPEN call PROCEDURE DIVISION logic</font></h2></a></dt>
+<dd>
+<p>The CICS SPOOL API requires that we pass the CICSOPEN function a pointer to a pointer to the <tt>PRTO</tt> parameters.
+This means that we have to perform some COBOL trickery, because COBOL is brain-dead when it comes application management
+of pointers.
+<p>
+<table>
+<tr><td width="50"></td>
+<td bgcolor="LightBlue">
+<pre>
+      *       ************************************************************ 
+      *       * FIRST, WE ALLOCATE SOME STORAGE TO BUILD OUR PARMLIST IN *
+      *       ************************************************************
+              EXEC CICS
+                  GETMAIN
+                  SET(WS-JES-OUTDESC-PTR)
+                  LENGTH(1024)
+              END-EXEC
+
+      *       ************************************************************
+      *       * IF THAT WORKED, WE COPY OUR PARMLIST INTO THE STORAGE    *
+      *       * AND PERFORM THE CICS SPOOLOPEN                           *
+      *       ************************************************************
+              IF WS-CICS-RESP IS EQUAL TO DFHRESP(NORMAL)
+
+      *           ********************************************************
+      *           * PREPARE THE DYNAMIC MEMORY TO RECEIVE THE PARMLIST   *
+      *           * (WE RESORT TO THIS TRICKERY BECAUSE COBOL IS MOSTLY  *
+      *           * BRAIN-DEAD WHEN IT COMES TO POINTERS-TO-POINTERS)    *
+      *           ********************************************************
+                  SET ADDRESS OF LS-OUTDESC     TO WS-JES-OUTDESC-PTR
+                  MOVE WS-JES-OUTDESC-ADDR      TO LS-OUTDESC-ADDR
+                  ADD 4                         TO LS-OUTDESC-ADDR
+
+      *           ********************************************************
+      *           * SET THE PARMLIST LENGTH, IF IT HASN'T BEEN SET YET   *
+      *           ********************************************************
+                  MOVE LENGTH OF WS-JES-OUTDESC-TXT
+                                                TO WS-JES-OUTDESC-LEN
+
+      *           ********************************************************
+      *           * COPY THE COMPLETED PARMLIST TO THE ALLOCATED STORAGE *
+      *           ********************************************************
+                  MOVE WS-JES-OUTDESC           TO LS-OUTDESC-TEXT
+
+      *           ********************************************************
+      *           * EXECUTE THE CICS SPOOLOPEN TO OPEN THE PRINT OUTPUT  *
+      *           ********************************************************
+                  EXEC CICS
+                      SPOOLOPEN OUTPUT
+                      PRINT NOCC RECORDLENGTH(132)
+                      CLASS('A') NODE('*') USERID('*')
+                      OUTDESCR(WS-JES-OUTDESC-PTR)
+                      TOKEN(WS-JES-TOKEN)
+                      RESP(WS-CICS-RESP) RESP2(WS-CICS-RESP2)
+                  END-EXEC
+
+      *           ********************************************************
+      *           * RELEASE THE STORAGE WE GETMAINED EARLIER             *
+      *           ********************************************************
+                  EXEC CICS
+                      FREEMAIN
+                      DATAPOINTER(WS-JES-OUTDESC-PTR)
+                  END-EXEC
+              END-IF
+      *       ************************************************************
+</pre>
+</td></tr>
+</table>
+<p>Before we can SPOOLOPEN, we have to get some temporary storage (through a GETMAIN call). This gives us a
+pointer that we can manipulate and store. Once we have the storage, we make it addressable to the COBOL code
+and adjust the pointer so that it points to the data area we're going to use. We copy our <tt>PRTO</tt>
+parameters into this block of memory, because we'll use the pointer to this storage in our SPOOLOPEN call
+(I said that COBOL was brain-dead, didn't I?).
+<p>Once we've set up our parameterlist, we SPOOLOPEN the spooling system. SPOOLOPEN returns a &quot;token&quot;
+(essentially, a file handle for the SPOOL API) that we must save, and use in the rest of the SPOOL API calls.
+<p>Finally, we FREEMAIN the allocated block of storage, because we no longer need it.
+<p>
+</dd>
+<hr>
+
+<dt><a name="CICS_SPOOLWRITE_WS"><h2><font color="green">CICS SPOOLWRITE call WORKING-STORAGE</font></h2></a></dt>
+<dd>
+<p>This area is very simple; it's just a 132-byte buffer that we will populate with a single line for the
+<tt>SPOOLWRITE</tt> call. We'll iterate through all our print lines, repeatedly populating this field
+with a single line's worth of data and invoking SPOOLWRITE until all the print data has been spooled.
+<p> 
+<table>
+<tr><td width="50"></td>
+<td bgcolor="LightBlue">
+<pre>
+        01    FILLER.
+              03  WS-JES-PRTLINE         PIC X(132). 
+
+</pre>
+</td></tr>
+</table>
+</dd>
+<hr>
+
+<dt><a name="CICS_SPOOLWRITE_PD"><h2><font color="green">CICS SPOOLWRITE call PROCEDURE DIVISION logic</font></h2></a></dt>
+<dd>
+<p>Here is one iteration of our line output logic. The single line of report data is placed in
+WS-JES-PRTLINE, and the CICS SPOOLWRITE function is invoked to write it out.
+<p>
+<table>
+<tr><td width="50"></td>
+<td bgcolor="LightBlue">
+<pre>
+      *       ************************************************************ 
+      *       * IF STILL OK, WRITE A LINE TO THE SPOOL                   *
+      *       ************************************************************
+              IF WS-CICS-RESP IS EQUAL TO DFHRESP(NORMAL)
+	      
+      *          ********************************************************* 
+      *          * MOVE THE PRINT DATA INTO THE BUFFER                   *
+      *          *********************************************************
+                  MOVE 'data to print'  TO WS-JES-PRTLINE
+	      
+      *          ********************************************************* 
+      *          * SPOOLWRITE THE BUFFER                                 *
+      *          *********************************************************
+                  EXEC CICS
+                    SPOOLWRITE
+                    TOKEN(WS-JES-TOKEN)
+                    LINE FROM(WS-JES-PRTLINE)
+                    RESP(WS-CICS-RESP) RESP2(WS-CICS-RESP2)
+                  END-EXEC
+              END-IF
+      *       ************************************************************
+</pre>
+</td></tr>
+</table>
+</dd>
+<hr>
+
+<dt><a name="CICS_SPOOLCLOSE_PD"><h2><font color="green">CICS SPOOLCLOSE call PROCEDURE DIVISION logic</font></h2></a></dt>
+<dd>
+<p>Finally, we close the report with a SPOOLCLOSE call, which releases the spooled data to JES for printing.
+<p>
+<table>
+<tr><td width="50"></td>
+<td bgcolor="LightBlue">
+<pre>
+      *       ************************************************************ 
+      *       * IF STILL OK, CLOSE THE SPOOL                             *
+      *       ************************************************************
+              IF WS-CICS-RESP IS EQUAL TO DFHRESP(NORMAL)
+	      
+      *          ********************************************************* 
+      *          * CLOSE THE SPOOL CONNECTION                            *
+      *          *********************************************************
+                  EXEC CICS
+                      SPOOLCLOSE KEEP
+                      TOKEN(WS-JES-TOKEN)
+                      RESP(WS-CICS-RESP) RESP2(WS-CICS-RESP2)
+                  END-EXEC
+              END-IF
+      *       ************************************************************
+</pre>
+</td></tr>
+</table>
+<p>After this, JES will take the spooled print data and print it to the pseudo-printer named in the
+parameters passed to the SPOOLOPEN call.
+<p>
+</dd>
+<hr>
+
+
+</dl>
+<hr>
+<h4>Copyright (&copy;) Lew Pitcher, March 2002</h4>
+</body>
+</html>

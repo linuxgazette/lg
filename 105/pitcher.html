@@ -1,0 +1,425 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Q &amp; A: The difference between hard and soft links LG #105</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="oregan2.html" >&lt;-- prev</A> | <A HREF="pitcher1.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Q &amp; A: The difference between hard and soft links</h1>
+<p id="by"><b>By <A HREF="../authors/pitcher.html">Lew Pitcher</A></b></p>
+
+<p>
+<p> I participate in about 30 usenet newsgroups, and in a virtual LUG, and
+a number of questions keep coming up. I've answered a few of these
+questions often enough to have 'canned' an answer, which I modify,
+depending on the circumstances.
+
+<p> Here's one, now...
+
+<p> <strong>Q:</strong> Can someone give me a simple explanation of the
+difference between a soft link and a hard link?  The documentation I've
+read mention these links but make no strong explanations of their meaning
+and how/when to use them.  Thanks!
+
+<p> <strong>A:</strong> OK, I'll give it a try...
+
+<p> Unix files consist of two parts: the data part and the filename part.
+
+<p> The data part is associated with something called an 'inode'. The inode
+carries the map of where the data is, the file permissions, etc. for the
+data.
+   
+<pre class="code">
+
+                               .---------------&gt; ! data ! ! data ! etc
+                              /                  +------+ !------+
+        ! permbits, etc ! data addresses !
+        +------------inode---------------+
+
+</pre>
+
+<p> The filename part carries a name and an associated inode number.
+
+<pre class="code">
+                         .--------------&gt; ! permbits, etc ! addresses !
+                        /                 +---------inode-------------+
+        ! filename ! inode # !
+        +--------------------+
+</pre>
+
+<p> More than one filename can reference the same inode number; these files are
+said to be 'hard linked' together.
+   
+<pre class="code">
+        ! filename ! inode # !
+        +--------------------+
+                        \
+                         &gt;--------------&gt; ! permbits, etc ! addresses !
+                        /                 +---------inode-------------+
+        ! othername ! inode # !
+        +---------------------+
+</pre>
+
+<p> On the other hand, there's a special file type whose data part carries
+a path to another file. Since it is a special file, the OS recognizes the
+data as a path, and redirects opens, reads, and writes so that, instead of
+accessing the data within the special file, they access the data in the
+file <u>named</u> by the data in the special file. This special file is
+called a 'soft link' or a 'symbolic link' (aka a 'symlink').
+
+   
+<pre class="code">
+        ! filename ! inode # !
+        +--------------------+
+                        \
+                         .-------&gt; ! permbits, etc ! addresses !
+                                   +---------inode-------------+
+                                                      /
+                                                     /
+                                                    /
+    .----------------------------------------------'
+   ( 
+    '--&gt;  !"/path/to/some/other/file"! 
+          +---------data-------------+
+                  /                      }
+    .~ ~ ~ ~ ~ ~ ~                       }-- (redirected at open() time)
+   (                                     }
+    '~~&gt; ! filename ! inode # !
+         +--------------------+
+                         \
+                          '------------&gt; ! permbits, etc ! addresses !
+                                         +---------inode-------------+
+                                                            /
+                                                           /
+     .----------------------------------------------------'
+    (
+     '-&gt;  ! data !  ! data ! etc.
+          +------+  +------+ 
+
+</pre>
+	  
+<p> Now, the filename part of the file is stored in a special file of its own
+along with the filename parts of other files; this special file is called a
+directory. The directory, as a file, is just an array of filename parts of
+other files.
+   
+<p> When a directory is built, it is initially populated with the filename parts
+of two special files: the '.' and '..' files. The filename part for the '.'
+file is populated with the inode# of the directory file in which the entry
+has been made; '.' is a hardlink to the file that implements the current
+directory.
+   
+<p> The filename part for the '..' file is populated with the inode# of the
+directory file that contains the filename part of the current directory
+file. '..' is a hardlink to the file that implements the immediate parent
+of the current directory.
+
+<p> The 'ln' command knows how to build hardlinks and softlinks; the
+'mkdir' command knows how to build directories (the OS takes care of the
+above hardlinks).
+
+<p> There are restrictions on what can be hardlinked (both links must reside on
+the same filesystem, the source file must exist, etc.) that are not
+applicable to softlinks (source and target can be on seperate file systems,
+source does not have to exist, etc.). OTOH, softlinks have other
+restrictions not shared by hardlinks (additional I/O necessary to complete
+file access, additional storage taken up by softlink file's data, etc.)
+
+<p> In other words, there's tradeoffs with each.
+
+<p> Now, let's demonstrate some of this...
+
+<h3>ln in action</h3>
+   
+<p> Let's start off with an empty directory, and create a file in it
+   
+<pre class="code">
+~/directory $ ls -lia 
+total 3
+  73477 drwxr-xr-x   2 lpitcher users        1024 Mar 11 20:16 .
+  91804 drwxr-xr-x  29 lpitcher users        2048 Mar 11 20:16 ..
+
+~/directory $ echo "This is a file" &gt;basic.file
+
+~/directory $ ls -lia 
+total 4
+  73477 drwxr-xr-x   2 lpitcher users        1024 Mar 11 20:17 .
+  91804 drwxr-xr-x  29 lpitcher users        2048 Mar 11 20:16 ..
+  73478 -rw-r--r--   1 lpitcher users          15 Mar 11 20:17 basic.file
+
+~/directory $ cat basic.file
+This is a file
+</pre>
+
+Now, let's make a hardlink to the file
+
+<pre class="code">   
+~/directory $ ln basic.file hardlink.file
+
+~/directory $ ls -lia 
+total 5
+  73477 drwxr-xr-x   2 lpitcher users        1024 Mar 11 20:20 .
+  91804 drwxr-xr-x  29 lpitcher users        2048 Mar 11 20:18 ..
+  73478 -rw-r--r--   2 lpitcher users          15 Mar 11 20:17 basic.file
+  73478 -rw-r--r--   2 lpitcher users          15 Mar 11 20:17 hardlink.file
+
+~/directory $ cat hardlink.file
+This is a file
+</pre>
+
+<p>We see that:
+<ol type="a">
+ <li><tt>hardlink.file</tt> shares the same inode (73478) as basic.file</li>
+ <li><tt>hardlink.file</tt> shares the same data as basic.file</li>
+</ol>
+<p>If we change the permissions on <tt>basic.file</tt>:
+   
+<pre class="code">
+~/directory $ chmod a+w basic.file
+
+~/directory $ ls -lia 
+total 5
+  73477 drwxr-xr-x   2 lpitcher users        1024 Mar 11 20:20 .
+  91804 drwxr-xr-x  29 lpitcher users        2048 Mar 11 20:18 ..
+  73478 -rw-rw-rw-   2 lpitcher users          15 Mar 11 20:17 basic.file
+  73478 -rw-rw-rw-   2 lpitcher users          15 Mar 11 20:17 hardlink.file
+</pre>
+     
+<p> then the same permissions change on <tt>hardlink.file</tt>.
+
+<p>The two files (<tt>basic.file</tt> and <tt>hardlink.file</tt>) share the same inode and data,
+but have different file names.
+   
+<p>Let's now make a softlink to the original file:
+   
+<pre class="code">
+~/directory $ ln -s basic.file softlink.file
+
+~/directory $ ls -lia 
+total 5
+  73477 drwxr-xr-x   2 lpitcher users        1024 Mar 11 20:24 .
+  91804 drwxr-xr-x  29 lpitcher users        2048 Mar 11 20:18 ..
+  73478 -rw-rw-rw-   2 lpitcher users          15 Mar 11 20:17 basic.file
+  73478 -rw-rw-rw-   2 lpitcher users          15 Mar 11 20:17 hardlink.file
+  73479 lrwxrwxrwx   1 lpitcher users          10 Mar 11 20:24 softlink.file -&gt; basic.file
+
+~/directory $ cat softlink.file
+This is a file
+</pre>
+
+<p> Here, we see that although <tt>softlink.file</tt> accesses the same data as
+<tt>basic.file</tt> and <tt>hardlink.file</tt>, it does not share the same inode (73479 vs
+73478), nor does it exhibit the same file permissions. It does show a new
+permission bit: the 'l' (softlink) bit.
+   
+<p> If we delete <tt>basic.file</tt>:
+   
+<pre class="code">
+~/directory $ rm basic.file
+
+~/directory $ ls -lia 
+total 4
+  73477 drwxr-xr-x   2 lpitcher users        1024 Mar 11 20:27 .
+  91804 drwxr-xr-x  29 lpitcher users        2048 Mar 11 20:18 ..
+  73478 -rw-rw-rw-   1 lpitcher users          15 Mar 11 20:17 hardlink.file
+  73479 lrwxrwxrwx   1 lpitcher users          10 Mar 11 20:24 softlink.file -&gt; basic.file
+</pre>
+   
+<p> then we lose the ability to access the linked data through the softlink:
+   
+<pre class="code">
+~/directory $ cat softlink.file
+cat: softlink.file: No such file or directory
+</pre>
+
+<p> However, we still have access to the original data through the hardlink:
+
+<pre class="code">
+~/directory $ cat hardlink.file
+This is a file
+</pre>
+
+<p> You will notice that when we deleted the original file, the hardlink didn't
+vanish. Similarly, if we had deleted the softlink, the original file wouldn't
+have vanished. 
+
+<h3>A further note with respect to hardlink files</h3>
+
+<p> When deleting files, the data part isn't disposed of until all the filename
+parts have been deleted. There's a count in the inode that indicates how
+many filenames point to this file, and that count is decremented by 1 each
+time one of those filenames is deleted. When the count makes it to zero,
+the inode and its associated data are deleted.
+
+<p> By the way, the count also reflects how many times the file has been opened
+without being closed (in other words, how many references to the file are
+still active). This has some ramifications which aren't obvious at first:
+you can delete a file so that no "filename" part points to the inode,
+without releasing the space for the data part of the file, because the file
+is still open.
+
+<p> Have you ever found yourself in this position: you notice that
+<tt>/var/log/messages</tt> (or some other syslog-owned file) has grown too big, and
+you
+
+<pre class="code">
+     rm /var/log/messages
+     touch /var/log/messages
+</pre>
+
+<p> to reclaim the space, but the used space doesn't reappear? This is because,
+although you've deleted the filename part, there's a process that's got the
+data part open still (syslogd), and the OS won't release the space for the
+data until the process closes it. In order to complete your space
+reclamation, you have to
+<pre class="code">
+     kill -SIGHUP `cat /var/run/syslogd.pid`
+</pre>
+
+<p>to get syslogd to close and reopen the file.
+
+<p> You can use this to your advantage in programs: have you ever wondered how
+you could <u>hide</u> a temporary file? Well, you could do the following:
+  
+<pre class="code">
+     {
+        FILE *fp;
+
+        fp = fopen("some.hidden.file","w");
+        unlink("some.hidden.file"); /* deletes the filename part */
+
+        /* some.hidden.file no longer has a filename and is truely hidden */
+        fprintf(fp,"This data won't be found\n"); /* access the data part */
+        /*etc*/
+        fclose(fp); /* finally release the data part */
+     }
+</pre>
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/2002/note.png" class="bio">
+
+<!-- 
+If the author has sent his pic, save it to the right directory
+and enable the line below.
+
+<img align="left" alt="[BIO]" src="../gx/authors/pic.jpg" class="bio">
+
+-->
+
+<em>
+
+<! -- BIO GOES HERE -->
+
+Canadian by birth, and living in Brampton, Ontario, I am a career techie
+working at a major Canadian bank. For over 25 years, I've programmed on
+all sorts of systems, from Z80 CP/M up to OS/390. Primarily, I develop
+OS/390 MVS applications for banking services, and have incorporated
+Linux into my development environment.
+
+</em>
+<br clear="all">
+<!-- *** END bio *** -->
+
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2004, Lew Pitcher. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 105 of Linux Gazette, August 2004
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="oregan2.html" >&lt;-- prev</A> | <A HREF="pitcher1.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">August 2004 (#105)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

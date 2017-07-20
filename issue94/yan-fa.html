@@ -1,0 +1,751 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>Linux based Radio Timeshifting LG #94</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<!-- *** BEGIN navbar *** -->
+<A HREF="lalji.html">&lt;&lt;&nbsp;Prev</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="index.html">TOC</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../index.html">Front Page</A>&nbsp;&nbsp;|&nbsp;&nbsp;Talkback&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../faq/index.html">FAQ</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="zhuralev.html">Next&nbsp;&gt;&gt;</A>
+<!-- *** END navbar *** -->
+
+<!--endcut ============================================================-->
+
+<TABLE BORDER><TR><TD WIDTH="200">
+<A HREF="http://www.linuxgazette.net/">
+<IMG ALT="LINUX GAZETTE" SRC="../gx/2002/lglogo_200x41.png" 
+	WIDTH="200" HEIGHT="41" border="0"></A> 
+<BR CLEAR="all">
+<SMALL>...<I>making Linux just a little more fun!</I></SMALL>
+</TD><TD WIDTH="380">
+
+
+<CENTER>
+<BIG><BIG><STRONG><FONT COLOR="maroon">Linux based Radio Timeshifting</FONT></STRONG></BIG></BIG>
+<BR>
+<STRONG>By <A HREF="../authors/yan-fa.html">Yan-Fa Li</A></STRONG>
+</CENTER>
+
+</TD></TR>
+</TABLE>
+<P>
+
+<!-- END header -->
+
+
+
+<h2>1.0 Introduction</h2>
+Like a lot of gadget freaks I have a Tivo in the living room.  Now while
+one could argue that thanks to an infestation of Clear Channel there
+really isn't much of interest to listen to anymore, there is still
+public radio.  I listen to a lot of NPR while driving in the car, and I
+often find I miss programs I find interesting, or worse, I arrive at my
+destination and have to stop listening.  So naturally I'd been thinking
+for some months now, why not invest some time and effort and look at
+how to build a PRR (Personal Radio Recorder).
+
+<p>
+Obviously I'm not the only one.  There are now some commercial
+offerings like <a href="http://radioyourway.com/">this</a>,
+and quite a few people appear to have done <a
+href="http://gary.burd.info/content/articles/fmcapture.html">projects</a>
+to timeshift radio. There's even a <a
+href="http://osl.iu.edu/~tveldhui/radio/">how-to</a>,
+and slashdot had a big thread about it <a
+href="http://ask.slashdot.org/askslashdot/03/01/10/1053222.shtml?tid=137">recently</a>.
+
+<p>
+
+These notes are all based on using RedHat Linux 7.3, so your mileage may
+vary if using something like SuSe or Mandrake. I believe they already
+come with Alsa, for example, so you can skip those parts that involve
+installing them if your system already comes pre-installed with it.
+
+<p>
+<h3>The Basics</h3>
+Pretty much all the projects I've seen out there have the same things
+in common.  They use one of three kinds of setup:
+<p>
+<ul>
+	<li>A regular analog radio tuned to a single station connected
+	    to the line-in of your PC.  Pros: really cheap and easy.
+	    Cons: single station only.
+	<li>A programmable tuner card with radio function and built
+	    in audio device.  Pros: self contained solution, no sound
+	    card required.  Cons: PCs are quite noisy electrically;
+	    perhaps a lack of Linux drivers.
+	<li>An external programmable Radio and the line-in, like the popular
+	    but discontinued DSB-R100 radio from D-link.  Pros: programmable
+	    by the PC;  replaceable antenna;  outside of the computer.  Cons:
+	    possible lack of drivers and potentially more expensive than the
+ 	    other two options.
+</ul>
+
+Naturally I picked the USB radio, since I wanted the flexibility of being
+able to replace the radio easily, and knew that drivers already existed
+in the Linux kernel for this device under the Video For Linux APIs.
+<p>
+
+<h2>3. Architecture</h2>
+I had a few requirements:
+
+<ol>
+	<li> Output straight to mp3, and avoid creating any intermediate
+	     wave files.  Two hours of Prairie Home Companion, for example,
+	     would be 1.2GB as 44KHz wave files, so this is definitely
+	     something to be avoided.
+
+	<li> Decent ID3 tags so the files had some useful info contained
+	     within them rather than just in the filename.
+
+	<li> An automated system of reaping the files at regular intervals
+	     to avoid eating up huge amounts of disk.  NPR is highly
+	     topical and current and generally not something I want to
+	     archive long term.
+
+</ol>
+
+<p>
+The basic capture system ended up looking like this:
+<pre>
+Alsa HW Interface -&gt [ ecasound ] -&gt &lt Wav Stream &gt -&gt [ lame encoder ] -&gt &lt mp3 &gt
+</pre>
+
+Nice and simple.  It just requires a little syntactic sugar to hold
+it all together.  Since I wanted to encode VBR mp3s on the fly I had a
+few worries about CPU usage.   I also planned installing it on my main
+file server since it's always on and therefore an ideal candidate.
+Using an 850MHz celeron, my tests showed the load to be about 40-50%
+while capturing and encoding.  This still left plenty of CPU for other
+tasks like serving files, ssh and http.
+<p>
+
+Your mileage will of course vary if you're running X for example, which
+notoriously causes skipping with sound cards.  However, since my system
+is a dedicated file server I've long stopped running a GUI on it. It
+never became an issue, but keep it in mind for your target system.  <p>
+
+<h3>Encoding FM in real-time as MP3</h3>
+A little googling got me a wealth of excellent information about FM
+mp3 encoding.  Firstly, FM has a hard cut off for all frequencies above
+15KHz at the transmitter, so any information above that can be safely
+ignored while encoding; secondly, the optimal bitrates for FM appear
+to be somewhere between 96 and 112kbits, since it's mostly voice with
+only a modicum of music and we're already saving 5KHz in the frequency
+range anyway.  We therefore have more than enough bits remaining to get
+a faithful encoding. Thirdly, since I was planning on using Lame encoder,
+joint stereo was a must.  Not only is the joint stereo mode of Lame
+excellent, but it also leaves more bits for the encoding.
+
+<h3>Hardware Constraints</h3>
+At a bare minimum, I wouldn't recommend anything slower than a 450MHz
+Pentium III for this task, though if you are willing to switch to Average
+Bit Rate and a slightly lower encoding rate from the one I've used, you
+could possibly get away with a well tuned 350MHz PII.  Having a disk
+on the system itself is also optional, as it only needs to keep up with
+~112kbps of data plus network overhead, so one could create a completely
+diskless system that booted off the network or a flash card which dumped
+all its recordings back to the network.
+<p>
+Check out <a href="http://compgeeks.com">compgeeks</a> or <a
+href="http://computersurplusoutlet.com">CSO</a> for low end systems
+which would be suitable for this duty.
+
+<p>
+
+<h2>4.0 Recording Audio Under Linux</h2>
+This is actually a bigger challenge than it seems.  While a large number
+of audio cards are supported by Linux for playback, not very many are all
+that great for recording.  A great source of information can be found
+at the Alsa Project <a href="http://www.alsa-project.org/alsa-doc/">web
+site</a>.  Having already used Alsa on a number of systems and projects
+previously, I decided to use it for the PRR project.  And don't forget,
+it's the future of Linux audio, as it's already in the 2.6 kernels.
+<p>
+
+The next problem is figuring out what to use to do
+the actual recording.  After looking at a variety of
+solutions such as sox and alsarecord, I settled on using <a
+href="http://www.wakkanet.fi/~kaiv/ecasound/">Ecasound</a>.  While it's
+probably overkill for this project, some of the features I liked were
+the built-in audio conversion routines, the ability to specify realtime
+scheduling under Linux if run by root, and support for writing data to
+stdout.  Audio is really a real-time sort of task with hard requirements
+on meeting certain scheduling goals, so being able to specify this was
+a big plus for Ecasound.  Unix pipes also avoids the creation of large
+temporary data files keeping disk requirements down to manageable levels.
+
+<p>
+<h3>Preparing to Set Up Alsa Sound System</h3>
+First things first,  identify what kind of sound card you have and
+figure out whether it's supported by Alsa.  As I said earlier, not all
+audio cards are very good for recording.  Interestingly enough, the sound
+card I ended up using is one of the most inexpensive available and yet
+it works quite well.  <p>
+
+I ended up using a <a
+href="http://alsa-project.org/alsa-doc/doc-php/template.php3?company=Hercules&card=Game+Fortissimo+II&chip=CS4624&module=cs46xx">
+Cirrus Logic 46XX</a> (Hercules Fortissmo) series card.  I picked one
+these up in the sfbay area for ~35USD at retail.  I'm pretty sure they're
+not much more than that elsewhere.  Alsa has pretty good support for
+them and for FM recording they work just fine.  I had started out with a
+CMI8738, an even cheaper card at around ~20USD, but I could not make it
+record audio without a horrible whine and very poor input gain.  It was
+just fine for playback, but pretty much useless as a recording device.
+
+<p>
+
+Detailed instructions for setting up Alsa are on their website listed
+card by card.  But here are a few notes before you start.  Firstly, Alsa
+really needs the kernel source you are compiling against and your running
+kernel to be the same.  So for example, on a typical RedHat installation,
+say 2.4.18-26.7, you would need the same kernel sources installed in
+your <code>/usr/src/linux-2.4/</code> directory.  By default, this is
+not the case, because RedHat specifically renames the kernel sources to
+use the extra version string "custom".
+
+<p>
+To avoid this problem just re-compile, re-install and boot your new
+redhat kernel before attempting to install Alsa.  If you don't know how
+to do this there are lot of good instructions on the net and I suggest
+you look some up before proceeding.  If you want the default RedHat
+options, simply use something like:
+
+<pre>
+cd /usr/src/linux-2.4
+make mrproper && \
+make oldconfig && \
+make dep clean bzImage modules MAKE='make -j2'
+</pre>
+
+This will rebuild your kernel sources.  You will need to install this
+and reboot using it.  How you do that depends on whether you're using lilo or
+grub, and is beyond the scope of these instructions.
+
+<h3>Additional Build Notes For RedHat Kernel Users</h3>
+There's also a problem which seems to happen on RedHat 2.4.20 kernels, which
+is quite infruriating.  I suspect it's because of all the scheduler
+patches they've been packporting from the 2.5 series.  Anyway, whenever
+you run configure it deletes the file include/linux/workqueue.h from the
+working directory.  This has the unfortunate side effect of letting the
+compile proceed cleanly, but refuse to load because of unknown symbols.
+Most annoying.  The fix is simple.  Run configure, and before running
+make once again to compile, un-tar the workqueue.h file from the tarball
+again.  Something like:
+
+<pre>
+tar jxvf alsa-driver-0.9.5.tar.bz2 alsa-driver-0.9.5/include/linux/workqueue.h
+</pre>
+
+works for the 0.9.5 release.  This will prevent the dreaded complaints about
+being unable to install modules due to failed dependencies.
+
+<h3>Building and Installing Alsa</h3>
+Assuming you've got your new kernel running, download the Alsa drivers
+package, and compile and install it as root.  Next, download the Alsa
+library package, compile and install this.  Finally, at a bare minimum
+you'll need the Alsa Utils, otherwise you won't be able to do anything
+useful like unmute the audio.  Tools and OSS compat are nice to have
+but not required at this point.
+<p>
+
+As an additional note, by default, recent versions of Alsa install
+themselves in the default system paths.  Older versions installed
+themselves in /usr/local, and on RedHat systems this would cause problems
+because the dynamic loader wasn't configured to look there for libraries.
+This would cause configure scripts to fail to find libraries and
+generally not compile.  This is actually pretty easy to fix, just
+add the /usr/local/lib path to /etc/ld.so.conf and re-run ldconfig.
+This will update your ld cache and also dynamic libs that have been
+installed there to run.  FYI, this is also one of the main reasons why
+a lot of open source packages fail to compile on RedHat systems.
+
+<p>
+
+The new drivers will install in your currently running kernel directory.
+You will need to reconfigure your modules.conf to reflect the new sound
+card set up.  This normally involves removing the entries added by kudzu,
+or disabling them using a '#' sign and then adding the new driver
+entries.  Here's the one from my CS46XX setup:
+
+<pre>
+# ALSA portion
+alias char-major-116 snd cards_limit=1 device_mode=0660
+post-install snd alsactl restore
+alias snd-card-0 snd-cs46xx
+# module options
+# OSS/Free portion
+alias char-major-14 soundcore
+alias sound-slot-0 snd-card-0
+# card #1
+alias sound-service-0-0 snd-mixer-oss
+alias sound-service-0-1 snd-seq-oss
+alias sound-service-0-3 snd-pcm-oss
+alias sound-service-0-8 snd-seq-oss
+alias sound-service-0-12 snd-pcm-oss
+</pre>
+
+Notice the post-install directive.  This lets you restore audio settings
+on reboots as soon as the driver loads.  You can also achieve this by
+modifying the <code>/etc/rc.local</code> too, but I like this way better
+in case I need to unload the driver.  You can also add a pre-remove
+directive if you like to save any settings you may have changed before
+unloading the sound modules. I prefer to restore to known defaults.
+
+<p>
+Next we need to add an entry to the <code>rc.local</code> file.  For
+whatever reason, the OSS emulation drivers don't load automatically. KDE
+complains for example when starting artsd because the sound system hasn't
+initialized while it's trying to load. You can force OSS emulation to
+pre-load by adding:
+
+<pre>
+modprobe snd-pcm-oss
+setpci -s 01:09 latency_timer=60
+</pre>
+to the end of rc.local.  The first entry loads the pcm oss driver and
+keeps apps which depend on OSS being there to stay none the wiser.
+The second entry adjusts the PCI timers for the sound card to give it
+a little more time on the bus; that part is optional.  I find tweaking
+the PCI bus helps avoid pops and clicks in the audio.  If you do choose
+to tweak your PCI latency this way, remember to use lspci
+to find the correct device number for your card.  The one listed here
+is for my system bus and will likely be different on your system.
+
+<p>
+It's probably easiest at this point just to just reboot one more time,
+however if you're confident about what you're doing, manually remove
+the old OSS audio drivers using <code>rmmod</code> and do a
+<pre>modprobe snd-pcm-oss</pre>
+Follow up with a <code>lsmod</code> and you should see a lot of bright
+and shiny new alsa drivers loaded:
+
+<pre>
+Module                  Size  Used by    Not tainted
+snd-pcm-oss            45668   0
+snd-mixer-oss          16536   0  [snd-pcm-oss]
+snd-cs46xx             79156   0  (autoclean)
+snd-rawmidi            18656   0  (autoclean) [snd-cs46xx]
+snd-seq-device          6316   0  (autoclean) [snd-rawmidi]
+snd-ac97-codec         44640   0  (autoclean) [snd-cs46xx]
+snd-pcm                83264   0  (autoclean) [snd-pcm-oss snd-cs46xx]
+snd-timer              19560   0  (autoclean) [snd-pcm]
+snd-page-alloc          8520   0  (autoclean) [snd-cs46xx snd-pcm]
+gameport                3412   0  (autoclean) [snd-cs46xx]
+snd                    43140   0  [snd-pcm-oss snd-mixer-oss snd-cs46xx snd-rawmidi snd-seq-device snd-ac97-codec snd-pcm snd-timer]
+soundcore               6532   6  [snd]
+</pre>
+
+This is an excerpt from a working system.  Test it by playing some audio,
+anything you have handy will do, like mpg123 for example.  Though on a
+RedHat system, you'll actually have to download and compile and install
+it yourself since they no longer ship mpeg decoders due to patent issues
+with Fraunhofer and Philips.
+
+<h2>5.0 Additional Packages to Downloaded</h2>
+<h3>Download and Compile ECASOUND</h3>
+Since you now have an installed and working alsa sound system, you do have
+it working, don't you ?  It is now a good time to get ecasound downloaded and
+running.
+I did my initial implementation using 2.2.1, but I recently upgraded
+to 2.2.3 as it seems to have a lot of bugfixes specifically for use with
+Alsa.  Building it should be fairly straightforward, since it's GNU
+autoconf based. Just follow the INSTALL instructions.
+<p>
+If you want a slightly more optimized build, and you're using a version
+of GCC that supports more advanced x86 optimizations, (gcc 3.2 or higher),
+I would recommend the following configure line on an PII and above system.
+This especially includes the new FPGA2 Celerons.
+
+<pre>
+CXXFLAGS='-O2 -march=i686' CFLAGS='-O2 -march=i686' ./configure
+</pre>
+
+Or the even more aggressive:
+<pre>
+CXXFLAGS='-O2 -march=i686 -msse -mmmx' CFLAGS='-O2 -march=i686 -mmmx -msse' ./configure
+</pre>
+However, be warned this second version may not compile correctly and could
+cause more problems than it's worth.  On the other hand, it probably
+wouldn't hurt to at least give it a try and see if it makes a difference
+on your system.  In my particular case I see gains in the 2-4% range
+with these optimizations.
+
+<h3>Download and Compile Lame</h3>
+
+Now download Lame 3.93.1 and compile that.  It's also gnu configure based
+so you can use the same flags as we used above.  Install it.
+I'll also recommend downloading and installing your favorite
+mp3 player such as <a href="xmms.org">xmms</a> or <a
+href="http://mpg321.sourceforge.net">mpg321</a> as it will be useful
+while testing the installation.
+
+<h2>6.0 Configuring The Recording Devices</h2>
+This is probably the hardest part of getting this all running.  I found
+the easiest thing to do was set the volumes before the recording was
+going, using the <code>alsamixer</code> tool.  It's a curses based
+program that lets you adjust sliders for various audio devices and
+lets you take a trial and error approach to your particular sound card.
+The basic trick is to put the devices you are interested in capturing
+from, into capture mode.  If anyone has better information on how to
+configure this using a command line interface, please drop me a line.
+
+<p>
+If you go into the <code>alsamixer</code> interface you'll see a group of
+sliders that have values from 0 to 100.  Bars which have 6 hyphens above
+them are potential capture sources.  Because each sound card appears to
+have slightly different DACs it's not always clear which ones to activate
+to enable recording.  <p>
+
+Using a combination of trial and error and <code>ecasound</code>, I was
+able to test which devices were capable of recording.  Having a pair
+of speakers hooked up to the speaker out at this point is very useful,
+but headphones would be just as useful at this point too.  Typically you
+want line-in device.  Crank up the volume to around 70%.  If you're using
+a Video 4 Linux radio you can use the 'radio' util to tune in and turn
+on the radio device giving you a source of audio.  The Dlink radio is a
+line device, meaning it has fixed volume so how loud it sounds will be
+directly related to how loud you set the line-in volume.
+
+<P>
+If you've hooked it up correctly to the line-in of your sound card
+you should now hear some audio.  Adjust the volume until it doesn't
+sound distorted.  Distorted audio will a) sound horrible and b) make
+your mp3s sound really crappy.  Just play it by ear (sic), and get it to
+where it sounds reasonably clear and undistorted.  Remember it's FM so
+it's already lost about 5KHz of fidelity from being converted, so don't
+expect miracles.  You may need to look for sources of noise and reposition
+your antenna.  This will vary from installation to installation.
+
+<h3>Notes on Noise</h3>
+Because the source is analog, you really need to pay close attention to
+sources of electrical noise, devices such as other computers or monitors
+are electrically very noisy.  For example, I recently discovered that I
+was getting an annoying pulsing static sound from my setup.  Turns out
+the routing of the audio cable was a little too close to power cords.
+A simple re-route solved the problem, but as with a lot of audio you
+have to do regular sound checks to make sure you haven't introduced a
+new source of interference.
+
+<h2>7.0 Gluing it all together</h2>
+So now we have the basic infrastructure going, we need to do some simple
+glue scripting to make it all work together.  I wrote a couple of
+simple scripts to do the functions I needed.  The first one is to do
+the actual recording.  It's started via cron jobs.  It simply invokes
+all the programs in a big fat pipe with ecasound at the head and lame
+at the tail.  Works quite well.  The name of the file to be created and
+any pertinent parameters are passed in via Cron.  It's written in bash
+and is quite easy to understand.
+
+<h3>Recordshow2: the capture script</h3>
+<pre>
+#!/bin/bash
+echo "Recordshow2 (c)2003 Yan-Fa Li (yanfali@best.com) under GNU LGPL"
+# FREQUENCY TIMEINMINS "PROGRAM NAME"
+#set -x
+
+tune_channel()
+{
+	echo -n "Tuning to FM Channel $1..."
+
+
+	# Reset and Turn on and Tune Radio
+	$RADIO -qm 2>/dev/null && sleep 1 && $RADIO -qf $1
+}
+
+record_program()
+{
+	echo "Recording $TITLE for $1 Minutes ($TIME seconds) to:"
+	echo -e "\t$FILENAME"
+
+	# Record and Pipe to Lame
+	TITLE2=${TITLE#*/}
+	$ARECORD $APARMS | $LAME $LPARMS - "$FILENAME" \
+		--tt "$TITLE2 on $DATE" \
+		--ta "KQED/NPR" \
+		--ty `date +"%Y"` \
+		--tg 101 \
+		--tc "$COMMENT"
+
+	if [ $? -ne 0 ]
+	then
+		echo -n "Error Recording - Check the Soundcard Isn't Recording"
+		echo " Already"
+		turn_radio_off
+		exit 1
+	fi
+}
+
+fix_permissions()
+{
+	# Correct Permissions
+	if [ -f "$FILENAME" ]
+	then
+		chown $OWNER "$FILENAME"
+   		chmod 664 "$FILENAME"
+	fi
+}
+
+turn_radio_off()
+{
+	echo -n "Turning off Radio..."
+	# Turn off Radio
+	$RADIO -qm
+}
+
+
+#
+# Main Program
+#
+
+# Arg Check
+if [ $# -ne 3 ]
+then
+	echo "usage: `basename $0` FREQUENCY TIME_IN_MINS \"NAME_OF_PROGRAM\""
+	exit -1
+fi
+
+DEST=/mnt/music/radio
+declare -i TIME=$2
+TIME=TIME*60
+OWNER="yan:music"
+
+RADIO=/usr/bin/radio
+
+ARECORD=/usr/local/bin/ecasound
+APARMS="-b 512 -i alsahw,default -o:stdout -t $TIME"
+
+LAME=/usr/local/bin/lame
+LPARMS="-r -x -mj -s44.1"	# required for ecasound
+# -r raw pcm input
+# -x swap bytes
+# -mj join stereo
+# -s incoming sample rate
+
+LPARMS=$LPARMS" -V5 --vbr-new -q0 -b112 --lowpass 15 --cwlimit 10"
+# Thanks to: http://www.jthz.com/mp3/ for the settings
+# -V5 encoding speed 
+# --vbr-new
+# -q0 highest quality
+# -b112 bitrate of 112Kbps
+# --lowpass 15 filter all frequencies above 15KHz (FM cutoff)
+# --cwlimit 10 acoustic model
+
+DATE=`date +"%a %b %d %Y (%k:%M)"`
+SIMPLEDATE=`date +"%Y-%m-%d-%a"`
+
+FILENAME="$DEST/$3-$SIMPLEDATE.mp3"
+TITLE="$3"
+COMMENT="$1 MHz"
+
+echo "`basename $0`: Recording Started on "$DATE
+# Call it twice to avoid radio coming up mute
+tune_channel $1
+tune_channel $1
+
+record_program $2
+
+fix_permissions 
+
+turn_radio_off
+
+echo "`basename $0`: Recording Ended on "`date +"%a %b %e, %Y  %k:%M"`
+</pre>
+
+<h3>Example Crontab</h3>
+<pre>
+# usage: recordshow2 FREQUENCY TIME_IN_MINS "NAME_OF_PROGRAM"
+# leave a minute at the end otherwise you'll overlap the audio
+# device and fail to record
+#
+# Weekdays
+SHELL=/bin/bash
+PATH=/sbin:/bin:/usr/sbin:/usr/bin:/etc/radio
+MAILTO=root
+HOME=/
+
+# Daily
+0 9 * * Mon-Fri 	recordshow2 88.5 59 "Forum/Forum H1"
+0 10 * * Mon-Fri 	recordshow2 88.5 59 "Forum/Forum H2"
+0 11 * * Mon-Fri 	recordshow2 88.5 59 "Talk of the Nation/Talk Of The Nation H1"
+0 12 * * Mon-Fri 	recordshow2 88.5 59 "Talk of the Nation/Talk Of The Nation H2"
+0 13 * * Mon-Fri 	recordshow2 88.5 59 "Fresh Air/Fresh Air"
+0 16 * * Mon-Fri 	recordshow2 88.5 29 "Market Place/Marketplace"
+30 16 * * Mon-Fri 	recordshow2 88.5 119 "All Things Considered/All Things Considered"
+0 21 * * Mon-Fri 	recordshow2 88.5 59 "BBC World Service/BBC World Service"
+
+# Weekly Recordings
+# Thursday
+30 18 * * Thu	 	recordshow2 88.5 29 "Pacific Time/Pacific Time"
+# Saturday
+0 11 * * Sat	 	recordshow2 88.5 59 "WaitWait/Wait Wait Don't Tell Me"
+0 12 * * Sat	 	recordshow2 88.5 59 "This American Life/This American Life"
+0 18 * * Sat	 	recordshow2 88.5 119 "Prarie Home Companion/Prarie Home Companion"
+# Sunday - in case you messed up saturday
+
+# Sunday
+0 11 * * Sun	 	recordshow2 88.5 119 "Prarie Home Companion/Prarie Home Companion"
+# Maintenance
+0 1 * * Sun		weekly_file_cleanup.rb
+</pre>
+
+<h3>File Administration</h3>
+The second script is more of a util script.  Remember my requirement
+about automatically removing files after a certain time ?  What this script
+does is that it scans the date when the file was created and after a
+predetermined time, two weeks in my case, it deletes them.  I used ruby,
+because I was learning it and it actually made writing the program
+quite easy.  Go figure.  Feel free to re-write it in bash, but it really
+was much easier to write it in ruby.  See for yourself.
+<p>
+Because there are some recordings I don't ever want to delete, usually
+weekly programs, I added the ability to ignore a directory by simply
+writing the file .donotreap into the directory.  It'll bail on this
+directory if it finds it.  As a secondary safe guard it will also only
+delete mp3 files.  Everything else will be ignored.  It's not fancy but
+it works quite well.
+<pre>
+#!/usr/bin/ruby -w
+=begin
+Simple script to clean up the Timeshifted Radio Directories
+Looks for files more than two weeks old and removes them
+=end
+
+puts "Timeshifted Radio File Cleaner v0.1"
+puts "(c) 2003 Yan-Fa Li (yanfali@best.com) under GNU LGPL"
+
+Dir.chdir("/mnt/raid5/music/radio")
+TWOWEEKS = 60 * 60 * 24 * 7 * 2
+
+file_list=Dir["**"]
+
+# Find All Directories
+dir_list = []
+file_list.each { |x| dir_list << x if File.ftype(x) == "directory" }
+
+topdir = Dir.pwd
+
+# Recurse through all directories
+dir_list.each do |x|
+	Dir.chdir(topdir + "/" + x)
+
+	# Do Not Reap Flagged Directories
+	next if File.zero?(".donotreap")
+
+	puts "Entering Directory: #{x}"
+
+	# Build File List and Filter on name mp3
+	file_list=Dir["**"]
+	puts "\tFound #{file_list.length} Files Total"
+	file_list.each { |y| file_list.delete(y) if not y.include?("mp3") }
+	puts "\tFound #{file_list.length} MP3 Files"
+
+	# Find Files Older than 2 Weeks
+	del_list = []
+	file_list.each { |y|
+		del_list << y if (Time.now - File.stat(y).mtime) > TWOWEEKS }
+
+	puts "\t#{del_list.length} Files Scheduled For Deletion"
+
+	next if del_list.length == 0
+	del_list.each { |z| File.delete(z) }
+end
+</pre>
+
+<h2>8.0 Bugs and Things To Do</h2>
+One recurring problem which I have not been able to fix is that
+occasionally the recording will be skewed and sound slightly off.
+I haven't been able to figure out what's causing it.  Most of the
+time the recordings are pristine, but every so often one will be off.
+You can still listen to it, but it sounds likes it's slightly off
+frequency or tinny.  Since I'm streaming the audio straight into the
+recording software and then compressing, it could be any one of those
+elements in the chain; keeping around large wave files is not an option.
+Upgrading to the latest greatest versions has not helped.  It could also
+be the sound card itself.  It doesn't bug me enough to want to fix it,
+though I do lose some recordings that way.  If anyone out there knows
+what it might be, I'd appreciate a heads up.
+<p>
+Since it pretty much all just works, I haven't messed with it much.
+I recently used a lot of the recordings on a long road trip: iPods
+rule.  But I do have a few ideas on things that would be nice to have.
+First, it'd be great to scrape NPR program listings and get the
+details for each recording, attaching a reference file to each mp3
+or changing the id3 comment to match the program listing.
+<p>
+Second, a dedicated scheduler would also be great.  Right now if you
+have a clash in using the recording device, due to overruns, the second
+recording fails because the audio device is busy.  Having a dedicated
+scheduler that is recording centric would pretty much fix this problem.
+I know Tivo has something similar so it's obviously a known problem
+with known solutions.  Cron is the wrong solution for this, so the
+work around is of course to deliberately stop recording a minute sooner
+than necessary.  In general this works very well.
+<p>
+Third, it would be great to have a web based interface for interacting
+with the recordings, changing programs to be recorded and listening,
+say via shoutcast, to stuff that's already been recorded.  I'm far too
+lazy to write it myself, so I leave it as a challenge to all you
+out there :D
+
+<h2>9.0 Summary</h2>
+As you can see, it's a little bit of work to set up Linux to timeshift
+radio, but it's really not that difficult.  I've been using it now
+for about six months and it's a real pleasure not having to miss any
+shows that catch my attention while driving.  PBS is a great source of
+material and I strongly encourage you to support your local station.
+When combined with a portable music player like an iPod, long car rides
+become much more enjoyable.  <p>
+
+The good news about building one is that things will be getting much
+easier in the 2.6 timeframe because of the integration of Alsa sound
+system into the mainline kernel.  While the files it generates by default
+are quite large, you can reduce that footprint by choosing a lower
+encoding bitrate than my default of 112kbps.  As low as 64kbps should
+sound fine for just voice, though music will sound pretty horrible at
+this bitrate.  I haven't experimented with OGG or any other formats
+as I don't have portable players that support alternative formats, but
+changing it to support them should be a simple matter of modifying the
+backend a bit.  <p>
+
+Any <a href="mailto:yanfali@best.com">feedback</a> or comments are appreciated,
+and if you have a solution to my occasional bad recordings drop me a line.
+
+
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<P>
+<img ALIGN="LEFT" ALT="[BIO]" SRC="../gx/2002/note.png">
+<em>
+</em>
+<br CLEAR="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+
+<!-- *** BEGIN copyright *** -->
+<hr>
+<CENTER><SMALL><STRONG>
+Copyright &copy; 2003, Yan-Fa Li.
+Copying license <A HREF="../copying.html">http://www.linuxgazette.net/copying.html</A><BR> 
+Published in Issue 94 of <i>Linux Gazette</i>, September 2003
+</STRONG></SMALL></CENTER>
+<!-- *** END copyright *** -->
+<HR>
+
+<!--startcut ==========================================================-->
+<CENTER>
+<!-- *** BEGIN navbar *** -->
+<A HREF="lalji.html">&lt;&lt;&nbsp;Prev</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="index.html">TOC</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../index.html">Front Page</A>&nbsp;&nbsp;|&nbsp;&nbsp;Talkback&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../faq/index.html">FAQ</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="zhuralev.html">Next&nbsp;&gt;&gt;</A>
+<!-- *** END navbar *** -->
+</CENTER>
+</BODY></HTML>
+<!--endcut ============================================================-->

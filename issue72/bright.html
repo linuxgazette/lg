@@ -1,0 +1,603 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>PDF Service with Samba LG #72</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<CENTER>
+<A HREF="http://www.linuxgazette.net/">
+<IMG ALT="LINUX GAZETTE" SRC="../gx/lglogo.png" 
+	WIDTH="600" HEIGHT="124" border="0"></A> 
+<BR>
+
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="alcidi.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../faq/index.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="brod.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+<P>
+</CENTER>
+
+<!--endcut ============================================================-->
+
+<H4 ALIGN="center">
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H1><font color="maroon">PDF Service with Samba</font></H1>
+<H4>By <a href="mailto:jbright@winfordeng.com">John Bright</a></H4>
+</center>
+<P> <HR> <P>  
+
+<!-- END header -->
+
+
+
+
+<H2>Introduction</H2>
+PDF documents provide a great way to pass around documents on the Internet.  They have many 
+uses, such as sending quotes and invoices to business clients.  Two of the main reasons the PDF 
+format is so popular is that it preserves all of the document's formatting exactly and it is 
+easily viewable on almost all platforms.  For many computer users stuck in the Windows paradigm,
+creating PDF documents means forking over precious cash to the folks at Adobe.  However, this 
+article will show you how to use Linux, Samba, and Ghostscript to provide a PDF creation service
+to both Windows and Linux users.  Of course, all of this can be obtained for free.
+
+<p>
+First, let's take a look at the overall scheme of operation.  We will use Samba to provide a 
+&quot;pseudo-printer&quot; service (it will look like a standard printer to clients) 
+that will use Ghostscript to create a PDF document out of any Postscript printer job that is queued 
+onto it.  We will then configure the Windows machines to use this shared printer and send jobs 
+to it in Postscript form.
+
+<H2>Samba</H2>
+<a href="http://www.samba.org">Samba</a> is a great piece of software that runs on Linux/UNIX and 
+allows you to share files and printers with Windows machines.  Samba provides services that 
+are compatible with the standard &quot;Windows Networking&quot; services provided by Windows 
+95/98/NT/etc computers.  Before we get into configuring Samba for our purposes, you'll need 
+to make sure that the Samba server is installed on your Linux system.  As always, you can 
+download the Samba source from <a href="http://www.samba.org">www.samba.org</a>, but generally the easiest 
+way to install it on your system is by installing the &quot;samba&quot; package provided by 
+Debian, Red Hat, or whoever.
+
+<p>
+If this is your first time installing Samba, you will want to review/edit some of the basic
+configuration options in the smb.conf (look in /etc or /etc/samba) configuration file.  The 
+main things to watch in order to get your services up and running are the security policy 
+(security=share or security=user) and the &quot;guest account&quot; setting.  For details of 
+configuring Samba, refer to the Samba documentation at <a href="http://www.samba.org">
+www.samba.org</a> or the <a href="http://www.linuxdoc.org/HOWTO/SMB-HOWTO.html">SMB HOWTO</a>.
+A complete sample (low-security) configuration file will be shown later.
+
+<p>
+It is probably advisable to test your connection and authentication method (if any) by creating a 
+simple file share for your clients.  In any event, once your clients are able to connect to 
+your Samba server, we are ready to create the PDF &quot;pseudo-printer&quot;.  First, though,
+let's make sure we have the right utilities to actually produce the PDF documents.
+
+<H2>Ghostscript</H2>
+Ghostscript is another great application that can be used on a Linux system.  Ghostscript is 
+often used to convert Postscript into the correct raw format for a printer, but it can also 
+be used to convert between Postscript and PDF formats.  Ghostscript comes installed on many 
+distributions in order to provide printer support.  If the &quot;gs&quot; command is available 
+on your system, then Ghostscript is probably already installed.  Otherwise, you can 
+install your distribution's package (ghostscript on Red Hat, gs or gs-aladdin on Debian) or 
+download the source from 
+<a href="http://www.cs.wisc.edu/~ghost/">http://www.cs.wisc.edu/~ghost/</a> if you're 
+feeling adventurous.
+
+<p>
+The Ghostscript package includes a script called ps2pdf that makes the conversion of 
+Postscript to PDF quite easy.  Now that we have this utility available, we can begin 
+the creation of our PDF service on Samba.
+
+<H2>Bringing It Together</H2>
+First, let's review a typical bare-bones printer share in Samba (from
+the smb.conf file):
+
+<P>
+<pre>
+[hpdeskjet]
+	path = /tmp
+	printable = yes
+	writeable = no
+	create mask = 0700
+	guest ok = yes
+	printer name = lp
+</pre>
+
+<P>
+<EM>(Note the silent "e" in <CODE>writeable</CODE>.  The configuration file has
+it even though the ordinary word doesn't.  The same applies to
+<CODE>browseable</CODE> below.  Actually, Samba accepts it either way, but
+Samba's manpages use <CODE>writeable</CODE>.)</EM>
+
+<p>
+Normally, when a print job is spooled to this share, a command such as lpr is run
+to transfer the job to the Linux printing system.  Our method here is to use the 
+excellent configurability of Samba to specify an alternate printing command in place 
+of lpr.  Specifically, the configuration variable is called &quot;print command&quot;.
+The specified command is executed, and any occurrence of %f or %s in the &quot;print command&quot; 
+variable will be replaced by the name of the printer spool file that was sent in 
+by the windows client.  For example, to simply discard any print jobs, this line could
+be placed in the above printer configuration:
+<pre>
+	print command = /bin/rm %f
+</pre>
+
+This brings up another important point: whatever print command is specified must delete
+the spool files, or else they will eventually pile up and fill your disk.
+
+<h3>Print Script</h3>
+Our print script will accept one command-line argument: the name of the print spool file, 
+which is assumed to be in Postscript format. It will then convert this into the PDF document 
+and place it in an accessible location.  Clients will be able to retrieve the finished 
+product by using the file sharing services of Samba.  For example, if a directory named 
+&quot;/shr&quot; is shared by Samba, we could place finished PDF documents in 
+/shr/pdfdropbox/.  Be sure to mkdir whatever directory you choose.  
+Also, you must be sure that you give write permission to the Samba user (the nobody user
+in this example) or it will not be able to create any PDFs.  In this example, you 
+would want to:
+<pre>
+chown nobody /shr/pdfdropbox
+chmod u+rwx /shr/pdfdropbox
+</pre>
+Here is the complete, yet simple print script, called printpdf, also available 
+in <a href="misc/bright/printpdf.sh.txt">text format</a>.  On our Linux system, we'll place 
+the script at /usr/bin/printpdf
+
+<P>
+<pre>
+#!/bin/sh
+
+# Simple script to convert a specified postscript file into a PDF document
+# and place it in a location that is shared by the Samba server.
+# 
+# Arguments:
+#   1st - The name of the spool file
+#
+# John Bright, 2001, jbright@winfordeng.com
+
+# We will create the pdf into a temporary file based upon the current date and time.
+# After we are finished, we'll rename it to a file with the same date, but ending
+# in .pdf.  We do this because if a user tries to open a PDF that is still being written,
+# they will get a message that it is corrupt, when it is actually just not done yet.
+
+DATE=`date +%b%d-%H%M%S`
+
+# Directory in which to place the output
+# Be sure this directory exists and is writable by the user that Samba
+# is running as (for example, the nobody user)
+OUTDIR=/shr/pdfdropbox
+
+ps2pdf $1 $OUTDIR/$DATE.temp
+mv $OUTDIR/$DATE.temp $OUTDIR/$DATE.pdf
+rm $1
+
+</pre>
+
+<p>
+I said it was simple, right?  There's really not much to it once we have all of the tools 
+together.
+
+<h3>Finish the Samba Setup</h3>
+Now that we have seen everything that goes into the PDF service on the Linux side,
+we can finish the Samba configuration file.  Here is an example smb.conf file that 
+gets the job done.  It is a little low on security, but that keeps everything simple. 
+You can download this file from <a href="misc/bright/smb.conf.1.txt">here</a>.
+
+<P>
+<pre>
+[global]
+   guest account = nobody
+   invalid users = root
+
+   ; Tighten security just a little: only allow local access
+   interfaces = 127.0.0.1 eth0
+   bind interfaces only = Yes
+   ; This assumes you are on a local network with 192.168.x.x IP addresses
+   hosts allow = 192.168.
+   
+   ; Share-level security is generally easier, although not as secure
+   security=share
+   
+   workgroup=WORKGROUP
+
+; Set up a public share, this will be used to retrieve PDFs
+; The name of the share will be seen as "shr" by Windows users
+[shr]
+   path = /shr
+   browseable = yes
+   writeable = yes
+   guest ok = yes
+   force user = nobody
+
+; Set up our PDF-creation print service
+[pdf]
+   path = /tmp
+   printable = yes
+   guest ok = yes
+   print command = /usr/bin/printpdf %s
+   
+   ; There is no need to support listing or removing print jobs,
+   ; since the server begins to process them as soon as they arrive.
+   ; So, we set the lpq (list queued jobs) and lprm (remove jobs in queue)
+   ; commands to be empty.
+   lpq command =
+   lprm command =
+</pre>
+
+<P>
+Of course, you will need to start/restart Samba after you have created/edited the smb.conf
+configuration file to your liking.
+
+<p>
+<h2>Setting Up a Windows Client</h2>
+You should now be able to go ahead and install the shared PDF 
+printer as a network printer on your Windows client machine.
+To do this, find the printer share under Network Neighborhood, 
+right-click, and select Install.  During installation, you will 
+be asked to pick a printer driver.  Just select some Postscript printer 
+driver, for example, the HP LaserJet 5P/5MP PostScript.
+
+<p>
+To briefly explain how this is fitting together, the PDF service on your Linux 
+machine is expecting to receive input in Postscript format.  Since our printpdf script 
+receives the print job exactly as it was sent by the Windows client, this means we need to 
+have the Windows clients send print jobs in Postscript form.  As described above, this 
+is done by selecting a driver for any Postscript printer on the Windows client when 
+the PDF network printer is installed.   I generally select some variety of 
+HP Laserjet PS printer from Windows' printer driver list 
+(such as the HP LaserJet 5P/5MP PostScript, as noted above) although it 
+doesn't matter a whole lot because all of the Microsoft-supplied 
+Postscript drivers use the same core driver to 
+generate the Postscript.
+
+<p>
+Once you have the PDF network printer installed on your Windows machine, 
+simply print anything from any program to your new network printer, 
+and you should have a PDF document waiting for 
+you shortly.
+
+<p>
+<h3>Streamlining</h3>
+If you have an office full of non-computer-savvy folks, it would probably be more trouble 
+than it's worth to try to have them go through the installation process and select an 
+appropriate printer driver.  If you have ever installed a network printer from another Windows 
+machine, you have probably noticed how the printer driver is automagically copied to your 
+machine so that you are never even prompted for a driver.  We can do the same thing with Samba. 
+First, you should set up a file share on your Linux machine named &quot;printer$&quot; (without the 
+quotes).  We'll make the path for the printer$ share be /etc/samba/printdrivers/ (you'll have to 
+mkdir the directory).  The clients will simply use this share to obtain the printer driver files during 
+installation.
+
+<p>
+Now we need to find out which driver files must be copied into the printer$ share directory. 
+We also need to give Samba a printer definition so it can tell the client which driver files 
+it needs.  It turns out all this is taken care of in one step thanks to a Samba utility called 
+make_printerdef.  This utility requires you to have the Windows INF file that defines your 
+printer and know the full title, such as &quot;HP LaserJet 5P/5MP PostScript&quot;.  You will 
+need to find which INF file your printer is defined in.  For example, this LaserJet is defined 
+in C:\WINDOWS\INF\MSPRINT3.INF.  Note that C:\WINDOWS\INF is a hidden directory.
+Copy this file onto your Linux machine and use the 
+make_printerdef utility to create a local printer definition file that Samba will read. 
+For example:
+
+<p>
+<pre>
+make_printerdef MSPRINT3.INF "HP LaserJet 5P/5MP PostScript" &gt;&gt; /etc/samba/printers.def
+</pre>
+
+<p>
+Here we redirected standard output to the printers.def file to create the printer 
+configuration.  The make_printerdef program also outputs some explanation on standard
+error which you will see.  It should tell you which driver files you need.  You can 
+find these in C:\WINDOWS\SYSTEM or C:\WINDOWS and you should copy them into the path 
+of your printer$ share on the Linux machine (in our case, /etc/samba/printerdrivers/).  
+The printers.def file that we have 
+created (or appended to) here does not need to be shared to the Windows machines, 
+it is only read by Samba.  Now we just have to tell Samba about the printers.def file 
+and our driver files.  This is done with the &quot;printer driver file&quot; setting 
+in the global section and the &quot;printer driver&quot; and &quot;printer driver 
+location&quot; settings in each printer section of smb.conf.  The following revised 
+smb.conf file shows how these settings are used, and also shows an example of a 
+printer$ share. You can download this configuration file from 
+<a href="misc/bright/smb.conf.2.txt">here</a>.
+
+<p>
+<pre>
+[global]
+   guest account = nobody
+   invalid users = root
+
+   ; Tighten security just a little: only allow local access
+   interfaces = 127.0.0.1 eth0
+   bind interfaces only = Yes
+   ; This assumes you are on a local network with 192.168.x.x IP addresses
+   hosts allow = 192.168.
+   
+   ; Share-level security is generally easier, although not as secure
+   security=share
+   
+   workgroup=WORKGROUP
+
+   printer driver file = /etc/samba/printers.def
+   
+; Set up a public share, this will be used to retrieve PDFs
+; The name of the share will be seen as "shr" by Windows users
+[shr]
+   path = /shr
+   browseable = yes
+   writeable = yes
+   guest ok = yes
+   force user = nobody
+
+; Set up our PDF-creation print service
+[pdf]
+   path = /tmp
+   printable = yes
+   guest ok = yes
+   print command = /usr/bin/printpdf %s
+   
+   ; There is no need to support listing or removing print jobs,
+   ; since the server begins to process them as soon as they arrive.
+   ; So, we set the lpq (list queued jobs) and lprm (remove jobs in queue)
+   ; commands to be empty.
+   lpq command =
+   lprm command =
+   
+   ; We already defined the printer driver definition file above.
+   ; Here we need to specify the entry in that file that should be used
+   ; for this printer.
+   printer driver = HP LaserJet 5P/5MP PostScript
+   printer driver location = \\%h\printer$
+
+; File share to allow clients to download printer drivers
+[printer$]
+   path = /etc/samba/printdrivers
+   guest ok = yes
+   read only = yes
+   
+</pre>
+
+<p>
+<h2>Setting Up a Linux Client</h2>
+This section isn't necessary for providing a PDF service to Windows clients.  This section 
+describes the procedure for using the PDF service from Linux clients. 
+The service probably isn't quite as useful 
+for the Linux clients, since they can more easily install all the necessary tools on their 
+own machines, but it still 
+might be useful to have a centralized PDF creation service.  (Side note: Ghostscript is 
+available for the Windows platform, but most users would probably find it quite difficult 
+compared to the printer service-based technique described here.)  Also, the technique used to 
+print to the PDF service can be used to print to any other printer service shared by Samba 
+or Windows, so it is good information to cover.
+
+<p>
+There are numerous ways that you can print to a Windows printer share from Linux.  Probably the 
+best is to list the smbprint script (which uses smbclient) as a filter in an /etc/printcap entry.  
+When this method is used, a Windows shared printer can be used with the standard lpr command 
+that Linux users and applications are accustomed to.  You will need to make sure you have both 
+the smbprint and smbclient programs on your computer.  The smbclient program is in the 
+&quot;smbclient&quot; package on Debian systems and the &quot;samba-client&quot; package on 
+Red Hat systems.  On Red Hat, the smbprint script is included with the 
+&quot;samba-client&quot; package.  On Debian, it is included with the &quot;samba-doc&quot; 
+package as well as a different version in the &quot;printfilters-ppd&quot;
+package and &quot;lprngtool&quot;.  There are so many different versions floating around that 
+I thought it best to include a copy here.  You can download it from <a href="misc/bright/smbprint.sh.txt">
+here</a>.  In any event, I'll assume that you have a working smbprint at /usr/bin/smbprint and 
+that it is executable (chmod +x /usr/bin/smbprint).  Here is the smbprint script:
+
+<p>
+<pre>
+#!/bin/sh
+# This script is an input filter for printcap printing on a UNIX machine. It
+# uses the smbclient program to print the file to the specified smb-based 
+# server and service.
+# For example you could have a printcap entry like this
+#
+# smb:lp=/dev/null:sd=/usr/spool/smb:sh:if=/usr/local/samba/smbprint
+#
+# which would create a UNIX printer called "smb" that will print via this 
+# script. You will need to create the spool directory /usr/spool/smb with
+# appropriate permissions and ownerships for your system.
+
+# Set these to the server and service you wish to print to 
+# In this example I have a Windows for Workgroups PC called "lapland" that has
+# a printer exported called "printer" with no password.
+
+#
+# Script further altered by hamiltom@ecnz.co.nz (Michael Hamilton)
+# so that the server, service, and password can be read from 
+# a /usr/var/spool/lpd/PRINTNAME/.config file.
+#
+# In order for this to work the /etc/printcap entry must include an 
+# accounting file (af=...):
+#
+#   cdcolour:\
+#	:cm=CD IBM Colorjet on 6th:\
+#	:sd=/var/spool/lpd/cdcolour:\
+#	:af=/var/spool/lpd/cdcolour/acct:\
+#	:if=/usr/local/etc/smbprint:\
+#	:mx=0:\
+#	:lp=/dev/null:
+#
+# The /usr/var/spool/lpd/PRINTNAME/.config file should contain:
+#   share=PC_SERVER
+#   user="user"
+#   password="password"
+#
+# Please, do not modify the order in the file.
+# Example:
+#   share=\\server\deskjet
+#   user="fred"
+#   password=""
+
+#
+# The last parameter to the filter is the accounting file name.
+#   Extract the directory name from the file name.
+#   Concatenate this with /.config to get the config file.
+#
+eval acct_file=\$$#
+spool_dir=`dirname $acct_file` 
+config_file=$spool_dir/.config
+
+# Should read the following variables set in the config file:
+#   share
+#   hostip
+#   user
+#   password
+
+eval `cat $config_file`
+
+share=`echo $share | sed "s/[\]/\//g"`
+
+if [ "$user" != "" ]; then
+   usercmd="-U"
+else
+   usercmd=""
+fi
+
+if [ "$workgroup" != "" ]; then
+   workgroupcmd="-W"
+else
+   workgroupcmd=""
+fi
+
+if [ "$translate" = "yes" ]; then
+ command="translate ; print -"
+else
+ command="print -"
+fi
+#echo $share $password $translate $x_command &gt; /tmp/smbprint.log
+
+cat | /usr/bin/smbclient "$share" "$password" -E ${hostip:+-I} \
+     $hostip -N -P $usercmd "$user" $workgroupcmd "$workgroup" \
+     -c "$command" 2&gt;/dev/null
+
+</pre>
+
+<p>
+The next step is to add a new /etc/printcap entry and list the smbprint script as a filter.  
+Here is an example printcap entry (or complete file), also available as a 
+<A HREF="misc/bright/printcap.txt">text file</A>:
+
+<p>
+<pre>
+# PDF Service entry
+
+lp|pdf|PDF Printer:\
+        :lp=/dev/null:sh:\
+        :sd=/var/spool/lpd/pdf:\
+        :af=/var/spool/lpd/pdf/acct:\
+        :mx#0:sh:\
+        :if=/usr/bin/smbprint:
+
+</pre>
+
+<p>
+You will need to create the spool directory /var/spool/lpd/pdf/ 
+(or if you have LPRng, run checkpc -f).  Be sure to keep the accounting file line in the 
+printcap entry, and be sure the accounting file is located in the same directory as your 
+.config file, as this is how the smbprint script finds the .config file. 
+Also, it is standard procedure to have the system's default 
+printer named &quot;lp&quot; as shown above.  If you already have a /etc/printcap file and 
+would like to retain your existing default printer, you should remove the leading 
+&quot;lp|&quot; from the entry shown above.  Next, 
+you need to create a configuration file named &quot;.config&quot;.  You should create this 
+at /var/spool/lpd/pdf/.config  .  The .config file defines which server the print job 
+should be sent to. Here is an example:
+
+<p>
+<pre>
+share=//yourserver/pdf
+user=""
+password=""
+</pre>
+
+<p>
+Here, yourserver should be replaced by the name of the computer providing the PDF service.  
+If you have any trouble with this, 
+make sure that the smbprint script has permission to read 
+the .config file, or you may be scratching your head for a while.  Probably the safest way, 
+at least at first, is to give read permission to all, for example: chmod a+r /var/spool/lpd/pdf/.config
+
+<p>
+Finally, to print to the PDF service from Linux, invoke the command:
+<pre>
+lpr -Ppdf file_to_print.ps
+</pre>
+
+on a Postscript file.  This can also be used from within most applications.  For example, 
+listing &quot;lpr -Ppdf&quot; as the print command in Netscape will allow you to create a 
+PDF document from a web page.
+
+<h2>Viewing PDF Documents</h2>
+The final topic to be covered deals with how to view PDF documents. 
+Everybody knows the standard on Windows is Adobe Acrobat Reader, but there 
+are many more options on Linux.  Unfortunately, none of the current options on Linux seem to be quite 
+as dependable as Reader on Windows, but they are still very workable.  The main options are:
+<ul>
+  <li>acroread - Adobe has a nice version of Acrobat Reader for Linux</li>
+  <li>gv - Viewer that uses ghostscript to interpret the PDF</li>
+  <li>gnome-gv - Also uses ghostscript, but has a nicer user interface</li>
+  <li>xpdf - A nice lean PDF viewer, but not a fancy interface</li>
+</ul>
+
+<p>
+In my opinion, gnome-gv has the nicest user interface.  It is based on GTK+, so things 
+like the mouse scroll wheel work without any special consideration.  Unfortunately, it will 
+fail to read some PDF documents and display a nasty-looking error from ghostscript.  From 
+my experience, acroread is very good about being able to interpret documents.  In the past 
+I have had some trouble with it crashing, but I think it has gotten better since then.  
+I have rarely used gv, but I imagine it has the same problem as gnome-gv since they are 
+both based on ghostscript.  Finally, xpdf is a very stable PDF reader.  
+I don't recall every having it crash, and it usually has no problem interpreting documents.
+Still, there is an occasional problem, and the displayed quality of the document often 
+isn't quite up to par.  It doesn't have a full feature list, but it is a good viewer 
+to keep around.  All this may sound scary, but be assured that on average, PDF viewing on 
+Linux is not a problem.
+
+<p>
+<I>Have fun and good luck!</I>
+
+
+
+
+<!-- *** BEGIN bio *** -->
+<SPACER TYPE="vertical" SIZE="30">
+<P> 
+<H4><IMG ALIGN=BOTTOM ALT="" SRC="../gx/note.gif">John Bright</H4>
+<EM>John Bright is a partner in
+<a href="http://www.winfordeng.com">Winford Engineering</a>
+and flawlessly performs his assigned programming and Linux
+administration duties :).  He also administers several Linux/UNIX
+computers at a local university and always has several
+Linux-related projects to keep him busy.</EM>
+
+<!-- *** END bio *** -->
+
+<!-- *** BEGIN copyright *** -->
+<P> <hr> <!-- P --> 
+<H5 ALIGN=center>
+
+Copyright &copy; 2001, John Bright.<BR>
+Copying license <A HREF="../copying.html">http://www.linuxgazette.net/copying.html</A><BR> 
+Published in Issue 72 of <i>Linux Gazette</i>, November 2001</H5>
+<!-- *** END copyright *** -->
+
+<!--startcut ==========================================================-->
+<HR><P>
+<CENTER>
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="alcidi.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../faq/index.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="brod.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+</CENTER>
+</BODY></HTML>
+<!--endcut ============================================================-->

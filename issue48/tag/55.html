@@ -1,0 +1,324 @@
+<!--startcut ======================================================= -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<html>
+<head>
+<META NAME="generator" CONTENT="lgazmail v1.3A.e">
+<TITLE>The Answer Guy 48: "telnetd connected:" But No "login" Prompt</TITLE>
+</HEAD><BODY BGCOLOR="#FFFFFF" TEXT="#000000"
+	LINK="#3366FF" VLINK="#A000A0">
+<!-- ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::: -->
+<H4>"The Linux Gazette...<I>making Linux just a little more fun!</I>"</H4>
+<P> <hr> <P>
+<!-- ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::: -->
+<center>
+<H1><A NAME="answer">
+	<img src="../../gx/dennis/qbubble.gif" alt="(?)" 
+		border="0" align="middle">
+	<font color="#B03060">The Answer Guy</font>
+	<img src="../../gx/dennis/bbubble.gif" alt="(!)" 
+		border="0" align="middle">
+</A></H1> 
+<BR>
+<H4>By James T. Dennis,
+	<a href="mailto:tag@lists.linuxgazette.net">tag@lists.linuxgazette.net</a><BR>
+	LinuxCare,
+	<A HREF="http://www.linuxcare.com/">http://www.linuxcare.com/</A> 
+</H4>
+</center>
+
+<p><hr><p>
+<!--  endcut ======================================================= -->
+<!-- begin 55 -->
+<H3 align="left"><img src="../../gx/dennis/qbubble.gif" 
+	height="50" width="60" alt="(?) " border="0"
+	>"telnetd connected:" But No "login" Prompt</H3>
+
+
+<p><strong>From cbgyeh on Mon, 11 Oct 1999  
+</strong></p>
+<!-- ::
+"telnetd connected:" But No "login" Prompt
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+:: -->
+<P><STRONG>
+Hi,
+</STRONG></P>
+<P><STRONG>
+I appreciate that if you can help me the problem related to telnet
+running RedHat 6.0.
+</STRONG></P>
+<P><STRONG>
+I recently configured RedHat 6.0.  When I telnet to the server, I see
+the banner message.  There is no login prompt.  The <TT>/var/log/secure</TT>
+indicates telnetd connected from xxx.xxx.xxx.xxx.  When I test the loop
+back i.e. 127.0.0.1, the telnetd works correctly.  Ping and ftp work
+well.  FTP has no delay at all.
+</STRONG></P>
+<P><STRONG>
+I did not install any patches yet.
+Ching
+</STRONG></P>
+<BLOCKQUOTE><IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	>
+It sounds like a TCP Wrappers problem.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+Linux systems normally have TCP Wrappers (tcpd)
+preconfigured to provide selective access control to
+all 'inetd' launched services.  You'll see this if you
+look in your <TT>/etc/inetd.conf.</TT>  Thus 'inetd' is configured
+to listen to the telnet service port (23, as listed in
+<TT>/etc/services</TT>).  'inetd' find 'tcpd' and runs that.  Thus
+'inetd' won't complain about a "program not found."
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+TCP Wrappers will log the connection attempt (under the service
+name).  Then it will do a double-reverse lookup (taking
+the source IP address of the connection, getting a purported
+host/domain name, then doing a a forward lookup of that to
+scan for the original source IP address).  If those values
+are inconsistent it may just drop the connection or it
+may continue as normal.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+TCP Wrapper will then check the <TT>/etc/hosts.allow</TT> and the
+<TT>/etc/hosts.deny</TT> files.  It will look for a line that
+applies to this service (in.telnetd) followed by a list
+of allowed (or denied) IP address or host/domain name
+patterns.  The syntax of these files is described in
+the hosts_access man pages.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+I've described TCP Wrappers and this double reverse lookup
+before.  If you're reverse DNS zones aren't properly
+configured you may seen very log delays on connections at
+this point (several minutes).  You're test from localhost
+succeeds because you have localhost (127.0.0.1) listed in
+your <TT>/etc/hosts</TT> file so the forward and reverse records will
+always be correct so long as the 'files' entry in your
+<TT>/etc/nsswitch.conf</TT> (<TT>/etc/hosts.conf</TT> for older libc5
+packages) is properly maintained.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+Usually your FTP daemon would also be protected this way.
+However, new Linux distributions sometimes are using
+ProFTPd which is often run "standalone" (not through the
+inetd dispatcher).  ProFTPd has optional service access
+controls of it's own (and might not be configured to do
+this "double-reverse lookup").
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+So, try adding the appropriate IP addresses and names to
+your <TT>/etc/hosts</TT> file or get your hostmaster to get your
+reverse zone maps configured properly.  If that doesn't
+work trying using strace.  To do that replace the in.telnetd
+line in your <TT>/etc/inetd.conf</TT> file with something like:
+</BLOCKQUOTE>
+
+<blockquote><pre>telnet		stream	tcp	nowait	telnetd.telnetd	/usr/sbin/tcpd	/root/bin/trace.telnetd
+</pre></blockquote>
+<BLOCKQUOTE>
+... (all on one line, of course --- the  backslash is just
+to note that this is a "continued" line in my e-mail ---
+DON'T put that in the inetd.conf file).
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+"<TT>/root/bin/trace.telnetd</TT>" is a shell script that
+looks like:
+</BLOCKQUOTE>
+
+<blockquote><pre>#!/bin/sh
+exec strace -o root/tmp/telnetd.trace /usr/sbin/in.telnetd
+</pre></blockquote>
+<BLOCKQUOTE>
+... that can give you a system call trace of what the telnet
+daemon is doing after its launched.  Of course you have to
+signal your inetd to re-read it's configuration file using
+a command like:
+</BLOCKQUOTE>
+<BLOCKQUOTE><BLOCKQUOTE><CODE><BlockQuote>
+kill -HUP $(cat <TT>/var/run/inetd.pid</TT>)
+</BlockQuote></CODE></BLOCKQUOTE></BLOCKQUOTE>
+<BLOCKQUOTE>
+... in order for this change to take effect.  (It would also
+take effect after a reboot, of course).
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+NOTE: I don't recommend that you run with this strace
+script during normal production use.  It could be insecure
+and it's likely to be a bad idea in any event.  However,
+it's useful for capturing some low level diagnostic data.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+Reading strace output is challenging.  However, you can
+usually get by okay by simply looking for failed<TT> open()</TT>,
+<TT>stat()</TT>, and<TT> lstat()</TT> calls.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+If that line doesn't work (you don't get any telnet.trace
+output) try:
+</BLOCKQUOTE>
+
+<blockquote><pre>telnet		stream	tcp	nowait	telnetd.telnetd		/root/bin/trace.telnetd		telnetd
+</pre></blockquote>
+<BLOCKQUOTE>
+... (all on one line, as before).  In this case we are
+eliminating tcpd from the picture.  The confusing part
+about the inetd.conf file syntax is that you seem to repeat
+the name of the program your running twice on each service
+line.  The first reference is the program that will be run,
+the next is the name under which it will appear in a 'ps'
+(process status) listing and anything else on the line will
+be passed as command line arguments to the daemon.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+This ability to separately supply an executable patch/name
+and a full argument list, including "arg(0)" --- the
+'ps' name --- is normal for UNIX and Linux, it's just not
+something you'd see from using the command shell.  That and
+'init' always start programs using the same value for
+both the executable path and the arg(0).
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+I doubt you'll have to go to that level of debugging for
+this.  I'm just describing the technique (again) for
+other readers and in case you do need it.
+</BLOCKQUOTE>
+
+<!-- sig -->
+
+
+<!-- end 55 -->
+
+<p><hr width="40%"><p>
+
+<!-- begin 55 -->
+<H3 align="left"><img src="../../gx/dennis/qbubble.gif" 
+	height="50" width="60" alt="(?) " border="0"
+	>Ying at New York: Re: RedHat 6.0:Telnet has no login prompt</H3>
+
+
+<p><strong>From chgyeh on Fri, 15 Oct 1999  
+</strong></p>
+<BLOCKQUOTE>
+Jim,
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+Thank you so much for showing me strace command.  I was able to look at
+the trace file and determined my nsswitch was not correct.  It was
+hanging at the nis+ which I did not configure to use.  Again, thank you
+for your help.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+Ching
+</BLOCKQUOTE>
+
+<!-- end 55 -->
+<!--startcut ======================================================= -->
+<P> <hr> <P>
+<H5 align="center"><a href="http://www.linuxgazette.net/copying.html"
+	>Copyright &copy;</a> 1999, James T. Dennis 
+<BR>Published in <I>The Linux Gazette</I> Issue 48 December 1999</H5>
+<H6 ALIGN="center">HTML transformation  by
+	<A HREF="mailto:star@starshine.org">Heather Stern</a> of
+	Starshine Technical Services,
+	<A HREF="http://www.starshine.org/">http://www.starshine.org/</A> 
+</H6>
+<P> <hr> <P>
+<!-- begin tagnav ::::::::::::::::::::::::::::::::::::::::::::::::::-->
+<TABLE WIDTH="95%"><TR VALIGN="center" ALIGN="center">
+<TD colspan="2" rowspan="2"><A 
+	HREF="../lg_answer48.html"
+	><IMG SRC="../../gx/dennis/answernew.gif"
+              ALT="[ Answer Guy Current Index ]"></A>
+<TD colspan="2" rowspan="2"><A 
+	HREF="../../tag/kb.html"
+	><IMG SRC="../../gx/dennis/answertoc.gif"
+              ALT="[ Index of Past Answers ]"></A></td>
+  <TD WIDTH="11%"><A HREF="../lg_answer48.html#greeting"><img
+	src="../../gx/dennis/smily.gif" alt="greetings" border="0"></A></TD>
+  <TD WIDTH="11%"><A HREF="1.html">1</A></TD>
+  <TD WIDTH="11%"><A HREF="2.html">2</A></TD>
+  <TD WIDTH="11%"><A HREF="3.html">3</A></TD>
+  <TD WIDTH="11%"><A HREF="4.html">5</A></TD>
+</TR><TR VALIGN="center" ALIGN="center">
+  <TD WIDTH="11%"><A HREF="5.html">5</A></TD>
+  <TD WIDTH="11%"><A HREF="6.html">6</A></TD>
+  <TD WIDTH="11%"><A HREF="7.html">7</A></TD>
+  <TD WIDTH="11%"><A HREF="8.html">8</A></TD>
+  <TD WIDTH="11%"><A HREF="9.html">9</A></TD>
+</TR><TR VALIGN="center" ALIGN="center">
+  <TD WIDTH="10%"><A HREF="10.html">10</A></TD>
+  <TD WIDTH="10%"><A HREF="11.html">11</A></TD>
+  <TD WIDTH="10%"><A HREF="12.html">12</A></TD>
+  <TD WIDTH="10%"><A HREF="13.html">13</A></TD>
+  <TD WIDTH="11%"><A HREF="14.html">14</A></TD>
+  <TD WIDTH="11%"><A HREF="15.html">15</A></TD>
+  <TD WIDTH="11%"><A HREF="16.html">16</A></TD>
+  <TD WIDTH="11%"><A HREF="17.html">17</A></TD>
+  <TD WIDTH="11%"><A HREF="18.html">18</A></TD>
+</TR><TR VALIGN="center" ALIGN="center">
+  <TD WIDTH="10%"><A HREF="19.html">19</A></TD>
+  <TD WIDTH="10%"><A HREF="20.html">20</A></TD>
+  <TD WIDTH="10%"><A HREF="21.html">21</A></TD>
+  <TD WIDTH="10%"><A HREF="22.html">22</A></TD>
+  <TD WIDTH="11%"><A HREF="23.html">23</A></TD>
+  <TD WIDTH="11%"><A HREF="24.html">24</A></TD>
+  <TD WIDTH="11%"><A HREF="25.html">25</A></TD>
+  <TD WIDTH="11%"><A HREF="26.html">26</A></TD>
+  <TD WIDTH="11%"><A HREF="27.html">27</A></TD>
+</TR><TR VALIGN="center" ALIGN="center">
+  <TD WIDTH="10%"><A HREF="28.html">28</A></TD>
+  <TD WIDTH="10%"><A HREF="29.html">29</A></TD>
+  <TD WIDTH="10%"><A HREF="30.html">30</A></TD>
+  <TD WIDTH="10%"><A HREF="31.html">31</A></TD>
+  <TD WIDTH="11%"><A HREF="32.html">32</A></TD>
+  <TD WIDTH="11%"><A HREF="33.html">33</A></TD>
+  <TD WIDTH="11%"><A HREF="34.html">34</A></TD>
+  <TD WIDTH="11%"><A HREF="35.html">35</A></TD>
+  <TD WIDTH="11%"><A HREF="36.html">36</A></TD>
+</TR><TR VALIGN="center" ALIGN="center">
+  <TD WIDTH="10%"><A HREF="37.html">37</A></TD>
+  <TD WIDTH="10%"><A HREF="38.html">38</A></TD>
+  <TD WIDTH="10%"><A HREF="39.html">39</A></TD>
+  <TD WIDTH="10%"><A HREF="40.html">40</A></TD>
+  <TD WIDTH="11%"><A HREF="41.html">41</A></TD>
+  <TD WIDTH="11%"><A HREF="42.html">42</A></TD>
+  <TD WIDTH="11%"><A HREF="43.html">43</A></TD>
+  <TD WIDTH="11%"><A HREF="44.html">44</A></TD>
+  <TD WIDTH="11%"><A HREF="45.html">45</A></TD>
+</TR><TR VALIGN="center" ALIGN="center">
+  <TD WIDTH="10%"><A HREF="46.html">46</A></TD>
+  <TD WIDTH="10%"><A HREF="47.html">47</A></TD>
+  <TD WIDTH="10%"><A HREF="48.html">48</A></TD>
+  <TD WIDTH="10%"><A HREF="49.html">49</A></TD>
+  <TD WIDTH="11%"><A HREF="50.html">50</A></TD>
+  <TD WIDTH="11%"><A HREF="51.html">51</A></TD>
+  <TD WIDTH="11%"><A HREF="52.html">52</A></TD>
+  <TD WIDTH="11%"><A HREF="53.html">53</A></TD>
+  <TD WIDTH="11%"><A HREF="54.html">54</A></TD>
+</TR><TR VALIGN="center" ALIGN="center">
+  <TD colspan="3"><A HREF="55.html">55</A></TD>
+  <TD colspan="3"><A HREF="56.html">56</A></TD>
+  <TD colspan="3"><A HREF="57.html">57</A></TD>
+</TR></TABLE>
+</TR><TR VALIGN="center" ALIGN="center">
+<!-- end tagnav ::::::::::::::::::::::::::::::::::::::::::::::::::::-->
+<P> <hr> <P>
+<!-- begin lgnav ::::::::::::::::::::::::::::::::::::::::::::::::::: -->
+<A HREF="../index.html"
+	><IMG SRC="../../gx/indexnew.gif" ALT="[ Table Of Contents ]"></A>
+<A HREF="../../index.html"
+	><IMG SRC="../../gx/homenew.gif" ALT="[ Front Page ]"></A>
+<A HREF="../lg_bytes48.html"
+	><IMG SRC="../../gx/back2.gif" ALT="[ Previous Section ]"></A>
+<A HREF="../../faq/index.html"
+	><IMG SRC="../../gx/dennis/faq.gif"
+              ALT="[ Linux Gazette FAQ ]"></A>
+<A HREF="../lg_tips48.html"
+	><IMG SRC="../../gx/fwd.gif" ALT="[ Next Section ]"></A>
+<!-- end lgnav ::::::::::::::::::::::::::::::::::::::::::::::::::::: -->
+<!-- ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::: -->
+</BODY></HTML>
+<!--endcut ========================================================= -->

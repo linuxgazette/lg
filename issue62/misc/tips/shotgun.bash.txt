@@ -1,0 +1,146 @@
+#!/bin/bash
+#
+# Requires bash, basename, cat, find, grep, insmod/lsmod, strings
+
+
+[ -z "$1" ] &amp;&amp; {
+  cat &lt;&lt; @END@
+* 'shotgun' - a parameter guessing routine for module loading *
+*** Copyright Ben Okopnik 2000 - released under the GNU GPL ***
+Syntax: `basename $0` module_name
+@END@
+  exit
+}
+
+# Parameter value lists - make sure the 'iolist' makes sense for your
+# hardware!
+#
+# Note that '0' is not an actual value - it tells the module to try
+# a default value. This usually works, but is not the best thing.
+
+irqlist="3 4 5 6 7 8 9 10 11 12 13 14 15 0"
+dmalist="1 2 3 4 5 6 7 0"
+iolist="200 210 220 230 240 250 260 270 280 290 2a0 2b0 2c0 2d0 2e0 2f0 300 310 320 330 340 350 360 370 380 390 3a0 3b0 3c0 3d0 3e0 3f0"
+
+# Clipping the ".o" for uniform syntax
+module=${1#\.o}
+
+fname=$(find /lib/modules -name ${module}.o)
+[ -z "$fname" ] &amp;&amp; {
+  echo "No module called \"$module\" exists under /lib/modules."
+  exit
+}
+
+
+clear
+warn
+
+parms="$(strings -a $fname|grep ^parm)"
+for p in $parms
+do
+  par=${p#parm_}
+  echo ${par%=*}
+done
+
+[ -z $par ] &amp;&amp; {
+  echo "This module does not require any parameters. Loading..."
+  insmod $module &amp;&amp; echo -e "\n$module loaded.\n"
+  exit 1
+} || {
+  echo -e "\nPress a key to start the test process or 'Ctrl-C' to quit."
+}
+
+read
+
+echo -e "This might take a while...\n"
+echo -n "Running"
+for irq in $irqlist
+do
+  for dma in $dmalist
+  do
+    for io in $iolist
+    do
+    echo -n "."
+    result="$(insmod $module irq=$irq dma=$dma io=0x$io 2&gt;/dev/null)"
+    invalid=$(echo "$result"|grep -c invalid)
+    unresolved=$(echo "$result"|grep -c unresolved)
+    if [ $(($invalid+$unresolved)) -eq 0 ]
+    then
+      out=$(lsmod|grep ^$module)
+      echo
+      echo
+      if [ -z "$out" ]
+      then
+        badnews
+      else
+        echo "If the module loaded successfully, you should see"
+        echo "its name on the following line:"
+        echo ${out% *}
+        echo
+        echo "The parameter values were: irq=$irq dma=$dma io=0x$io"
+        echo
+        exit
+      fi
+    fi
+    done
+  done
+done
+
+function badnews()
+{
+clear
+cat &lt;&lt; @END@
+Oops. It didn't load. OK, try typing "insmod $module" and see what it
+says - if you get a whole bunch of 'unresolved symbol' messages, that
+means there's another module that needs to be loaded before this one;
+take a look in "/lib/modules/&lt;version&gt;/modules.dep" to find out what
+that might be. Other than that, here are a few things to try:
+
+
+1) Modify the values in the parameter lists at the beginning of this
+script: the IRQ and the DMA ranges are probably OK, but the IOs can vary
+widely - make sure they make some kind of sense for your module. This
+might mean looking at the paperwork that came with your hardware or
+starting up Windows to see what I/O address it's been assigned there.
+
+2) Load the values manually. The module you're trying to load may
+require more than just IRQ, DMA, and IO - the parameter list at the
+start of this program will show you all the possibilities.
+
+3) Do some more research on what the appropriate value ranges for your
+module might be. Search the Web for your hardware name plus "linux" - I've
+usually had good success with Google and AltaVista's "advanced" search.
+
+4) Often, reading the appropriate part of the kernel source - even if
+you are not a programmer - can be very helpful. As a good example,
+reading the source for the SoundBlaster/ESS module - 'sb_ess.c' in the
+'/usr/src/kernel-source-&lt;version&gt;/drivers/sound/' directory - enabled me
+to get my WAV files to play at normal speed, by using the "esstype=1688"
+parameter; it was explained in the comments near the top of the file.
+The source files tend to be about half code and half comments: the good
+folks that write them *want* you to understand.
+
+Good luck!
+@END@
+  exit
+}
+
+
+function warn()
+{
+cat &lt;&lt; @END@
+NOTE: The following is a list of parameters your module can accept; usually,
+most of these are not required. Most often, 'irq', 'io', and 'dma' are all
+that are necessary; this script will try to load your module with various
+values of those parameters.
+
+If after pressing a key you do not see all three of these - 'irq', 'dma',
+_and_ 'io' - on the list, you should probably quit the script by pressing
+'Control-C', as the module will almost certainly fail to load despite the
+lack of error messages. If the module takes <EM>no</EM> parameters, the script
+will notify you of that and load it properly.
+
+* Press 'Enter' to see the parameter list *
+@END@
+  read
+}

@@ -1,0 +1,120 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML>
+<HEAD>
+<title>Thoughts on Multi-threading Issue 15</title>
+</HEAD>
+<BODY >
+
+<H4>
+&quot;Linux Gazette...<I>making Linux just a little more fun!</I>&quot;
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H2>Thoughts on Multi-threading</H2>
+<H4>By Andrew L. Sandoval,
+<a href="mailto:sandoval@perigee.net">sandoval@perigee.net</a></H4>
+</center>
+<P> <HR> <P>  
+
+<P>As I read the article &quot;What Is Multi-Threading?&quot; in
+the February issue of LJ my mind went back a couple of months ago to the
+time I decided it would be fun to write a multi-threaded FTP daemon
+to replace the wu-ftpd we were using on a very heavily hit FTP server. 
+As the author explains in his article, threads make a lot of sense for
+server applications.  Just the memory savings on 250 copies of the
+FTP daemon makes it all worth investigating.  BUT, just as you were
+about to go out and make all of you favorite server applications multi-threaded,
+I thought a couple of notes from my project might come in handy.
+
+<P>First, if you plan on allowing a high number of concurrent connections
+to your server, a single multi-threaded process will not do.  Most
+OS's, Linux included limit the number of file descriptors a process is
+allowed to have open at any one time.  You can usually use getrlimit()
+and setrlimit() to give your process the maximum number of file descriptors
+allowed, rather than the default (usually 64), but, even still most operating
+system (NOFILE) hard limits are set to 1024.  In the case of an FTP
+server you must keep in mind that you will need at least three file descriptors
+for every client connection.  (1 for commands, 1 for file transfers,
+and 1 to open the file or directory listing to transfer.)  This
+quickly adds up.  Supporting 500 concurrent connections would require
+an absolute minimum of 1500 descriptors, and that is not even counting
+the ones you need just to get up and running (like the socket used to listen
+for incoming connections.)  The best way I have found to solve
+this problem is to fork() a predetermined number of child processes that
+all accept file descriptors that are passed from the parent and then create
+a thread to handle the incoming descriptor/connection.  On Linux you
+would use the proc filesystem to pass the descriptor.  On other OS's
+such as Solaris (that support Streams) you would use ioctl() with the I_SENDFD
+and I_RECVFD functions.
+
+<P>This has another advantage as well.  In addition to accepting
+file descriptors from the parent process which is listening for connections
+on port n, you can now receive connections from any process that chooses
+to pass clients on to your multi-threaded server through a named pipe. 
+A good example might be a small appliction that is started by inetd and
+then decides (by say IP address) whether to pass your connection to
+the multi-threaded server or to the standard ftpd.  (This was useful
+in my case, since our ftpd was for anonymous FTP only.  The daemon
+did not support any functions unneccesary for typical anonymous FTP such
+as chmod or delete.  On the otherhand, we wanted employees of the
+company to be able to do just that while still logging in as anonymous. 
+So, if you came from an IP address that we knew was ours, the inetd
+application exec()'d ftpd after clearing the close-on-exec flag. 
+If you came from the outside world you went directly to the multi-threaded
+FTP daemon which also limited your access beyond what the file system already
+provided.)
+
+<P>Just when you finally think you have out smarted the file descriptor
+problem, here comes another one: fopen().  The standard i/o fuctions
+like fopen(), fprintf(), fgets(), etc., are extremely useful when working
+with a command driven application like FTP.  Unfortunately the fileno
+element of the FILE struct is usually defined as an unsigned char. 
+Simply put, once you have more than 255 open file descriptors in a single
+process you can no longer reliably use fopen(), fprintf(), etc.  The
+solution here: don't use these functions.  Instead use open(), read(),
+write(), etc.  A possible second solution is to make sure you have
+enough child processes accepting file descriptors to keep each process
+from exceeding the 255 limit.
+
+<P>If you choose to write such a multi-threaded server, you will also
+have to deal with the possibility of concurrent threads in multiple processes
+accessing a delicate resource.  (i.e. even something as simple as
+a global count of the number of concurrent connections.)  In this
+case you will still want to use a Mutex to protect data, but, the mutex
+will need to mmap()'d by all child processes, so that a lock in thread
+A in process 1 will also block thread C in process 2.  In the case
+of a resource such as a &quot;current user count&quot; you will want that
+variable to be included in the mmap()'ing anyway.
+
+<P>Aside from all of this, threads really are fun.  Threaded applications
+are a great deal more painful to debug, and given the OS and stdio limits
+I have mentioned there may even be more programming overhead, but,
+the trade off in system performance and resource utilization for major
+client/server applications is worth it.  Besides, this is the stuff
+that makes programming fun!
+
+<P>I hope this is helpful.
+
+<P>Andrew L. Sandoval
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<center><H5>Copyright &copy; 1997, Andrew L. Sandoval <BR> 
+Published in Issue 15 of the Linux Gazette, March 1997</H5></center>
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<A HREF="./index.html"><IMG ALIGN=BOTTOM SRC="../gx/indexnew.gif" 
+ALT="[ TABLE OF CONTENTS ]"></A>
+<A HREF="../index.html"><IMG ALIGN=BOTTOM SRC="../gx/homenew.gif"
+ALT="[ FRONT PAGE ]"></A>
+<A HREF="./sigrot.html"><IMG SRC="../gx/back2.gif"
+ALT=" Back "></A>
+<A HREF="./usenix.html"><IMG SRC="../gx/fwd.gif" ALT=" Next "></A>
+<P> <hr> <P> 
+</BODY>
+</HTML>
+

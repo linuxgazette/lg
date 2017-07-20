@@ -1,0 +1,448 @@
+<!DOCTYPE html
+	PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+	 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="utf-8" xml:lang="utf-8">
+<head>
+<title>Bidirectionally Testing Network Connections LG #171</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link rel="stylesheet" href="../lg.css" type="text/css" media="screen, projection"  />
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="../lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="../lg.rdf" />
+<!-- link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" / -->
+<link rel="shortcut icon" href="../favicon.ico" />
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+</head>
+<body>
+
+<a href="../">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+<div id="navigation">
+<table summary="masthead" width="100%">
+<tr>
+<td align="center" colspan="3" style="font-size: 10px; font-weight: bold">
+<a href="../index.html">Home</a>
+<a href="http://linuxgazette.net">Main Site</a>
+<a href="../faq/index.html">FAQ</a>
+
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/mailman/listinfo/">Mailing Lists</a>
+<a href="../jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+<hr width="99%" style="border: 1px inset #000033">
+</td>
+</tr>
+<tr>
+<td width="40%" align="left" style="font-size: 10px; font-weight: bold">
+The Free International Online Linux Monthly
+</td>
+<td width="20%" align="center" style="font-size: 10px; font-weight: bold">
+ISSN: 1934-371X
+</td>
+<td width="40%" align="right" style="font-size: 10px; font-weight: bold">
+Main site: <a href="http://linuxgazette.net">http://linuxgazette.net</a> 
+</td>
+</table>
+</div>
+
+
+<div id="breadcrumbs1">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">February 2010 (#171)</a> &gt; 
+Article
+
+</div>
+
+<div class="articlecontent1">
+<div class="content">
+
+<div id="previousnexttop">
+<A HREF="nonstyleguide.html" >&lt;-- prev</A> | <A HREF="silva.html" >next --&gt;</A>
+</div>
+
+<h1>Bidirectionally Testing Network Connections</h1>
+<p id="by"><b>By <a href="../authors/pfeiffer.html">Ren&eacute; Pfeiffer</a></b></p>
+
+<p>
+Beginning in Spring 2009, I started seeing network problems at some
+customer sites: data transmissions would hang and time out; connections via
+OpenVPN links would work at first but time out as soon as more data was
+transmitted; VPN connections using UDP would not work at all (but would
+work magically when changing OpenVPN's port to 80/TCP). All these symptoms
+are usually tied to traffic shaping, problems with the maximum packet size
+(maximum transfer unit, MTU) or other issues usually found between the
+end-points of the transmission. But how do you test and record the
+performance of "your" Internet?  
+</p>
+
+<h3>
+Using Network Tools for Debugging
+</h3>
+
+<p>
+First of all, you can use network tools to inspect the path between the
+two communication partners.
+</p>
+
+<ul>
+<li> <tt>hping3</tt> is a tool to construct arbitrary TCP/IP packets and
+     send them to hosts.  This is very useful for sending TCP SYN packets and
+     seeing if TCP SYN+ACK packets return.  You can also send packets with a
+     custom payload, and check for MTU issues.</li>
+<li> <tt>ping</tt> is a well-known tool for sending ICMP Echo Request
+     packets.</li>
+<li> <tt>tracepath</tt> is used for discovering the MTU between source
+     and destination. It uses UDP packets, starting with a size of 65536 byte
+     and reducing the size after receiving timeouts or errors.</li>
+<li> <tt>traceroute</tt> is the classic tool for displaying the 
+     intermediate hops between source and destination.</li>
+</ul>
+
+<p>
+Most tools display error messages, round-trip/response times and other
+useful information.  Although many people rely on the results of tools,
+always keep in mind that sending test packets is not the same as sending
+real data over different protocols. There are routers and other network
+devices out there that do not treat every packet equally.  
+</p>
+
+<p>
+One site reported very strange effects. Immediately after you used a
+Bittorrent client or a protocol over "bad ports", the bandwidth for
+"regular" network traffic dropped notably.  After half an hour or more, the
+performance would return to normal. This behaviour may indicate a violation
+of <a href="http://en.wikipedia.org/wiki/Network_neutrality">net
+neutrality</a>, the presence of filters, or other defects. The big problem
+is to find the cause, since it could be the network path, flaky hardware,
+broken software, prioritisation of network traffic, policy enforcement, or
+some entirely different reason. If there are intermediate network devices
+manipulating your packet flow, then there's a chance you will never
+identify or "see" these devices with the tools available.  
+</p>
+
+<h3>
+Using Data Transmissions for Debugging
+</h3>
+
+<p>
+Using "real" data and "real" protocols for testing is better, but how do
+you do that? Clicking on download links in your Web browser and using a
+stop watch isn't well suited to finding hard facts.  What about the other
+direction? Downloads are treated differently from uploads, if you're on
+an asymmetric Internet connection. You need to test transfers in both
+directions, and you need to use different protocols and ports. Why not
+let a script do all of this, and collect a nice summary?  
+</p>
+
+<p>
+First, we thought to use a shell script containing a few tools, and send
+data around. The problem is that you might want to do some statistics.
+Filtering the output and calculating transmission rates can be quite
+difficult. That's why a Perl script was created. It uses HTTP, HTTPS, SCP,
+FTP, SMTP, and IMAP. All protocols except SMTP are automatically used
+bidirectionally. The script uses a configuration file where login,
+password, paths, and other parameters can be configured. You can use
+different servers for every protocol, if you want. The data to be
+transferred can be given explicitly by file. If no file is given, then the
+script will create a given amount of random data using OpenSSL's
+pseudo-random generator code. The full configuration file with all entries
+looks like this:
+</p>
+
+<pre class="code">
+# Size of data - you can either provide a file or a number of bytes.
+# If the file is set to "none", the number of random bytes is used.
+data_bytes=65536
+data_chunk=8192
+data_file="none"
+logfile="result.log"
+tests=3
+# Send report by email
+email="recipient@example.net"
+cc="none"
+smtp_relay="localhost"
+# HTTP URLs
+http_download="http://www.example.net/tmp/crypto_schrift.png"
+http_upload="http://www.example.net/internettester.php"
+# HTTPS URLs
+https_download="https://www.example.net/tmp/crypto_schrift.png"
+https_upload="https://www.example.net/internettester.php"
+# FTP
+ftp_server="ftp.example.net"
+ftp_username="ftpuser"
+ftp_password="password"
+ftp_path="none"
+# IMAP connection (we use the INBOX)
+imap_server="mail.example.net"
+imap_port="143"
+imap_messages=5
+imap_username="mailuser"
+imap_password="password"
+imap_ssl="no"
+# SCP connection
+scp_server="www.example.net"
+scp_port=22
+scp_path="/tmp"
+scp_username="user"
+# SMTP
+smtp_server="mail.example.net"
+smtp_port=25
+smtp_subject="This is a automatically generated email from internettester.pl (%u)"
+smtp_from="tester@example.net"
+smtp_to="devnull@example.net"
+# SSL parameters
+ssl_ca=""
+ssl_cert=""
+ssl_key=""
+# Temporary directory
+tmpdir="/tmp"
+</pre>
+
+<p>
+It is important that the HTTP and HTTPS upload URLs handle POST
+requests. One way of doing this is to place the PHP script <a
+href="misc/pfeiffer/internettester.php.txt">internettester.php</a> on a
+Web server. The script receives the POST requests, checks the
+parameters, and discards the upload data.  If you need to use SSL with
+certificates, then you can add the path to a certificate, key, and
+certificate authority to the configuration, too. (See the section "SSL
+parameters".)
+</p>
+
+<p>
+The results are printed on standard output. If you want the results by
+e-mail, then you can set the parameters <em>email</em>, <em>cc</em>, and
+<em>smtp_relay</em>. The output is then put into an e-mail message and
+sent via SMTP.
+</p>
+
+<p>
+In order to do the actual measurements, you will need at least one
+endpoint with an Internet connection with known parameters. You can use
+a place on a co-located server, but bear in mind that the connectivity
+will most probably be shared. 100 Mbit/s or more sounds a lot - if you
+have well-behaving neighbours. The bandwidth should at least be higher
+than the one at the endpoint you are interested in testing.  
+</p>
+
+<p>
+The <a href="misc/pfeiffer/internettester.pl.txt">script itself</a>
+needs only Perl and a couple of modules for all the protocols used. You
+can check if you have all modules by using <tt>perl -cw
+internettester.pl</tt> on the command line. On Debian or Ubuntu systems,
+the packages of the Perl modules start with <em>lib</em> and end with
+<em>-perl</em>. So the module Crypt::OpenSSL::Random translates to the
+package <em>libcrypt-openssl-random-perl</em>.  
+</p>
+
+<h3>
+Running the Script
+</h3>
+
+<p>
+Running the script is fairly straightforward. It takes only two optional
+parameters.  By using <tt>--config</tt>, you can direct the script to use
+a configuration file. By default, it uses <em>internettester.cfg</em>.
+The other parameter sets the debug mode.  It lets you see what the
+script does.
+</p>
+
+<pre class="code">
+lynx@nightfall:~$ ./internettester.pl --config lg.cfg
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
++ Test run - using configuration file lg.cfg - 
++ Sun Dec 13 03:35:01 CET 2009
+
++ 
++ Test file has a size of 3284992 bytes.
++
+
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+--- HTTP download ---------------------------------------------------------
+Number of tests    :             5
+Mean               :     227.16 KiB/s
+Minimum            :     221.96 KiB/s
+Maximum            :     231.75 KiB/s
+Standard deviation :       4.66 KiB/s
+
+--- HTTP upload -----------------------------------------------------------
+Number of tests    :             5
+Mean               :    1195.61 KiB/s
+Minimum            :    1171.40 KiB/s
+Maximum            :    1208.61 KiB/s
+Standard deviation :      14.47 KiB/s
+
+--- HTTPS download --------------------------------------------------------
+Number of tests    :             5
+Mean               :     227.64 KiB/s
+Minimum            :     222.47 KiB/s
+Maximum            :     233.43 KiB/s
+Standard deviation :       4.13 KiB/s
+
+--- HTTPS upload ----------------------------------------------------------
+Number of tests    :             5
+Mean               :    1054.77 KiB/s
+Minimum            :     978.15 KiB/s
+Maximum            :    1138.29 KiB/s
+Standard deviation :      64.00 KiB/s
+[...]
+lynx@nightfall:~$
+</pre>
+
+<p>
+I cut the output after the first two protocols. The script measures only 
+bandwidth. Packet loss and round-trip time are not recorded. You can see
+the mean, maximum, and minimum of the measured rates. They are computed
+with the help of the Statistics::Descriptive module. The fourth value is
+the standard deviation. It indicates how far away the measurements are
+away from the mean. Low values of standard deviation indicate low
+variations of the individual transfer rate. Make sure the number of
+tests is not too low for a statistical analysis.  
+</p>
+
+<p>
+A word of warning: The tests will probably saturate your Internet link.
+All tests use TCP, which will tend to grab all your bandwidth (on a
+"standard" link). Measurements during office hours should be
+coordinated.  
+</p>
+
+<h3>
+What's next?
+</h3>
+
+<p>
+The script is no magic bullet, and won't detect all of your network
+problems, but can perform automated tests and record the bandwidth
+used. Feel free to adapt the code to your requirements.  
+</p>
+
+<h3>
+Useful resources
+</h3>
+
+<ul>
+<li> <a href="http://www.ubuntugeek.com/bandwidth-monitoring-tools-for-linux.html">Bandwidth Monitoring Tools For Linux</a></li>
+<li> <a href="http://en.wikipedia.org/wiki/Network_traffic_measurement">Network traffic measurement</a></li>
+</ul>
+
+
+<br clear="all" />
+
+<script type='text/javascript'>
+digg_url = 'http://linuxgazette.net/171/pfeiffer.html';
+digg_title = 'Bidirectionally Testing Network Connections';
+digg_bodytext = '<p> Beginning in Spring 2009, I started seeing network problems at some customer sites: data transmissions would hang and time out; connections via OpenVPN links would work at first but time out as soon as more data was transmitted; VPN connections using UDP would not work at all (but would work magically when changing OpenVPN\'s port to 80/TCP). All these symptoms are usually tied to traffic shaping, problems with the maximum packet size (maximum transfer unit, MTU) or other issues usually found between the end-points of the transmission. But how do you test and record the performance of "your" Internet?   </p> ';
+digg_topic = 'linux_unix';
+</script>
+<script src="http://digg.com/tools/diggthis.js" type="text/javascript"></script>
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:171/pfeiffer.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<!-- *** BEGIN bio *** -->
+<hr>
+<p>
+
+<img align="left" alt="Bio picture" src="../gx/authors/pfeiffer.jpg" class="bio">
+
+</p>
+<em>
+
+<p>
+Ren&eacute; was born in the year of Atari's founding and the release of the game Pong.
+Since his early youth he started taking things apart to see how they work. He
+couldn't even pass construction sites without looking for electrical wires that
+might seem interesting. The interest in computing began when his grandfather
+bought him a 4-bit microcontroller with 256 byte RAM and a 4096 byte operating
+system, forcing him to learn assembler before any other language.
+</p>
+
+<p>
+After finishing school he went to university in order to study physics. He then
+collected experiences with a C64, a C128, two Amigas, DEC's Ultrix, OpenVMS and
+finally GNU/Linux on a PC in 1997. He is using Linux since this day and still
+likes to take things apart und put them together again. Freedom of tinkering
+brought him close to the Free Software movement, where he puts some effort into
+the right to understand how things work. He is also involved with civil liberty
+groups focusing on digital rights.
+</p>
+
+<p>
+Since 1999 he is offering his skills as a freelancer. His main activities
+include system/network administration, scripting and consulting. In 2001 he
+started to give lectures on computer security at the Technikum Wien. Apart from
+staring into computer monitors, inspecting hardware and talking to network
+equipment he is fond of scuba diving, writing, or photographing with his digital
+camera. He would like to have a go at storytelling and roleplaying again as soon
+as he finds some more spare time on his backup devices.
+</p>
+
+</em>
+</p>
+<br clear="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2010, Ren&eacute; Pfeiffer. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication License</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 171 of Linux Gazette, February 2010
+</p>
+
+</div>
+
+<div id="previousnextbottom">
+<A HREF="nonstyleguide.html" >&lt;-- prev</A> | <A HREF="silva.html" >next --&gt;</A>
+</div>
+
+</div>
+</div>
+
+<script src="http://www.google-analytics.com/urchin.js"
+type="text/javascript">
+</script>
+<script type="text/javascript">
+_uacct = "UA-1204316-1";
+urchinTracker();
+</script>
+
+
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+</body>
+</html>
+

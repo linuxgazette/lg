@@ -1,0 +1,156 @@
+<!--startcut ==========================================================-->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML>
+<HEAD>
+<TITLE>Introduction to IRQs, DMAs and Base Addresses LG #38</TITLE>
+</HEAD>
+
+<BODY BACKGROUND="" BGCOLOR="#ffffff" TEXT="#000000" LINK="#0000ff" VLINK="#800080" ALINK="#ff0000">
+<!--endcut ============================================================-->
+
+<H4>
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H1><font color="maroon">
+Introduction to IRQs, DMAs and Base Addresses</font></H1>
+<H4>by <A HREF="mailto:blanchas@cadvision.com">Eugene Blanchard</A></H4>
+</center>
+<P> <HR> <P> 
+This article will discuss the function and assignment of IRQs, DMAs and Base Addresses (IOPorts) used by IBM compatible computers. I've found that the documentation, with IBM compatible PCs and peripheral devices, list the resources that the device can use but do not give any guidelines as to standard resource assignments. Hopefully this article will shed some light on this troublesome area and provide some guidance as to the selection of IRQs, DMAs and Base Addresses.<P>
+
+<HR WIDTH="95%" ALIGN=CENTER>
+<H3>IRQ - Interrupt Requests</H3>
+IRQ stands for Interrupt ReQuest. It is a "tap on the shoulder" to the CPU by a peripheral card plugged in an ISA slot to tell the CPU that the peripheral has something to say (also used by EISA and MCA slots). Common peripherals are modems, NICs (network interface cards), sound cards, SCSI adapters, hard-drive controllers, floppy drive controllers, COM ports and printer ports.<P>
+
+An IRQ is a hardware interrupt, this means that there is a physical line run to each of the ISA slots on the motherboard. There are 2 types of ISA slots: 8 bit and 16 bit. The 16 bit consists of the 8 bit slot plus a 16 bit extension slot.<P>
+
+There are 8 IRQ (IRQ0-7) lines that run to the 8 bit ISA slot. There are 8 more (IRQ8-15) that run to the 16 bit ISA extension slot. For a total of 16 IRQs in a typical ISA bus PC. IRQ0 has the highest priority and IRQ7 the lowest priority. IRQ8-15 have "special" priority as will be explained.<P>
+
+When IBM introduced the AT computer, they added IRQ8-15. Now, in order to make AT (286) PCs backward compatible with 8 bit XT (8088) PCs and to "up" the priority of the new IRQ lines, they cascaded two interrupt controllers. This results in IRQ8-15 having the same priority as IRQ2. Priority means if two IRQs are active at the same time, the one with the higher priority is serviced first.<P>
+
+<B>IMPORTANT:</B> An IRQ can be assigned to only <I>one active</I> device at a time. If 2 devices share the same IRQ, this is called a <I>CONFLICT</I>. This means that when the IRQ line becomes active, the CPU does not know which device needs to "talk". For example, if a modem used IRQ5 and a NIC used IRQ5. If the modem had some information that needed to be passed on to the CPU, it would set IRQ5 active. The CPU would not know whether to talk to the NIC or modem. The computer may hang, or nothing would happen.<P>
+
+*** <I>IRQ conflicts are the NUMBER 1 source of PC problems!</I> ***<P>
+
+Here is a table that is used as a rule of thumb (guideline) in selecting IRQs for PCs. The IRQs are listed in order of priority. (Note that I lied earlier when I said that all IRQ lines go to the card slots)<P>
+
+<PRE>
+IRQ	Function			Physical Line	ISA Bus
+
+IRQ0	System Timer			No		-			
+IRQ1	Keyboard Controller		No		-
+IRQ2	Cascaded to IRQ8-15		No		-
+IRQ8	Real-time clock			No		-
+IRQ9	*-Available(IRQ2)		Yes		8/16 bit
+IRQ10	NIC				Yes		16 bit
+IRQ11	SCSI adapter			Yes		16 bit
+IRQ12	Motherboard mouse/available	Yes		16 bit
+IRQ13	Math coprocessor		No		-
+IRQ14	Primary IDE controller		Yes		16 bit
+IRQ15	Secondary IDE controller	Yes		16 bit
+IRQ3	Com2/Com4			Yes		8 bit
+IRQ4	Com1/Com3			Yes		8 bit
+IRQ5	Sound card/LPT2			Yes		8 bit
+IRQ6	Floppy drive controller		Yes		8 bit
+IRQ7	Parallel port LPT1		Yes		8 bit
+</PRE>
+*- IRQ9 appears as if it is IRQ2. Normally not used because it can cause interesting problems to appear. Is it really IRQ9 or is it the IRQ2 cascaded to IRQ9? Which do you set it to? What if you are using an 8 bit ISA modem in a 16 bit ISA slot? See what I mean...<P>
+
+The above table is a rule of thumb or guideline to selecting IRQs for your peripherals. For example if the PC does not use a SCSI adapter then IRQ11 is available for use for another NIC card or another device. <P>
+
+Most autodetecting software or operating systems like Linux expect to see the IRQs assigned as above.<P>
+<H3>COM Port Conflicts</H3>
+Note that COM1 (DB9 on the back of the PC) and COM3 share IRQ4. This is allowed as long as only one device is active at a time. This means that if you are running a mouse on COM1 then you cannot use COM3 for an internal modem. You will run into a conflict. Some communication packages will allow you to do this but most will choke or cause flaky operation. A common symptom is if you move the mouse, you see garbage on your terminal program.<P>
+
+COM2 (DB25 on the back of the PC) and COM4 have a similar problem except that most people don't use COM2. It is usually safe to configure an internal modem to COM4. If COM2 is used, it is typically used for an external modem or a plotter. Usually, both are not active at the same time.<P>
+<PRE>
+Standard COM Port Assignment
+
+Port	IRQ	Function
+COM1	4	Mouse
+COM2	3	Plotter / external modem / not used
+COM3	4	Not used (conflicts with mouse)
+COM4	3	Internal modem / not used
+</PRE>
+<HR WIDTH="95%" ALIGN=CENTER>
+<H3>DMA -Direct Memory Access</H3>
+DMA stands for Direct Memory Access. This is a method that allows channels to be opened by the peripheral to read/write directly to memory without going through the CPU. This offloads some of the work from the CPU to allow it to do more important tasks.<P>
+
+There are 8 DMA channels available in the PC: DMA0-7. They are divided into 8 bit channels and 16 bit channels based on the 8 bit ISA slot and 16 bit ISA slot.<P>
+
+Here is a table that is used as a rule of thumb for selecting DMA channels:<P>
+<PRE>
+DMA	Function		Physical Line	ISA Bus		Channel Width
+
+DMA0	Available		Yes		16 bit		8 bits
+DMA1	Sound			Yes		8 bit		8 bits
+DMA2	Floppy Disk controller	Yes		8 bit		8 bits
+DMA3	ECP Parallel Port	Yes		8 bit		8 bits
+DMA4	* - Not used		No		-		16 bit
+DMA5	Sound			Yes		16 bit		16 bit
+DMA6	SCSI			Yes		16 bit		16 bit
+DMA7	Available		Yes		16 bit		16 bit
+</PRE>
+NOTES: <BR>
+DMA0 is on the 16 bit ISA bus but only 8 bits wide.<BR>
+DMA4 is cascaded to the 1st 8 bit DMA controller and is not available.<P>
+
+*** <I>DMA conflicts are the NUMBER 2 source of PC problems!</I> ***<P>
+
+Like IRQs, you are only allowed to assign one DMA channel to an active device at a time. Otherwise you will have a conflict appear and things will not work properly. Notice the word active - this means turned on and a software program accessing the device. You may have one DMA channel assigned to two devices ONLY if one device is active at a time - risky but allowed.
+<HR WIDTH="95%" ALIGN=CENTER>
+<H3>Base Addresses</H3>
+Base addresses are also called I/O ports, I/O addresses, I/O port addresses and base ports. They are memory locations that provide an interface between the operating system and the I/O device (peripheral). The peripheral communicates with the operating system through the base address. Each peripheral must have a UNIQUE base address.<P>
+
+Standard Base Address assignments (h - hexadecimal):<P>
+<PRE>
+060h + 064h		Keyboard controller
+170h + 376h		Secondary IDE Hard-drive controller
+1F0h + 3F6h		Primary IDE Hard-drive controller
+220h			Sound Card
+300h			NIC card
+330h			SCSI adapter
+3F2h			Floppy Drive Controller
+3F8h			COM1
+2F8h			COM2
+3E8h			COM3
+2E8h			COM4
+378h			LPT1
+278h			LPT2
+</PRE>
+*** <I>Base Address conflicts are the NUMBER 3 source of PC problems!</I> ***<P>
+
+Unfortunately, the above table is only a small part of the Base Addresses used. The base addresses used will depend on what has been installed on the PC.<P>
+<HR WIDTH="95%" ALIGN=CENTER>
+<H3>Resource Information on Linux</H3>
+To view your Linux configuration, look in the /proc directory for the following text files:<P>
+<PRE>
+cat  /proc/interrupts		lists the current interrupts in use
+cat  /proc/ioports		lists the ioports (base addresses) in use
+cat  /proc/dma			lists the current dmas in use
+</PRE>
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<center><H5>Copyright &copy; 1999, Eugene Blanchard <BR> 
+Published in Issue 38 of <i>Linux Gazette</i>, March 1999</H5></center>
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<A HREF="./index.html"><IMG ALIGN=BOTTOM SRC="../gx/indexnew.gif" 
+ALT="[ TABLE OF CONTENTS ]"></A>
+<A HREF="../index.html"><IMG ALIGN=BOTTOM SRC="../gx/homenew.gif"
+ALT="[ FRONT PAGE ]"></A>
+<A HREF="./gm.html"><IMG SRC="../gx/back2.gif"
+ALT=" Back "></A>
+<A HREF="./gentry.html"><IMG SRC="../gx/fwd.gif" ALT=" Next "></A>
+<P> <hr> <P> 
+<!--startcut ==========================================================-->
+</BODY>
+</HTML>
+<!--endcut ============================================================-->

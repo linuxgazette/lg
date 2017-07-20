@@ -1,0 +1,38 @@
+from xml.dom import minidom
+
+import urllib2, base64
+
+user = 'username'
+passwd = 'password'
+
+mindmap = open(user+'.mm', 'w')
+mindmap.write('<?xml version="1.0"?>\n')
+mindmap.write('<map version="0.7.1">\n')
+mindmap.write('<node LINK="http://del.icio.us/%s" TEXT="del.icio.us/%s">\n' % ( user, user ))
+
+def auth_open(url):
+    request = urllib2.Request(url)
+    base64string = base64.encodestring('%s:%s' % (user,passwd))[:-1]
+    request.add_header("User-Agent", "delicious_mind")
+    request.add_header("Authorization", "Basic %s" % base64string)
+    return urllib2.urlopen(request)
+
+recent_post_data = auth_open('http://del.icio.us/api/posts/recent?count=100').read()
+posts = minidom.parseString(recent_post_data).documentElement.getElementsByTagName("post")
+
+tag_data = auth_open('http://del.icio.us/api/tags/get?').read()
+xdoc = minidom.parseString(tag_data).documentElement
+for tag in xdoc.getElementsByTagName("tag"):
+    category = tag.getAttribute("tag")
+    mindmap.write('<node LINK="http://del.icio.us/%s/%s" TEXT="%s" FOLDED="true">\n' % ( user, category, category ))
+    for post in posts:
+        if post.getAttribute("tag").find(category) != -1:
+            mindmap.write('<node LINK="%s" TEXT="%s"/>\n' % (
+                post.getAttribute("href").encode('ascii',
+                                                 'xmlcharrefreplace').replace('&', '&amp;'),
+                post.getAttribute("description").encode('ascii',
+                                                        'xmlcharrefreplace').replace('"','&quot;').replace('&', '&amp;')))
+            mindmap.write('</node>\n')
+mindmap.write('</node>\n</map>\n')
+    
+

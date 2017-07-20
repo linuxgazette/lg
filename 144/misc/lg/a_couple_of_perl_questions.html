@@ -1,0 +1,773 @@
+<!DOCTYPE html PUBLIC '-//W3C//DTD XHTML 1.0 Transitional//EN'
+		 'http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd'>
+<html xmlns='http://www.w3.org/1999/xhtml' lang='utf-8' xml:lang='utf-8'>
+<head>
+<title>A couple of Perl questions...</title>
+<meta http-equiv='Content-Type; charset=utf-8' />
+<link rel='stylesheet' type='text/css' href='../../../lg.css' />
+</head>
+<body>
+<a href="../../../"><img alt="Linux Gazette" src="../../../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" /></a><img alt="Tux" src="../../../gx/tux_86x95_indexed.png" id="tux" /><p id="fun">...making Linux just a little more fun!</p><div class='content articlecontent'><a name="top"></a><h3>A couple of Perl questions...</h3>
+<p>
+<b><p>
+Jimmy ORegan [joregan at gmail.com]
+
+</p>
+</b><br />
+<b>Tue, 9 Oct 2007 19:20:41 +0100</b>
+</p>
+
+<p>
+I have a couple of scripts that almost work, and I was wondering if
+anyone (Ben? <img src="../gx/smile.png" alt=":)"> could tell me why...
+</p>
+
+<p>
+First, I want to convert a list of tags in the IPA PAN's corpus format
+(subst:pl:dat:f) to Apertium's tag format (n.f.pl.dat). I have this:
+</p>
+
+<pre>
+#!/usr/bin/perl
+ 
+use warnings;
+use strict;
+ 
+# tags to replace
+my %terms = qw(n nt pri p1 sec p2 ter p3 subst n);
+ 
+while (&lt;&gt;)
+{
+	my @in = split/:/;
+	my @out = map { ($terms{$_} ne "") ? $terms{$_} : $_ } @in;
+	if ($#out &gt; 3) {
+		my $type = $out[3];
+		$out[3] = $out[2];
+		$out[2] = $out[1];
+		$out[1] = $type;
+	}
+	print join '.', @out;
+}
+</pre>
+
+<p>
+That's broken, because it only works for tag sets which have more than
+4 entries, but changing the if to "($#out &gt;= 3)" gives me this:
+".sg.nomxxs.m3" from "xxs:sg:nom:m3". I also get a lot of warnings:
+</p>
+
+<pre>
+Use of uninitialized value in string ne at foo.pl line 11, &lt;&gt; line 1085.
+Use of uninitialized value in string ne at foo.pl line 11, &lt;&gt; line 1086.
+</pre>
+
+<p>
+Next, I have a list of names extracted from a Polish morphology
+dictionary[1] that I'm trying to convert to a list of word stems and
+endings. I have this, which works (aside from a couple of errors):
+</p>
+
+<pre>
+#!/usr/bin/perl
+ 
+use warnings;
+use strict;
+ 
+use String::Diff qw/diff_fully/;
+use Data::Dumper;
+ 
+#test();
+while(&lt;&gt;)
+{
+	s/,\W+$//;
+	my $endings = $_;
+	my @a = split/, /;
+	my $stem = find_stem(@a);
+	$endings =~ s/$stem//g;
+	print $stem;
+	if ($endings =~ /?/) {print ":n.f:";}
+	elsif ($endings =~ /owie/) {print ":n.m1:";}
+	else {print ":n.??:";}
+	print $endings . "\n";
+}
+ 
+sub test()
+{
+	my $test = "Adam, Adama, Adaemie, Adamowi, Adamem, Adamach, Adamami, Adamom";
+	my @t = split/, /, $test;
+	print find_stem(@t);
+	print "\n";
+}
+ 
+sub find_stem()
+{
+	my @in = @_;
+	my ($r, $l, $cur, $last);
+	my $i=0;
+ 
+	while ($i&lt;($#in))
+	{
+		($r, $l) = diff_fully($in[$i], $in[$i+1]);
+	
+		$cur = $r-&gt;[0]-&gt;[1];
+		$last = $cur if (!$last);
+		if ($cur ne $last) {
+			($r, $l) = diff_fully($last, $cur);
+			$last = $r-&gt;[0]-&gt;[1];
+		}
+	$i++;
+	}
+	return $last;
+}
+</pre>
+
+<p>
+but if I change the end of the while() to this:
+</p>
+
+<pre>
+	else {print ":n.??:";}
+	my @ends = split/, /, $endings;
+	sort(@ends);
+	$endings = join(',', at ends);
+	print $endings . "\n";
+</pre>
+
+<p>
+to sort the endings, it... doesn't. What am I missing?
+</p>
+
+<p>
+[1] "S?ownik alternatywny", under the GPL: <a href="http://www.kurnik.pl/slownik/odmiany/">http://www.kurnik.pl/slownik/odmiany/</a>
+</p>
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_mail.html#mb-a_couple_of_perl_questions">Back</a><hr width="50%" align="left" /><p><br /></p><p>
+<b><p>
+Ben Okopnik [ben at linuxgazette.net]
+
+</p>
+</b><br />
+<b>Tue, 9 Oct 2007 16:55:55 -0400</b>
+</p>
+
+<p>
+On Tue, Oct 09, 2007 at 07:20:41PM +0100, Jimmy O'Regan wrote:
+</p>
+
+<pre>
+&gt; I have a couple of scripts that almost work, and I was wondering if
+&gt; anyone (Ben? <img src="../gx/smile.png" alt=":)"> could tell me why...
+</pre>
+
+<p>
+I'll give it a shot. The only problem is, your script is doing more than
+what you describe here - so I'm going to have to guess about a few
+things. Worse yet, since your code isn't doing what it's supposed to do,
+I'm guessing based on wrong data. But hey, for a friend...
+ 
+</p>
+
+<pre>
+&gt; First, I want to convert a list of tags in the IPA PAN's corpus format
+&gt; (subst:pl:dat:f) to Apertium's tag format (n.f.pl.dat). I have this:
+</pre>
+
+<p>
+Something like this, maybe? Again, I'm just guessing.
+</p>
+
+<pre>
+perl _F: -wlne'shift @F; print "n. at F[2,0,1]"' input_file
+</pre>
+
+
+<pre>
+&gt; ``
+&gt; #!/usr/bin/perl
+&gt; 
+&gt; use warnings;
+&gt; use strict;
+&gt; 
+&gt; # tags to replace
+&gt; my %terms = qw(n nt pri p1 sec p2 ter p3 subst n);
+</pre>
+ 
+Just a personal reaction here - BLECH. I hate having to count
+terms to figure out what's a key and what's a value.
+</p>
+
+<pre>
+my %terms = (	n		=&gt; 'nt',
+			 	pri		=&gt; 'p1',
+				sec		=&gt; 'p2',
+				ter		=&gt; 'p3',
+				subst 	=&gt; 'n'
+);
+</pre>
+
+
+<pre>
+&gt; while (&lt;&gt;)
+&gt; {
+</pre>
+
+<p>
+chomp;		# If you don't handle that "\n", you'll be sorry...
+</p>
+
+
+<pre>
+&gt; 	my @in = split/:/;
+&gt; 	my @out = map { ($terms{$_} ne "") ? $terms{$_} : $_ } @in;
+</pre>
+
+<p>
+What happens when $terms{$_} is undefined? Bad news, that's what. I
+suspect that this is where your errors are coming from - perhaps with
+help from the absence of that 'chomp'.
+</p>
+
+
+<pre>
+&gt; 	if ($#out &gt; 3) {
+&gt; 		my $type = $out[3];
+&gt; 		$out[3] = $out[2];
+&gt; 		$out[2] = $out[1];
+&gt; 		$out[1] = $type;
+</pre>
+
+<p>
+What happens to your $out[0]? Is it just supposed to be ignored?
+In any case, you could just use a list slice instead of all the manual
+swapping:
+</p>
+
+<pre>
+@out[1 .. 3] = @out[3, 1, 2];
+</pre>
+
+<p>
+However, I strongly suspect that the 'map' statement is the source of
+your problems.
+</p>
+
+
+<pre>
+&gt; 	}
+&gt; 	print join '.', @out;
+&gt; }
+&gt; ''
+&gt; 
+&gt; That's broken, because it only works for tag sets which have more than
+&gt; 4 entries, but changing the if to "($#out &gt;= 3)" gives me this:
+&gt; ".sg.nomxxs.m3" from "xxs:sg:nom:m3". I also get a lot of warnings:
+</pre>
+
+<p>
+The best thing you could do to help me help you is by providing a bunch
+of example inputs and expected outputs. It <em>sounds</em> like it should be
+trivially simple to mung this stuff; this is the kind of thing that Perl
+is really good at.
+ 
+</p>
+
+<pre>
+&gt; Next, I have a list of names extracted from a Polish morphology
+&gt; dictionary[1] that I'm trying to convert to a list of word stems and
+&gt; endings. I have this, which works (aside from a couple of errors):
+&gt; 
+&gt; ``
+&gt; #!/usr/bin/perl
+&gt; 
+&gt; use warnings;
+&gt; use strict;
+&gt; 
+&gt; use String::Diff qw/diff_fully/;
+&gt; use Data::Dumper;
+&gt; 
+&gt; #test();
+&gt; while(&lt;&gt;)
+&gt; {
+&gt; 	s/,\W+$//;
+&gt; 	my $endings = $_;
+&gt; 	my @a = split/, /;
+&gt; 	my $stem = find_stem(@a);
+&gt; 	$endings =~ s/$stem//g;
+&gt; 	print $stem;
+&gt; 	if ($endings =~ /??/) {print ":n.f:";}
+&gt; 	elsif ($endings =~ /owie/) {print ":n.m1:";}
+&gt; 	else {print ":n.??:";}
+&gt; 	print $endings . "\n";
+&gt; }
+&gt; 
+&gt; sub test()
+&gt; {
+&gt; 	my $test = "Adam, Adama, Adaemie, Adamowi, Adamem, Adamach, Adamami, Adamom";
+&gt; 	my @t = split/, /, $test;
+&gt; 	print find_stem(@t);
+&gt; 	print "\n";
+&gt; }
+&gt; 
+&gt; sub find_stem()
+&gt; {
+&gt; 	my @in = @_;
+&gt; 	my ($r, $l, $cur, $last);
+&gt; 	my $i=0;
+&gt; 
+&gt; 	while ($i&lt;($#in))
+&gt; 	{
+&gt; 		($r, $l) = diff_fully($in[$i], $in[$i+1]);
+&gt; 	
+&gt; 		$cur = $r-&gt;[0]-&gt;[1];
+&gt; 		$last = $cur if (!$last);
+&gt; 		if ($cur ne $last) {
+&gt; 			($r, $l) = diff_fully($last, $cur);
+&gt; 			$last = $r-&gt;[0]-&gt;[1];
+&gt; 		}
+&gt; 	$i++;
+&gt; 	}
+&gt; 	return $last;
+&gt; }
+&gt; ''
+&gt; 
+&gt; but if I change the end of the while() to this:
+&gt; 
+&gt; ``
+&gt; 	else {print ":n.??:";}
+&gt; 	my @ends = split/, /, $endings;
+&gt; 	sort(@ends);
+&gt; 	$endings = join(',', at ends);
+&gt; 	print $endings . "\n";
+&gt; ''
+&gt; 
+&gt; to sort the endings, it... doesn't. What am I missing?
+</pre>
+
+<p>
+Like most Perl functions, "sort" doesn't modify the specified variable -
+it just <strong>returns</strong> a modified value. Your 'use warnings;' line should
+definitely have generated a warning about that.
+</p>
+
+<pre>
+ben at Tyr:/tmp$ perl -wle'@a = qw/3 2 1/; sort @a; print "@a"'
+Useless use of sort in void context at -e line 1.
+3 2 1
+</pre>
+
+<p>
+You can try this instead:
+</p>
+
+<pre>
+ 	else {
+		print ":n.??:";
+	}
+ 
+	# If you're only going to use a variable once, don't bother.
+	print join(',', sort split/, /, $endings), "\n";
+</pre>
+
+
+<pre>-- 
+* Ben Okopnik * Editor-in-Chief, Linux Gazette * <a href="http://LinuxGazette.NET">http://LinuxGazette.NET</a> *
+</pre>
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_mail.html#mb-a_couple_of_perl_questions">Back</a><hr width="50%" align="left" /><p><br /></p><p>
+<b><p>
+Ben Okopnik [ben at linuxgazette.net]
+
+</p>
+</b><br />
+<b>Tue, 9 Oct 2007 17:03:44 -0400</b>
+</p>
+
+<p>
+On Tue, Oct 09, 2007 at 04:55:55PM -0400, Benjamin Okopnik wrote:
+</p>
+
+<pre>
+&gt; 
+&gt; Something like this, maybe? Again, I'm just guessing.
+&gt; 
+&gt; ``
+&gt; perl _F: -wlne'shift @F; print "n. at F[2,0,1]"' input_file
+&gt; ''
+</pre>
+
+<p>
+Arrgh. Must be the welding fumes getting to me. That should be
+</p>
+
+<pre>
+perl -F: -walne'shift @F; print "n. at F[2,0,1]"' input_file
+</pre>
+
+
+<pre>-- 
+* Ben Okopnik * Editor-in-Chief, Linux Gazette * <a href="http://LinuxGazette.NET">http://LinuxGazette.NET</a> *
+</pre>
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_mail.html#mb-a_couple_of_perl_questions">Back</a><hr width="50%" align="left" /><p><br /></p><p>
+<b><p>
+Jimmy ORegan [joregan at gmail.com]
+
+</p>
+</b><br />
+<b>Wed, 10 Oct 2007 00:16:10 +0100</b>
+</p>
+
+<p>
+On 09/10/2007, Ben Okopnik &lt;ben at linuxgazette.net&gt; wrote:
+</p>
+
+<pre>
+&gt; On Tue, Oct 09, 2007 at 07:20:41PM +0100, Jimmy O'Regan wrote:
+&gt; &gt; I have a couple of scripts that almost work, and I was wondering if
+&gt; &gt; anyone (Ben? <img src="../gx/smile.png" alt=":)"> could tell me why...
+&gt;
+&gt; I'll give it a shot. The only problem is, your script is doing more than
+&gt; what you describe here - so I'm going to have to guess about a few
+&gt; things. Worse yet, since your code isn't doing what it's supposed to do,
+&gt; I'm guessing based on wrong data. But hey, for a friend...
+&gt;
+</pre>
+
+<p>
+Oh, OK. Input:
+</p>
+
+<pre>
+subst:pl:acc:f
+subst:pl:acc:m1
+subst:pl:acc:m2
+subst:pl:acc:m3
+subst:pl:acc:n
+subst:pl:dat:f
+subst:pl:dat:m1
+subst:pl:dat:m2
+adj:sg:nom:n:comp
+adj:sg:nom:n:pos
+adj:sg:nom:n:sup
+adj:sg:voc:f:pos
+adj:sg:voc:m1:comp
+</pre>
+
+<p>
+expected output:
+</p>
+
+<pre>
+n.f.pl.acc
+n.m1.pl.acc
+n.m2.pl.acc
+n.m3.pl.acc
+n.nt.pl.acc
+n.f.pl.dat
+n.m1.pl.dat
+n.m2.pl.dat
+adj.nt.sg.nom.comp
+adj.nt.sg.nom.pos
+adj.nt.sg.nom.sup
+adj.f.sg.voc.pos
+adj.m1.sg.voc.comp
+</pre>
+
+
+<pre>
+&gt; &gt; First, I want to convert a list of tags in the IPA PAN's corpus format
+&gt; &gt; (subst:pl:dat:f) to Apertium's tag format (n.f.pl.dat). I have this:
+&gt;
+&gt; Something like this, maybe? Again, I'm just guessing.
+&gt;
+&gt; ``
+&gt; perl _F: -wlne'shift @F; print "n. at F[2,0,1]"' input_file
+&gt; ''
+&gt;
+</pre>
+
+<p>
+Kind of. Everything except for 1..3 passes through, except maybe with
+a change from that hash.
+</p>
+
+
+<pre>
+&gt; &gt; ``
+&gt; &gt; #!/usr/bin/perl
+&gt; &gt;
+&gt; &gt; use warnings;
+&gt; &gt; use strict;
+&gt; &gt;
+&gt; &gt; # tags to replace
+&gt; &gt; my %terms = qw(n nt pri p1 sec p2 ter p3 subst n);
+&gt;
+&gt; Just a personal reaction here - BLECH. I hate having to count
+&gt; terms to figure out what's a key and what's a value.
+&gt;
+</pre>
+
+<p>
+Oh... yeah. I can see a few more terms that'll have to be swapped, and
+your way is definitely less confusing.
+</p>
+
+
+<pre>
+&gt; ``
+&gt; my %terms = (   n               =&gt; 'nt',
+&gt;                                 pri             =&gt; 'p1',
+&gt;                                 sec             =&gt; 'p2',
+&gt;                                 ter             =&gt; 'p3',
+&gt;                                 subst   =&gt; 'n'
+&gt; );
+&gt; ''
+&gt;
+&gt; &gt; while (&lt;&gt;)
+&gt; &gt; {
+&gt;
+&gt; chomp;          # If you don't handle that "\n", you'll be sorry...
+&gt;
+</pre>
+
+<p>
+I had one in there at one stage; I don't remember why I took it out.
+</p>
+
+
+<pre>
+&gt; &gt;       my @in = split/:/;
+&gt; &gt;       my @out = map { ($terms{$_} ne "") ? $terms{$_} : $_ } @in;
+&gt;
+&gt; What happens when $terms{$_} is undefined? Bad news, that's what. I
+&gt; suspect that this is where your errors are coming from - perhaps with
+&gt; help from the absence of that 'chomp'.
+&gt;
+&gt; &gt;       if ($#out &gt; 3) {
+&gt; &gt;               my $type = $out[3];
+&gt; &gt;               $out[3] = $out[2];
+&gt; &gt;               $out[2] = $out[1];
+&gt; &gt;               $out[1] = $type;
+&gt;
+&gt; What happens to your $out[0]? Is it just supposed to be ignored?
+&gt; In any case, you could just use a list slice instead of all the manual
+&gt; swapping:
+&gt;
+</pre>
+
+<p>
+It's ignored because it's in the right place.
+</p>
+
+
+<pre>
+&gt; ``
+&gt; @out[1 .. 3] = @out[3, 1, 2];
+&gt; ''
+&gt;
+&gt; However, I strongly suspect that the 'map' statement is the source of
+&gt; your problems.
+&gt;
+</pre>
+
+<p>
+Yeah... using that was kind of wishful thinking, because I don't
+really get it. (Yet!)
+</p>
+
+
+<pre>
+&gt; &gt;       }
+&gt; &gt;       print join '.', @out;
+&gt; &gt; }
+&gt; &gt; ''
+&gt; &gt;
+&gt; &gt; That's broken, because it only works for tag sets which have more than
+&gt; &gt; 4 entries, but changing the if to "($#out &gt;= 3)" gives me this:
+&gt; &gt; ".sg.nomxxs.m3" from "xxs:sg:nom:m3". I also get a lot of warnings:
+&gt;
+&gt; The best thing you could do to help me help you is by providing a bunch
+&gt; of example inputs and expected outputs. It <em>sounds</em> like it should be
+&gt; trivially simple to mung this stuff; this is the kind of thing that Perl
+&gt; is really good at.
+&gt;
+&gt; &gt; ``
+&gt; &gt;       else {print ":n.??:";}
+&gt; &gt;       my @ends = split/, /, $endings;
+&gt; &gt;       sort(@ends);
+&gt; &gt;       $endings = join(',', at ends);
+&gt; &gt;       print $endings . "\n";
+&gt; &gt; ''
+&gt; &gt;
+&gt; &gt; to sort the endings, it... doesn't. What am I missing?
+&gt;
+&gt; Like most Perl functions, "sort" doesn't modify the specified variable -
+&gt; it just <strong>returns</strong> a modified value. Your 'use warnings;' line should
+&gt; definitely have generated a warning about that.
+&gt;
+</pre>
+
+<p>
+Ah. So it does.
+</p>
+
+
+<pre>
+&gt; ``
+&gt; ben at Tyr:/tmp$ perl -wle'@a = qw/3 2 1/; sort @a; print "@a"'
+&gt; Useless use of sort in void context at -e line 1.
+&gt; 3 2 1
+&gt; ''
+&gt;
+&gt; You can try this instead:
+&gt;
+&gt; ``
+&gt;         else {
+&gt;                 print ":n.??:";
+&gt;         }
+&gt;
+&gt;         # If you're only going to use a variable once, don't bother.
+&gt;         print join(',', sort split/, /, $endings), "\n";
+&gt; ''
+</pre>
+
+<p>
+Oh, cool. Thanks.
+</p>
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_mail.html#mb-a_couple_of_perl_questions">Back</a><hr width="50%" align="left" /><p><br /></p><p>
+<b><p>
+Ben Okopnik [ben at linuxgazette.net]
+
+</p>
+</b><br />
+<b>Wed, 10 Oct 2007 10:00:03 -0400</b>
+</p>
+
+<p>
+On Wed, Oct 10, 2007 at 12:16:10AM +0100, Jimmy O'Regan wrote:
+</p>
+
+<pre>
+&gt; On 09/10/2007, Ben Okopnik &lt;ben at linuxgazette.net&gt; wrote:
+&gt; &gt; On Tue, Oct 09, 2007 at 07:20:41PM +0100, Jimmy O'Regan wrote:
+&gt; &gt; &gt; I have a couple of scripts that almost work, and I was wondering if
+&gt; &gt; &gt; anyone (Ben? <img src="../gx/smile.png" alt=":)"> could tell me why...
+&gt; &gt;
+&gt; &gt; I'll give it a shot. The only problem is, your script is doing more than
+&gt; &gt; what you describe here - so I'm going to have to guess about a few
+&gt; &gt; things. Worse yet, since your code isn't doing what it's supposed to do,
+&gt; &gt; I'm guessing based on wrong data. But hey, for a friend...
+&gt; &gt;
+&gt; 
+&gt; Oh, OK. Input:
+&gt; 
+&gt; ``
+&gt; subst:pl:acc:f
+&gt; subst:pl:acc:m1
+&gt; subst:pl:acc:m2
+&gt; subst:pl:acc:m3
+&gt; subst:pl:acc:n
+&gt; subst:pl:dat:f
+&gt; subst:pl:dat:m1
+&gt; subst:pl:dat:m2
+&gt; adj:sg:nom:n:comp
+&gt; adj:sg:nom:n:pos
+&gt; adj:sg:nom:n:sup
+&gt; adj:sg:voc:f:pos
+&gt; adj:sg:voc:m1:comp
+&gt; ''
+&gt; 
+&gt; expected output:
+&gt; 
+&gt; ``
+&gt; n.f.pl.acc
+&gt; n.m1.pl.acc
+&gt; n.m2.pl.acc
+&gt; n.m3.pl.acc
+&gt; n.nt.pl.acc
+&gt; n.f.pl.dat
+&gt; n.m1.pl.dat
+&gt; n.m2.pl.dat
+&gt; adj.nt.sg.nom.comp
+&gt; adj.nt.sg.nom.pos
+&gt; adj.nt.sg.nom.sup
+&gt; adj.f.sg.voc.pos
+&gt; adj.m1.sg.voc.comp
+&gt; ''
+</pre>
+
+<p>
+Ah. OK, got it.
+</p>
+
+<pre>
+#!/usr/bin/perl -w
+# Created by Ben Okopnik on Wed Oct 10 09:21:10 EDT 2007
+ 
+%repl = (
+    subst   =&gt; 'n',
+    n       =&gt; 'nt',
+);
+ 
+while (&lt;&gt;){
+    next unless /:/;
+    chomp;
+ 
+    my @in = split /:/;
+ 
+    if (@in &gt; 4){
+        @in = @in[0, 3, 1, 2, 4];
+        $in[1] =~ s/(.*)/$repl{$1}||$1/e;
+    }
+    else {
+        @in = @in[0, 3, 1, 2];
+        $in[0] =~ s/(.*)/$repl{$1}||$1/e;
+        $in[1] =~ s/(.*)/$repl{$1}||$1/e;
+    }
+    print join(".", @in), "\n";
+}
+</pre>
+
+<p>
+It's a little clunky, but... I've got a lot on my mind this morning.
+ 
+</p>
+
+<pre>
+&gt; &gt; However, I strongly suspect that the 'map' statement is the source of
+&gt; &gt; your problems.
+&gt; 
+&gt; Yeah... using that was kind of wishful thinking, because I don't
+&gt; really get it. (Yet!)
+</pre>
+
+<p>
+[grin] You're not the only one. 'map' can get a little complex -
+especially since, based on its semantics, it <em>can</em> modify a list "in
+place" - or return a modified list, leaving the original alone.
+ 
+</p>
+
+<pre>-- 
+* Ben Okopnik * Editor-in-Chief, Linux Gazette * <a href="http://LinuxGazette.NET">http://LinuxGazette.NET</a> *
+</pre>
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_mail.html#mb-a_couple_of_perl_questions">Back</a><hr width="50%" align="left" /><p><br /></p></div>
+</body>
+</html>

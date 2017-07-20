@@ -1,0 +1,485 @@
+<!DOCTYPE html
+	PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+	 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="utf-8" xml:lang="utf-8">
+<head>
+<title>Lockpicking LG #150</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link rel="stylesheet" href="../lg.css" type="text/css" media="screen, projection"  />
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<!-- link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" / -->
+<link rel="shortcut icon" href="../favicon.ico" />
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+</head>
+<body>
+
+<a href="../">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+<div id="navigation">
+<table summary="masthead" width="100%">
+<tr>
+<td align="center" colspan="3" style="font-size: 10px; font-weight: bold">
+<a href="../index.html">Home</a>
+<a href="http://linuxgazette.net">Main Site</a>
+<a href="../faq/index.html">FAQ</a>
+
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/mailman/listinfo/">Mailing Lists</a>
+<a href="../jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+<hr width="99%" style="border: 1px inset #000033">
+</td>
+</tr>
+<tr>
+<td width="40%" align="left" style="font-size: 10px; font-weight: bold">
+The Free International Online Linux Monthly
+</td>
+<td width="20%" align="center" style="font-size: 10px; font-weight: bold">
+ISSN: 1934-371X
+</td>
+<td width="40%" align="right" style="font-size: 10px; font-weight: bold">
+Main site: <a href="http://linuxgazette.net">http://linuxgazette.net</a> 
+</td>
+</table>
+</div>
+
+
+<div id="breadcrumbs1">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">May 2008 (#150)</a> &gt; 
+Article
+
+</div>
+
+<div class="articlecontent1">
+<div class="content">
+
+<div id="previousnexttop">
+<A HREF="kapil.html" >&lt;-- prev</A> | <A HREF="pfeiffer.html" >next --&gt;</A>
+</div>
+
+<h1>Lockpicking</h1>
+<p id="by"><b>By <a href="../authors/melinte.html">Aurelian Melinte</a></b></p>
+
+<pre>
+
+"When two trains approach each other at a crossing, both shall come to a
+full stop and neither shall start up again until the other has gone."
+ -- old Kansas statute
+</pre>
+ 
+<h3>Overview</h3>
+
+<p>The dynamic linker allows us to override functions exported by the
+shared objects that are used by programs. In this article, we will use this
+interposition functionality and build a library that wraps around the
+'pthreads' library to diagnose <a
+href="http://en.wikipedia.org/wiki/Mutex">mutex</a>-related problems,
+including the well-known deadlock.
+</p>
+
+
+<h3>Deadlocks and how to avoid them</h3>
+
+<p>Simply put, a deadlock is a run-time condition where threads are waiting 
+for resources in a circular chain. The well-known solution to this is to 
+assign a process-wide order to these resources and have each thread acquire 
+the resources it needs in that particular order; threads should release the 
+taken resources in reverse order. </p>
+
+<p>To keep things simple for our debugging library, let's assume the resources 
+that threads are competing for are all mutexes. But the techniques presented 
+here can be extended to other type of resources threads would be competing for 
+(e.g. semaphores, condition variables). </p>
+
+<p>With pthreads, a thread can also self-deadlock if it attempts to lock a 
+mutex it already owns. The ptreads library can help with self-lock: when 
+creating the mutex, you can create it: </p>
+  <ul>
+  <li>As type PTHREAD_MUTEX_ERRORCHECK. A thread attempting to relock this 
+  type of mutex without first unlocking it will get an error. A thread 
+  attempting to unlock a mutex which another thread has locked will get an
+  error. A thread attempting to unlock an unlocked mutex will also get an
+  error.  </li>
+  <li>As type PTHREAD_MUTEX_RECURSIVE. A thread attempting to relock this 
+  mutex without first unlocking it will succeed in locking the mutex. A 
+  thread attempting to unlock a mutex which another thread has locked will 
+  get an error. A thread attempting to unlock an unlocked mutex will still 
+  get an error.  </li>
+  </ul>
+
+<p>One certainly should understand exactly why and whether a particular 
+thread needs to multiple lock the mutex before making usage of such 
+techniques. </p>
+
+<h3>Library interposition</h3>
+
+<p>The dynamic linker allows users to intercept any function call an 
+application makes to any shared library that the application uses. The 
+dynamic linker will first load libraries specified in the LD_PRELOAD 
+environment variable (the interposition libraries) and the linker will use 
+these libraries before any other when it resolves symbols. This functionality 
+offered by the linker is used traditionally for debugging purposes, just like 
+we will do shortly. </p>
+
+<p>Functions exported by the interposition library will get called instead of 
+the functions in the shared objects (here pthreads) that the application 
+normally uses. Thus, in the interposition library we can wrap around the 
+"real" functions; or replace them outright. </p>
+
+
+<h3>Hooking pthreads</h3>
+
+<p>We need to know which thread acquires and releases what and when. At a 
+minimum, we have to hook pthread_mutex_lock(), pthread_mutex_trylock() and 
+pthread_mutex_unlock(). Other candidates might be pthread_mutex_init(), 
+pthread_mutex_destroy(), pthread_cond_timedwait(), pthread_cond_wait(). But 
+since we decided to tackle only mutexes, the first three might well be enough, 
+depending on your strategy to communicate the resources' acquiring order to 
+the debug library.  Also, hooking pthread_mutex_destroy() is worthwhile 
+because attempting to destroy a locked mutex is undefined behavior according 
+to the standard (aside from being a programming error). </p>
+
+<p>Below is the code used to hook our mutex functions, stripped of error 
+checking code. We use the dlsym() function to dig out the real function, so 
+that we can call it from within our wrapper function. The hooking function in 
+the interposition library looks like this:</p>
+<pre class="code">
+    #define _GNU_SOURCE
+    #include &lt;dlfcn.h&gt;
+
+    typedef int (*lp_pthread_mutex_func)(pthread_mutex_t *mutex); 
+
+    int lp_hookfunc(lp_pthread_mutex_func *fptr, const char *fname) 
+    {
+        char *msg = NULL; 
+
+        *fptr = dlsym(RTLD_NEXT, fname); 
+        if ((*fptr == NULL) || ((msg = dlerror()) != NULL)) {
+            lp_report("dlsym %s failed : %s\n", fname, msg); 
+            return -1; 
+        } else {
+            return 0; 
+        }
+    }
+</pre>
+
+<p>We'll use it to hook the pthreads-exported functions we need. This will be 
+done as soon as the linker loads the debugging library, well before the main() 
+function of the application gets called:</p>
+<pre class="code">
+    static lp_pthread_mutex_func next_pthread_mutex_lock = NULL; 
+    static lp_pthread_mutex_func next_pthread_mutex_trylock = NULL; 
+    static lp_pthread_mutex_func next_pthread_mutex_unlock = NULL; 
+
+    void _init()
+    {
+        lp_hookfunc(&amp;next_pthread_mutex_lock,    "pthread_mutex_lock"); 
+        lp_hookfunc(&amp;next_pthread_mutex_trylock, "pthread_mutex_trylock"); 
+        lp_hookfunc(&amp;next_pthread_mutex_unlock,  "pthread_mutex_unlock"); 
+        /*And check for errors.*/
+    }
+</pre>
+
+
+<p>Next, we'll compile the code in a shared object: </p>
+
+<pre>
+    $ gcc -g -Wall -fPIC -I. -c lp_hooks.c -o lp_hooks.o
+    $ ld -o liblockpick.so -shared lp_hooks.c 
+</pre>
+
+
+<p>Finally, we load this diagnostic shared object so that it takes over 
+pthreads. At a Bourne shell prompt: </p> 
+
+<pre>
+    $ LD_PRELOAD=./liblockpick.so ./deadlock
+</pre>
+
+<p>Now, each time the application will call pthreads_mutex_lock(), the 
+overriding/wrapping pthreads_mutex_lock() function from the debugging library 
+will be called instead of the real one. Having taken control over the locking 
+and unlocking functions, we can start keeping track of what is going on. The 
+overriding function looks like this: </p>
+
+<pre class="code">
+    int pthread_mutex_lock(pthread_mutex_t *mutex)
+    {
+        int rc = EINVAL;
+
+        if (mutex != NULL) {
+            lp_lock_precheck(mutex);
+
+            /* Call the real pthread_mutex_lock() */
+            rc = next_pthread_mutex_lock(mutex);
+
+            lp_lock_postcheck(mutex, rc);
+        } else {
+            lp_report("%s(): mutex* is NULL.\n", __FUNCTION__ );
+        }
+
+        return rc;
+    }
+</pre>
+
+<h3>Resource ordering &amp; bookkeeping</h3>
+
+<p>One important issue to consider is how to pass the resource-ordering 
+information down to the debug library. There are various solutions that would 
+require making the application aware of the debugging library and thus would 
+require modifications of the application itself.  These solutions would 
+eventually make the library less generic too.</p>
+
+<p>This resource-ordering information is not needed to diagnose deadlock 
+situations, but we need it if we want to check for out-of-order locking 
+issues.</p>
+
+<p>The code accompanying this article is strictly application-agnostic: the 
+order given to mutexes is the order in which the library finds out about the 
+existence of these mutexes. The mutex to be acquired first is the first one it 
+finds out about. Practical for exemplifying this article -- we need to hook only 
+three functions -- but maybe not so practical for a real application. </p>
+
+<p>For each of the functions hooked, there are two moments when we do
+bookkeeping and proceed to check the sanity of the application: before the
+real call is made and after the real call returns. Making the most of the
+time before the call proceeds is important as the call might block
+indefinitely and thus we can detect deadlocks before actually placing the
+call. </p>
+
+<p>Before the call, we can check:</p>
+
+<ul>
+<li>whether the mutex will be acquired or released out of order; </li>
+<li>whether the thread tries to lock a mutex it already acquired; </li>
+<li>or whether it tries to unlock a mutex it does not owns; </li>
+</ul>
+
+<p>Before the call, we also store the information about which mutex the
+thread is trying to acquire. After the call, we keep evidence of which
+mutexes have been acquired or released by which thread. </p>
+
+<pre class="code">
+    void lp_lock_precheck_diagnose(const pthread_mutex_t *mutex)
+    {
+        int rc = -1; 
+        /*Highest ranking mutex currently acquired by 'me'*/
+        int maxmidx = LP_INVALID_IDX; 
+        int midx = LP_INVALID_IDX; 
+        pthread_t me = pthread_self(); 
+
+        pthread_t             thr = LP_INVALID_THREAD; 
+        const pthread_mutex_t *mtx = NULL; 
+
+        /* Thread tries to lock a mutex it has already locked? */
+        if ((rc=lp_is_mutex_locked(mutex, me)) != 0) {
+            lp_report("Mutex M%lx is already locked by thread.\n", mutex); 
+            lp_dump();
+        } 
+
+        /* Is mutex order respected? */
+        maxmidx = lp_max_idx_mutex_locked(me); 
+        midx = lp_mutex_idx(mutex); 
+        if (midx &lt; maxmidx) {
+            lp_report("Mutex M%lx will be locked out of order (idx=%d, crt max=%d).\n", 
+                    mutex, midx, maxmidx); 
+            lp_dump();
+        }
+
+        /* Will deadlock? Check for a circular chain. */
+        lp_report("Checking if it will deadlock...\n");
+        thr = me; 
+        mtx = mutex; 
+        while ((thr=lp_thread_owning(mtx)) != LP_INVALID_THREAD) {
+            lp_report("  Mutex M%lx is owned by T%lx.\n", mtx, thr); 
+            mtx = lp_mutex_wanted(thr); 
+            lp_report("  Thread T%lx waits for M%lx.\n", thr, mtx); 
+
+            if (mtx == LP_INVALID_MUTEX) 
+                break; /*no circular dead; */
+
+            if (0 != pthread_equal(thr, me)) {
+                lp_report("  Deadlock condition detected.\n");
+                lp_dump();
+                break; 
+            }
+        }
+    }
+
+    void lp_unlock_precheck_diagnose(const pthread_mutex_t *mutex) 
+    {
+        int rc = -1; 
+        int maxmidx = LP_INVALID_IDX, midx = LP_INVALID_IDX; 
+
+        /* Thread tries to unlock a mutex it does not have? */
+        if ((rc=lp_is_mutex_locked(mutex, pthread_self())) == 0) {
+            lp_report("Attempt to release M%lx NOT locked by thread.\n", mutex); 
+            lp_dump();
+        } 
+
+        /* Are mutexes released in reverse order? */
+        maxmidx = lp_max_idx_mutex_locked(pthread_self());
+        midx = lp_mutex_idx(mutex); 
+        if (midx &lt; maxmidx) {
+            lp_report("Mutex M%lx will be released out of order (idx=%d, crt max=%d).\n",
+                    mutex, midx, maxmidx); 
+            lp_dump();
+        }
+    }
+</pre>
+
+<p>A sample of the results obtained at run-time can be seen below: </p>
+
+<pre class="code">
+$ make test
+
+...
+<strong>Tx40571bb0: Mutex M8049e48 will be locked out of order (idx=1, crt max=2). </strong>
+...
+Tx40571bb0: Checking if it will deadlock... 
+Tx40571bb0:   Mutex M8049e48 is owned by T40370bb0. 
+Tx40571bb0:   Thread T40370bb0 waits for M8049e30. 
+Tx40571bb0:   Mutex M8049e30 is owned by T40571bb0. 
+Tx40571bb0:   Thread T40571bb0 waits for M8049e48. 
+<strong>Tx40571bb0:   Deadlock condition detected. </strong>
+Tx40571bb0: Mutexes: 
+Tx40571bb0:   [00] M4001d180 [owned by:T40571bb0 02] 
+Tx40571bb0:   [01] M08049e48 [owned by:T40370bb0 01] 
+Tx40571bb0:   [02] M08049e30 [owned by:T40571bb0 02] 
+Tx40571bb0:   [03] M08049e60 [owned by:T40772bb0 03] 
+Tx40571bb0: Threads: 
+Tx40571bb0:   [00] T4016f6c0 [owns:M0000000000000000000000000000000][wants:M00000000] 
+Tx40571bb0:   [01] T40370bb0 [owns:M0100000000000000000000000000000][wants:M08049e30] 
+Tx40571bb0:   [02] T40571bb0 [owns:M1010000000000000000000000000000][wants:M08049e48] 
+Tx40571bb0:   [03] T40772bb0 [owns:M0001000000000000000000000000000][wants:M00000000] 
+...
+<strong>Tx40772bb0: Mutex M8049e60 is already locked by thread. </strong>
+</pre>
+
+
+<h3>On Heisenberg's uncertainty principle </h3>
+
+<p>A word of caution: the Heisenberg's uncertainty principle, in its general 
+form, applies to software! In plain words, Heisenberg stated that observation 
+of a system does modify the behavior of the observed system. In our case, the 
+debug library affects the behavior of the application in at least two ways:</p>
+  <ul>
+  <li>First, there is now an extra mutex protecting the data collected by the 
+  debug library. This mutex has to be acquired now by the observed threads and 
+  thus comes to play into the deadlock game.  </li>
+  <li>Secondly, bookkeeping takes time, no matter how fast and smart are the 
+  data structures at the core of the library. And these extra times will 
+  affect the way threads interact.  </li>
+  </ul>
+  
+<p>Thus, it might happen that the debug library makes it easier to reproduce 
+the deadlock. Or, on the contrary, it may make it harder to reproduce. </p>
+
+
+<h3>Resources</h3>
+
+  <ul>
+  <li><a href="http://www.opengroup.org/onlinepubs/009695399/functions/dlsym.html">The dlsym() man page, The Open Group Base Specifications Issue 6</a></li>
+  <li><a href="http://www.opengroup.org/onlinepubs/009695399/basedefs/pthread.h.html">Pthreads, The Open Group Base Specifications Issue 6</a></li>
+  <!--<li><a href="http://publib.boulder.ibm.com/infocenter/pseries/v5r3/index.jsp?topic=/com.ibm.aix.genprogc/doc/genprogc/understanding_threads.htm">Programming for AIX, Understanding Threads and Processes</a></li>-->
+  <li><a href="http://www.ddj.com/article/printableArticle.jhtml?articleID=204801163&dept_url=/hpc-high-performance-computing/">Lock hierarchies (DDJ). </a></li>
+  </ul>
+
+
+
+<script type='text/javascript'>
+digg_url = 'http://linuxgazette.net/150/melinte.html';
+digg_title = 'Lockpicking';
+digg_bodytext = '<p>The dynamic linker allows us to override functions exported by the shared objects that are used by programs. In this article, we will use this interposition functionality and build a library that wraps around the \'pthreads\' library to diagnose <a href="http://en.wikipedia.org/wiki/Mutex">mutex</a>-related problems, including the well-known deadlock. </p> ';
+digg_topic = 'linux_unix';
+</script>
+<script src="http://digg.com/tools/diggthis.js" type="text/javascript"></script>
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:150/melinte.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/authors/melinte.jpg" class="bio">
+</p>
+
+<em>
+<p>
+Aurelian is a software programmer by trade. Sometimes he programmed
+ Windows, sometimes Linux and sometimes embedded systems. He discovered
+ Linux in 1998 and enjoys using it ever since. He is currently settled
+ with Debian.
+</p>
+
+
+
+</em>
+
+<br clear="all">
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2008, Aurelian Melinte. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication License</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 150 of Linux Gazette, May 2008
+</p>
+
+</div>
+
+<div id="previousnextbottom">
+<A HREF="kapil.html" >&lt;-- prev</A> | <A HREF="pfeiffer.html" >next --&gt;</A>
+</div>
+
+</div>
+</div>
+
+<script src="http://www.google-analytics.com/urchin.js"
+type="text/javascript">
+</script>
+<script type="text/javascript">
+_uacct = "UA-1204316-1";
+urchinTracker();
+</script>
+
+
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+</body>
+</html>
+

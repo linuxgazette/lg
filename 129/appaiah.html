@@ -1,0 +1,466 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Making XMMS Effect plugins LG #129</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="lg_talkback.html" >&lt;-- prev</A> | <A HREF="dyckoff.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Making XMMS Effect plugins</h1>
+<p id="by"><b>By <A HREF="../authors/appaiah.html">Kumar Appaiah</A></b></p>
+
+<p>Most of us will agree that though there are many audio players for
+GNU/Linux and the BSDs, the most popular by far is XMMS. Not only is it
+similar to Winamp, which eases things for people coming from Windows, it
+is also simple and has all the features one would expect in a complete
+multimedia player. Best of all, it is extensible with additional plugins
+for added functionality, file support, visualization and, of course, sound
+effects.</p>
+
+<p>In this article, I will present an introduction to some functions
+provided in the XMMS plugin library for developing our own effects, along
+with some useful techniques. Using an example (a simple echo plugin), I
+shall walk through the steps, introducing the functions one by one. The
+only requirement is that you should know C, but you needn't be an audio
+engineer (I'm not one!) to be able to churn out some simple effects.</p>
+
+<p>Before we begin - an effect plugin, or, for that matter, any other
+plugin for XMMS, is a shared object (.so) file. Make sure you have
+gcc, make and other development tools on you machine, along with the
+XMMS plugin development headers and libraries.</p>
+
+<h3>Prerequisites</h3>
+
+<p>Check if the XMMS plugin library is installed already on your
+system. The presence of headers, /usr/include/xmms or
+/usr/local/include/xmms, is a good indication of this. If it isn't,
+install the xmms-devel (or equivalent) package from your
+distribution.</p>
+
+<h3>Technique</h3>
+
+<p>Though this article should be only about writing XMMS plugins, I
+also thought that it would be appropriate to mention a buffering
+technique used <em>all the time</em> in audio processing, called
+<strong>circular buffers</strong>. In our case, let us say we want to
+make the echo sound, say 370 ms (0.37 seconds) later. If we are
+working with data sampled at 44100 Hz, then the size of the buffer
+required would be 0.37 * 44100 = 16317 elements each for left and
+right (assuming you are providing separate echoes for the two
+channels). Now, the obvious way to solve our problem is, as soon as we
+get a new sample, we can retrieve the most delayed sample from the
+buffer for the echo effect, then shift the contents of the buffer so
+that the second element goes to the first place, third to second and
+so on and push the new sample to the last position, just like a FIFO
+queue. However, this would mean about 16317 memory read and write
+operations have to be executed for every sample processed, which is
+quite expensive when it comes to CPU use.</p>
+
+<p>A simple solution to this problem is to treat the buffer as
+<em>circular</em>. Here, we create an index or pointer to the element (or
+an index) in the buffer which you mark as the last element to be read for
+the delay, read that element for the echo effect, write the new sample into
+the <em>same</em> memory location, and increment the index. If the pointer
+or index reaches the end of the array, it just loops back to the first
+element. The following picture should give you an idea.</p>
+
+<p style="text-align: center; padding: 10px;"><img alt="Circular buffer picture" title="Circular buffer picture"
+src="misc/appaiah/circbuf.png" border="1" /></p>
+
+<p>With this, we have reduced the memory operations per sample to just
+one read and write; many times more efficient than the previous
+case. For more details, see the <a
+href="http://en.wikipedia.org/wiki/Circular_buffer">Wikipedia
+article</a> on this topic.</p>
+
+<h3>Writing the Plugin</h3>
+
+<p>Now, we start writing a minimal plugin that will create a fixed echo
+effect. The full source is available in <a
+href="misc/appaiah/exampleecho.c.txt">exampleecho.c</a>.</p>
+
+<p>A plugin is registered with XMMS
+using the following function:</p>
+
+<pre>
+EffectPlugin
+*get_eplugin_info(void);
+</pre>
+
+<p>First, we create the buffers for the echo effect. I have chosen a
+16384-sample delay, which is about 0.37 sec. Since we will use these as
+circular buffers, we shall keep two integers to index the location in the
+buffers.</p>
+
+<pre class="code">
+#define BUFFER_LENGTH 16384
+
+static gfloat *buffer_left = NULL;
+static gfloat *buffer_right = NULL;
+static guint index_left = 0;
+static guint index_right = 0;
+</pre>
+
+<p>Now, we observe the requirements of the <tt>EffectPlugin</tt>
+structure, defined in <tt>/usr/include/xmms/plugin.h</tt>:</p>
+
+<pre class="code">
+typedef struct
+{
+	void *handle;		/* Filled in by xmms */
+	char *filename;		/* Filled in by xmms */
+	char *description;	/* The description that is shown in the preferences box */
+	void (*init) (void);	/* Called when the plugin is loaded */
+	void (*cleanup) (void);	/* Called when the plugin is unloaded */
+	void (*about) (void);	/* Show the about box */
+	void (*configure) (void);	/* Show the configure box */
+	int (*mod_samples) (gpointer *data, gint length, AFormat fmt,
+	gint srate, gint nch);	/* Modify samples */
+	void (*query_format) (AFormat *fmt,gint *rate, gint *nch);
+}
+EffectPlugin;
+</pre>
+
+<p>Though most of the functions specified are optional and you can
+just make them NULL, we see that we need to write some functions for
+our plugin to be useful. I will call these <tt>query</tt>,
+<tt>init</tt>, <tt>cleanup</tt>, <tt>configure</tt>, <tt>about</tt>
+and <tt>mod_samples</tt>, though you can name them whatever you like. Of
+these, we will first write <tt>about</tt>, since it seems to be the
+easiest!</p>
+
+<pre class="code">
+static char *about_text = "Kumar's test reverberation plugin!";
+
+void
+about(void)
+{
+	static GtkWidget *about_dialog = NULL;
+	if (about_dialog != NULL)
+		return;
+	about_dialog = xmms_show_message("About Example Echo Plugin",
+					 about_text, "Ok", FALSE,
+					 NULL, NULL);
+	gtk_signal_connect(GTK_OBJECT(about_dialog), "destroy",
+			   GTK_SIGNAL_FUNC(gtk_widget_destroyed),
+			   &amp;about_dialog);
+}
+</pre>
+
+<p>Next, we write the <tt>query</tt> function. The query function
+informs XMMS what type of audio data we wish to process. This is a
+good idea, because our plugin may not function as expected for data
+with different attributes, such as a different sampling rate. To make
+it more clear, let us say we want an echo after 0.1 seconds, that is
+0.1 * 44100 samples later when 44100 Hz is the sampling rate. But it
+should be changed to 0.1 * 22050 for a file with 22050 Hz sampling
+rate. Yes, it can be done on the fly, but I leave such tricks for you
+to try out.</p>
+
+<p>We'll make our plugin work with 16 bit little-endian stereo data,
+sampled at 44100 (stereo) samples per second.</p>
+
+<pre class="code">
+void
+query(AFormat *afmt, gint *s_rate, gint *n_channels) {
+	*afmt = FMT_S16_LE;
+	*s_rate = 44100;
+	*n_channels = 2;
+}
+</pre>
+
+<p>The <tt>init</tt> function is used to initialize your plugin's settings,
+and you may also want to initialize your audio buffers here. This function
+is called the moment the plugin is <em>enabled</em>, or whenever the plugin
+loads (like when XMMS is started). In our plugin, we use two audio buffers
+to hold past left and right samples, which need to be zeroed initially to
+avoid &quot;noise&quot;. Note that <tt>g_malloc0</tt> is a GLIB function.
+In general, it is convenient to use GLIB functions and data types, and
+there are no extra requirements because XMMS needs them and uses them
+anyway.
+
+<pre class="code">
+void init(void)
+{
+	if (buffer_left == NULL) {
+		buffer_left = g_malloc0(sizeof(gfloat) * BUFFER_LENGTH);
+	}
+	if (buffer_right == NULL) {
+		buffer_right = g_malloc0(sizeof(gfloat) *
+		BUFFER_LENGTH);
+	}
+}
+</pre>
+
+<p>The <tt>cleanup</tt>, as the name very well suggests, is to free
+any resources you might have allocated and prepare for releasing the
+plugin. It is called the moment the plugin is disabled, or when XMMS
+exits, if the plugin remains enabled at that time. Here, we just free
+the buffers that we have allocated.</p>
+
+<pre class="code">
+void
+cleanup(void)
+{
+	g_free(buffer_left);
+	buffer_left = NULL;
+	g_free(buffer_right);
+	buffer_right = NULL;
+}
+</pre>
+
+<p>The <tt>configure</tt> function is used to allow the user to modify
+some characteristics of the plugin. It is called when the user clicks
+"Configure" for your plugin in the Preferences dialog box. In our
+plugin, I have left it blank, since I wanted to avoid adding a lot of
+GTK code. However, this is fairly simple, and left as an exercise for the
+reader. I would suggest that you refer the source of the plugins which
+come with XMMS for ideas.</p>
+
+<p>Note that the <tt>xmms_cfg_*</tt> functions make the use of the
+XMMS configuration extremely easy, with XMMS doing the dirty work of
+reading and writing the configuration file. They are present in
+<tt>/usr/include/xmms/configfile.h</tt></p>
+
+<p>Finally, we come to the most important function of the effect
+plugin, <tt>mod_samples</tt>, in which the samples are provided and
+are to be appropriately modified. The declaration of this function is
+as follows:</p>
+
+<pre>
+gint
+mod_samples(gpointer * d, gint length, AFormat afmt, gint srate, gint nch);
+</pre>
+
+<p>Here, <tt>d</tt> is the pointer to the data (samples), and length is the
+number of bytes of data provided to the function in a given instance. This
+function is called again and again with successive data; that is, in one
+pass, you are provided the first set of samples, in the next one, the next
+set of samples and so on, in order. The format of the data is given by the
+<tt>AFormat</tt> value. By checking the <tt>afmt</tt> value, you can
+dynamically adjust to changes in data type, etc.; however, we are going to
+just assume it is what we specified in the <tt>query</tt> function.</p>
+
+<pre class="code">
+gint mod_samples(gpointer * d, gint length, AFormat afmt, gint srate, gint nch)
+{
+	/* Read data as 16 bit values */
+	gint16 *data = (gint16 *) * d;
+	gint i;
+
+	/* We have "length" bytes, so "length / 2" samples */
+	for (i = 0; i &lt; length / 2; i += 2) {
+		gfloat echo_val;
+
+		/* For the left sample */
+		echo_val = buffer_left[left_index]; /* Retrieve delayed value */
+		buffer_left[left_index++] = data[i]; /* Store latest sample */
+		data[i] = (1 - ECHO_SCALE) * data[i] + ECHO_SCALE * echo_val; /* Set the echoed value */
+		left_index = left_index % BUFFER_LENGTH; /* Circular buffer shift */
+		/* Do the same for the right channel samples */
+		echo_val = buffer_right[right_index]; /* Retrieve delayed value */
+		buffer_right[right_index++] = data[i + 1]; /* Store latest sample */
+		data[i + 1] = (1 - ECHO_SCALE) * data[i + 1] + ECHO_SCALE * echo_val; /* Set the echoed value */
+		right_index = right_index % BUFFER_LENGTH; /* Circular buffer shift */
+	}
+	return length; /* Amount of data we have processed. */
+}
+</pre>
+
+<p>We are expected to process the samples and write the modified
+values back into the same memory locations. There are two things which
+you must note here. First, since we have to process samples which are
+16 bits (or two bytes) each, the number of samples is actually half
+the number of bytes. So, <tt>length / 2</tt> is the actual number of
+samples we have. That explains the cast to <tt>gint16</tt>. Also,
+since we are handling stereo audio, successive samples alternate
+between left and right. So, we actually have <tt>length / 4</tt>
+number of left and an equal number of right channel samples, such that
+<tt>data[0]</tt> is a left sample, <tt>data[1]</tt> is a right sample,
+<tt>data[2]</tt> is a left sample, and so on.</p>
+
+<p>Finally, we register the plugin with XMMS as follows:</p>
+
+<pre class="code">
+EffectPlugin e_plugin = {
+	NULL,
+	NULL,
+	"Example Echo plugin",
+	init,
+	cleanup,
+	about,
+	configure,
+	mod_samples,
+	query};
+
+EffectPlugin *
+get_eplugin_info(void)
+{
+	return &amp;e_plugin;
+}
+</pre>
+
+<h3>Build, install and test</h3>
+
+<p>The compilation and linking is just like for any other shared
+object file; note that we have to take care of the GTK and GLIB
+dependencies. You can see the <a
+href="misc/appaiah/Makefile.txt">Makefile</a> for details. I
+also add a line to copy the plugin to <tt>$HOME/.xmms/Plugins/</tt>
+after every compile. This ensures that I don't forget to put it there
+manually after each build. It is very useful for testing!</p>
+
+<p>I strongly recommend that you initially compile your plugin with
+the <tt>-g</tt> option, so that you can debug it using
+<tt>gdb</tt>. There are many ways to use <tt>gdb</tt> to debug the
+plugin. I generally start <tt>gdb</tt> as <tt>gdb /usr/bin/xmms</tt>,
+or find the PID of a running XMMS process and use <tt>gdb --pid
+&lt;PID&gt;</tt>.</p>
+
+<p>For best performance, once you are done with debugging the plugin,
+recompile it with <tt>-O2</tt> or a similar optimization to allow the
+compiler to optimize your code. You may also wish to consider using a
+profiler to optimize the code further.</p>
+
+<h3>Further details</h3>
+
+<p>Now that you are ready and raring to write your own XMMS effect
+plugins, enjoy yourself. I'd also recommend that you go through the
+source code of various effect plugins available at <a
+href="http://www.xmms.org/plugins.php?category=Effect">xmms.org</a> to
+get an idea of the techniques and possibilites. Also, for serious DSP
+advice, <a
+href="http://groups.google.co.in/group/comp.dsp">comp.dsp</a> is
+<em>the</em> place to go. <a href="http://www.dspguru.com">dspguru</a>
+also has a good collection of DSP tricks and ideas. <a
+href="http://www.harmony-central.com/">Harmony Central</a> is an
+excellent place to learn more about artificial sound effects.</p>
+
+<p>Comments, corrections and cribs are always welcome. Please e-mail
+me at the address in my <a href="../authors/appaiah.html">bio</a>.</p>
+
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:129/appaiah.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<hr>
+<p>
+<img align="left" alt="Bio picture" src="../gx/authors/appaiah.jpg" class="bio">
+</p>
+
+<p>
+<em>
+Kumar Appaiah is studying to earn a B.Tech in Electrical
+Engineering and M.Tech in Communication Engineering (Dual-degree) at
+the <a href="http://www.iitm.ac.in/">Indian Institute of Technology
+Madras</a>. He has been using GNU/Linux for the past five years, and
+believes that Free Software has helped him do work more neatly,
+quickly and efficiently.
+</p>
+
+<p>
+He is a fan of Debian GNU/Linux. He loves using Mutt, GNU Emacs,
+XCircuit, GNU Octave, SciPy, Matplotlib and ConTeXt.
+</p>
+
+</em>
+
+<br clear="all">
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2006, Kumar Appaiah. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 129 of Linux Gazette, August 2006
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="lg_talkback.html" >&lt;-- prev</A> | <A HREF="dyckoff.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">August 2006 (#129)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

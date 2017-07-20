@@ -1,0 +1,65 @@
+/*
+ * A watchdog timer. 
+ */
+
+#include &lt;linux/module.h&gt;
+#include &lt;linux/ioport.h&gt;
+#include &lt;linux/sched.h&gt;
+#include &lt;asm-arm/irq.h&gt;
+#include &lt;asm/io.h&gt;
+
+#define WME 1
+#define OSCLK 3686400 /* The OS counter gets incremented
+                       * at this rate
+                       * every second 
+                       */
+
+#define TIMEOUT 20 /*  20 seconds timeout */
+
+static int major;
+static char *name = "watchdog";
+
+void
+enable_watchdog(void)
+{
+    OWER = OWER | WME;
+}
+
+void
+enable_interrupt(void)
+{
+    OIER = OIER | 0x8;
+}
+
+ssize_t 
+watchdog_write(struct file *filp, const char *buf, size_t
+               count, loff_t *offp)
+{
+    OSMR3 = OSCR + TIMEOUT*OSCLK;   
+    printk("OSMR3 updated...\n");
+    return count;
+}
+
+static struct file_operations fops = {write:watchdog_write};
+
+int
+init_module(void)
+{
+    major = register_chrdev(0, name, &amp;fops);
+    if(major &lt; 0) {
+       printk("error in init_module...\n");
+       return major;
+    }
+    printk("Major = %d\n", major);
+    OSMR3 = OSCR + TIMEOUT*OSCLK;
+    enable_watchdog();
+    enable_interrupt();
+    return 0;
+}
+
+
+void
+cleanup_module()
+{
+    unregister_chrdev(major, name);
+}

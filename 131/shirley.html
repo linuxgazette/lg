@@ -1,0 +1,358 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>SVN Hackery: Versioning Your Linux Configuration LG #131</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+<a href="/">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="oregan.html" >&lt;-- prev</A> | <A HREF="lg_backpage.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>SVN Hackery: Versioning Your Linux Configuration</h1>
+<p id="by"><b>By <A HREF="../authors/shirley.html">Stephen Shirley</A></b></p>
+
+<h3>Basic Premise</h3>
+
+<p class="editorial">
+"So, let's assume that you're already familiar with <a
+href="http://subversion.tigris.org/">SVN</a>..." This might have made a
+good start for an article that deals with refining and sharpening your
+SVN-Fu and making you into an SVN Guru. Stephen's article, however, started
+life as a tip posted to <a href="http://www.linux.ie/">ILUG</a> - and
+gained a new lease on life when Rick Moen, a member of LG's staff and an
+ILUG regular, forwarded it to me for possible inclusion in LG. At first, I
+didn't see this idea as being all that revolutionary - but after an email
+exchange with Stephen where he explained the finer points to me <a
+name="shirley.html_1_back"></a><a href="#shirley.html_1">[1]</a>, I came to
+appreciate it for what it is.
+</p>
+
+<p class="editorial">
+SVN (Subversion, also known as "a compelling replacement for CVS") is a
+central part of the LG publication process; after using it for a couple of
+years and exploring its various features, I'm definitely a fan.  However,
+SVN is not an end in itself but an important building block, a flexible
+tool. In the case described here, it's used to provide a series of
+<strong>versioned snapshots</strong> of your system - something that would
+allow you to "roll it back" to a known-good version (creating a cron job
+that would take those snapshots on a regular basis would, of course, be an
+obvious complement to this.) In my opinion, that makes a very nice addition
+to a system administrator's toolkit - one that's likely to save you untold
+grief in a number of situations. That's the kind of ideas and systems I
+like to expose to our readers; that, to me, is what makes Linux "just a
+little more fun".<br>
+ -- Ben Okopnik, Editor-in-Chief
+</p>
+
+<hr>
+
+<p>
+So you have all of /etc stored in your SVN repository (say, at
+file:///root/svn/etc).  That works nicely: it's trivially easy to see if
+any files have changed, you can revert to any previous version, sleep well
+at night - just great. Then you decide that you should also store /boot in
+SVN (say, at file:///root/svn/boot). Also great. However, now in order to
+check if anything has changed, you have to do:
+</p>
+
+<pre>
+   cd /etc; svn status
+   cd /boot; svn status
+</pre>
+
+<p>
+If you add any more top-level directories to SVN, it quickly becomes a
+pain to do this. So, you want to store / in SVN also (with the
+appropriate "svn:ignore" properties set so that all the non-SVN'd
+top-level dirs don't show up in 'svn status'). If, however, you now try
+</p>
+
+<pre>
+   svn co file:///root/svn/ /
+</pre>
+
+<p>
+it wont work as SVN will try to also check out /etc and /boot, and
+will complain that those directories already exist. Hurm. If you try
+the non-recursive checking
+</p>
+
+<pre>
+   svn co -N file:///root/svn/ /
+</pre>
+
+<p>
+it will check out file:///root/svn/ into / alright, but /etc and /boot 
+will show up as unknown in "svn status":
+</p>
+
+<pre>
+   fluff# svn status /
+   ?    /boot
+   ?    /etc
+</pre>
+
+<p>
+Fixing this requires some minor hackery of the .svn/ special
+directory. If you open /.svn/entries in a text editor, youll see
+something like:
+</p>
+
+<pre class="code">
+&lt;?xml version="1.0" encoding="utf-8"?&gt;
+&lt;wc-entries
+  xmlns="svn:"&gt;
+&lt;entry
+  committed-rev="226"
+  name=""
+  committed-date="2006-08-17T22:34:00.835159Z"
+  url="file:///root/svn"
+  last-author="root"
+  kind="dir"
+  uuid="18f6e95b-a6ff-0310-910f-8823210a8ec4"
+  revision="226"/&gt;
+&lt;/wc-entries&gt;
+</pre>
+
+<p>
+It contains a single &lt;entry ... /&gt; tag, with the name attribute set to
+"". This is the SVN entry for '/' itself. If you open '/etc/.svn/entries'
+in a text editor, you'll find a very similar &lt;entry... name=""... /&gt;
+tag:
+</p>
+
+<pre class="code">
+&lt;entry
+  committed-rev="25"
+  name=""
+  committed-date="2005-09-22T20:33:37.949298Z"
+  url="file:///root/svn/etc"
+  last-author="root"
+  kind="dir"
+  uuid="18f6e95b-a6ff-0310-910f-8823210a8ec4"
+  revision="25"/&gt;
+</pre>
+
+<p>
+So, to make SVN consider /etc to be part of the / working directory,
+what you need to do is this: copy the above &lt;entry.../&gt; tag from
+/etc/.svn/entries into /.svn/entries, placing it just before the
+closing &lt;/wc-entries&gt; tag. Then, change the 'name' attribute from ""
+to "etc". The complete finished /.svn/entries file should look like
+this:
+</p>
+
+<pre class="code">
+&lt;?xml version="1.0" encoding="utf-8"?&gt;
+&lt;wc-entries
+  xmlns="svn:"&gt;
+&lt;entry
+  committed-rev="226"
+  name=""
+  committed-date="2006-08-17T22:34:00.835159Z"
+  url="file:///root/svn"
+  last-author="root"
+  kind="dir"
+  uuid="18f6e95b-a6ff-0310-910f-8823210a8ec4"
+  revision="226"/&gt;
+&lt;entry
+  committed-rev="25"
+  name="etc"
+  committed-date="2005-09-22T20:33:37.949298Z"
+  url="file:///root/svn/etc"
+  last-author="root"
+  kind="dir"
+  uuid="18f6e95b-a6ff-0310-910f-8823210a8ec4"
+  revision="25"/&gt;
+&lt;/wc-entries&gt;
+</pre>
+
+<p>
+Now when you check the SVN status of /, it no longer considers /etc to
+be a foreign object:
+</p>
+
+<pre>
+   fluff# svn status /
+   ?    /boot
+</pre>
+
+<p>
+Bingo. If you repeat the process again for /boot (i.e. copy the
+&lt;entry... name=""... /&gt; tag from /boot/.svn/entries into /.svn/entries
+before the closing &lt;/wc-entries&gt; tag, and set the name attribute to be
+"boot") and any other applicable dirs; SVN will then start treating
+them as proper checked-out subdirs of the working dir.
+</p>
+
+<p>
+As your reward, a single 'svn status /' will now check all of the
+top-level dirs that are stored in Subversion, making it much easier to
+keep track of things.
+</p>
+
+<hr>
+
+<p>
+<a name="shirley.html_1"></a><a href="#shirley.html_1_back">[1]</a>
+Our exchange went something like this:
+</p>
+
+<pre>
+Ben &gt; &gt; Why not just do 'svn status /etc /boot', or even a little script that
+Ben &gt; &gt; would read the list of directories in SVN and report on them? E.g.,
+Ben &gt; &gt; 
+Ben &gt; &gt; -------------------------------------------------------------------
+Ben &gt; &gt; #!/bin/bash
+Ben &gt; &gt; 
+Ben &gt; &gt; cd /root/svn
+Ben &gt; &gt; svn status `echo *|sed 's|\&lt;|/|g'`
+Ben &gt; &gt; -------------------------------------------------------------------
+&gt;
+Steve &gt; For what i explicitly stated, yes, that's a neat enough solution.
+Steve &gt; Other solutions that were posted in response on the ILUG list involved
+Steve &gt; using the "svn:externals" property on / to achieve roughly the same
+Steve &gt; thing. The downside to doing this is that you lose the benefit of a
+Steve &gt; cohesive working directory. You can't do atomic commits (you have to
+Steve &gt; do one per /, /etc and /boot instead). It also doesn't work with
+Steve &gt; branching etc. And of course you have to remember to run a script
+Steve &gt; rather than just 'svn status' when you're working on stuff.
+Steve &gt; 
+Steve &gt; All in all, my solution is probably overkill for most people, i just
+Steve &gt; thought i'd document it seeing as i discovered it was possible with a
+Steve &gt; moderate amount of effort, and it makes things nice and elegant for
+Steve &gt; me, even when i set up svn for /etc before realising that i want it
+Steve &gt; for other top-level dirs too.
+Steve &gt;
+Steve &gt; By all means publish it if you think it's genuinely useful to others,
+Steve &gt; but i'd perfectly understand if you don't -)
+</pre>
+
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:131/shirley.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/authors/shirley.jpg" class="bio">
+</p>
+
+<p>
+<em>
+Stephen 'Captain Pedantic Pants' Shirley is a quiet student[0] with an
+appetite for sanely configured, maintainable systems. He was first
+introduced to Linux in 1996 with RedHat 4.1, and has since progressed
+through SuSE, Mandrake and Debian, seeking enlightenment. He is now
+involved in the Ubuntu project, and is the head admin of the
+University of Limerick computer society (<a
+href="http://skynet.ie">skynet.ie</a>). Currently finishing a MSc through
+research in the aforementioned UL, he's looking forward to a fulfilling
+life of bending Unix boxen to his will, whilst striking down inaccuracies
+wherever he finds them.
+</p>
+
+<p>
+[0] It's always the quiet ones...
+</em>
+
+</p>
+<br clear="all">
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2006, Stephen Shirley. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 131 of Linux Gazette, October 2006
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="oregan.html" >&lt;-- prev</A> | <A HREF="lg_backpage.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/mailman/listinfo/">Mailing Lists</a>
+<a href="..//jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">October 2006 (#131)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

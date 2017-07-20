@@ -1,0 +1,528 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>Apache Log Analysis Using Python LG #83</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="thangaraju.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../lg_faq.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="ward.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+
+<!--endcut ============================================================-->
+
+<TABLE BORDER><TR><TD WIDTH="200">
+<A HREF="http://www.linuxgazette.net/">
+<IMG ALT="LINUX GAZETTE" SRC="../gx/2002/lglogo_200x41.png" 
+	WIDTH="200" HEIGHT="41" border="0"></A> 
+<BR CLEAR="all">
+<SMALL>...<I>making Linux just a little more fun!</I></SMALL>
+</TD><TD WIDTH="380">
+
+
+<center>
+<BIG><BIG><STRONG><FONT COLOR="maroon">Apache Log Analysis Using Python</FONT></STRONG></BIG></BIG><BR>
+<STRONG>By <A HREF="../authors/tougher.html">Rob Tougher</A></STRONG></BIG>
+
+</TD></TR>
+</TABLE>
+<P>
+
+<!-- END header -->
+
+
+
+
+<dl>
+<dt><a href=#1>1. Introduction</a>
+<dt><a href=#2>2. The Framework</a>
+<dd><a href=#2.1>2.1 First pass - Awk attempt</a>
+<dd><a href=#2.2>2.2 Next pass - Python to the rescue</a>
+<dt><a href=#3>3. Example Handlers</a>
+<dd><a href=#3.1>3.1 Return visitors</a>
+<dd><a href=#3.2>3.2 Referring domains</a>
+<dt><a href=#4>4. Files</a>
+<dt><a href=#5>5. Conclusion</a>
+</dl>
+
+<a name=1></a>
+<h3>1. Introduction</h3>
+
+<p>
+I use the <a href="http://httpd.apache.org/">
+Apache HTTP Server</a> to run my
+<a href="http://www.robtougher.com">web site</a>. 
+When a visitor requests a page from the site, Apache
+records the following information in a file named "access_log":
+</p>
+
+<ul>
+<li>The IP address of the computer requesting the page
+<li>The name of the page being requested
+<li>The date and time of the request
+<li>The page that referred the visitor to the requested page
+</ul>
+
+
+<p>
+Until recently I used a combination of command line utilities 
+(grep, tail, sort, wc, less, awk) to extract
+this information from the access log. 
+But some complex calculations were difficult and time-consuming
+to perform using these tools. 
+I needed a more powerful solution - 
+a programming language to crunch the data.
+</p>
+
+<p>
+Enter <a href="http://www.python.org">Python</a>. Python is
+fast becoming my favorite language, and was the perfect tool
+for solving this problem. I created a framework in Python for 
+performing generic text file analysis, and then utilized
+this framework to glean information from my Apache access log.
+</p>
+
+<p>
+This article first explains the framework, and 
+then describes two examples that use it. My hope
+is that by the end of this article you will be able
+to use this framework for analyzing your own text files.
+</p>
+
+<a name=2></a>
+<h3>2. The Framework</h3>
+
+<a name=2.1></a>
+<h4>2.1 First pass - Awk attempt</h4>
+
+<p>
+When trying to solve this problem I initially turned to 
+<a href="http://www.gnu.org/software/gawk/gawk.html">Gawk</a>, 
+an implementation of the Awk language. Awk is primarily used
+to search text files for certain pieces of data. The following is 
+a basic Awk script:
+</p>
+
+
+
+<p>Listing 1: 
+<a href="misc/tougher/count_lines.awk.txt">count_lines.awk</a></p>
+<pre>
+#!/usr/bin/awk -f
+
+BEGIN {
+	count = 0
+}
+
+{ count++ }
+
+END {
+	print count
+}
+</pre>
+
+
+<p>
+This script prints the number of lines in a file. You can
+run it by typing the following at a command prompt:
+</p>
+
+<pre>
+prompt$ ./count_lines.awk access_log
+</pre>
+
+<p>
+Awk reads in the script, and does the following:
+</p>
+
+<ul>
+<li>Runs the code in the BEGIN block.
+<li>Runs the middle block of code for each line in "access_log".
+<li>Runs the code in the END block.
+</ul>
+
+<p>
+I liked this processing model. It made sense to me - 
+first run some initialization code, 
+next process the file line by line, 
+and finally run some cleanup code. It seemed perfectly
+suited to the task of analyzing text files.
+</p>
+
+<p>
+Awk gave me trouble, though. It was very difficult to create
+complex data structures - I was jumping through hoops for
+tasks that should have been much more straightforward. 
+So after some time I started looking for an alternative.
+</p>
+
+<a name=2.2></a>
+<h4>2.2 Next pass - Python to the rescue</h4>
+
+<p>
+My situation was this: I liked the Awk processing model, 
+but I didn't like the language itself. And I liked Python, but 
+it didn't have Awk's processing model. So I decided
+to combine the two, and came up with the current framework.
+</p>
+
+<p>
+The framework resides in 
+<a href="misc/tougher/awk.py.txt">awk.py</a>.
+This module contains one class, <code>controller</code>, which
+implements the following methods:
+</p>
+
+<ul>
+<li><code>__init__(file)</code> - the constructor, which takes a 
+file object to process.
+<li><code>subscribe(handler)</code> - subscribes a handler to the controller.
+<li><code>run()</code> - processes the file.
+<li><code>print_results()</code> - prints the results of the process.
+</ul>
+
+
+<p>
+A <i>handler</i> is a class that implements a defined set 
+of methods. Multiple handlers 
+can be subscribed to the controller at any given time. Every
+handler must implement the following methods:
+</p>
+
+
+<ul>
+<li><code>begin()</code> - gets called once before the file is processed.
+<li><code>process_line(line)</code> - gets called for each line of the file.
+<li><code>end()</code> - gets called after the file is processed.
+<li><code>description()</code> - gets called from 
+<code>controller.print_results()</code>. It should
+return a description of the handler.
+<li><code>result()</code> - also called from 
+<code>controller.print_results()</code>. 
+It should return the results of the class' calculations.
+</ul>
+
+
+<p>
+You create handlers, subscribe them to the controller, and then
+run the controller. The following is a simple example with one handler:
+</p>
+
+
+
+<p>Listing 2: <a href="misc/tougher/count_lines.py.txt">count_lines.py</a></p>
+<pre>
+# Standard sys module
+import sys
+
+# Custom awk.py module
+import awk
+
+class count_lines:
+
+	def begin(self):
+		self.m_count = 0
+
+	def process_line(self, s):
+		self.m_count += 1
+
+	def end(self):
+		pass
+
+	def description(self):
+		return "# of lines in the file"
+
+	def result(self):
+		return self.m_count
+
+
+#
+# Step 1: Create the Awk controller
+#
+ac = awk.controller(sys.stdin)
+
+#
+# Step 2: Subscribe the handler
+#
+ac.subscribe(count_lines())
+
+#
+# Step 3: Run
+#
+ac.run()
+
+#
+# Step 4: Print the results
+#
+ac.print_results()
+</pre>
+
+
+
+<p>
+You can run this script using the following command:
+</p>
+
+<pre>
+prompt$ cat access_log | python count_lines.py
+</pre>
+
+<p>
+The results of the script should be printed to the console.
+</p>
+
+
+
+<a name=3></a>
+<h3>3. Example Handlers</h3>
+
+<p>
+Now that the framework was in place, I had to figure
+out how I was going to use it. I came up with many ideas, but
+the following two were the top priorities.
+</p>
+
+<a name=3.1></a>
+<h4>3.1 Return visitors</h4>
+
+<p>
+The first question that I wanted to answer using my new framework
+was the following:
+</p>
+
+<ul>
+<li><i>How many people have returned to the site more than N times?</i>
+</ul>
+
+
+<p>
+My thinking was this: if people return often, they must enjoy
+the site, right? The following script answers the
+above question:
+</p>
+
+
+<p>
+Listing 3: return_visitors (can be found in 
+<a href="misc/tougher/handlers.py.txt">handlers.py</a>)
+</p>
+
+<pre>
+class return_visitors:
+
+	def __init__(self, n):
+		self.m_n = n
+		self.m_ip_days = {}
+
+	def begin(self):
+	    pass
+
+	def process_line(self, s):
+
+		try:
+			array = s.split()
+			ip = array[0]
+			day = array[3][1:7]
+
+			if self.m_ip_days.has_key(ip):
+
+				if day not in self.m_ip_days[ip]:
+					self.m_ip_days[ip].append(day)
+
+			else:
+				self.m_ip_days[ip] = []
+				self.m_ip_days[ip].append(day)
+
+		except IndexError:
+			pass
+
+
+
+	def end(self):
+
+		ips = self.m_ip_days.keys()
+		count = 0
+
+		for ip in ips:
+
+			if len(self.m_ip_days[ip]) > self.m_n:
+				count += 1
+
+		self.m_count = count
+
+
+	def description(self):
+		return "# of IP addresses that visited more than %s days" % self.m_n
+
+	def result(self):
+		return self.m_count
+</pre>
+
+
+<p>
+The script stores the number of days that each IP address has visited
+the site. When the file is finished processing, it returns how
+many IP addresses have visited more than N times.
+</p>
+
+
+<a name=3.2></a>
+<h4>3.2 Referring domains</h4>
+
+<p>
+Another thing I wanted to know was how people found out about the
+site. I was getting a decent amount of traffic, and I wasn't sure
+why. I kept asking myself:
+</p>
+
+
+<ul>
+<li><i>Where are all these people coming from?</i>
+</ul>
+
+<p>
+I guess you shouldn't argue with a site that's popular. But
+I was curious to know how people were learning about my site.
+So I wrote the following script:
+</p>
+
+
+<p>Listing 4: referring_domains (can be found in 
+<a href="misc/tougher/handlers.py.txt">handlers.py</a>)
+</p>
+
+<pre>
+class referring_domains:
+
+	def __init__(self):
+		self.m_domains = {}
+
+	def begin(self):
+		pass
+
+	def process_line(self, line):
+
+		try:
+			array = line.split()
+			referrer = array[10]
+
+			m = re.search('//[a-zA-Z0-9\-\.]*\.[a-zA-z]{2,3}/',
+				      referrer)
+
+			length = len(m.group(0))
+			domain = m.group(0)[2:length-1]
+
+			if self.m_domains.has_key(domain):
+				self.m_domains[domain] += 1
+			else:
+				self.m_domains[domain] = 1
+
+		except AttributeError:
+			pass
+		except IndexError:
+			pass
+
+
+	def end(self):
+		pass
+
+
+	def description(self):
+		return "Referring domains"
+
+
+	def sort(self, key1, key2):
+		if self.m_domains[key1] > self.m_domains[key2]:
+			return -1
+		elif self.m_domains[key1] == self.m_domains[key2]:
+			return 0
+		else:
+			return 1
+
+
+	def result(self):
+
+		s = ""
+		keys = self.m_domains.keys()
+		keys.sort(self.sort)
+
+		for domain in keys:
+			s += domain
+			s += " "
+			s += str(self.m_domains[domain])
+			s += "\n"
+
+		s += "\n\n"
+
+		return s
+</pre>
+
+
+<p>
+This script stores the referral information
+for each request, and generates a list of
+referring domains, sorted by frequency.
+</p>
+
+<p>
+I ran the script and found that most of the referrals came from my own site.
+This makes sense - when a visitor moves from one page to another on
+the site, the referring domain for the page is my web site's
+domain. But I did find some interesting entries in the referral
+list, and my question about site traffic was answered.
+</p>
+
+
+<a name=4></a>
+<h3>4. Files</h3>
+
+<p>
+The following files contain the code from this article:
+</p>
+
+<ul>
+<li><a href="misc/tougher/count_lines.awk.txt">count_lines.awk</a> - 
+a basic Awk script
+<li><a href="misc/tougher/awk.py.txt">awk.py</a> - 
+the <code>controller</code> class
+<li><a href="misc/tougher/count_lines.py.txt">count_lines.py</a> - 
+<code>count_lines</code> handler
+<li><a href="misc/tougher/handlers.py.txt">handlers.py</a> - 
+<code>return_visitors</code> and <code>referring_domains</code> handlers
+</ul>
+
+<a name=5></a>
+<h3>5. Conclusion</h3>
+
+
+<p>
+In this article I described how I use Python to process my
+Apache HTTP Server access log. Hopefully I explained my techniques
+clearly enough so that you can use them for your text files.
+</p>
+
+
+
+
+<!-- *** BEGIN copyright *** -->
+<hr>
+<CENTER><SMALL><STRONG>
+
+Copyright &copy; 2002, Rob Tougher.
+Copying license <A HREF="../copying.html">http://www.linuxgazette.net/copying.html</A><BR> 
+Published in Issue 83 of <i>Linux Gazette</i>, October 2002</H5>
+</STRONG></SMALL></CENTER>
+<!-- *** END copyright *** -->
+<HR>
+
+<!--startcut ==========================================================-->
+<CENTER>
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="thangaraju.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../lg_faq.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="ward.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+</CENTER>
+</BODY></HTML>
+<!--endcut ============================================================-->

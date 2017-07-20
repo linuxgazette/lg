@@ -1,0 +1,453 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Learning about Linux Processes LG #133</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+<a href="../">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="renker.html" >&lt;-- prev</A> | <A HREF="tag.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Learning about Linux Processes</h1>
+<p id="by"><b>By <A HREF="../authors/saha.html">Amit Saha</A></b></p>
+
+
+<h3>So, What Is A Process?</h3>
+
+<p>Quoting from Robert Love's book <em>Linux Kernel
+Development</em>, "The Process is one of the fundamental
+abstractions in Unix Operating Systems, the other fundamental
+abstraction being files." A <em>process</em> is a program in
+execution. It consists of the executing program code, a set of
+resources such as open files, internal kernel data, an address
+space, one or more threads of execution and a data section
+containing global variables.</p>
+
+<h3>Process Descriptors</h3>
+
+<p>Each process has <em>process descriptors</em> associated with it. These
+hold the information used to keep track of a process in memory.  Among the
+various pieces of information stored about a process are its PID, state,
+parent process, children, siblings, processor registers, list of open files
+and address space information.</p>
+
+<p>The Linux kernel uses a circular doubly-linked list of <tt>struct
+task_struct</tt>s to store these process descriptors.  This structure is
+declared in <i>linux/sched.h</i>. Here are a few fields from kernel
+2.6.15-1.2054_FC5, starting at line 701:</p>
+
+<pre class="code">
+    701 struct task_struct {
+    702         volatile long state;    /* -1 unrunnable, 0 runnable, &gt;0 stopped */
+    703         struct thread_info *thread_info;
+     .
+     .
+    767         /* PID/PID hash table linkage. */
+    768         struct pid pids[PIDTYPE_MAX];
+     .
+     .
+    798         char comm[TASK_COMM_LEN]; /* executable name excluding path
+</pre>
+<!-- 20061129 dsrich - Deleted line numbers from all other listings 
+Left them here to give the flavor of how much was left out -->
+
+<p>The first line of the structure defines the field <tt>state</tt>
+as <tt>volatile long</tt>. This variable is used to keep track of
+the execution state of the process, defined by the following
+macros:</p>
+
+<pre class="code">
+#define TASK_RUNNING            0
+#define TASK_INTERRUPTIBLE      1
+#define TASK_UNINTERRUPTIBLE    2
+#define TASK_STOPPED            4
+#define TASK_TRACED             8
+/* in tsk-&gt;exit_state */
+#define EXIT_ZOMBIE             16
+#define EXIT_DEAD               32
+/* in tsk-&gt;state again */
+#define TASK_NONINTERACTIVE     64
+</pre>
+
+<p>The <strong>volatile</strong> keyword is worth noting - see
+<a href=
+"http://www.kcomputing.com/volatile.html">http://www.kcomputing.com/volatile.html</a>
+for more information.</p>
+
+<h3>Linked Lists</h3>
+
+<p>Before we look at how tasks/processes (we will use the two words
+as synonyms) are stored by the kernel, we need to understand how
+the kernel implements circular linked lists. The implementation
+that follows is a standard that is used across all the kernel sources.
+The linked list is declared in <i>linux/list.h</i> and the data
+structure is simple:</p>
+
+<pre class="code">
+ struct list_head {
+         struct list_head *next, *prev;
+ };
+</pre>
+
+<p>This file also defines several ready-made macros and functions
+which you can use to manipulate linked lists. This standardizes the
+linked list implementation to prevent people "reinventing the
+wheel" and introducing new bugs.</p>
+
+<p>Here are some kernel linked list references:</p>
+
+<ul>
+<li>Suman Adak has an excellent entry in his blog at <a href=
+"http://sumanadak.blogspot.com/2006/09/linux-kernel-linked-list.html">
+this link</a></li>
+
+<li>Linux kernel source: &lt;include/linux/list.h&gt;, &lt;include/linux/sched.h&gt;</li>
+
+<li>"Linux Kernel Development", by Robert Love (Appendix A)</li>
+
+<li><a href=
+"http://www.win.tue.nl/~aeb/linux/lk/lk-2.html">http://www.win.tue.nl/~aeb/linux/lk/lk-2.html</a>
+</li>
+</ul>
+
+<h3>The Kernel Task List</h3>
+
+<p>Let us now see how the linux kernel uses circular doubly-linked
+lists to store the records of processes. Searching for <tt>struct
+list_head</tt> inside the definition of <tt>struct task_struct</tt>
+gives us:</p>
+
+<pre>
+struct list_head tasks;
+</pre>
+
+<p>This line shows us that the kernel is using a circular linked
+list to store the tasks. Thsi means we can use the standard kernel
+linked list macros and functions to traverse through the complete
+task list.</p>
+
+<p><i>init</i> is the "mother of all processes" on a
+Linux system. Thus it is represented at the beginning of the list,
+although strictly speaking there is no head since this is a
+<b>circular</b> list. The <i>init</i> task's process descriptor is
+statically allocated:</p>
+
+<pre class="code">
+extern struct task_struct init_task;
+</pre>
+
+<p>The following shows the linked list representation of processes
+in memory:</p>
+
+<p><img src="misc/saha/l-list.png" alt="Linked List Figure">
+</p>
+<!-- 20061128 dsrich - Redrew artwork -->
+
+<p>Several other macros and functions are available to help us
+traverse this list:</p>
+
+<p><tt>for_each_process()</tt> is a macro which iterates over the
+entire task list. It is defined as follows in linux/sched.h:</p>
+
+<pre class="code">
+#define for_each_process(p) \
+        for (p = &amp;init_task ; (p = next_task(p)) != &amp;init_task ; )
+</pre>
+
+<p><tt>next_task()</tt> is a macro defined in linux/sched.h which
+returns the next task in the list:</p>
+
+<pre class="code">
+#define next_task(p)    list_entry((p)-&gt;tasks.next, struct task_struct, tasks)
+</pre>
+
+<p><tt>list_entry()</tt> is a macro defined in linux/list.h:</p>
+
+<pre>
+/*
+ * list_entry - get the struct for this entry
+ * @ptr:        the &amp;struct list_head pointer.
+ * @type:       the type of the struct this is embedded in.
+ * @member:     the name of the list_struct within the struct.
+ */
+#define list_entry(ptr, type, member) \
+        container_of(ptr, type, member)
+</pre>
+
+<p>The macro <tt>container_of()</tt> is defined as follows:</p>
+
+<pre>
+#define container_of(ptr, type, member) ({                      \
+        const typeof( ((type *)0)-&gt;member ) *__mptr = (ptr);    \
+        (type *)( (char *)__mptr - offsetof(type,member) );})
+</pre>
+<!-- 
+<p>The purpose of this macro is that it returns the inode number of
+the node.</p>
+ -->
+<!-- 20061129 dsrich - inode?  this is not a file system...? -->
+
+<p>Thus if we can traverse through the entire task list we can have
+all the processes running on the system. This can be done with the
+macro for_each_process(task) , where task is a pointer of struct
+task_struct type. Here is an example kernel module, from <em>Linux
+Kernel Development</em>:</p>
+<!-- 20061129 dsrich - wonder which kernel version this is for? -->
+
+<pre class="code">
+    /* ProcessList.c 
+    Robert Love Chapter 3
+    */
+    #include &lt; linux/kernel.h &gt;
+    #include &lt; linux/sched.h &gt;
+    #include &lt; linux/module.h &gt;
+
+    int init_module(void)
+    {
+    struct task_struct *task;
+    for_each_process(task)
+    {
+    printk("%s [%d]\n",task-&gt;comm , task-&gt;pid);
+    }
+   
+    return 0;
+    }
+   
+    void cleanup_module(void)
+    {
+    printk(KERN_INFO "Cleaning Up.\n");
+    }
+</pre>
+
+<p>The <tt>current</tt> macro is a link to the process descriptor
+(a pointer to a <tt>task_struct</tt>)of the currently executing
+process. How <tt>current</tt> achieves its task is architecture
+dependent. On an x86 this is done by the function
+<tt>current_thread_info()</tt> in <tt>asm/thread_info.h</tt></p>
+
+<pre class="code">
+   /* how to get the thread information struct from C */
+   static inline struct thread_info *current_thread_info(void)
+   {
+           struct thread_info *ti;
+           __asm__("andl %%esp,%0; ":"=r" (ti) : "0" (~(THREAD_SIZE - 1)));
+           return ti;
+   }
+</pre>
+
+<p>Finally <tt>current</tt> dereferences the <tt>task</tt> member
+of the <tt>thread_info</tt> structure which is reproduced below
+from <tt>asm/thread_info.h</tt> by
+<tt>current_thread_info()-&gt;task;</tt></p>
+
+<pre class="code">
+   struct thread_info {
+           struct task_struct      *task;          /* main task structure */
+           struct exec_domain      *exec_domain;   /* execution domain */
+           unsigned long           flags;          /* low level flags */
+           unsigned long           status;         /* thread-synchronous flags */
+           __u32                   cpu;            /* current CPU */
+           int                     preempt_count;  /* 0 =&gt; preemptable, &lt;0 =&gt; BUG */
+   
+   
+           mm_segment_t            addr_limit;     /* thread address space:
+                                                      0-0xBFFFFFFF for user-thread
+                                                      0-0xFFFFFFFF for kernel-thread
+                                                   */
+           void                    *sysenter_return;
+           struct restart_block    restart_block;
+   
+           unsigned long           previous_esp;   /* ESP of the previous stack in case
+                                                      of nested (IRQ) stacks
+                                                   */
+           __u8                    supervisor_stack[0];
+   };
+</pre>
+<!--<p>I did wonder a bit about why the current process
+descriptor is obtained from the <tt>thread_info</tt> structure and I
+reasoned to myself that since a thread is a unit of dispatch so the
+current process information is obviously going to be obtained from
+the currently executing thread.</p>-->
+<!-- 20061129 dsrich - Hunh? -->
+
+<p>Using the <tt>current</tt> macro and <tt>init_task</tt> we can
+write a kernel module to trace from the current process back to
+<i>init</i>.</p>
+
+<pre class="code">
+/*
+Traceroute to init
+   traceinit.c
+Robert Love Chapter 3
+*/
+  #include &lt; linux/kernel.h &gt;
+  #include &lt; linux/sched.h &gt;
+  #include &lt; linux/module.h &gt;
+ 
+  int init_module(void)
+  {
+  struct task_struct *task;
+  
+   for(task=current;task!=&amp;init_task;task=task-&gt;parent)
+   //current is a macro which points to the current task / process
+   {
+   printk("%s [%d]\n",task-&gt;comm , task-&gt;pid);
+   }
+  
+   return 0;
+   }
+   
+   void cleanup_module(void)
+   {
+   printk(KERN_INFO "Cleaning up 1.\n");
+   }
+</pre>
+
+<p>Well, we have just started in our quest to learn about one of
+the fundamental abstractions of a linux system &mdash; the process.
+In (possible) future extensions of this, we shall take a look at several
+others. 
+</p>
+
+<p>
+'Till then, Happy hacking!
+</p>
+
+<h3>Other Resources:</h3>
+
+<ul>
+<li><a href="http://tldp.org/LDP/lkmpg/2.6/html/index.html">The
+Linux Kernel Module Programming Guide</a> for 2.6.x kernels</li>
+<li>Makefile used to compile the kernel modules:</li>
+</ul>
+
+<pre>
+     obj-m +=ProcessList.o
+     obj-m +=traceinit.o
+     all:
+             make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules
+     
+     clean:
+             make -C /lib/modules/$(shell uname -r)/build M=$(PWD) clean
+</pre>
+
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:133/saha.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<hr>
+<p>
+<img align="left" alt="Bio picture" src="../gx/authors/saha.jpg" class="bio">
+</p>
+
+<p>
+<em>
+
+The author is a 3rd year Computer Engineering Undergraduate at Haldia
+Institute of Technology, Haldia. His interests include Network Protocols,
+Network Security, Operating systems, and Microprocessors. He is a Linux fan
+and loves to hack the Linux kernel.
+
+</em>
+
+</p>
+<br clear="all">
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2006, Amit Saha. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 133 of Linux Gazette, December 2006
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="renker.html" >&lt;-- prev</A> | <A HREF="tag.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/mailman/listinfo/">Mailing Lists</a>
+<a href="../jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">December 2006 (#133)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

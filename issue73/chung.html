@@ -1,0 +1,548 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>Audio Processing Pipelines LG #73</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<CENTER>
+<A HREF="http://www.linuxgazette.net/">
+<IMG ALT="LINUX GAZETTE" SRC="../gx/lglogo.png" 
+	WIDTH="600" HEIGHT="124" border="0"></A> 
+<BR>
+
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="arndt.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../faq/index.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="dennis.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+<P>
+</CENTER>
+
+<!--endcut ============================================================-->
+
+<H4 ALIGN="center">
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H1><font color="maroon">Audio Processing Pipelines</font></H1>
+<H4>By <a href="mailto:ajchung@email.com">Adrian J. Chung</a></H4>
+</center>
+<P> <HR> <P>  
+
+<!-- END header -->
+
+
+
+
+For decades experienced Unix users have employed many text processing
+tools to make document editing tasks much easier.  Console utilities
+such as <TT>sed</TT>, <TT>awk</TT>, <TT>cut</TT>, <TT>paste</TT>, and
+<TT>join</TT>, though useful in isolation, only realise their full
+potential when combined together through the use of pipes.
+
+<P>
+Recently Linux has been used for more than just processing of ASCII
+text.  The growing popularity of various multimedia formats, in the
+form of images and audio data, has spurred on the development of tools
+to deal with such files.  Many of these tools have graphical user
+interfaces and cannot operate in absence of user interaction.  There
+are, however, a growing number of tools which can be operated in <EM>batch
+mode</EM> with their interfaces disabled.  Some tools are even designed to
+be used from the command prompt or within shell scripts.
+
+<P>
+It is this class of tools that this article will explore.  Complex
+media manipulation functions can often be effected by combining simple
+tools together using techniques normally applied to text processing
+filters.  The focus will be on audio stream processing as these
+formats work particularly well with the Unix filter pipeline paradigm.
+
+
+<H3>Sound Sample Translator</H3>
+
+<P>
+There are a multitude of sound file formats and converting between
+them is a frequent operation.  The sound exchange utility <TT>sox</TT> 
+fulfills this role and is invoked at the command prompt:
+
+<BR><BR><B><PRE>
+sox sample.wav sample.aiff
+</PRE></B><BR>
+
+The above command will convert a WAV file to AIFF format.  One can
+also change the sample rate, bits per sample (8 or 16), and number of
+channels:
+
+<BR><BR><B><PRE>
+sox sample.aiff -r 8000 -b -c 1 low.aiff
+</PRE></B><BR>
+
+<TT>low.aiff</TT> will be at 8000 single byte samples per second in a
+single channel.
+
+<BR><BR><B><PRE>
+sox sample.aiff -r 44100 -w -c 2 high.aiff
+</PRE></B><BR>
+
+<TT>high.aiff</TT> will be at 44100 16-bit samples per second in stereo.
+
+<P>
+When <TT>sox</TT> cannot guess the destination format from the file
+extension it is necessary to specify this explicitly:
+
+<BR><BR><B><PRE>
+sox sample.wav -t aiff sample.000 
+</PRE></B><BR>
+
+The "<TT>-t raw</TT>" option indicates a special headerless format that
+contains only raw sample data:
+
+<BR><BR><B><PRE>
+sox sample.wav -t raw -r 11025 -sw -c 2 sample.000 
+</PRE></B><BR>
+
+As the file has no header specifying the sample rate, bits per sample,
+channels etc, it is a good idea to set these explicitly at the command
+line.  This is necessary when converting from the <TT>raw</TT> format:
+
+<BR><BR><B><PRE>
+sox -t raw -r 11025 -sw -c 2 sample.000 sample.aiff 
+</PRE></B><BR>
+
+<P>
+One need not use the "<TT>-t raw</TT>" option if the file
+extension is <TT>.raw</TT>, however this option is essential when the
+raw samples are coming from standard input or being sent to standard
+output.  To do this, use the "<TT>-</TT>" in place of the
+file name:
+
+<BR><BR><B><PRE>
+sox -t raw -r 11025 -sw -c 2 - sample.aiff < sample.raw
+</PRE></B>
+
+<B><PRE>
+sox sample.aiff -t raw -r 11025 -sw -c 2 - > sample.raw
+</PRE></B><BR>
+
+Why would we want to do this?  This usage style allows <TT>sox</TT> to
+be used as a filter in a command pipeline.
+
+<H3>Play It Faster/Slower</H3>
+
+Normally <TT>sox</TT> adjusts the sample frequency without altering
+the pitch or tempo of any sounds through the use of interpolation.  By
+piping the output of one <TT>sox</TT> to the input of another and
+using unequal sample rates, we can bypass the interpolation and
+effectively slow down a sound sample:
+
+<BR><BR><B><PRE>
+sox sample.aiff -t raw -r 44100 -sw -c 2 - |
+sox -t raw -r 32000 -sw -c 2 - slow.aiff
+</PRE></B><BR>
+
+or speed it up:
+
+<BR><BR><B><PRE>
+sox sample.aiff -t raw -r 32000 -sw -c 2 - |
+sox -t raw -r 44100 -sw -c 2 - fast.aiff
+</PRE></B><BR>
+
+
+<H3>Simple Editing</H3>
+
+Suppose one wants a sample consisting of the first two seconds of some
+other sound file.  We can do this using <TT>sox</TT> in a command
+pipeline as shown here:
+
+<BR><BR><B><PRE>
+sox sample.aiff -t raw -r 44100 -sw -c 2 - | head -c 352800 |
+sox -t raw -r 44100 -sw -c 2 - twosecs.aiff
+</PRE></B><BR>
+
+The input file <TT>sample.aiff</TT> is converted to 44.1kHz samples,
+each two bytes in two channels. Thus two seconds of sound is
+represented in 44100x2x2x2 = 352800 bytes of data which are stripped
+off using "<TT>head -c 352800</TT>".  This is then converted
+back to AIFF format and stored in <TT>twosecs.aiff</TT>
+
+<P>
+Likewise to extract the last second of a sample:
+
+<BR><BR><B><PRE>
+sox sample.aiff -t raw -r 44100 -sw -c 2 - | tail -c 176400 |
+sox -t raw -r 44100 -sw -c 2 - lastsec.aiff
+</PRE></B><BR>
+
+and the third second:
+
+<BR><BR><B><PRE>
+sox sample.aiff -t raw -r 44100 -sw -c 2 - | tail -c +352801 |
+head -c 176400 | sox -t raw -r 44100 -sw -c 2 - lastsec.aiff
+</PRE></B><BR>
+
+Note that with 16-bit samples the argument to "<TT>tail -c
++</TT><EM>N</EM>" must be odd, otherwise the raw samples become
+misaligned.
+
+<P>
+One can extract parts of different samples and join them together into
+one file via nested sub-shell commands:
+
+<BR><BR><B><PRE>
+(sox sample-1.aiff -t raw -r 44100 -sw -c 2 - | head -c 176400 
+sox sample-2.aiff -t raw -r 44100 -sw -c 2 - | head -c 176400 ) | 
+sox -t raw -r 44100 -sw -c 2 - newsample.aiff
+</PRE></B><BR>
+
+Here we invoke a child shell that outputs raw samples to standard
+output from two different files.  This is piped to a <TT>sox</TT>
+process executing in the parent shell which creates the resulting
+file.
+
+<H3>Desktop Sound Output</H3>
+
+<P>
+Sounds can be sent to the OSS (open sound system) device <TT>/dev/dsp</TT>
+with the "<TT>-t ossdsp</TT>" option:
+
+<BR><BR><B><PRE>
+sox sample.aiff -t ossdsp /dev/dsp
+</PRE></B><BR>
+
+The <TT>sox</TT> package usually includes a platform-independent
+script <TT><B>play</B></TT> that invokes <TT>sox</TT> with the appropriate
+options.  The previous command could be invoked simply by
+
+<BR><BR><B><PRE>
+play sample.aiff
+</PRE></B><BR>
+
+<P>
+Audio samples played this way monopolise the output hardware.  Another
+sound capable application must wait until the audio device is freed
+before attempting to play more samples.  Desktop environments such as
+GNOME and KDE provide facilities to play more than one audio sample
+simultaneously.  Samples may be issued by different applications at
+any time without having to wait, although not every audio application
+knows how to do this for each of the various desktops.  <TT>sox</TT>
+is one such program that lacks this capability.  However, with a
+little investigation of the audio media services provided by GNOME and
+KDE, one can devise ways to overcome this shortcoming.
+
+<P>
+There are quite a few packages that allow audio device sharing.  One
+common strategy is to run a background server to which client
+applications must send their samples to be played.  The server then
+grabs control of the sound device and forwards the audio data to it.
+Should more than one client send samples at the same time the server
+mixes them together and sends a single combined stream to the output
+device.
+
+<P>
+The Enlightened Sound Daemon (ESD) uses this method.  The server,
+<TT>esd</TT>, can often be found running in the background of GNOME
+desktops.  The ESD package goes by the name, <TT>esound</TT>, on most
+distributions and includes a few simple client applications such as:
+<UL>
+<LI><TT><B>esdplay</B></TT> - plays sound samples stored in one of the
+more popular file formats (WAV, AU, or AIFF)
+<LI><TT><B>esdcat</B></TT> - submits raw sound samples to the server.
+This tool is a natural fit for terminating a pipeline of sound
+filters.
+</UL>
+
+This command will play the first second of a sample via ESD:
+
+<BR><BR><B><PRE>
+sox sample.aiff -t raw -r 44100 -sw -c 2 - | head -c 176400 | esdcat
+</PRE></B><BR>
+
+One can also arrange to play samples stored in formats
+that ESD does not understand but can be read by <TT>sox</TT>:
+
+<BR><BR><B><PRE>
+sox sample.cdr -t raw -r 44100 -sw -c 2 - | esdcat
+</PRE></B><BR>
+
+In some cases samples can sound better when played this way.  Some
+versions of ESD introduce significant distortion and noise when given
+sounds recorded at a low sample rate.
+
+<P>
+The Analog RealTime Synthesizer (ARtS) is similar to ESD but is often used
+with KDE.  The background server is <TT>artsd</TT> with the
+corresponding client programs, <TT>artsplay</TT> and <TT>artscat</TT>.
+To play a sample:
+
+<BR><BR><B><PRE>
+sox sample.cdr -t raw -r 44100 -sw -c 2 - | tail -c 352800 |artscat
+</PRE></B><BR>
+
+<P>
+Both ESD and ARtS are not dependent on any one particular desktop
+environment.  With some work, one could in theory use ESD with KDE and
+ARtS with GNOME.  Each can even be used within a console login
+session.  Thus one can mix samples, encoded in a plethora of formats,
+with or without the graphical desktop interface.
+
+<H3>Music as a Sample Source</H3>
+
+<P>
+Having covered what goes on the end of an audio pipeline, we should
+consider what can be placed at the start.  Sometimes one would like to
+manipulate samples extracted from music files in MP3, MIDI, or module
+(MOD, XM, S3M, etc) format.  Command line tools exist for each of
+these formats that will output raw samples to standard output.
+
+<P>
+For MP3 music one can use "<TT>maplay -s</TT>"
+
+<BR><BR><B><PRE>
+maplay -s music.mp3 | artscat
+</PRE></B><BR>
+
+The <TT>music.mp3</TT> must be encoded at 44.1kHz stereo to play
+properly otherwise <TT>artscat</TT> or <TT>esdcat</TT> will have to be
+told otherwise:
+
+<BR><BR><B><PRE>
+maplay -s mono22khz.mp3 | esdcat -r 22050 -m<BR>
+maplay -s mono22khz.mp3 | artscat -r 22050 -c 1
+</PRE></B><BR>
+
+Alternatively one can use "<TT>mpg123 -s</TT>".  Additional
+arguments ensure that the output is at the required rate and number of
+channels:
+
+<BR><BR><B><PRE>
+mpg123 -s -r 44100 --stereo lowfi.mp3 | artscat
+</PRE></B><BR>
+
+<P>
+Users of Ogg Vorbis may use the following:
+
+<BR><BR><B><PRE>
+ogg123 -d raw -f - music.ogg | artscat
+</PRE></B><BR>
+
+Piping is not really necessary here since <TT>ogg123</TT> has built-in
+ESD and ARtS output drivers.  Nevertheless, it is still useful to have
+access to a raw stream of sample data which one can feed through a
+pipeline.
+
+
+<P>
+Music files also can be obtained in MIDI format.  If (like me) you
+have an old sound card with poor sequencer hardware, you may find that
+<TT>timidity</TT> can work wonders.  Normally this package converts
+MIDI files into sound samples for direct output to the sound device.
+Carefully chosen command line options can redirect this output:
+
+<BR><BR><B><PRE>
+timidity -Or1sl -o - -s 44100 music.mid | artscat
+</PRE></B><BR>
+
+The "<TT><B>-o -</B></TT>" sends sample data to standard
+output, "<TT><B>-Or1sl</B></TT>" ensures that the samples
+are 16-bit signed format, and "<TT><B>-s 44100</B></TT>"
+sets the sample rate appropriately.
+
+<P>
+If you're a fan of the demo scene you might want to play a few music
+modules on your desktop.  Fortunately <TT>mikmod</TT> can play most of
+the common module formats.  The application can also output directly
+to the sound device or via ESD.  The current stable version of
+<TT>libmikmod</TT>, 3.1.9, does not seem to be ARtS aware yet.  One can
+remedy this using a command pipeline:
+
+<BR><BR><B><PRE>
+mikmod -d stdout -q -f 44100 music.mod | artscat
+</PRE></B><BR>
+
+The <TT><B>-q</B></TT> is needed to turn off the curses interface
+which also uses standard output.  If you still want access to this
+interface you should try the following:
+
+<BR><BR><B><PRE>
+mikmod -d pipe,pipe=artscat -f 44100 music.mod
+</PRE></B><BR>
+
+Only the later versions of <TT>mikmod</TT> know how to create their
+own output pipelines.
+
+
+<H3>Effects Filters</H3>
+
+Let us return to the pipeline friendly <TT>sox</TT>.  In addition to
+its format conversion capabilities, there is small library of
+effects filters.  Here are some examples:
+
+<UL>
+<LI>Add echo
+<B><PRE>
+play sample.aiff echo 1 0.6 150 0.6
+</PRE></B><BR>
+
+<LI>Add vibration
+<B><PRE>
+play sample.aiff vibro 20 0.9
+</PRE></B><BR>
+
+<LI>Add severe distortion
+<B><PRE>
+play sample.aiff flanger 0.7 0.7 4 0.8 2
+play sample.aiff phaser 0.6 0.6 4 0.6 2
+</PRE></B><BR>
+
+<LI>Band pass filter -- sounds like a bad phone connection:
+<B><PRE>
+play sample.aiff band 3000 700
+</PRE></B><BR>
+or listening through a thick blanket:
+<B><PRE>
+play sample.aiff band 0 700
+</PRE></B><BR>
+
+<LI>Make a chorus of sounds from one sample:
+<B><PRE>
+play sample.aiff chorus 0.7 0.7 20 1 5 2 -s
+</PRE></B><BR>
+
+<LI>Hidden messages? Play it backwards:
+<B><PRE>
+play sample.aiff reverse
+</PRE></B><BR>
+
+<EM>Warning: Depending on the size of the sample, this can use up a
+lot of memory and/or disk space</EM>
+
+</UL>
+
+
+
+<H3>Putting It All Together</H3>
+
+The major components of an audio command pipeline have now been
+covered.  Let us see how they can be combined together to perform
+a few non-trivial functions:
+
+<UL>
+<LI>
+Play a music module on the KDE desktop with a chorus effect:
+
+<BR><BR><B><PRE>
+mikmod -d stdout -q -f 44100 music.xm | 
+sox -t raw -r 44100 -sw -c 2 - -t raw - chorus 0.7 0.7 80 0.5 2 1 -s | 
+artscat
+</PRE></B><BR>
+
+<LI>
+Play a song in Ogg Vorbis format with the first 4 seconds removed:
+<BR><BR><B><PRE>
+ogg123 -d raw -f - music.ogg | tail -c +705601 |artscat
+</PRE></B><BR>
+
+<LI>
+Convert a MIDI file to Ogg Vorbis format introducing a little added echo:
+
+<BR><BR><B><PRE>
+timidity -Or1sl -o - -s 44100 music.mid | 
+sox -t raw -r 44100 -sw -c 2 - -t raw - echo 1 0.6 80 0.6 | 
+oggenc -o music.ogg --raw -
+</PRE></B><BR>
+
+The pipeline has been terminated with the Ogg Vorbis encoder,
+<TT>oggenc</TT>, configured here to accept raw sample data from
+standard input.
+
+<LI>
+Convert a 32kHz mono MP3 file to 44.1kHz stereo Ogg Vorbis file,
+lowering the volume in the process:
+
+<BR><BR><B><PRE>
+maplay -s mono32.mp3 | 
+sox -v 0.5 -t raw -r 32000 -sw -c 1 - -t raw -r 44100 -c 2 - split | 
+oggenc -o music.ogg --raw -
+</PRE></B><BR>
+
+<LI>
+Concatenate all AIFF files in the current directory into a single WAV file:
+<BR><BR><B><PRE>
+for x in *.aiff 
+do sox $x -v 0.5 -t raw -r 8000 -bu -c 1 - 
+done | sox -t raw -r 8000 -bu -c 1 - all.wav
+</PRE></B><BR>
+
+</UL>
+
+<P>
+Hopefully these examples hint at what can be accomplished with the
+pipeline technique.  One cannot argue against using interactive
+applications with elaborate graphical user interfaces.  They often can
+perform much more complicated tasks while saving the user from having
+to memorise pages of argument flags.  There will always be instances
+where command pipelines are more suitable however.  Converting a large
+number of sound samples will require some form of scripting.
+Interactive programs cannot be invoked as part of an <TT>at</TT> or
+<TT>cron</TT> job.
+
+<P>
+Audio pipelines can also be used to save disk space.  One need not
+store a dozen copies of what is essentially the same sample with
+different modifications applied. Instead, create a dozen scripts each
+with a different pipeline of filters.  These can be invoked when the
+modified version of the sound sample is called for.  The altered sound
+is generated on demand.
+
+<P>
+I encourage you to experiment with the tools described in this
+article.  Try combining them together in increasingly elaborate
+sequences.  Most importantly, remember to have fun while
+doing so.
+
+
+
+
+
+
+
+
+
+
+
+<!-- *** BEGIN bio *** -->
+<SPACER TYPE="vertical" SIZE="30">
+<P> 
+<H4><IMG ALIGN=BOTTOM ALT="" SRC="../gx/note.gif">Adrian J Chung</H4>
+<EM>When not teaching undergraduate computing at the University of the West
+Indies, Trinidad, Adrian is writing system level scripts to manage a network
+of Linux boxes, and conducts experiments with interfacing various scripting
+environments with home-brew computer graphics renderers and data visualization
+libraries.</EM>
+
+<!-- *** END bio *** -->
+
+<!-- *** BEGIN copyright *** -->
+<P> <hr> <!-- P --> 
+<H5 ALIGN=center>
+
+Copyright &copy; 2001, Adrian J. Chung.<BR>
+Copying license <A HREF="../copying.html">http://www.linuxgazette.net/copying.html</A><BR> 
+Published in Issue 73 of <i>Linux Gazette</i>, December 2001</H5>
+<!-- *** END copyright *** -->
+
+<!--startcut ==========================================================-->
+<HR><P>
+<CENTER>
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="arndt.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../faq/index.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="dennis.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+</CENTER>
+</BODY></HTML>
+<!--endcut ============================================================-->

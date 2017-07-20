@@ -1,0 +1,260 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>But All My Partitions Were Mirrored LG #93</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<!-- *** BEGIN navbar *** -->
+<A HREF="pesin.html">&lt;&lt;&nbsp;Prev</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="index.html">TOC</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../index.html">Front Page</A>&nbsp;&nbsp;|&nbsp;&nbsp;Talkback&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../faq/index.html">FAQ</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="levkovich.html">Next&nbsp;&gt;&gt;</A>
+<!-- *** END navbar *** -->
+
+<!--endcut ============================================================-->
+
+<TABLE BORDER><TR><TD WIDTH="200">
+<A HREF="http://www.linuxgazette.net/">
+<IMG ALT="LINUX GAZETTE" SRC="../gx/2002/lglogo_200x41.png" 
+	WIDTH="200" HEIGHT="41" border="0"></A> 
+<BR CLEAR="all">
+<SMALL>...<I>making Linux just a little more fun!</I></SMALL>
+</TD><TD WIDTH="380">
+
+
+<CENTER>
+<BIG><BIG><STRONG><FONT COLOR="maroon">But All My Partitions Were Mirrored</FONT></STRONG></BIG></BIG>
+<BR>
+<STRONG>By <A HREF="../authors/jenkins.graham.html">Graham Jenkins</A></STRONG>
+</CENTER>
+
+</TD></TR>
+</TABLE>
+<P>
+
+<!-- END header -->
+
+
+
+
+
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.or
+g/TR/xhtml1/DTD/transitional.dtd">
+<html>
+
+<body>
+<h2>No Problem, Everything is Mirrored</h2>
+
+<p>This story actually started with a call from a user whilst I was
+strolling back to work through the sunshine one Friday lunchtime. The
+conversation went something like this:</p>
+
+<p>"Hi Graham, we seem to be having a few problems in seeing the database
+for the ACME application. You want to take a look, please?"</p>
+
+<p>"Sure, I'm ten minutes away from my desk, I'll call you back when I'm there. 
+Everything on that server is mirrored; most likely scenario is that the
+archive logs are not being moved off to secondary storage. Should be able to
+resolve it in a few minutes."</p>
+
+<p>And ten minutes later: "Guys, its going to take more that a few minutes.
+Something like a few hours, in fact.  We seem to have lost disks from both
+sides of the mirrors!"<p>
+
+<h2>How Could You Lose Both Sides of a Mirror at Once?</h2>
+
+<p>So what went wrong?  The mirror pieces were on separate disks attached to
+separate controllers, there was no evidence of a major power spike or
+earth tremor. And we couldn't blame the night-time cleaning staff for
+pulling power cables so they could use their vacuum cleaners.</p>
+
+<p>The answer is that we didn't lose both sides at once. We had actually
+lost one side a week earlier. My company has an excellent monitoring and
+alarm system for detecting such occurences, but we had forgotten to
+advise the alarm people that this server had moved from "build" status
+to "production" status. That's not something we are likely to do again!</p>
+
+<h2>A Bit Closer to Home</h2>
+
+<p>A few weeks back, my home workstation experienced its second disk
+failure in six months. Sure, the disk got replaced again under warrantee.
+But I decided right then that I was going to mirror everything onto
+an additional disk.</p>
+
+<p>Then I started thinking: "How would I know if a partition on one disk
+took itself off-line?" It's not like I can justify hooking my home
+workstation into my company's alarm system.</p>
+
+<p>Did somebody say: "Check the messages file, read the 'root' email!"?
+Great theory guys. Trouble is, I have a partner whose idea of "messages"
+equates to a stack of Post-It notes, and who thinks that "email" means
+"Hotmail". And she has become a major user of my machine when I'm not
+around.</p>
+
+<h2>A Simple Watchdog Mechanism</h2>
+
+<p>The solution here turned out to be a mechanism to flash the Scroll-Lock
+light for a one second interval every ten seconds.
+If a partition gets
+unmirrored, the light gets left on. No extra hardware, dead easy to
+understand.
+<img src="misc/jenkins/dog2.jpg" width="200" height="300" border="0"
+align="right" hspace="10" vspace="10" alt="Simple Watchdog">
+What we have here is a simple watchdog, which barks
+periodically to show it is still alive, and barks continuously when
+something goes wrong.</p>
+
+<p>So how do you make the Scroll-Lock light flash?  If you are using Xwindows,
+it's easy: 'xset led 3' turns it on, 'xset -led 3' turns it off. Even
+works if you have screen-lock running and/or your monitor powered off - provided
+you are logged in.</p>
+
+<p>If nobody is logged in, or if you aren't using Xwindows, it isn't going
+to work. For that situation, you need to install something like the 'blinker'
+program which comes as part of the "morse2led" suite available at
+<a href="http://node.to/"> the node.to website.</a>
+
+<h2>The Program</h2>
+
+<p>Here's what you might see when you enter 'cat /proc/mdstat' on a machine
+which has a broken mirror:
+<pre>
+
+  Personalities : [raid1] 
+  read_ahead 1024 sectors
+  md2 : active raid1 hda6[0] hdb6[1](F)
+        1959808 blocks [2/1] [U_]
+        
+  md1 : active raid1 hda5[0] hdb5[1]
+        5863616 blocks [2/2] [UU]
+        
+  md0 : active raid1 hda3[1] hdb3[0]
+        104320 blocks [2/2] [UU]
+        
+  unused devices: &lt;none&gt;
+
+</pre>
+And here's our program which detects when something is wrong (by searching
+for an underscore in those lines containing 'blocks'), then activates the
+scroll-lock light accordingly. It will run under most Bourne-like shells,
+and has been extended to detect a couple of extra alarm conditions. You can
+add to it as you see fit.
+<pre>
+
+#!/bin/sh
+# ledblink      System monitor. Scroll-lock light will remain on if any faults.
+#               Graham Jenkins, IBM GSA, July 2003.
+
+PATH=/sbin:/bin:/usr/bin:/usr/X11R6/bin:/usr/local/bin
+On=1
+while : ; do                                    # Use 'blinker' if it works,
+  blinker -d `expr $On \* 1000` s 2&gt;/dev/null ||# else use 'xset' to flash the
+    ( xset led 3 &amp;&amp; sleep $On &amp;&amp; xset -led 3 )  # scroll-lock light on and off.
+  sleep `expr 10 - $On` 
+  On=10                                         # Set on-time to 10 seconds.
+  #
+  # Raid status
+  grep blocks /proc/mdstat | grep _ &gt;/dev/null 2&gt;&amp;1                &amp;&amp; continue
+  #
+  # Filesystem capacity
+  df -x iso9660 |tr -d '%'|awk '{if (NR &gt; 1) if ($5 &gt; 90) exit 1}' || continue
+  #
+  # Swap usage
+  swapon -s | awk '{ if (NR &gt; 1) { Size=Size+$3; Used=Used+$4 } }
+               END { if (Used*100/Size &gt; 70 ) exit 1            }' || continue
+  #
+  On=1                                          # If there are no problems
+done                                            # reset on-time to 1 second.
+
+</pre></p>
+
+<h2>Starting Up</h2>
+
+<p>If you are happy for 'ledblink' to run only when somebody is logged on
+with an Xwindows session, it's easy. If your machine has an 'xinitrc.d'
+directory, place the following script in it.  Otherwise, place the
+uncommented line in the 'xinitrc' file.
+<pre>
+
+#!/bin/sh
+# ledblink      Place this file in: /usr/X11R6/lib/X11/xinit/xinitrc.d
+#               and make it readable and executable for everyone.
+[ -x /usr/local/bin/ledblink ] &amp;&amp; /usr/local/bin/ledblink &amp;
+
+</pre>
+If you have the 'blinker' program, you can start 'ledblink' at boot
+time with the following script.
+<pre>
+
+#!/bin/sh
+# ledblink      Start/stope the 'ledblink' system monitor program.
+#               Graham Jenkins, IBM GSA, July 2003.
+#
+# chkconfig: 2345 98 7
+# description: Start/stops the 'ledblink' system monitor program.
+
+case "$1" in
+start) if [ -x /usr/local/bin/ledblink ] ; then
+         [ -s /var/run/ledblink.pid ] &amp;&amp; exit 0 
+         echo "Starting 'ledblink' system monitor program .."
+         /usr/local/bin/ledblink &amp;
+         echo $! &gt;/var/run/ledblink.pid
+       fi ;;
+stop)  if [ -n "`cat /var/run/ledblink.pid`" ] ; then
+         echo "Stopping 'ledblink' system monitor program .."
+         kill `cat /var/run/ledblink.pid`
+         rm        /var/run/ledblink.pid
+       fi ;;
+esac
+</pre>
+</p>
+
+</body>
+</html>
+
+
+
+
+
+
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<P>
+<img ALIGN="LEFT" ALT="[picture]" SRC="../gx/2003/authors/Graham_Jenkins.jpg"
+WIDTH="223" HEIGHT="207">
+<em>
+Graham is a Unix Specialist at IBM Global Services, Australia. He lives
+in Melbourne and has
+built and managed many flavors of proprietary and open systems on several
+hardware platforms.
+</em>
+<br CLEAR="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+
+<!-- *** BEGIN copyright *** -->
+<hr>
+<CENTER><SMALL><STRONG>
+Copyright &copy; 2003, Graham Jenkins.
+Copying license <A HREF="../copying.html">http://www.linuxgazette.net/copying.html</A><BR> 
+Published in Issue 93 of <i>Linux Gazette</i>, August 2003
+</STRONG></SMALL></CENTER>
+<!-- *** END copyright *** -->
+<HR>
+
+<!--startcut ==========================================================-->
+<CENTER>
+<!-- *** BEGIN navbar *** -->
+<A HREF="pesin.html">&lt;&lt;&nbsp;Prev</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="index.html">TOC</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../index.html">Front Page</A>&nbsp;&nbsp;|&nbsp;&nbsp;Talkback&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../faq/index.html">FAQ</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="levkovich.html">Next&nbsp;&gt;&gt;</A>
+<!-- *** END navbar *** -->
+</CENTER>
+</BODY></HTML>
+<!--endcut ============================================================-->

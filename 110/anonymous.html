@@ -1,0 +1,1261 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Bash Shell and Beyond LG #110</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="lg_answer.html" >&lt;-- prev</A> | <A HREF="engel.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Bash Shell and Beyond</h1>
+<p id="by"><b>By <A HREF="../authors/anonymous.html">Anonymous</A></b></p>
+
+<p>
+<!-- Modified by David Rich and Ben Okopnik from an original by William
+Park; modifications by D. Rich are dated within the relevant comments,
+modifications by B. Okopnik done on 01/05/2005. The author has not yet
+provided us with a link to the original; it will be cited here whenever he
+does. -->
+
+<!-- dsrich 27 Dec 2004 - There was no segue from the previous article
+here, but this article certainly appears to be a continuation, so I
+faked it, calling it the Introduction... -->
+<h2>Introduction</h2>
+
+<p>This article is a continuation of a series in Issues <a href=
+"../108/park.html">108</a> and <a href="../109/park.html">109</a>
+in which I discuss some of my additions to the standard Linux
+shell. In my previous article in Issue 109, I promised to cover
+dynamically-loadable builtins related to arrays, regex splitting,
+plus interfacing to external libraries like SQL databases and an
+XML parser.</p>
+
+<h2>Regex Match</h2>
+
+<p>Modeled after the Awk match() function, I added a new
+<code>match</code> builtin for regex(3) matching.</p>
+
+<pre>
+    match [-23] string regex [submatch]
+</pre>
+
+<p>It returns success (0) if 'string' contains 'regex' pattern. If
+the 'submatch' array variable is specified, then by default, it
+will contain all matching substrings corresponding to the entire
+'regex' and any parenthesized groups in 'regex'. E.g.</p>
+
+<pre>
+    match Aabc123Z '([a-z]+)([0-9]+)' a         # a=(abc123 abc 123)
+</pre>
+
+<p>where 'abc123' matches the entire 'regex', 'abc' matches the
+first group '([a-z])', and '123' matches the second group
+'([0-9]+)'.</p>
+
+<p>For the <code>-2</code> option, 'submatch' will contain 2 elements,
+non-matching preamble and leftover postamble (ie. before and after
+the 'regex'). For <code>-3</code> option, 'submatch' will contain 3
+elements, the preamble, the matching string, and the postamble.
+E.g.</p>
+
+<pre>
+    match -2 Aabc123Z '([a-z]+)([0-9]+)' a      # a=(A Z)
+    match -3 Aabc123Z '([a-z]+)([0-9]+)' a      # a=(A abc123 Z)
+</pre>
+
+<p>where 'A' and 'Z' are the string segments before and after the
+'regex', respectively.</p>
+
+<p>You now have 3 different ways of doing regex matching:</p>
+
+<ol>
+<li>
+<code>[[ string =~ regex ]]</code> conditional
+test in standard Bash-3.0, which uses BASH_REMATCH as the array
+variable,
+
+<li>
+the new extended 'case' statement,
+which uses SUBMATCH as the array variable, and
+
+<li>
+<code>match</code> builtin command, where you can specify the array
+variable and what it should contain.
+</ol>
+
+<h2>Stack and Queue</h2>
+
+<p>Quite often, you need to implement a "stack" or "queue" data
+structure. In shell, you can use positional parameters or an array
+to hold the data, e.g.</p>
+
+<pre>
+    set -- {a--z}
+    set -- $@ Z                 # append to queue
+    set -- A $@                 # push to stack
+    set -- $2 $1 ${@:3}         # swap first 2 items in stack
+    shift 2                     # pop 2 items off the stack
+    set -- ${@|:-5:} ${@|::-5}  # rotate queue to the right by 5
+    set -- ${@|:5:} ${@|::5}    # rotate queue to the left by 5
+</pre>
+
+<p>This is acceptable for a throw-away script, but is very
+inefficient because of all the copying of data back and forth.</p>
+
+<p>Here are builtin implementations of stack and queue operations.
+They directly manipulate positional parameters or arrays (with
+<code>-a</code> option), in-place without copying the data. They are
+<em>fast</em> and suitable for general purpose "toolbox" work.</p>
+
+<p><code>pp_pop [-a array] [n]</code>
+
+<p>Deletes N (default 1) positional parameters or array elements.
+Same as 'shift' builtin for positional parameters, except that it
+will pop items if possible. It returns error if the parameter or
+array is empty.</p>
+
+<p><code>pp_push [-a array] arg...</code>
+
+<p>Inserts arguments at the beginning of positional parameters or
+array. E.g.</p>
+
+<pre>
+    set -- 1 2 3
+    pp_push a b c
+    echo $*             # a b c 1 2 3
+</pre>
+
+<p><code>pp_append [-a array] arg...</code>
+
+<p>Appends arguments at the end of positional parameters or array.
+E.g.</p>
+
+<pre>
+    set -- 1 2 3
+    pp_append a b c
+    echo $*             # 1 2 3 a b c
+</pre>
+
+<p><code>pp_swap [-a array]</code>
+
+<p>Swaps the first 2 parameters (ie. $1, $2) or array elements. It
+returns error if the parameter or array does not have at least 2
+items to swap.</p>
+
+<p><code>pp_set [-a array] arg...</code>
+
+<p>Sets the argument(s) as new positional parameters or array.
+Equivalent to</p>
+
+<pre>
+    set arg...
+    set -A array arg...         # from Ksh
+</pre>
+
+<p><code>pp_overwrite [-a array] arg...</code>
+
+<p>Overwrite the parameter(s) in-place. For an array, this is
+equivalent to</p>
+
+<pre>
+    set +A array arg...         # from Ksh
+</pre>
+
+<p>E.g.</p>
+
+<pre>
+    set -- 1 2 3 4 5 6
+    pp_overwrite a b c
+    echo $*             # a b c 4 5 6
+</pre>
+
+<p><code>pp_rotateleft [-a array] [n]</code>
+
+<p>Rotate N (default 1) positional parameters or array elements to
+the left.</p>
+
+<p><code>pp_rotateright [-a array] [n]</code>
+
+<p>Rotate N (default 1) positional parameters or array elements to
+the right.</p>
+
+<p><code>pp_flip [-a array]</code>
+
+<p>Flip the order of positional parameters or array elements.
+E.g.</p>
+
+<pre>
+    set -- {a--z}
+    pp_flip
+    echo $*             # z y x ... a
+</pre>
+
+<p>The above example can be rewritten as,</p>
+
+<pre>
+    set -- {a--z}
+    pp_append Z         # append to queue
+    pp_push A           # push to stack
+    pp_swap             # swap first 2 items in stack
+    pp_pop 2            # pop 2 items off the stack
+    pp_rotateright 5    # rotate queue to the right by 5
+    pp_rotateleft 5     # rotate queue to the left by 5
+</pre>
+
+<h2>Transpose and Sort</h2>
+
+<p>Transpose and sort problems come up a lot when dealing with
+tables. Although there are utilities such as awk(1), and sort(1) to
+handle these functions, in order to use them you have to pipe the
+data (or write a file) to the external program, then read the
+program's output back and re-parse it to collect the re-ordered
+data. For well-behaved line-oriented text data this is possible,
+but it is much better to have a dedicated shell solution, especially
+when you have the data already parsed and simply want to re-order
+it.</p>
+
+<p><code>pp_transpose [-a array] n</code>
+
+<p>Transpose positional parameters or array representing matrix
+ordered by rows into a sequence that is ordered by columns. N is
+the size of row. For example, given a sequence (1 2 3 4 a b c d),
+representing 2x4 array with 2 rows (1 2 3 4) and (a b c d),</p>
+
+<pre>
+    | 1 2 3 4 |         | 1 a |
+    | a b c d |   ==&gt;   | 2 b |
+                        | 3 4 |
+                        | 4 d |
+</pre>
+
+<p>the transposed sequence is (1 a 2 b 3 c 4 d), representing 4x2
+array with 4 rows (1 a), (2 b), (3 c), and (4 d).</p>
+
+<pre>
+    set -- 1 2 3 4 a b c d
+    pp_transpose 4
+    echo $*             # 1 a 2 b 3 c 4 d
+
+    pp_transpose 2      # back to original sequence
+</pre>
+
+<p>An equivalent solution in pure shell would go (very slowly)
+like</p>
+
+<pre>
+    set -- 1 2 3 4 a b c d
+    eval set -- $(
+        for i in `seq 4`; do 
+            for j in `seq $i 4 $#`; do 
+                echo '"${'$j'}"'
+            done
+        done
+    )
+    echo $*             # 1 a 2 b 3 c 4 d
+</pre>
+
+<p><code>pp_sort [-a array]</code>
+
+<p>Sort positional parameters or array in ascending order. If the
+array is integer type, then numerical sorting is done, e.g.</p>
+
+<pre>
+    a=( {10..1} )
+        pp_sort -a a
+        echo ${a[*]}            # 1 10 2 3 ... 9 (string sort)
+    declare -i a
+        pp_sort -a a
+        echo ${a[*]}            # 1 2 3 ... 9 10 (integer sort)
+</pre>
+
+<h2>Array Operations</h2>
+
+<h3>Array cat</h3>
+
+<p><code>arraycat [-a array] a [b ...]</code>
+
+<p>Prints array elements, one array at a time. If the <code>-a</code>
+option is given, then it appends the data to the 'array' variable
+instead. This is similar to</p>
+
+<pre>
+    printf '%s\n' "${a[@]}" "${b[@]}}" ...
+    array=( "${a[@]}" "${b[@]}}" ... )
+</pre>
+
+<p>except that you're using variable references like the strcat()
+and strcpy() builtins discussed in the previous articles.</p>
+
+<h3>Array map</h3>
+
+<p>In Python (and some other functional languages), you can apply a
+function to each element of array without manually looping through.
+If there are 2 or more arrays, then elements are taken from all of
+the arrays in parallel. I've added a shell version of the Python
+map() function:</p>
+
+<p><code>arraymap command a [b ...]</code>
+
+<p>Run 'command' with arguments taken from array elements in
+parallel. It should take as many positional parameters as there are
+arrays. This is equivalent to</p>
+
+<pre>
+    command "${a[0]}" "${b[0]}" ...
+    command "${a[1]}" "${b[1]}" ...
+    ...
+    command "${a[N]}" "${b[N]}" ...
+</pre>
+
+<p>where N is the maximum of all indexes. Array elements are
+referenced by index, not by the order of storage. So, there can be
+empty parameters.</p>
+
+<p>E.g.</p>
+
+<pre>
+    unset a b;  a=(1 2 3)  b=(4 5 6)
+    func () { echo $1$2; }
+    arraymap func a b           # join in parallel: 14 25 36
+
+    func () { echo $(($1 + $2)); }
+    arraymap func a b           # add in parallel: 5 7 9
+</pre>
+
+<h3>Array zip and unzip</h3>
+
+<p>The names come from the workings of a
+
+<!-- dsrich 28 Dec 2004 - Is this Zipper TM supposed to be humor?
+It seems like he is referring to the garden variety clothing zipper,
+no trademark?  A quick web search failed to turn up any likely candidates
+for programs that would deserve this, just lots of PKZip clones. -->
+
+zipper. You start with two rows of teeth; and, when
+you zip-up, you get one row of interleaved teeth. Consider arrays
+x=(x1 x2 x3 ... xn) and y=(y1 y2 y3 ... yn). Zipping produces a
+single array xy=(x1 y1 x2 y2 x3 y3 ... xn yn) which consists of
+interleaved elements of 'x' and 'y' arrays. Of course, unzipping
+does the reverse.</p>
+
+<pre>
+       y1    y2    y3 ... yn   ==&gt;   x1 y1 x2 y2 x3 y3 ... xn yn
+    x1    x2    x3 ... xn
+</pre>
+
+<p>Here are 2 new builtins to "zip" and "unzip" directly within
+Bash shell.</p>
+
+<p><code>arrayzip [-a array] name ...</code>
+
+<p>Print array elements, one by one, going across the arrays in
+parallel. If <code>-a</code> option is given, then append to the array
+variable instead. Array elements are referenced by index, not by
+the order of storage, so there can be empty parameters. This is
+shell version of Python zip() function, and is equivalent to</p>
+
+<pre>
+    arraymap 'printf "%s\n"' name ...
+    arraymap 'pp_append -a array' name ...
+</pre>
+
+<p><code>arrayunzip -a array name...</code>
+
+<p>Inverse of 'arrayzip'. Sequentially appends items from 'array'
+into 'name' array variables, moving across one row at a time.
+Output variables are flushed first. If there are not enough input
+items, then the null (empty) string is appended to the leftover
+variables.</p>
+
+<p>For example,</p>
+
+<pre>
+    x=(1 2 3 4)  y=(a b c d)
+    arrayzip -a xy x y
+    declare -p xy               # xy=(1 a 2 b 3 c 4 d)
+
+    unset x y
+    arrayunzip -a xy x y
+    declare -p x y              # back to original
+</pre>
+
+<p>You can also use array commands to extract rows or columns in a
+transposition problem. E.g.</p>
+
+<pre>
+    row1=(1 2 3 4)  row2=(a b c d)
+    arraycat -a table row{1..2}
+    arrayunzip -a table col{1..4}
+    declare -p col{1..4}        # (1 a), (2 b), (3 c), (4 d)
+</pre>
+
+<h2>Putting Items into an Array</h2>
+
+<p><pre>array [-gG glob] [-iInN a:b] [-jspq string] [-evwrR regex]
+[-EVfc command] name arg...</pre>
+
+<p>Given a list of items on the command-line, this new builtin
+appends the selected items into an array variable. It is designed
+to be called repeatedly, so you should create or flush the array
+variable beforehand. Its many options control how and what items to
+select.</p>
+
+<h3>Content filtering</h3>
+
+<p>The following options are command-line versions of parameter
+expansion ${var|...}.</p>
+
+<p><code>-f filter</code> Append 'arg', only
+if 'filter arg' returns success (0). Otherwise, skip to next
+'arg'.</p>
+
+<p><code>-c command</code> Append the stdout
+of command substitution `command arg`, only if there is an output.
+Otherwise, skip to next 'arg'.</p>
+
+<p><code>-i a:b</code> Extract Python-style 
+
+<!-- dsrich 28 Dec 2004 - What does this notation mean? -->
+
+[a:b] substring from each 'arg', ie. arg[a:b], arg[a:b], ...</p>
+
+<p><code>-I a:b</code> Complement of
+<code>-i</code>, ie. [:a] + [b:]</p>
+
+<p><code>-n a:b</code> Extract Python-style
+[a:b] range from 'arg' sequence, ie. [arg,arg,...][a:b]</p>
+
+<p><code>-N a:b</code> Complement of
+<code>-n</code>, ie. [:a] + [b:]</p>
+
+<p><code>-g glob</code> Append 'arg'
+matching 'glob' pattern.</p>
+
+<p><code>-r regex</code> Append 'arg'
+matching 'regex' pattern.</p>
+
+<p><code>-G glob</code> Complement of
+<code>-g</code>.</p>
+
+<p><code>-R regex</code> Complement of <code>-r</code>.</p>
+
+<!-- dsrich 28 Dec 2004 - The following paragraph does not make sense
+as written, "Minor differences" from what? Python?  Editted for grammar
+only. -->
+
+<p>There are minor differences between the above mechanism and standard
+parameter expansion. <code>-i</code> option extracts a substring from each
+item, and the <code>-n</code> option extracts a subrange from the argument
+list.  Options <code>-I</code> and <code>-N</code> selects the inverse of
+<code>-i</code> and <code>-n</code>, respectively, which are not available
+in ${var|...}.</p>
+
+<h3>String join and split</h3>
+
+<p>Joining and splitting strings are very common operations. In
+Python, you have string.join() and string.split(). Now, you can do
+them in Bash also.</p>
+
+<p><code>-j sep</code>
+
+<p>Join all 'arg' with 'sep' separator, and append the resulting
+string. E.g.</p>
+
+<pre>
+    a=()                # 'unset a' if 'a' already exists.
+    array -j '.'  a  11 22 33 44
+    array -j '---'  a  abc 123
+    declare -p a                # a=(11.22.33.44 abc---123)
+</pre>
+
+<p><code>-s sep</code>
+
+<p>Split 'arg' by 'sep' separator, and append each segment to the
+array. If 'sep' is null, then each char itself becomes an entry.
+E.g.</p>
+
+<pre>
+    a=()
+    array -s '.'  a  11.22.33.44
+    array -s '---'  a  abc---123
+    declare -p a                # a=(11 22 33 44 abc 123)
+</pre>
+
+<p><code>-p begin</code>
+
+<p><code>-q end</code>
+
+<p>Extract strings which are enclosed by 'begin' and 'end'
+delimiters from 'arg'. Append both matching (excluding the
+delimiters) and non-matching string segments to the array
+sequentially. If both 'begin' and 'end' are null or if one option
+is missing, then splitting is not done. E.g.</p>
+
+<pre>
+    a=()
+    array -p 'abc' -q 'xyz'  a  abc123xyz789
+    declare -p a                # a=(123 789)
+</pre>
+
+<p>You can call the command repeatedly, and the results are
+appended to the end of array variable.</p>
+
+<h3>Regex split</h3>
+
+<p>Practically, all modern scripting languages can split string on
+regex pattern, or replace the matching segment using callback
+function. Now, so can Bash, and more.</p>
+
+<p><code>-e regex</code>
+
+<p>Extract 'regex' patterns from 'arg', and append each matching
+string. (think egrep -e) E.g.</p>
+
+<pre>
+    unset a;  a=()
+    array -e '[a-z]+'  a  abc123xyz789
+    declare -p a                # a=(abc xyz)
+</pre>
+
+<p><code>-v regex</code>
+
+<p>Remove 'regex' patterns from 'arg' strings, and append each
+non-matching string. Matching strings are skipped, like IFS
+whitespace. (think egrep -v). This option is analogous to Awk
+split() or Python re.split(), in that you're left with non-matching
+segments. E.g.</p>
+
+<pre>
+    array -v '[a-z]+'  a  abc123xyz789
+    declare -p a                # a=(... 123 789)
+</pre>
+
+<p><code>-w regex</code>
+
+<p>Similar to <code>-e</code> and <code>-v</code> option, but both matching
+and non-matching strings are sequentially added, so that joining
+the array with null (empty) string will give back the original
+data.</p>
+
+<pre>
+    array -w '[a-z]+'  a  abc123xyz789
+    declare -p a                # a=(... abc 123 xyz 789)
+</pre>
+
+<p>You can specify regex(7) patterns with the <code>-evw</code> options
+above. Unlike the <code>-s</code> option, null segments are not
+appended, since they are rarely useful in regex splitting. If the
+'nocaseglob' shell option is set, then regex matching is
+case-insensitive, just like glob matching.</p>
+
+<h3>Callback function and substitution</h3>
+
+<p>So far, we are chopping up the command-line items and collecting
+the pieces. You can also transform the pieces using a
+<em>callback</em> command and use the result instead of the
+original content, just like ${var|command} or <code>-c command</code>
+option. However, if you collect the matching segments and the
+non-matching segments separately, you lose the relative order of
+those segments. What is needed is to apply the callback command to
+each item just before appending the item to the array variable.</p>
+
+<p><code>-E command</code><br>
+For each matching string, append `command matching [group...]` to
+the array. The command line consists of the matching string and all
+parenthesized groups (if any). For the <code>-p and -q</code> options,
+command substitution `command inside` will be called where 'inside'
+is matching segment without the delimiters.</p>
+
+<p><code>-V command</code><br>
+For each non-matching string, append `command non-matching` to the
+array.</p>
+
+<p><code>The-EV</code> options are independent and take effect only if
+<code>-evwpq</code> options are specified. 'command' can be any command
+you can type on your command line. This is a generalized form of
+regex substitution.</p>
+
+<p>For example, to increment numbers by 1 and capitalize
+non-numbers,</p>
+
+<pre>
+    a=()
+    addone () { echo $(($1 + 1)); }             # add 1
+    upper () { tr 'a-z' 'A-Z' &lt;&lt;&lt; "$1"; }       # to uppercase
+    array -w '[0-9]+' -E addone -V upper  a  abc123xyz789
+    declare -p a                # a=(ABC 124 XYZ 790)
+</pre>
+
+<h2>HTML Template (BAsh Server Pages)</h2>
+
+<p>If you can embed Python, Perl, PHP, Java, or VisualBasic within
+HTML file, then there is no reason why you can't embed shell script
+and process the HTML file through shell. In fact, I've done exactly
+that. Here is a new builtin to process template strings with
+embedded shell script.</p>
+
+<p><code>basp [-p begin -q end] text...</code><br>
+Extract embedded shell scripts which are enclosed within
+'&lt;%...%&gt;' delimiters (non-greedy, non-nesting) from text
+arguments. Run the scripts at top level, not as command
+substitution, and send the output, along with surrounding texts, to
+stdout. If there is error, it returns immediately. If <pre>-p and
+-q</pre> options are given, then 'begin' and 'end' are used as
+delimiters, instead of '&lt;%' and '%&gt;'.</p>
+
+<p>This is shell's answer to PHP, JSP, ASP, and the likes, so I
+named it <em>basp</em> (BAsh Server Pages). It is only 70 lines of
+C, and its main advantage is that you don't have to learn another
+scripting language and syntax. You can continue to use shell which
+has been around for 30 years. E.g.</p>
+
+<pre>
+    tag=x
+    basp '&lt;html&gt; &lt;% printf "&lt;$tag&gt;%s&lt;/$tag&gt; " 1 2 3 %&gt; &lt;/html&gt;'
+           # &lt;html&gt; &lt;x&gt;1&lt;/x&gt; &lt;x&gt;2&lt;/x&gt; &lt;x&gt;3&lt;/x&gt;  &lt;/html&gt;
+</pre>
+
+<p>If you have HTML template in a file, then just read it into a
+string like</p>
+
+<pre>
+    basp "`&lt; file.html`"
+</pre>
+
+<p>Because they are running at top level, embedded code-blocks share
+data and environment with each other and with the main shell session.
+If you want to isolate the main session, run it in a subshell.</p>
+
+<p>A more complicated example might be to get a list of items, then
+print a table with 10 consecutive items per row. The template
+<code>file.html</code> will look like</p>
+
+<pre>
+    &lt;table&gt;
+    &lt;%
+        set -- {1..40}
+        for i in `seq 1 10 $#`; do
+            cat &lt;&lt; EOF
+    &lt;tr&gt; `printf '&lt;td&gt;%s&lt;/td&gt; ' ${*:i:10}` &lt;/tr&gt;
+    EOF
+        done
+    %&gt;
+    &lt;/table&gt;
+</pre>
+
+<p>Then,</p>
+
+<pre>
+    basp "`&lt; file.html`"
+</pre>
+
+<p>will produce a 4x10 table which renders to</p>
+
+<pre>
+    1  2  3  4  5  6  7  8  9  10
+    11 12 13 14 15 16 17 18 19 20
+    21 22 23 24 25 26 27 28 29 30
+    31 32 33 34 35 36 37 38 39 40
+</pre>
+
+<p>You can implement the HTML template using the <code>array</code> builtin
+from above. Essentially, you extract the script that is between the
+'&lt;%...%&gt;' delimiters and run it through <code>eval</code>, and
+print non-script to stdout unchanged. So, it would go something
+like</p>
+
+<pre>
+    a=()
+    array -p '&lt;%' -q '%&gt;' -E eval -V echo  a  "`&lt; file.html`"
+    arraycat a
+</pre>
+
+<p>But, although it works for the example above, you are limited by
+the fact that each command substitution is a separate process and
+can't share data with other code-blocks. So, if you put 'set --
+{1..50}' in another code-block, then it won't work. Besides,</p>
+
+<pre>
+    basp "`&lt; file.html`"
+</pre>
+
+<p>is less typing.</p>
+
+<!-- dsrich 28 Dec 2004 - The paranoid bone is just too strong -->
+
+<p class="editorial">[Editor's Note: The security ramifications of
+this are left as an exercise for the reader. Think chroot jail, at
+a minimum. -- Dave ]</p>
+
+<h2>Expat XML parser</h2>
+
+<p>I've added a simple interface to the <a href=
+"http://www.libexpat.org/">Expat XML parser</a>, so that you can
+register callback functions and interact with the XML parser from
+the shell. This new builtin will be enabled only if you have Expat
+installed. If you don't, then you will need to download/compile/install
+Expat, and recompile Bash shell (starting with
+<code>./configure</code>).</p>
+
+<pre>
+<p><code>xml [-sedicnm command] text...</code>
+</pre>
+
+<p>This is the interface to Expat-1.95.8 (from www.libexpat.org)
+library. Arguments are fed to the Expat XML parser sequentially.
+It returns 1 immediately on any error. If all arguments are processed
+without error, then the builtin returns success (0). The argument must
+be a single complete XML document, because Expat can handle only one
+XML document per parser process.</p>
+
+<p>The parser will invoke the callback commands or handlers that
+you specify, with all required parameters on the command-line. The
+callbacks will run at the top level, so if you need to protect your
+shell environment, run the 'xml' command in subshell. For the moment,
+the following options are recognized:</p>
+
+<p><code>-s command</code> start element (Usage: <code>command tag att=value ...</code> ).</p>
+
+<p>The attribute name and value strings are concatenated with '=',
+so that 'declare' or 'local' can be used to set shell variables with
+the same names as attributes, ie.</p>
+
+<pre>
+    declare "$2"        # set the first attribute name
+    declare "${@:2}"    # set all attribute names
+</pre>
+
+<p><code>-e command</code> end element
+(Usage: <code>command tag</code> )</p>
+
+<p><code>-d command</code> character data
+(Usage: <code>command data</code> )</p>
+
+<p><code>-i command</code> processing
+instruction (Usage: <code>command target data</code> )</p>
+
+<p><code>-c command</code> comment (Usage:
+<code>command text</code> )</p>
+
+<p><code>-n command</code> namespace start
+(Usage: <code>command prefix uri</code> )</p>
+
+<p><code>-m command</code> namespace end (Usage: <code>command prefix</code> )</p>
+
+<p>For convenience, the name and attributes of start XML elements
+are saved in array variable XML_ELEMENT_STACK as a stack, ie.</p>
+
+<p>XML_ELEMENT_STACK[0] = number of
+positional parameters (ie. $#)</p>
+
+<p>XML_ELEMENT_STACK[1] = tag (ie.
+$1)</p>
+
+<p>XML_ELEMENT_STACK[2] = the first attribute 'key=value' (ie. $2)
+...</p>
+
+<p>and the depth of current XML element is stored in shell variable
+XML_ELEMENT_DEPTH. They will be removed and decreased,
+respectively, at the end of XML element. Essentially, this is
+equivalent to doing manually</p>
+
+<pre>
+    pp_push -a XML_ELEMENT_STACK  $# "$@"
+    ((XML_ELEMENT_DEPTH++))
+</pre>
+
+<p>at the start of element, and</p>
+
+<pre>
+    pp_pop -a XML_ELEMENT_STACK  $((XML_ELEMENT_STACK[0] + 1))
+    ((XML_ELEMENT_DEPTH--))
+</pre>
+
+<p>at the end of element.</p>
+
+<h3>Example</h3>
+
+<p>To illustrate how it works, consider the following XML
+sample:</p>
+
+<pre>
+    &lt;root&gt;
+        &lt;one a="AA" b="BB"&gt;
+            first line
+            &lt;two x="XX"/&gt;
+            second line
+        &lt;/one&gt;
+    &lt;/root&gt;
+</pre>
+
+<ol>
+<li>
+<p>When &lt;root&gt; element is encountered, it will set</p>
+
+<pre>
+    XML_ELEMENT_STACK=(1 root)
+    XML_ELEMENT_DEPTH=1
+</pre>
+
+<p>and call command registered with <code>-s</code> option with 'root'
+as the argument,</p>
+
+<pre>
+    command root
+</pre>
+</li>
+
+<li>
+<p>On encountering &lt;one&gt; element, it will push '3', 'one',
+'a=AA', and 'b=BB' onto XML_ELEMENT_STACK and increment
+XML_ELEMENT_DEPTH, so that they become</p>
+
+<pre>
+    XML_ELEMENT_STACK=(3 one a=AA b=BB 1 root)
+    XML_ELEMENT_DEPTH=2
+</pre>
+
+<p>Also, it will call the <code>-s</code> callback with the tag and
+attributes, like</p>
+
+<pre>
+    command one a=AA b=BB
+</pre>
+</li>
+
+<li>
+<p>Similarly, on encountering &lt;two&gt; element, it will push
+'2', 'two', 'x=XX' onto XML_ELEMENT_STACK and increment
+XML_ELEMENT_DEPTH, which become</p>
+
+<pre>
+    XML_ELEMENT_STACK=(2 two x=XX 3 one a=AA b=BB 1 root)
+    XML_ELEMENT_DEPTH=3
+</pre>
+
+<p>and call the <code>-s</code> callback, like</p>
+
+<pre>
+    command two x=XX
+</pre>
+
+<p>Since this tag has implicit &lt;/two&gt; element, it will
+immediately call command registered with <code>-e</code> option with
+'two' as the argument,</p>
+
+<pre>
+    command two
+</pre>
+
+<p>Then, it will pop the current tag and attributes off
+XML_ELEMENT_STACK and decrement XML_ELEMENT_DEPTH. Now, they return
+to the state they were in before entering 'two' element, ie.</p>
+
+<pre>
+    XML_ELEMENT_STACK=(3 one a=AA b=BB 1 root)
+    XML_ELEMENT_DEPTH=2
+</pre>
+</li>
+
+<li>
+<p>On encountering &lt;/one&gt; element, it will call <code>-e</code>
+callback,</p>
+
+<pre>
+    command one
+</pre>
+
+<p>and pop the tag and attributes off XML_ELEMENT_STACK and
+decrement XML_ELEMENT_DEPTH, so that they become</p>
+
+<pre>
+    XML_ELEMENT_STACK=(1 root)
+    XML_ELEMENT_DEPTH=1
+</pre>
+</li>
+
+<li>
+<p>Finally, for &lt;/root&gt; element, it will call <code>-e</code>
+callback,</p>
+
+<pre>
+    command root
+</pre>
+
+<p>and pop the current tag off
+XML_ELEMENT_STACK and decrement XML_ELEMENT_DEPTH, returning to
+their initial state.</p>
+</li>
+
+<li>
+<p>For data such as 'first line' and 'second line', the command
+registered with <code>-d</code> option will be called with the data as
+argument. Multiple calls are made, if data are multi-line, contains
+special character encodings, or broken up by another elements. It
+is the user's responsibility to collect these data segments. Here,
+<code>strcat</code> would come handy.</p>
+</li>
+</ol>
+
+<p>Because XML_ELEMENT_STACK is a stack holding the command-line
+arguments for all nested elements, you can check it to find out
+where you are.</p>
+
+<p>In any callback command, the command-line arguments used at the
+start of current element are</p>
+
+<pre>
+    arg=( "${XML_ELEMENT_STACK[@]:0:XML_ELEMENT_STACK[0]+1}" )
+</pre>
+
+<p>which consists of $# <code>${arg[0]}</code>, the tag name
+<code>${arg[1]}</code>, and the attribute names and values
+<code>${arg[*]:2}</code> (if any). Similarly, the command-line
+arguments used for the immediate parent element are</p>
+
+<pre>
+    n=${XML_ELEMENT_STACK[0]}
+    arg=( "${XML_ELEMENT_STACK[@]:n+1:XML_ELEMENT_STACK[n+1]+1}" )
+</pre>
+
+<p>An easier way would be to rotate the stack, assuming
+XML_ELEMENT_DEPTH is deep enough to allow rotation, e.g.</p>
+
+<pre>
+    n=${XML_ELEMENT_STACK[0]}
+    pp_rotateleft -a XML_ELEMENT_STACK  $((n+1))
+    arg=( "${XML_ELEMENT_STACK[@]:0:XML_ELEMENT_STACK[0]+1}" )
+    pp_rotateright -a XML_ELEMENT_STACK  $((n+1))
+</pre>
+
+<p>To get a list of all nested tag names, you simply filter out
+stack items containing '=' (attribute) or all integers ($#). From
+inside of &lt;two&gt; element in the above example,</p>
+
+<pre>
+    XML_ELEMENT_STACK=(2 two x=XX 3 one a=AA b=BB 1 root)
+    echo ${XML_ELEMENT_STACK[*]|~=|^[0-9]+$}            # two one root
+</pre>
+
+<p>will give you just the tags. This is equivalent to manually
+looping through, like</p>
+
+<pre>
+    for i in {1..XML_ELEMENT_DEPTH}; do
+        echo ${XML_ELEMENT_STACK[1]}
+        pp_rotateleft -a XML_ELEMENT_STACK $((XML_ELEMENT_STACK[0] + 1))
+    done
+</pre>
+
+<p>So, Bash equivalent to 'outline' example from Expat distribution
+would go like</p>
+
+<pre>
+    indent='  '
+    start () {
+        echo "${indent|*XML_ELEMENT_DEPTH-1}$*"
+    }
+    xml -s start "`&lt; file.xml`"
+</pre>
+
+<p>producing</p>
+
+<pre>
+    root
+      one a=AA b=BB
+        two x=XX
+</pre>
+
+<h2>GDBM and Associative Arrays</h2>
+
+<p>For some reason, Bash doesn't have a key/value data structure
+(called associative array, hash, or dictionary in other scripting
+languages.) I've added a wrapper for gdbm(3) with a full set of
+operations to create and manipulate disk-based associative
+arrays.</p>
+
+<p><code>gdbm [-euikvr] [-KVW array] file [key | key value ...]</code>
+
+<p>Typical usage would be as follows:</p>
+
+<p><code>gdbm file</code> print all
+key/\t/value pairs, ie. dict.items()</p>
+
+<p><code>gdbm -k file</code> print all keys,
+ie. dict.keys()</p>
+
+<p><code>gdbm -v file</code> print all
+values, ie. dict.values()</p>
+
+<p><code>gdbm file key</code> print var[key], ie. ${var[key]}</p>
+
+<p><code>gdbm -r file</code> reorganize database</p>
+
+<p><code>gdbm -K array file</code> save all
+keys into array</p>
+
+<p><code>gdbm -V array file</code> save all
+values into array</p>
+
+<p><code>gdbm -W array file</code> save all key/value pairs into array
+sequentially</p>
+
+<p><code>gdbm file key value</code> store
+key/value, ie. var[key]=value</p>
+
+<p><code>gdbm -i file key value</code> store
+key/value, only if key is new</p>
+
+<p><code>gdbm -v file key name</code> store value in variable, ie.
+name=${var[key]}</p>
+
+<p><code>gdbm -e file</code> test if file is
+GDBM database</p>
+
+<p><code>gdbm -e file key</code> test if key
+exists</p>
+
+<p><code>gdbm -e file key value</code> test if key exists and value is
+var[key]</p>
+
+<p><code>gdbm -u file key</code> delete key,
+ie. unset var[key]</p>
+
+<p><code>gdbm -u file key value</code> delete key, only if value is
+var[key]</p>
+
+<p>More than one key/value pair can be specified on the command
+line, and  all arguments will be processed even if there
+is an error. This speeds up data entry, because each 'gdbm' call opens
+and closes the database file. If the last value is missing (ie.
+there is an odd number of arguments,) then the last key will be
+ignored.</p>
+
+<p>For example,</p>
+
+<pre>
+    gdbm file.db a 111 b 222 c 333
+
+    gdbm file.db a              # 111
+    gdbm file.db b              # 222
+    gdbm file.db c              # 333
+
+    gdbm -k file.db             # c a b
+    gdbm -v file.db             # 333 111 222
+
+    gdbm -v file.db a x b y c z
+    declare -p x y z            # x=111 y=222 z=333
+
+    gdbm -e file.db a                   # does 'a' exist?
+    gdbm -e file.db a 111 b 222         # is a==111 and b==222 ?
+</pre>
+
+<p>There are many benefits to this approach:</p>
+
+<ol>
+<li>
+<p>the database is a single file which
+can be copied,</p>
+</li>
+
+<li>
+<p>the data survives exit and
+reboot,</p>
+</li>
+
+<li>
+<p>other processes can access the
+database,</p>
+</li>
+
+<li>
+<p>the shell can now handle a database which is bigger than
+memory.</p>
+</li>
+</ol>
+
+<h2>SQLite, MySQL, and PostgreSQL</h2>
+
+<p>Each database comes with its own command-line client program
+(ie. 'sqlite', 'mysql', and 'psql'). Athough it is easy to send SQL
+statements to the database manager, it can be difficult to bring query results back into
+the shell. You have to use stdout or a file, read the table, and
+parse the rows and the columns. This is non-trivial for anything but
+simple data.</p>
+
+<p>I've added a simple interface to <a href=
+"http://www.sqlite.org/">SQLite</a>, <a href=
+"http://www.mysql.com/">MySQL</a>, and <a href=
+"http://www.postgresql.org/">PostgreSQL</a>:</p>
+
+<p><pre>Lsql [-a array] -d file
+SQL...</pre>
+
+<p><pre>Msql [-a array] [-h host -p port
+-d dbname -u user -P password ] SQL...</pre>
+
+<p><pre>Psql [-a array] [-h host -p port -d dbname -u user -P
+password ] SQL...</pre>
+
+<p>where <code>Lsql</code> is for SQLite, <code>Msql</code> is for MySQL,
+and <code>Psql</code> is for PostgreSQL. Of course, if you don't have a
+database, then you won't be able to use the corresponding
+builtin.</p>
+
+<p>They all work pretty much the same way. They send SQL statements
+to the database engine. If there is any query result, they print
+to stdout, or (with the <code>-a</code> option) save the data fields into an
+array variable, row by row. My intention is not to replace the
+client programs, but to make shell script easier to write. For
+example, here is  the tutorial example in the SQLite documentation:</p>
+
+<pre>
+    Lsql -d file.sqlite \
+        "CREATE TABLE tbl1(one VARCHAR(10), two SMALLINT)" \
+        "INSERT INTO tbl1 VALUES('hello!',10)" \
+        "INSERT INTO tbl1 VALUES('goodbye', 20)"        # use 'set +H'
+</pre>
+
+<p>creates a simple table and loads in 2 rows of data. To query it,</p>
+
+<pre>
+    Lsql -d file.sqlite "SELECT * FROM tbl1"    # to stdout
+
+    Lsql -a table -d file.sqlite "SELECT * FROM tbl1"
+    declare -p table            # table=(hello! 10 goodbye 20)
+</pre>
+
+<p>The first will print</p>
+
+<pre>
+    hello!  10
+    goodbye 20
+</pre>
+
+<p>and the second will put the data into array variable
+'table'.</p>
+
+<h2>Summary</h2>
+
+<p>This ends this tutorial on my patches to Bash-3.0 shell. Bash
+shell is ideal tool for teaching/learning about Linux and
+programming, because it is so easy to write C extensions and put
+shell handles on them. It is my sincere hope that readers will
+stick with shell a little longer before moving on to other
+scripting languages. :-)</p>
+
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- ============================================================= -->
+<!-- *** BEGIN bio *** -->
+<hr>
+
+<!--
+<p>
+<img ALIGN="LEFT" ALT="[BIO]" SRC="../gx/2002/note.png" class="bio">
+<em>
+</em>
+<br CLEAR="all">
+
+-->
+<!-- *** END bio *** -->
+
+<!-- ============================================================= -->
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2005, Anonymous. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 110 of Linux Gazette, January 2005
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="lg_answer.html" >&lt;-- prev</A> | <A HREF="engel.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">January 2005 (#110)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

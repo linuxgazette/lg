@@ -1,0 +1,405 @@
+<!--startcut ==========================================================-->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML>
+<HEAD>
+<title>Single-User Booting Under Linux Issue 19</title>
+</HEAD>
+<BODY BGCOLOR="#EEE1CC" TEXT="#000000" LINK="#0000FF" VLINK="#0020F0"
+ALINK="#FF0000">
+<!--endcut ============================================================-->
+
+<H4>
+&quot;Linux Gazette...<I>making Linux just a little more fun!</I>&quot;
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H2>Single-User Booting Under Linux</H2>
+<H4>By John Gatewood Ham,
+<a href="mailto:zappaman@alphabox.compsci.buu.ac.th">zappaman@alphabox.compsci.buu.ac.th</a></H4>
+</center>
+<P><HR>
+I was trained as a system administrator on HP, IBM, and Sun workstations 
+while working as a DRT consultant assigned to Informix as an alpha-tester.  
+There I learned the need for a true single-user operating mode in Unix.  
+When I tried to use the single user mode with Linux, it did not work in the 
+way that I expected.  After many, many reboots I worked out the right 
+configuration to support a true single-user mode on the distribution I was 
+using, Slackware 3.2, by modifying the boot process.
+</P>
+<P>
+This article will now explain how to setup the bootup process for Linux so 
+that single-user mode really works if you are using the Slackware 3.2 
+distribution (or a derivative).  I will begin by assuming that your kernel 
+is correctly configured and that the <CODE>init</CODE> program starts successfully.  
+See the Installation-HOWTO at
+<A HREF=ftp://sunsite.unc.edu/pub/Linux/docs/HOWTO/Installation-HOWTO><code>ftp://sunsite.unc.edu/pub/Linux/docs/HOWTO/Installation-HOWTO</code></A>
+for help to get this far.  Once you have a system that boots, however, you 
+have only begun.  Why?  Most distributions will give you a generic set of 
+initialization scripts that are designed to work for an average installation.  
+You will want to customize this in order to run extra things you want and/or 
+to prevent  running things you do not want.  With the dozen or so standard 
+startup scripts things can seem confusing, but after you read this article 
+you should be able to understand enough to create a custom environment 
+when you boot that exactly suits you.
+</P>
+<P>
+As I stated earlier, I will begin by assuming that <CODE>init</CODE> has started 
+successfully.  It will examine the file <CODE>/etc/inittab</CODE> to determine 
+what to do.  In that file are located the lines to activate your login 
+devices such as terminals, modems, and your virtual consoles.  Leave that 
+stuff alone.  What we are interested in are the lines which call the 
+startup/shutdown scripts.  These lines will look something like this:
+</P>
+<PRE>
+# Default runlevel.
+id:3:initdefault:
+
+# System initialization (runs when system boots).
+si::sysinit:/etc/rc.d/rc.S
+
+# Script to run when going single user (runlevel 1).
+l1:1:wait:/etc/rc.d/rc.K
+
+# Script to run when going single user (runlevel S or s)
+mm:S:wait:/etc/rc.d/rc.K2
+
+# Script to run when going multi user.
+rc:23456:wait:/etc/rc.d/rc.M
+
+# Runlevel 0 halts the system.
+l0:0:wait:/etc/rc.d/rc.0
+
+# Runlevel 6 reboots the system.
+l6:6:wait:/etc/rc.d/rc.6
+</PRE>
+<P>
+The comments are present and are very helpful.  First you need to determine 
+your default runlevel.  In this case it is 3.  The format of the <CODE>/etc/inittab</CODE>
+file section we are looking at is simple.  Blank lines are ignored.  Lines 
+with '#' as the first character are comments and are ignored.  Other lines 
+have 4 parts separated by the colon character.  These parts are 1. symbolic 
+label, 2. runlevel, 3. action and 4.command to run.  These are documented in 
+the section 5 manual page for <CODE>/etc/inittab</CODE> (<CODE>man 5 inittab</CODE>).  First
+we must find a line with an action of <CODE>initdefault</CODE>, and then see what runlevel 
+it has.  That will be the default runlevel.  Obviously you should not have 2 
+lines that have <CODE>initdefault</CODE> as the action in an <CODE>/etc/inittab</CODE> file.  Once you know 
+the default runlevel, you will be able to know what <CODE>/etc/inittab</CODE> entries 
+will be processed by <CODE>init</CODE>.  The 1 runlevel is considered single-user 
+maintenance mode, but it supported multiple simultaneous logins in virtual 
+terminals with the default <CODE>/etc/inittab</CODE> on my systems.  You can prevent this by 
+removing the 1 from the getty lines of the tty2, tty3, tty4, etc.  The 3 
+runlevel is considered the normal multi-user mode with full networking 
+support.  The S runlevel is supposed to be true single-user, and you can 
+theoretically enter that runlevel using the <CODE>lilo</CODE> parameter 
+<CODE>single</CODE>.  However, for the Slackware 3.2 distribution, that does 
+not put you in a single-user mode as you would expect, but instead you wind 
+up in runlevel 3.  The <CODE>/etc/inittab</CODE> file I show here does not have that problem 
+however.  Once you have read this article you can change the system to 
+behave in the expected manner.  So we know we will go to runlevel 3.  That 
+means <CODE>init</CODE> will perform every command in the <CODE>/etc/inittab</CODE> file that has a <CODE>sysinit</CODE>, 
+then <CODE>boot</CODE>, or <CODE>bootwait</CODE>, and finally any entries for our runlevel 3.  When you 
+want to run a script when entering a runlevel, it doesn't make sense to have 
+more than one script line in the <CODE>/etc/inittab</CODE> file for that level.  Instead, you 
+should put everything in 1 script, or call scripts from within the script 
+mentioned in the <CODE>/etc/inittab</CODE> file using the dot method.  Once thing to note is 
+that field 2, the runlevel field, can have more than 1 runlevel specified.  
+The <CODE>init</CODE> program will first run the <CODE>si</CODE> entry 
+(and we will wait for it to finish running <CODE>/etc/rc.d/rc.S</CODE>) since it has 
+<CODE>sysinit</CODE> (which implies <CODE>wait</CODE>) in the third field.  Then it will run everything 
+with 3 specified.  So in our example file we will run the <CODE>si</CODE> target, then 
+the <CODE>rc</CODE> target (and we will wait for it to finish running the 
+<CODE>/etc/rc.d/rc.M</CODE> script since the third field is <CODE>wait</CODE>), and finally 
+we it will do the <CODE>c1</CODE> through <CODE>c6</CODE> targets which set up the virtual ttys during 
+a normal boot.  
+</P>
+<P>
+If we boot (via <CODE>lilo</CODE>) and add the <CODE>single</CODE> 
+parameter, we will still run the <CODE>si</CODE> target (<CODE>/etc/rc.d/rc.S</CODE>) and wait for it to 
+complete, but then we will run the <CODE>mm</CODE> target (<CODE>/etc/rc.d/rc.K2</CODE>).  Keep in mind 
+that runlevel 1 and runlevel S are essentially the same when you enter them, 
+but how you get there is very different.  Runlevel 1 can be entered by using 
+the command <CODE>/sbin/telinit 1</CODE>, but <CODE>/sbin/telinit s</CODE> will send you to runlevel 5 
+often for some reason (some kind of bug).  Runlevel 1 will give you a normal 
+log in, and allows 1 user (<I>any</I> 1 user) to log in at the console.  
+With this setup, runlevel S will give you a special root-only login that 
+allows only root to use the console.  Since only root can log in, only a 
+special password prompt is displayed.  If you press enter or ctl-D, the system 
+will return to runlevel 3.  This root-only login is accomplished by using 
+the <CODE>/bin/sulogin</CODE> program.  Runlevel S is probably what you want when you think 
+single-user, but you have to reboot the machine and use <CODE>lilo</CODE> and have the 
+single parameter to make it work.  You can use runlevel 1 to accomplish the 
+same things, but remember you will have to manually return to runlevel 3 
+when you are done with another call to <CODE>/sbin/telinit 3</CODE> or a reboot, and you 
+must insure that nobody else can get to the console but the root user.  
+WARNING: The true single-user mode entered with the single parameter to 
+<CODE>lilo</CODE> with  my <CODE>/etc/inittab</CODE> and <CODE>/etc/rc.d/rc.K2</CODE> will support only 1 console and no other 
+virtual terminals.  Do not run anything that locks up the terminal!
+</P>
+<P>
+Ok, so what do we know now?  We know what scripts <CODE>init</CODE> will call and when they 
+will be called.  But what can be in those scripts?  The scripts should be 
+written for bash unless you are a real guru and KNOW the other shell you 
+wrote scripts for will be available during boot.  There is nothing preventing 
+you from using <CODE>perl</CODE> or <CODE>tcsh</CODE> or whatever, but traditionally most everyone uses 
+<CODE>bash</CODE> scripts (ok, ok, Bourne shell scripts) for unix boot scripts.  The <CODE>/etc/rc.d/rc.S</CODE>
+script which is called at system boot time should take care of things like 
+<CODE>fsck</CODE>'ing your file systems, mounting them, and starting up swapping and other 
+essential daemons.  These are things that you need independent of runlevel.  
+The <CODE>/etc/rc.d/rc.M</CODE> script which is called when you enter runlevel 3 should start all 
+the processes that remain that you usually need during normal system 
+operation EXCEPT things like <CODE>getty</CODE>.  Processes that must be restarted whenever 
+they stop running like <CODE>getty</CODE> should be placed in the <CODE>/etc/inittab</CODE> file instead of 
+being started by a boot script.  So what is in a typical <CODE>/etc/rc.d/rc.M</CODE> script?  
+Usually configuring the network , starting web servers, sendmail, and 
+anything else you want to always run like database servers, quota 
+programs, etc.
+</P>
+<P>
+The only startup script I mention in my <CODE>/etc/inittab</CODE> that is not included in the
+Slackware 3.2 distribution is <CODE>/etc/rc.d/rc.K2</CODE>, and it is merely a modified version 
+of <CODE>/etc/rc.d/rc.K</CODE> set up for single user mode.  Remember this is the startup script 
+that will be used if you choose to enter the <CODE>single</CODE> parameter to <CODE>lilo</CODE>.  At 
+the end of this file you will see a line:
+</P>
+<PRE>
+exec /bin/sulogin /dev/console
+</PRE>
+<P>
+This will replace the current process which is running the script with the 
+<CODE>/bin/sulogin</CODE> program.  This means, of course, that this has to be the last 
+line in your script, since nothing after this line will be processed by <CODE>bash</CODE>.
+After that program starts, it displays a message to either enter the root 
+password or press ctl-D.  If you enter the correct root password, you will 
+be logged in as root in a true single-user mode.  Be careful, though, 
+because when you exit that shell the machine will go into runlevel 3.  
+If you want to reboot before entering runlevel 3 you must remember to do 
+it (via <CODE>shutdown</CODE>) instead of just exiting the shell.  If you press ctl-D 
+instead of the root password, the system will enter runlevel 3.  I have 
+changed the incorrect calls to <CODE>kill</CODE> to use the <CODE>killall5</CODE> program, since 
+the lines with <CODE>kill</CODE> caused <CODE>init</CODE> to be killed and a runlevel change was
+happening incorrectly.
+</P>
+<P>
+Well, I hope that this description of how I enabled my Linux machine to 
+have a single-user mode similar to that of the big-name workstations 
+proves helpful to you.  Customizing your boot process is not too hard, 
+once you understand something about how the <CODE>/etc/inittab</CODE> 
+and <CODE>/etc/rc.d/*</CODE>
+scripts work.  Be sure you 1. backup your entire system, 2. have a boot 
+floppy, and 3. a rescue floppy that can restore the backup (or any 
+individual files) you made in step 1 using the boot floppy from step 2 to 
+boot the machine.  If you make a 1 character typo you can prevent the 
+machine from booting, so the backup steps, while tedious, are really 
+necessary to protect yourself before you experiment.
+</P>
+<h1><CENTER>The Files</CENTER></h1>
+<P>
+Here are the files I used.  Use at your own risk.  They work for me, but
+may need to be modified to work for you.
+</P>
+<hr>
+<h2><Center><code>/etc/inittab</code></center></h2>
+<PRE>
+#
+# inittab	This file describes how the INIT process should set up
+#		the system in a certain run-level.
+#
+# Version:	@(#)inittab		2.04	17/05/93	MvS
+#                                       2.10    02/10/95        PV
+#
+# Author:	Miquel van Smoorenburg, <a href="mailto:miquels@drinkel.nl.mugnet.org">miquel@drinkel.nl.jugnet.org</a>
+# Modified by:	Patrick J. Volkerding, <a href="mailto:volkerdi@ftp.cdrom.com">volkerdi@ftp.cdrom.com</a>
+# Modified by:  John Gatewood Ham, <a href="mailto:zappaman@alphabox.compsci.buu.ac.th">zappaman@alphabox.compsci.buu.ac.th</a>
+#
+# Default runlevel.
+id:3:initdefault:
+
+# System initialization (runs when system boots).
+si::sysinit:/etc/rc.d/rc.S
+
+# Script to run when going maintenance mode (runlevel 1).
+l1:1:wait:/etc/rc.d/rc.K
+
+# Script to run when going single user (runlevel s)
+mm:S:wait:/etc/rc.d/rc.K2
+
+# Script to run when going multi user.
+rc:23456:wait:/etc/rc.d/rc.M
+
+# What to do at the "Three Finger Salute".
+# make the machine halt on ctl-alt-del
+ca::ctrlaltdel:/sbin/shutdown -h now "going down on ctl-alt-del"
+
+# Runlevel 0 halts the system.
+l0:0:wait:/etc/rc.d/rc.0
+
+# Runlevel 6 reboots the system.
+l6:6:wait:/etc/rc.d/rc.6
+
+# What to do when power fails (shutdown to single user).
+pf::powerfail:/sbin/shutdown -f +5 "THE POWER IS FAILING"
+
+# If power is back before shutdown, cancel the running shutdown.
+pg:0123456:powerokwait:/sbin/shutdown -c "THE POWER IS BACK"
+
+# If power comes back in single user mode, return to multi user mode.
+ps:S:powerokwait:/sbin/init 5
+
+# The getties in multi user mode on consoles an serial lines.
+#
+# NOTE NOTE NOTE adjust this to your getty or you will not be
+#                able to login !!
+#
+# Note: for 'agetty' you use linespeed, line.
+# for 'getty_ps' you use line, linespeed and also use 'gettydefs'
+# we really don't want multiple logins in single user mode...
+c1:12345:respawn:/sbin/agetty 38400 tty1 linux
+c2:235:respawn:/sbin/agetty 38400 tty2 linux
+c3:235:respawn:/sbin/agetty 38400 tty3 linux
+c4:235:respawn:/sbin/agetty 38400 tty4 linux
+c5:235:respawn:/sbin/agetty 38400 tty5 linux
+c6:235:respawn:/sbin/agetty 38400 tty6 linux
+
+# Serial lines
+#s1:12345:respawn:/sbin/agetty 19200 ttyS0 vt100
+#s2:12345:respawn:/sbin/agetty 19200 ttyS1 vt100
+
+# Dialup lines
+#d1:12345:respawn:/sbin/agetty -mt60 38400,19200,9600,2400,1200 ttyS0 vt100
+#d2:12345:respawn:/sbin/agetty -mt60 38400,19200,9600,2400,1200 ttyS1 vt100
+
+# Runlevel 4 used to be for an X-window only system, until we discovered
+# that it throws init into a loop that keeps your load avg at least 1 all 
+# the time. Thus, there is now one getty opened on tty1. Hopefully no one
+# will notice. ;^)
+# It might not be bad to have one text console anyway, in case something 
+# happens to X.
+x1:4:wait:/etc/rc.d/rc.4
+
+# End of /etc/inittab
+</PRE>
+<hr>
+<h2><Center><code>/etc/rc.d/rc.K</code></center></h2>
+<PRE>
+# /bin/sh
+#
+# rc.K 		This file is executed by init when it goes into runlevel
+#		1, which is the administrative state. It kills all
+#		deamons and then puts the system into single user mode.
+#		Note that the file systems are kept mounted.
+#
+# Version:	@(#)/etc/rc.d/rc.K	1.50	1994-01-18
+# Version:	@(#)/etc/rc.d/rc.K	1.60	1995-10-02 (PV)
+#
+# Author:	Miquel van Smoorenburg <a href="mailto:miquels@drinkel.nl.mugnet.org">miquels@drinkel.nl.mugnet.org</a>
+# Modified by:  Patrick J. Volkerding <a href="mailto:volkerdi@ftp.cdrom.com">volkerdi@ftp.cdrom.com</a>
+# Modified by:  John Gatewood Ham <a href="mailto:zappaman@alphabox.compsci.buu.ac.th">zappaman@alphabox.compsci.buu.ac.th</a>
+#
+  # Set the path.
+  PATH=/sbin:/etc:/bin:/usr/bin
+
+  # Kill all processes.
+  echo
+  echo "Sending all processes the TERM signal."
+  killall5 -15
+  echo -n "Waiting for processes to terminate"
+  for loop in 0 1 2 3 4 5 6 7 ; do
+    sleep 1
+    echo -n "."
+  done
+  echo
+  echo "Sending all processes the KILL signal."
+  killall5 -9
+
+  # Try to turn off quota and accounting.
+  if [ -x /usr/sbin/quotaoff ]
+  then
+	echo "Turning off quota.."
+	/usr/sbin/quotaoff -a
+  fi
+  if [ -x /sbin/accton ]
+  then
+	echo "Turning off accounting.."
+	/sbin/accton
+  fi
+
+</PRE>
+<hr>
+<h2><Center><code>/etc/rc.d/rc.K2</code></center></h2>
+<PRE>
+# /bin/sh
+#
+# rc.K 		This file is executed by init when it goes into runlevel
+#		1, which is the administrative state. It kills all
+#		deamons and then puts the system into single user mode.
+#		Note that the file systems are kept mounted.
+#
+# Version:	@(#)/etc/rc.d/rc.K	1.50	1994-01-18
+# Version:	@(#)/etc/rc.d/rc.K	1.60	1995-10-02 (PV)
+#
+# Author:	Miquel van Smoorenburg <a href="mailto:miquels@drinkel.nl.mugnet.org">miquels@drinkel.nl.mugnet.org</a>
+# Modified by:  Patrick J. Volkerding <a href="mailto:volkerdi@ftp.cdrom.com">volkerdi@ftp.cdrom.com</a>
+# Modified by:  John Gatewood Ham <a href="mailto:zappaman@alphabox.compsci.buu.ac.th">zappaman@alphabox.compsci.buu.ac.th</a>
+#
+# Set the path.
+PATH=/sbin:/etc:/bin:/usr/bin
+
+# Kill all processes.
+echo
+echo "Sending all processes the TERM signal."
+killall5 -15
+echo -n "Waiting for processes to terminate"
+for loop in 0 1 2 3 4 5 6 7 ; do
+  sleep 1
+  echo -n "."
+done
+echo
+echo "Sending all processes the KILL signal."
+killall5 -9
+
+# Try to turn off quota and accounting.
+if [ -x /usr/sbin/quotaoff ]
+then
+	echo "Turning off quota.."
+	/usr/sbin/quotaoff -a
+fi
+if [ -x /sbin/accton ]
+then
+	echo "Turning off accounting.."
+	/sbin/accton
+fi
+
+# Now go to the single user level
+exec /bin/sulogin /dev/console
+</PRE>
+<HR>
+<address>
+<A HREF="mailto:zappaman@alphabox.compsci.buu.ac.th">zappaman@alphabox.compsci.buu.ac.th</A>
+<BR>
+<A HREF="http://alphabox.compsci.buu.ac.th/~zappaman">Information about me.</A>
+</address>
+
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<center><H5>Copyright &copy; 1997, John Gatewood Ham<BR> 
+Published in Issue 19 of the Linux Gazette, July 1997</H5></center>
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<A HREF="./index.html"><IMG ALIGN=BOTTOM SRC="../gx/indexnew.gif" 
+ALT="[ TABLE OF CONTENTS ]"></A>
+<A HREF="../index.html"><IMG ALIGN=BOTTOM SRC="../gx/homenew.gif"
+ALT="[ FRONT PAGE ]"></A>
+<A HREF="./unrpm.html"><IMG SRC="../gx/back2.gif"
+ALT=" Back "></A>
+<A HREF="./trade.html"><IMG SRC="../gx/fwd.gif" ALT=" Next "></A>
+<P> <hr> <P> 
+<!--startcut ==========================================================-->
+</BODY>
+</HTML>
+<!--endcut ============================================================-->
+

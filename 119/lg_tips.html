@@ -1,0 +1,1109 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>More 2 Cent Tips! LG #119</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="lg_mail.html" >&lt;-- prev</A> | <A HREF="lg_answer.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>More 2 Cent Tips!</h1>
+
+<p>
+<center><STRONG>See also: The Answer Gang's 
+<a href="../tag/kb.html">Knowledge Base</a>
+and the <i>LG</i> 
+<a href="http://www.linuxgazette.net/search.html">Search Engine</a></STRONG>
+</center><HR>
+<UL>
+<!-- index_text begins -->
+<li><A HREF="#tips.1"
+	><strong>closing unneeded ports</strong></a>
+<li><A HREF="#tips.2"
+	><strong>TFTP problem</strong></a>
+<li><A HREF="#tips.3"
+	><strong>HTTPS question</strong></a>
+<li><A HREF="#tips.4"
+	><strong>Mozilla hogging the screen</strong></a>
+<li><A HREF="#tips.5"
+	><strong>Couple of perl related questions</strong></a>
+<li><A HREF="#tips.6"
+	><strong>Securing rsync</strong></a>
+<li><A HREF="#tips.7"
+	><strong>Boot from cd via floppy</strong></a>
+<li><A HREF="#tips.8"
+	><strong>Security implications of root login over SSH</strong></a>
+<!-- index_text ends -->
+</UL>
+<!--     .~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.     -->
+<P> <A NAME="tips.1"><HR WIDTH="75%" ALIGN="center"></A> <P>
+<H3><IMG ALIGN=BOTTOM ALT="" SRC="../gx/lil2cent.gif">
+<FONT COLOR="navy">closing unneeded ports</FONT></H3>
+Mike Orr (<a href="mailto:tag@linuxgazette.net?cc=tag@lists.linuxgazette.net&cc=mso@oz.net&subject=%20Re%3A%20%5BLG%20119%5D%202c%20Tips%20%231"><em>LG</em> Contributing Editor</a>)
+
+
+<br>Answered By  Kapil Hari Paranjape,
+ Peter Knaggs,
+ Predrag Ivanovic,
+ Thomas Adam
+
+<P><STRONG>
+While most people know to turn off any services they don't want to offer
+the world, many do not realize this applies at the <EM>interface</EM> level as
+well as the service level.
+</STRONG></P>
+<BLOCKQUOTE>
+[Kapil] 
+Other than configuring this by editing the configuration files for
+the individual daemons that open the listening sockets, you can also
+use iptables/ipchains to block the (ir)relevant address/port pairs.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+Here is the relevant portion of a file called "iptables.save" on a
+machine that runs a public web server and also accepts ssh connections.
+</BLOCKQUOTE>
+
+<blockquote><pre>*filter
+:INPUT DROP [0:0]
+:FORWARD DROP [0:0]
+:OUTPUT ACCEPT [0:0]
+-A INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT
+-A INPUT -d 127.0.0.1 -i lo -j ACCEPT
+-A INPUT -p tcp -m tcp --dport 22 -j ACCEPT
+-A INPUT -p tcp -m tcp --dport 80 -j ACCEPT
+COMMIT
+</pre></blockquote>
+<BLOCKQUOTE>
+You can enable this with
+</BLOCKQUOTE>
+
+<blockquote><pre>	iptables-restore &lt; iptables.save
+</pre></blockquote>
+<BLOCKQUOTE>
+You can add/remove ports according to what connections you wish to
+accept. You should probably also accept some icmp connections in
+order to avoid losing routing information.
+</BLOCKQUOTE>
+<P><STRONG>
+A typical networked computer has two
+interfaces: lo (the loopback) and eth0 (the Ethernet).  Most daemons
+listen on all interfaces unless you tell them otherwise.  Obviously, your
+web server, mail server, and CUPS (printer) server must listen on the
+public interface if you want other computers to access them.  But if
+you're running mail or CUPS only for your own computer, you should make
+them listen only on the localhost.  This eliminates a bunch of security
+vunerabilities because inaccessible programs can't be exploited.
+</STRONG></P>
+<P><STRONG>
+There are several portscanners available but good ol' netstat works fine
+if you're logged into the target computer.
+</STRONG></P>
+
+<pre><strong># netstat -a --inet
+Active Internet connections (servers and established)
+Proto Recv-Q Send-Q Local Address           Foreign Address         State
+tcp        0      0 *:631                   *:*                     LISTEN
+tcp        0      0 *:https                 *:*                     LISTEN
+udp        0      0 *:bootpc                *:*
+udp        0      0 *:631                   *:*
+</strong></pre>
+<P><STRONG>
+Add the "-n" option to bypass domain-name resolution.  Here we see the
+secure web server listening on all interfaces (*:https), good.  But CUPS
+is also listening on all interfaces (*:631, both TCP and UDP), bad.  (We
+know port 631 is CUPS because that's what we type in our web browser to
+access the admin interface.)  To make CUPS listen only on the localhost, I
+edited <TT>/etc/cups/cupsd.conf</TT>, commented the "Port 631" line and added
+"Listen localhost:631".  (I like Listen better than Port because it shows
+in one line exactly which host:port combinations are in effect.)  Note
+that you can't specify an interface directly, you have to specify the
+domain/IP attached to that interface.
+</STRONG></P>
+<P><STRONG>
+Then I restarted the server and checked netstat again:
+</STRONG></P>
+
+<pre><strong># /etc/init.d/cupsd restart
+ * Stopping cupsd...
+[ ok ]
+ * Starting cupsd...
+[ ok ]
+# netstat -a --inet
+Active Internet connections (servers and established)
+Proto Recv-Q Send-Q Local Address           Foreign Address         State
+tcp        0      0 localhost:631           *:*                     LISTEN
+tcp        0      0 *:https                 *:*                     LISTEN
+tcp        0      0 10.0.0.1:32775          example.com:imaps ESTABLISHED
+udp        0      0 *:bootpc                *:*
+udp        0      0 *:631                   *:*
+</strong></pre>
+<P><STRONG>
+Good, the TCP line changed to "localhost:631".  The UDP line is still
+"*:631".  I searched the config file and "man cupsd" for "udp" but found
+nothing.  I guess that means you can't turn it off?  I decided not to
+worry about it.
+</STRONG></P>
+<P><STRONG>
+There's a new line in netstat: "10.0.0.1:32775 to example.com:imaps".  It
+looks like Mozilla Thunderbird is automatically checking for mail.
+10.0.0.1 happens to be my public IP.  (IPs/domains changed to protect the
+innocent.)    It connected to the secure IMAP port on example.com.  32775
+was a free port the kernel chose at random, as always happens when you
+connect to an external server.
+</STRONG></P>
+<P><STRONG>
+There's still one suspicious line, "*:bootpc".  I'm not running a diskless
+workstation or doing any exotic remote booting, so what is this?  "lsof"
+is a very nifty program that tells you which process has a file or socket
+open.
+</STRONG></P>
+
+<pre><strong># lsof -i :bootpc
+COMMAND  PID USER   FD   TYPE DEVICE SIZE NODE NAME
+dhcpcd  3846 root    4u  IPv4   5398       UDP *:bootpc
+</strong></pre>
+<P><STRONG>
+I <EM>am</EM> using DHCP, which runs this daemon while you're leasing an IP.  I
+ran "man dhcpcd" and searched for "bootpc" and "port".  Nothing.  I guess
+it uses that port for some unknown reason.  I decided not to worry about
+it.
+</STRONG></P>
+<BLOCKQUOTE>
+[Kapil] 
+Not quite. You shouldn't be running the dhcp-server (which is what
+the dhcpd program is). You are using dhcp in client mode so you
+should disable dhcpd from starting up.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+[Peter] 
+True, but the program in question listening on the UDP port 68
+(bootpc) is "dhcpcd",
+not the dhcp-server which indeed has the name "dhcpd".
+When a client requests a DHCP address, a proccess (either "dhclient"
+or "dhcpcd")
+listens on UDP port 68.
+</BLOCKQUOTE>
+<P><STRONG>
+It's eleven o'clock.  Do you know which services your computer is running?
+</STRONG></P>
+<BLOCKQUOTE>
+[Pedja] 
+OK, what about this?
+</BLOCKQUOTE>
+
+<blockquote><pre>pedja@deus:~ ]$ netstat -a --inet
+Active Internet connections (servers and established)
+Proto Recv-Q Send-Q Local Address           Foreign Address         State
+tcp        0      0                *:6000                       *:*                     LISTEN
+</pre></blockquote>
+<BLOCKQUOTE>
+That's X server, right?
+</BLOCKQUOTE>
+
+<blockquote><pre>root@deus:/home/pedja#lsof -i :6000
+COMMAND  PID USER   FD   TYPE DEVICE SIZE NODE NAME
+X       3840 root    1u  IPv6   9813       TCP *:6000 (LISTEN)
+X       3840 root    3u  IPv4   9814       TCP *:6000 (LISTEN)
+</pre></blockquote>
+<BLOCKQUOTE>
+I should add something like 'tcp -nolisten' to options that are passed
+to X when it starts(I use startx to,well,start X 
+<IMG SRC="../gx/dennis/smily.gif" ALT=":-)" 
+		height="24" width="20" align="middle"> ).
+My question is where to?
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+[Thomas]
+</BLOCKQUOTE>
+
+<blockquote><pre>/etc/X11/xinit/xserverrc
+</pre></blockquote>
+<BLOCKQUOTE>
+Is the file you're looking for.  By default (on most distros, anyway),
+the '-tcp nolisten' are set already.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+[Pedja] 
+There's no xserverrc in Crux, so I made one with
+</BLOCKQUOTE>
+
+<blockquote><pre>#!/bin/sh
+exec /usr/X11R6/bin/X -dpi 100 -nolisten tcp
+</pre></blockquote>
+<BLOCKQUOTE>
+in it.
+I've put it in my home folder.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+[Pedja] 
+Should I make an alias in .bashrc,like
+</BLOCKQUOTE>
+
+<blockquote><pre>startx  () { /usr/X11R6/bin/startx -- -dpi 100 ${1+"$@"} 2&gt;&amp;1 | tee $HOME/.X.err ; }
+</pre></blockquote>
+<BLOCKQUOTE>
+or modify .xinitrc in ~, or...
+What's The Right Thing(tm) to do?
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+[Thomas] 
+No alias. See above.
+</BLOCKQUOTE>
+
+<!-- end 1 -->
+<!--     .~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.     -->
+<P> <A NAME="tips.2"><HR WIDTH="75%" ALIGN="center"></A> <P>
+<H3><IMG ALIGN=BOTTOM ALT="" SRC="../gx/lil2cent.gif">
+<FONT COLOR="navy">TFTP problem</FONT></H3>
+mishradk (<a href="mailto:tag@linuxgazette.net?cc=tag@lists.linuxgazette.net&cc=mishradk@vsnl.net&subject=%20Re%3A%20%5BLG%20119%5D%202c%20Tips%20%232">mishradk from vsnl.net</a>)
+
+
+<br>Answered By  Breen Mullins,
+ Ben Okopnik
+
+<P><STRONG>
+Hi,
+</STRONG></P>
+<P><STRONG>
+I am a starter in GNU/Linux. I am using Linux Kernel 2.4.20-8 Redhat Linux 9.
+</STRONG></P>
+<P><STRONG>
+I have written a TFTP client and server. I have created a UDP socket and as per
+the RFC i am sending a structure with the proper TFTP header and then data.
+</STRONG></P>
+<P><STRONG>
+it is working fine and i am able to send and get files.
+</STRONG></P>
+<P><STRONG>
+my problem is when i use ethereal and tell to capture the TFTP and specified
+port it shows that the packets are UDP + data. I think i should get UDP header
+, then TFTP header and then data. But this is not happening in my case. My TFTP
+header is also coming as data.
+</STRONG></P>
+<P><STRONG>
+How can I solve this problem...
+</STRONG></P>
+<BLOCKQUOTE>
+[Breen] 
+You're not by chance using a non-standard port for your tftp server,
+are you? If the traffic isn't on port 69/udp, ethereal won't know
+to decode it as TFTP.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+[Ben] 
+I think that your best bet would be to look at a standard TFTP
+conversation and compare it to yours. There may be some subtle
+difference that you're missing, or perhaps a part of the RFC that you're
+misinterpreting.
+</BLOCKQUOTE>
+<P><STRONG>
+I dont have any guide.. hope to get a reply and from you people.
+</STRONG></P>
+<BLOCKQUOTE>
+[Ben] 
+I have not read it myself, but I understand that Richard Stevens' "UNIX
+Network Programming" series is the classic reference for this kind of
+work.
+</BLOCKQUOTE>
+<P><STRONG>
+Hi Breen
+</STRONG></P>
+<P><STRONG>
+you are right.. i had used a non std port. so it was not showing it as
+TFTP.
+</STRONG></P>
+<BLOCKQUOTE>
+[Breen] 
+Hi Deepak --
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+I've got two requests:
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+1) Please don't post html. Email is a text medium.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+2) When you ask a question on a mailing list, you should follow
+up on the mailing list. That allows all subscribers to benefit from
+the answer you receive. I've added The Answer Gang back to the
+recipients of this email.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+Glad we were able to help you!
+</BLOCKQUOTE>
+
+<!-- end 2 -->
+<!--     .~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.     -->
+<P> <A NAME="tips.3"><HR WIDTH="75%" ALIGN="center"></A> <P>
+<H3><IMG ALIGN=BOTTOM ALT="" SRC="../gx/lil2cent.gif">
+<FONT COLOR="navy">HTTPS question</FONT></H3>
+Mike Orr (<a href="mailto:tag@linuxgazette.net?cc=tag@lists.linuxgazette.net&cc=mso@oz.net&subject=%20Re%3A%20%5BLG%20119%5D%202c%20Tips%20%233"><em>LG</em> Contributing Editor</a>)
+
+
+<br>Answered By  Jay R. Ashworth,
+ Brian Bilbrey,
+ Ramon van Alteren
+
+<P><STRONG>
+Is there any way to have multiple HTTPS domains on the same IP/port?  The
+mod_ssl FAQ says name-based virtual hosts are impossible with HTTPS [1].
+I've got two sites currently on different servers.  Each is distinguished
+by a path prefix ("<TT>/a</TT>" and "<TT>/b</TT>"), so they aren't dependent on the domain
+name and can be installed in the same virtual host.  The boss wants them
+consolidated on one server, and to plan for additional sites in the
+future.  The problem is the certificates.  A certificate is
+domain-specific, and it looks like you can have only one per virtual host.
+</STRONG></P>
+<P><STRONG>
+So person A types https://a.example.com/a/ and it authenticates fine, but
+person B types https://b.example.com/b/ and gets a "domain does not match
+certificate" dialog.  (I have seen this in some cases, but haven't gotten
+it in my tests.  But it may be because we're still using unofficial
+certificates and getting the "unknown certificate authority" dialog
+instead.)  The only solutions seem to be using a general domain for all
+the sites, getting a separate IP for each one, or running them on
+nonstandard ports.
+</STRONG></P>
+<P><STRONG>
+[1] <A HREF="http://www.modssl.org/docs/2.8/ssl_faq.html"
+	>http://www.modssl.org/docs/2.8/ssl_faq.html</A>  ("Why can't I use SSL
+with name-based/non-IP-based virtual hosts?")
+</STRONG></P>
+<BLOCKQUOTE>
+[Jay] 
+Correct.  You can't have more than one SSL server per IP address,
+because the certs are IP based, not domain name based.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+They have to be, if you think about it, because you can't spoof IP [1]
+the way you can spoof DNS.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+[1] unless you manage a backbone.  
+<IMG SRC="../gx/dennis/smily.gif" ALT=":-)" 
+		height="24" width="20" align="middle">
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+[Brian] 
+I think, if your example is true, then [IIRC, you'll have to do more
+research] you can spend the bucks to get a wildcard cert that will
+handle [a-g].example.com/blah just fine. Alternatively, get extra IP
+addresses, alias the eth as needed, and multiple single-host certs can
+be applied. That works just fine. A separate set of SSL stanzas in each
+virtual host section, virtual host by number, not by name.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+You may, in that case, actually want to run a separate invocation of
+apache for the SSL side of things, so that you can do IP-based virtual
+hosts for SSL, and name-based virtual hosts for port 80.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+[Ramon] 
+Because encryption is set up before any HTTP headers are sent, name
+based vhosting with multiple certificates is not possible.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+The only thing that does work is multiple vhosts with one certificate
+that validates all of them.
+I've done that successfully with a project vhost server on ssl for
+multiple software development projects. You can get a wildcard
+certificate from rapidssl <A HREF="http://www.rapidssl.com"
+	>http://www.rapidssl.com</A> for $199.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+They're a dirt cheap certificate provider BTW $69 for a two year
+standard webserver certificate accepted in most (if not all) browsers
+</BLOCKQUOTE>
+<P><STRONG>
+If it were a small organization that would be a possibility.  But we're
+part of a large organization and can't monopolize the entire domain
+(*.example.com).  At the same time the sites are for multiple
+departments, and we haven't been able to come up with a
+*.subdomain.example.com that would satisfy all of them.
+</STRONG></P>
+<P><STRONG>
+Oh wait, you're talking about wildcard IPs rather than wildcard domains?
+(checking rapidssl website)  No, it is domains.
+</STRONG></P>
+<P><STRONG>
+Hmm, getting a wildcard certificate would obviate the need for multiple
+certificates but that's actually the lesser of our problems.  The greater
+problem is getting more IPs, justifying them, and putting in a new subnet
+for them.  But I guess I'll tell management that if they really want these
+multiple domains on one computer, they'll have to factor a new block of
+IPs
+into the price.
+</STRONG></P>
+<P><STRONG>
+Has anybody had experience with https://cert.startcom.org/ ?  It appears
+to be a nonprofit project geared toward free certificates.
+</STRONG></P>
+<P><STRONG>
+"The StartCom Certification Authority is currently undergoing an initial
+self and successive third party audit as required by various software
+vendors, such as Microsoft and Mozilla. This will lead to the natural
+support of the StartCom CA by the most popular browser and mail clients.
+Right now you still have to import our CA certificate into your browser,
+but chances are, that, during the life-time of your certificate (one
+year), your certificate will be supported without the need of the CA
+import."
+</STRONG></P>
+<P><STRONG>
+Probably not an option for us yet, but it looks worth watching.
+</STRONG></P>
+<P><STRONG>
+Duh, our netadmin pointed out that when the second site is moved over, we
+can take the IP from that computer.  And my other site will replace seven
+other servers so we can take their IPs too.  That'll last us past the
+foreseeable future.  Anybody got a few HTTPS sites they need hosting for a
+year or two?  (Just kidding.)
+</STRONG></P>
+
+<!-- end 3 -->
+<!--     .~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.     -->
+<P> <A NAME="tips.4"><HR WIDTH="75%" ALIGN="center"></A> <P>
+<H3><IMG ALIGN=BOTTOM ALT="" SRC="../gx/lil2cent.gif">
+<FONT COLOR="navy">Mozilla hogging the screen</FONT></H3>
+Neil Youngman (<a href="mailto:tag@linuxgazette.net?cc=tag@lists.linuxgazette.net&cc=ny@youngman.org.uk&subject=%20Re%3A%20%5BLG%20119%5D%202c%20Tips%20%234">ny from youngman.org.uk</a>)
+
+
+<br>Answered By  Ben Okopnik
+
+<P><STRONG>
+Mozilla has started hogging my screen. I can select other windows, but if
+Mozilla is maximised it remains in front of them. There is presumably a
+setting somewhere that is causing this behaviour, but the only setting I can
+find I can't seem to change. FYI, this is in <A HREF="http://www.kde.org/">KDE</A>.
+</STRONG></P>
+<P><STRONG>
+If I right click the Mozilla title bar and select advanced-&gt;special window
+settings-&gt;preferences, there is a checkbox either side of the "keep above"
+setting. The checkbox on the right is checked and greyed out. With a little
+fiddling I can get it unchecked, but if I click OK and then reopen the window
+to check it, I find that it is selected again.
+</STRONG></P>
+<P><STRONG>
+I don't know if that setting is the source of the problem, but the other
+windows don't have it checked, so it's a good candidate.
+</STRONG></P>
+<P><STRONG>
+Any ideas how to fix this one?
+</STRONG></P>
+<P><STRONG>
+OK. Going down into the "special window settings" wasn't necessary. If I just
+use "advanced-&gt;keep above others" it toggles that checkbox. It's annoying and
+a little confusing that it can't be changed from "special window settings".
+</STRONG></P>
+<BLOCKQUOTE>
+[Ben] 
+Hmm. Perhaps one or two - my Firefox started doing some ugly thing a
+while back, so I whacked it over the head a couple of times, and will
+happily relate what LART I used. 
+<IMG SRC="../gx/dennis/smily.gif" ALT=":)" 
+		height="24" width="20" align="middle"> Mind you, this is in the nature of
+shotgunning rather than troubleshooting (I can hear the sounds of
+retching from the other techies here, but, hey, it works - and I didn't
+feel like pulling down a hundred meg or so of code and wanking through
+it.)
+</BLOCKQUOTE>
+
+<blockQuote><ol>
+<LI>Move your ~/.mozilla to, say, /tmp/DOTmoz.
+
+<LI>Start Mozilla.
+
+<LI>If $UGLY_BEHAVIOR is still present, uninstall the mozilla package (making sure to blow away, or at least _move_ away all the stuff in "/usr/lib" and "/etc") and reinstall from scratch. If it's still there, curse life and file a bug. 
+<IMG SRC="../gx/dennis/smily.gif" ALT=":)" 
+		height="24" width="20" align="middle"> Otherwise -
+
+<LI>Make a copy of your new ~/.mozilla (as, say, /tmp/DOTmoz_default.) Start replacing the subdirectories in the one in $HOME, one at a time, from /tmp/DOTmoz until the problem reappears. Narrow it down to the specific file, then diff that file against the default one. The line causing the problem should be relatively obvious - since Mozilla uses more-or-less sensible, descriptive	names for their config variables.
+</ol></blockQuote>
+<BLOCKQUOTE>
+To (mis)quote the folks at the Mozilla Project, "it worked for me."
+</BLOCKQUOTE>
+<P><STRONG>
+I'd say this was starting from the wrong end. Possibly my fault because I
+flagged it as <em>Mozilla</em> hogging the screen. With window behaviours
+like this, it's far more likely to be a window manager issue.
+</STRONG></P>
+<P><STRONG>
+I have solved the problem now. You should have seen a followup email on the
+list.
+</STRONG></P>
+<BLOCKQUOTE>
+[Ben] 
+I've had similar problems (back in Netscape days, actually), and thought
+that it was the WM originally - it just made sense. Turned out to be
+that Netscape was doing some of its own craziness, at least in that
+case; I can definitely see where it could just as easily be the WM.
+</BLOCKQUOTE>
+
+<!-- end 4 -->
+<!--     .~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.     -->
+<P> <A NAME="tips.5"><HR WIDTH="75%" ALIGN="center"></A> <P>
+<H3><IMG ALIGN=BOTTOM ALT="" SRC="../gx/lil2cent.gif">
+<FONT COLOR="navy">Couple of perl related questions</FONT></H3>
+Suramya Tomar (<a href="mailto:tag@linuxgazette.net?cc=tag@lists.linuxgazette.net&cc=security@suramya.com&subject=%20Re%3A%20%5BLG%20119%5D%202c%20Tips%20%235">security from suramya.com</a>)
+
+
+<br>Answered By  Ben Okopnik,
+ Jimmy O'Regan
+
+<P><STRONG>
+Hi Everyone,
+I have a couple of questions for the perl experts that seem to lurk
+around the TAG mailing list.
+</STRONG></P>
+<BLOCKQUOTE>
+[Ben] 
+Never heard of any around here. 
+<IMG SRC="../gx/dennis/smily.gif" ALT=":)" 
+		height="24" width="20" align="middle"> However, I do play one on a center
+stage once in a while, so I'll try to help.
+</BLOCKQUOTE>
+<P><STRONG>
+I was playing around with the Yahoo Search API and decided to write a
+program that uses it to search for images based on user input and
+creates a collage from the results. I actually managed to get it to work
+(<A HREF="http://scripts.suramya.com/CollageGenerator"
+	>http://scripts.suramya.com/CollageGenerator</A>) but need some help in fine
+tuning it.
+</STRONG></P>
+<P><STRONG>
+The program consists of two parts: the frontend which is a php page and
+the backend which is a perl script. The PHP frontend writes the user
+input to a mysql DB which another perl script I call wrapper.pl checks
+frequently, when it finds a new row it calls the collage.pl that creates
+the collage.
+</STRONG></P>
+<BLOCKQUOTE>
+[Jimmy] 
+Um... is there any reason why the information has to be in a database?
+It seems like you're over complicating things: PHP is able to download
+files (IIRC, fopen can open from URLs), and Perl is well able to do
+CGI (use CGI
+<IMG SRC="../gx/dennis/smily.gif" ALT=";)" 
+		height="24" width="20" align="middle">, and can be embedded in HTML like PHP using
+HTML::Embperl (<A HREF="http://search.cpan.org/~grichter/HTML-Embperl-1.3.6/Embperl.pod"
+	>http://search.cpan.org/~grichter/HTML-Embperl-1.3.6/Embperl.pod</A>).
+This page (<A HREF="http://www.cs.wcupa.edu/~rkline/perl2php"
+	>http://www.cs.wcupa.edu/~rkline/perl2php</A>) has a Perl to
+PHP 'translation', but it's also good for the other direction.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+You can also directly embed Perl in PHP
+(<A HREF="http://www.zend.com/php5/articles/php5-perl.php"
+	>http://www.zend.com/php5/articles/php5-perl.php</A>), and PHP in Perl
+(<A HREF="http://search.cpan.org/~karasik/PHP-0.09/PHP.pm"
+	>http://search.cpan.org/~karasik/PHP-0.09/PHP.pm</A>
+<A HREF="http://search.cpan.org/~gschloss/PHP-Interpreter-1.0/lib/PHP/Interpreter.pm"
+	>http://search.cpan.org/~gschloss/PHP-Interpreter-1.0/lib/PHP/Interpreter.pm</A>),
+and Perl can read some PHP directly
+(<A HREF="http://search.cpan.org/~esummers/PHP-Include-0.2/lib/PHP/Include.pm"
+	>http://search.cpan.org/~esummers/PHP-Include-0.2/lib/PHP/Include.pm</A>).
+</BLOCKQUOTE>
+<P><STRONG>
+The original machine where my site was hosted was not a very powerful
+machine so the collage creation took ages.
+</STRONG></P>
+<P><STRONG>
+So I decided to use a client server model where I could run the backend
+on multiple machines and have each of them process a small portion of
+the requests which the system got. Thats why there's a DB involved so
+that I can keep track of who's working on what query and the backend can
+run on my home machine or a different more powerful system.
+</STRONG></P>
+<P><STRONG>
+Right now I am running just one backend process but once I get most of
+the bugs worked out I will prob put them on other systems I have. (Just
+to decrease the wait time..)
+</STRONG></P>
+<P><STRONG>
+Thanks for the links though, They will be useful in other programs I am
+thinking about. 
+<IMG SRC="../gx/dennis/smily.gif" ALT=":)" 
+		height="24" width="20" align="middle">
+</STRONG></P>
+<P><STRONG>
+Now my first problem is that I am using the following function to
+download the images to the local system for processing and I am not
+comfortable with it.:
+</STRONG></P>
+
+<pre><strong>sub download_images
+{
+  my $url = shift;
+
+  $url =~ s/\"/\%22/g;
+  $url =~ s/\&amp;/\%26/g;
+  $url =~ s/\'/\%27/g;
+  $url =~ s/\(/\%28/g;
+  $url =~ s/\)/\%29/g;
+  $url =~ s/\*/\%2A/g;
+  $url =~ s/\+/\%2B/g;
+  $url =~ s/\;/\%3B/g;
+  $url =~ s/\[/\%5B/g;
+  $url =~ s/\]/\%5D/g;
+  $url =~ s/\`/\%60/g;
+  $url =~ s/\{/\%7B/g;
+  $url =~ s/\}/\%7D/g;
+  $url =~ s/\|/\%7c/g;
+
+
+  # print "Getting " . $url . "\n";
+
+`wget -T 1 -t 1 -q $url`;
+}
+</strong></pre>
+<P><STRONG>
+Is there a way I can download the images fast to my computer without
+having to use wget? I download upto 10 images eachtime for creating a
+collage. I don't like passing results I get from the net directly to a
+shell but this is the only way I could get it to work. Another
+disadvantage of wget is that if it can't download an image it takes
+forever to timeout and goto the next url in the list.
+</STRONG></P>
+<BLOCKQUOTE>
+[Ben] 
+Take a look at the LWP toolkit at <A HREF="http://cpan.org"
+	>http://cpan.org</A> ; it contains support
+for any kind of HTTP/FTP/NNTP/etc. usage you might want from within
+Perl. The above can be done this way:
+</BLOCKQUOTE>
+
+<blockquote><pre>use LWP::UserAgent;
+use HTTP::Request;
+
+# Create user agent
+my $u = LWP::UserAgent -&gt; new;
+
+# Create request
+my $r = HTTP::Request -&gt; new( GET =&gt; "$url" );
+# Configure the request however you want - e.g.,
+$r -&gt; timeout( 10 );
+
+# Pass request to UA
+my $ret = $u -&gt; request( $r );
+
+print "Error fetching $url" if $ret -&gt; is_error();
+</pre></blockquote>
+<BLOCKQUOTE>
+There are much simpler ways to do it - i.e.,
+</BLOCKQUOTE>
+
+<blockquote><pre>perl -MLWP::Simple -we 'mirror "http://foo.bar.com"'
+</pre></blockquote>
+<BLOCKQUOTE>
+does the whole thing in one shot - but it's not nearly as flexible as
+the above approach, which allows tweaking any part of the interaction.
+</BLOCKQUOTE>
+<P><STRONG>
+Thanks for the info. I will check out this package. It looks like it does
+what I want. How is this package speed wise/resource usage wise?
+</STRONG></P>
+<BLOCKQUOTE>
+[Ben] 
+Forgot to mention: this is untested code, just off the top of my head -
+but stands a reasonably good chance of working. See 'perldoc
+LWP::UserAgent' and 'perldoc HTTP::Request' for the exact public
+interface/usage info.
+</BLOCKQUOTE>
+<P><STRONG>
+Ha ha, don't worry I had guessed that this was the case. Afterall I
+can't expect you to do all the work for me... 
+<IMG SRC="../gx/dennis/smily.gif" ALT=";)" 
+		height="24" width="20" align="middle"> I will try out the code
+and let you know how it went.
+</STRONG></P>
+<P><STRONG>
+The second problem is that my mysql connection seems to drop at random
+times during execution. What can I do to prevent the mysql server from
+going away?
+</STRONG></P>
+<BLOCKQUOTE>
+[Ben] 
+1) Stop shelling out. If in doubt, read "perldoc perlsec" (Perl security
+considerations) - and <EM>then</EM> stop shelling out. 
+<IMG SRC="../gx/dennis/smily.gif" ALT=":)" 
+		height="24" width="20" align="middle"> This includes
+command substitution (backticks) as well as the 'system' call.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+2) In any interaction involving file system calls the timing of which
+could affect the Perl functions, force the buffers to autoflush by
+setting the '$|' variable to non-zero. Oh, yeah - and stop shelling out.
+
+<IMG SRC="../gx/dennis/smily.gif" ALT=":)" 
+		height="24" width="20" align="middle">
+</BLOCKQUOTE>
+<P><STRONG>
+Below is the code I use in wrapper.pl to check the DB for changes:
+</STRONG></P>
+<p align="center">See attached <tt><a href="misc/tips/wrapper.pl.txt">wrapper.pl.txt</a></tt></p>
+<P><STRONG>
+The script usually dies around the last $update-&gt;execute. What I think
+might be happening is that the collage.pl is taking too long to run and
+the DB connection times out, is that possible? Can I force the
+connection to not timeout? (I did try searching on google but didn't
+find any ways of changing the keep connection alive variable from a script).
+</STRONG></P>
+<P><STRONG>
+Any idea's/suggestions? Thanks in advance for the help.
+</STRONG></P>
+<P><STRONG>
+PS: Any suggestions on improving the script would be most welcome as I
+am using this to try to learn perl.
+</STRONG></P>
+
+<!-- end 5 -->
+<!--     .~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.     -->
+<P> <A NAME="tips.6"><HR WIDTH="75%" ALIGN="center"></A> <P>
+<H3><IMG ALIGN=BOTTOM ALT="" SRC="../gx/lil2cent.gif">
+<FONT COLOR="navy">Securing rsync</FONT></H3>
+Mike Orr (<a href="mailto:tag@linuxgazette.net?cc=tag@lists.linuxgazette.net&cc=mso@oz.net&subject=%20Re%3A%20%5BLG%20119%5D%202c%20Tips%20%236"><em>LG</em> Contributing Editor</a>)
+
+
+<br>Answered By  Benjamin Donnachie,
+ Kapil Hari Paranjape
+
+<P><STRONG>
+I'm trying to get rsync access to an OS X server with a paranoid sysadmin
+who doesn't know much about Unix progams.  (He's a GUI kind of guy.)  He's
+offered me FTP access to one directory but I'd really like to use rsync
+due to its low-bandwidth nature and auto-delete feature (delete any file
+at the destination that's been deleted at the source).  His main desire is
+not to grant a general-purpose account on the server, so if I can convince
+him that rsync+ssh can be configured to grant access only for rsync in
+that directory, I may have a chance.  But since they're two separate
+programs (as opposed to *ftpd and mysqld, which can have private password
+lists for only their program), I'm not sure how to enforce that.  Would I
+have to use rsyncd alone, which I guess means no encryption?  (Granted,
+ftp has no encryption either, but I think he's just using that due to lack
+of knowledge of alternatives.)
+</STRONG></P>
+<P><STRONG>
+(And when is ssync going to arrive, to avoid this dual-program problem?)
+</STRONG></P>
+<BLOCKQUOTE>
+[Benjamin] 
+Take a look at rssh (<A HREF="http://www.pizzashack.org/rssh/index.shtml"
+	>http://www.pizzashack.org/rssh/index.shtml</A>) or
+scponly (<A HREF="http://sublimation.org/scponly"
+	>http://sublimation.org/scponly</A>) - both can be used together
+with ssh to restrict access to just rsync.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+However, access to a single directory would probably require a user jail
+- - all is explained in the rssh and scponly docs, but it's not really for
+your "GUI" types.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+[Kapil] 
+I suppose you mean something that combines ssh and rsync. In any case
+your particular problem might be solved by means of an authorized_keys
+file entry that looks like (this is all in one line one line)
+</BLOCKQUOTE>
+
+<blockquote><pre>from="202.41.95.13",command="rsync -aCz --server --sender $SRCDIR  .",
+no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty
+ssh-dss
+AAAAB3NzaC1kc3MAAACBAMzBqJtkx52y3IL9g/B0zAna3WVP6fXDO+YZSrb8GsZ2Novx+1sa
+X/wBYrIXiKlm0LayvJpz7cF17ycWEyzANF9EivYbwMXPQWecxao82999SjKiM7nX2BUmoePN
+iUkqpnZuilBS2fPadkTZ7CSGevJ2Y9ryb1LOkFWkdBe2c4ETAAAAFQCUk+rB5HRYj0+KIn5H
+fiOF0dQtvwAAAIA7ezUaP6CpZ45FOJLunipNdkC0oWj3C5WgguwiAVEz3/I5ALAQ9hdmy+7+
+Bi0hUGdkTcRoe4UPMgsahdXLZRNettMv+zdJiQqIiEnmzlQxlNY2LBlrfQyRwVU1SW3QWGog
+tssIoeOp9GRx7N5H2ZAzMoyGBaUDfHVQueI2BeJiGwAAAIEAhV0XWIm8c2hLAGRyYZeqi5G3
+yDAB0DZPyiuYyfnBav3nqjkO65faDuajKUv6as90CGYVlixWO+tjOL+/D9c0DoqdMllPEiZw
+aGBxd96o1pVrsFw/Ff0jJOtxzj+/Tzgaw9AdI0Usgw1cfXwWS1kJlhXqR00O/ow/XATejWpW
+0i8= kapil@neem
+</pre></blockquote>
+<BLOCKQUOTE>
+Here you must put the appropriate source directory in $SRCDIR.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+The authorized key file can be put in a dummy users directory. This
+dummy user should have appropriate read/write permissions for the
+directory in question.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+As an alternative you can use a configuration file "--config=$FILE"
+in place of $SRCDIR.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+Once this is done, the owner of the SSH private key associated with
+the public-key (which is the bit that starts ssh-dss AAA....) can
+connect to the ssh server and start the above command and <EM>only</EM> the
+above command.
+</BLOCKQUOTE>
+
+<!-- end 6 -->
+<!--     .~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.     -->
+<P> <A NAME="tips.7"><HR WIDTH="75%" ALIGN="center"></A> <P>
+<H3><IMG ALIGN=BOTTOM ALT="" SRC="../gx/lil2cent.gif">
+<FONT COLOR="navy">Boot from cd via floppy</FONT></H3>
+Francis Daly (<a href="mailto:tag@linuxgazette.net?cc=tag@lists.linuxgazette.net&cc=francis@daoine.org&subject=%20Re%3A%20%5BLG%20119%5D%202c%20Tips%20%237">francis from daoine.org</a>)
+
+
+<br>Answered By  Thomas Adam,
+ Ben Okopnik
+
+<P><STRONG>
+Hi there,
+</STRONG></P>
+<P><STRONG>
+I'm not a TAG subscriber, so I can't see the list archives to verify,
+but hopefully this mail isn't repeating something that you've already
+had a dozen times this month.
+</STRONG></P>
+<BLOCKQUOTE>
+[Thomas] 
+So far, you're the first.  
+<IMG SRC="../gx/dennis/smily.gif" ALT=":)" 
+		height="24" width="20" align="middle">
+</BLOCKQUOTE>
+<P><STRONG>
+From September's gazette: "my machine only boots from floppy, and I
+want it to boot from cd" might be addressed with a smart boot manager,
+such as sbm.  The debian (sarge) one credits James Su and Lonius as
+authors, and says it was downloaded from
+<A HREF="http://www.gnuchina.org/~suzhe"
+	>http://www.gnuchina.org/~suzhe</A> , but it looks like the useful content
+can now be found at <A HREF="http://btmgr.sourceforge.net"
+	>http://btmgr.sourceforge.net</A>
+</STRONG></P>
+<BLOCKQUOTE>
+[Thomas] 
+Indeed.  It has been mentioned in the LG in the past (twice by me, and
+once by Ben, I believe.)
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+[Ben] 
+Wasn't me; I hadn't run across SBM until now.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+[Thomas] 
+It's OK, and provides a lot of elaborate
+features that can be quite interesting on certain types of hardware, it
+has to be said.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+[Ben] 
+As is often the case, <A HREF="http://www.debian.org/">Debian</A> already has it as a package (pretty amazing
+folks, those Debian maintainers!) -
+</BLOCKQUOTE>
+
+<blockquote><pre>ben@Fenrir:~$ apt-cache search smart boot
+bmconf - The installer and configurator of the Smart Boot Manager
+sbm - Smart Boot Manager (SBM) is a full-featured boot manager
+</pre></blockquote>
+<BLOCKQUOTE>
+As Francis has already mentioned, though, it won't boot USB devices. Too
+bad; that would make it quite useful, especially given that modern
+kernels are too big to fit on a floppy anymore.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+By the way - the fact that they are too big annoys the hell out of me.
+There are plenty of folks out there who <em>  need  </em> floppy-based booting -
+troubleshooting and booting weird hardware configurations are two
+situations where that capability can be critical - and "new systems all
+come with a CD-ROM" is <EM>NOT</EM> equivalent to "all existing systems have a
+CD-ROM". Yeah, older kernels, whatever; as time goes on, those become
+less and less useful - and support less and less common hardware. I'll
+admit that I'm coming from ignorance here, but - there should have been
+a way to make the kernel modular enough to provide the "compile small
+kernel" option instead of just losing this important capability.
+</BLOCKQUOTE>
+<P><STRONG>
+Thanks for the reply.  Oops -- I hadn't spotted that.  I did try
+searching for "sbm", and all I found was a (presumably) mis-spelled
+samba config file.  But now that I try again, searching for "smart boot
+manager", I see that it does appear in the archives.
+</STRONG></P>
+<P><STRONG>
+No harm done.
+</STRONG></P>
+<P><STRONG>
+"sbminst" it to a floppy to confirm that it can use your hardware,
+then consider putting it in your primary disk mbr, consigning lilo or
+other boot loader to a partition or secondary disk.  Of course this
+last bit presumes that "my machine only boots from floppy" <EM>really</EM>
+means "my machine only boots from floppy or one hard disk", but that's
+probably a reasonable assumption.
+</STRONG></P>
+<P><STRONG>
+Worked for me with an ATAPI cd drive that the BIOS didn't like.  I
+suspect it won't work with the SCSI cd in the original problem, sadly.
+And am almost certain that it also won't work with the USB stick in
+the original original problem.  So it isn't a full solution -- or even
+a useful solution in these specific cases -- but it might help someone
+with a slightly different problem.
+</STRONG></P>
+
+<!-- end 7 -->
+<!--     .~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.~~.     -->
+<P> <A NAME="tips.8"><HR WIDTH="75%" ALIGN="center"></A> <P>
+<H3><IMG ALIGN=BOTTOM ALT="" SRC="../gx/lil2cent.gif">
+<FONT COLOR="navy">Security implications of root login over SSH</FONT></H3>
+Riza Aziz (<a href="mailto:tag@linuxgazette.net?cc=tag@lists.linuxgazette.net&cc=telefonixar@yahoo.com&subject=%20Re%3A%20%5BLG%20119%5D%202c%20Tips%20%238">telefonixar from yahoo.com</a>)
+
+
+<br>Answered By  Kapil Hari Paranjape
+
+<P><STRONG>
+Hi there,
+</STRONG></P>
+<P><STRONG>
+I'm wondering if it's wise to allow a remote user within
+the LAN to log in as root, by adding that user's public key
+to root's "authorized_keys" for that machine.
+</STRONG></P>
+<BLOCKQUOTE>
+[Kapil] 
+There is an "sudo"-like mechanism within SSH for doing this. In the
+authorized_keys file you put a "command=...." entry which ensures
+that this key can only be used to run that specific command.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+All the usual warnings a la "sudo" apply regarding what commands
+should be allowed. It is generally a good idea to also prevent
+the agent forwarding, X11 forwarding and pty allocation.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+Here is an entry that I use for "rsync" access. (I have wrapped the
+line and AAAA.... is the ssh key which has been truncated).
+</BLOCKQUOTE>
+
+<blockquote><pre>from="172.16.1.28",command="rsync -aCz --server --sender . .",
+no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty
+ssh-dss AAAA..... rsyncuser
+</pre></blockquote>
+<P><STRONG>
+I'm writing some scripts to back up data on our small
+business network here. One option is to get each machine to
+periodically dump its data on a specific machine using NFS.
+The option I'm interested in is to get a designated machine
+to remotely login to each machine and transfer the files
+over a tar-ssh pipe.
+</STRONG></P>
+<P><STRONG>
+The only reason to be using root access is because some
+directories (<TT>/root</TT>, some in <TT>/var/lib</TT>) can only be read by
+root. Would changing permissions (e.g. <TT>/var/lib/rpm</TT>) affect
+anything, if I chgrp the directories to a "backup"
+usergroup?
+</STRONG></P>
+<P><STRONG>
+I'm concerned with one machine, a web server, that will be
+included in the backup scheme. All machines here use Class
+A private network addresses and are behind a NAT firewall,
+but the web server can be accessed from the Internet. Will
+allowing root login over ssh on that machine pose a huge
+security risk, even by allowing ssh traffic from only the
+local network?
+</STRONG></P>
+
+<!-- end 8 -->
+<hr>
+<CENTER><Font face="Helvetica"><STRONG>
+This page edited and maintained by the Editors of <I>Linux Gazette</I><br>HTML script maintained by <A HREF="mailto:star@starshine.org">Heather Stern</a> of Starshine Technical Services, <A HREF="http://www.starshine.org/">http://www.starshine.org/</A>
+</STRONG></Font></CENTER>
+<hr>
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2005, . Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 119 of Linux Gazette, October 2005
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="lg_mail.html" >&lt;-- prev</A> | <A HREF="lg_answer.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">October 2005 (#119)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

@@ -1,0 +1,1332 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>Journalling Filesystems for Linux LG #68</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<CENTER>
+<A HREF="http://www.linuxgazette.net/">
+<IMG ALT="LINUX GAZETTE" SRC="../gx/lglogo.png" 
+	WIDTH="600" HEIGHT="124" border="0"></A> 
+<BR>
+
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="collinge.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../faq/index.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="ghosh.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+<P>
+</CENTER>
+
+<!--endcut ============================================================-->
+
+<H4 ALIGN="center">
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H1><font color="maroon">Journalling Filesystems for Linux</font></H1>
+<H4>By <a href="mailto:matt@martine2.difi.unipi.it">Matteo Dell'Omodarme</a></H4>
+</center>
+<P> <HR> <P>  
+
+<!-- END header -->
+
+
+
+
+<h1 align=center>Introduction</h1>
+
+A filesystem is the software used to organize and manage
+the data stored on disk drives; it ensures the
+integrity of the data providing that data written
+to disk is identical when it is read 
+back. In addition to storing the data contained in files, a filesystem 
+also stores and manages important 
+information about the files and about the filesystem
+itself (i.e. date and time stamps, ownership, access permissions,
+the file's  size and the storage location or locations on
+disk, and so on). This information is commonly referred to as metadata.  <p>
+
+Since a filesystem tries to work as asynchronous as possible, in order to
+avoid hard-disk bottleneck, a sudden interruption of its
+work could result in a loss of data.   
+As an example, let's consider the following scenario: what happens if your machine crashes
+when you are working on a document residing on a Linux standard ext2 
+filesystem? <br>
+
+There are several answers: 
+
+<ul>
+<li> The machine crashes after you saved the file. This is the best
+scenario: you haven't lost anything. Just reboot the machine and
+continue working on the document. <P>
+
+<li>The machine crashes before you saved the file. 
+You have lost all your changes but your old version is still ok. <P>
+
+<li>The machine crashes during the
+exact moment when the file is being written.
+This is the worst case: the new version of the file is 
+physically overwriting the old version. You end up with a file
+partially new and partially old. If the file was written in a binary form
+you can't reopen it because the internal format of
+its data is inconsistent with what the application expects.  <P>
+</ul>
+
+In this last scenario things can be even worse if the drive was
+writing the metadata areas, such  
+as the directory itself. Now instead of one corrupted file, you have one 
+corrupted filesystem and you can lose an entire directory 
+or all the data on an entire disk partition.<p>
+                   
+The standard Linux filesystem (ext2fs) makes an attempt to prevent 
+and recover from the metadata corruption case performing an extensive
+filesystem analysis (fsck) during bootup. 
+Since ext2fs incorporates redundant copies of critical 
+metadata, it is extremely unlikely for that data to be completely 
+lost. The system figures out where the corrupt metadata is, and then 
+either repairs the damage by copying from the redundant version or 
+simply deletes the file or files whose metadata is affected. <p>
+
+
+Obviously, the larger is the filesystem to check, the longer
+the check process. On a partition of several gigabytes it may
+take a great deal of time to check the metadata during bootup.<br>
+ As
+Linux begins to take on more complex applications, on larger servers,
+and with less tolerance for downtime, there is a need for more
+sophisticated filesystems that do an even better job of protecting data
+and metadata.<p>
+
+ The journalling filesystems available for Linux are the
+answer to this need. 
+
+
+<h1 align=center>What is a journalling filesystem?</h1>
+
+Here is reported only a general introduction to journalling. For more
+specific and technical notes please see Juan I. Santos Florido
+article in <a
+href="../issue55/florido.html">Linux Gazette 55</a>.
+Other information can be obtained from
+<a href="http://freshmeat.net/articles/view/212/">freshmeat.net/articles/view/212/</a>.<p>
+
+Most modern filesystems use journalling techniques borrowed from the
+database world to improve crash 
+recovery. Disk transactions are written sequentially to an area of
+disk called <em>journal</em> or <em>log</em> before being 
+written to their final locations within the filesystem. <br>
+Implementations vary in terms of what data is 
+written to the log. Some implementations write only the filesystem
+metadata, while others record all writes to the journal.<p>
+
+Now, if a crash happens before
+the journal entry is committed, then the original data is still on the
+disk and you lost only
+your new changes.
+If the
+crash happens during the actual disk update (i.e. after the journal
+entry was committed), the journal
+entry shows what was supposed to have happened. So when the
+system reboots, it can simply replay the journal entries and complete the
+update that was interrupted. <p>
+
+In either case, you have valid data and not a trashed partition.
+And since the recovery time associated with this log-based approach is
+much shorter, the system is on line in few seconds.<p>
+
+
+It is also important to note that using a journalling filesystem does not
+entirely obsolete the use of filesystem 
+checking programs (fsck). Hardware and software errors that corrupt random
+blocks in the filesystem are not 
+generally recoverable with the transaction log. 
+
+
+<h1 align=center>Available journalling filesystems</h1>
+
+In the following part I will consider three journalling filesystems.<p>
+ 
+The first one is <b>ext3</b>. Developed by Stephen Tweedie, a leading
+Linux kernel developer, ext3 adds journalling into ext2. 
+It is available in alpha
+form at
+<a href="ftp://ftp.linux.org.uk/pub/linux/sct/fs/jfs/">ftp.linux.org.uk/pub/linux/sct/fs/jfs/</a>.<p> 
+
+Namesys has a journalling filesystem under development called
+<b>ReiserFS</b>. It is available at
+<a href="http://www.namesys.com/">www.namesys.com</a>.<p> 
+
+SGI has released on May 1 2001 version 1.0 of its <b>XFS</b> filesystem for
+Linux. You can find it at 
+<a href="oss.sgi.com/projects/xfs/">oss.sgi.com/projects/xfs/</a>.<p> 
+
+In this article these three solutions are tested and benchmarked using
+two different programs. <p>
+
+
+
+<h1 align=center>Installing ext3</h1>
+
+For technical notes about ext3 filesystem please refer to Dr.
+Stephen Tweedie's <a
+href="ftp://ftp.kernel.org/pub/linux/kernel/people/sct/ext3/">paper</a>
+and to his
+<a href=http://olstrans.sourceforge.net/release/OLS2000-ext3/OLS2000-ext3.html">talk</a>. 
+<p>
+
+The ext3 filesystem is directly derived from its ancestor, ext2. It has
+the valuable characteristic to be absolutely backward compatible to
+ext2 since it is just an ext2 filesystem with journalling.
+The obvious drawback is that ext3 doesn't implement any of the modern
+filesystem features which increase data manipulation speed and packing. <p>  
+
+ext3 comes as a patch of
+2.2.19 kernel, so first of all, get a linux-2.2.19 kernel from
+<a href="ftp://ftp.kernel.org/pub/linux/kernel/v2.2/">ftp.kernel.org</a>
+ or from one of its <a href="http://www.kernel.org/mirrors/">mirrors</a>.
+
+The patch is available at <a
+href="ftp://ftp.linux.org.uk/pub/linux/sct/fs/jfs/">ftp.linux.org.uk/pub/linux/sct/fs/jfs</a>
+or  <a
+href="ftp://ftp.kernel.org/pub/linux/kernel/people/sct/ext3">ftp.kernel.org/pub/linux/kernel/people/sct/ext3</a>
+or from one mirror of this site.<br>
+From one of these sites you need to get the following files:
+
+<ul>
+<li><a
+href="ftp://ftp.kernel.org/pub/linux/kernel/people/sct/ext3/ext3-0.0.7a.tar.bz2">ext3-0.0.7a.tar.bz2</a>:
+the kernel patch.
+<li><a
+href="ftp://ftp.kernel.org/pub/linux/kernel/people/sct/ext3/e2fsprogs-1.21-WIP-0601.tar.bz2">e2fsprogs-1.21-WIP-0601.tar.bz2</a>:
+the e2fsprogs suite with ext3 support.
+</ul>
+
+Copy Linux kernel linux-2.2.19.tar.bz2 and ext3-0.0.7a.tar.bz2 files to
+<em>/usr/src</em> directory and extract them:
+
+<pre>
+mv linux linux-old
+tar -Ixvf linux-2.2.19.tar.bz2
+tar -Ixvf ext3-0.0.7a.tar.bz2
+cd linux
+cat ../ext3-0.0.7a/linux-2.2.19.kdb.diff | patch -sp1
+cat ../ext3-0.0.7a/linux-2.2.19.ext3.diff | patch -sp1
+</pre>
+
+The first diff is copy of SGI's kdb kernel debugger patches. The
+second one is  the ext3 filesystem. <br>
+Now, configure the kernel, saying YES to "Enable Second extended fs
+development code" in the filesystem section, and build it.<p>
+
+After the kernel is compiled and installed you should make and install
+the e2fsprogs:
+
+<pre>
+tar -Ixvf e2fsprogs-1.21-WIP-0601.tar.bz2
+cd e2fsprogs-1.21
+./configure
+make
+make check
+make install
+</pre>
+
+That's all. The next step is to make an ext3 filesystem in a partition.
+Reboot with the new kernel. Now you have two options: make a
+new journalling filesystem or journal an existing one. <br> 
+
+<ul>
+<li>Making a new ext3 filesystem. Just use the mke2fs from the
+ installed  e2fsprogs, and use the "-j" option when running mke2fs: 
+
+<pre>
+mke2fs -j /dev/xxx
+</pre>
+
+where /dev/xxx is the device where you would create the ext3 filesystem.
+The "-j" flag tells mke2fs to create an ext3 filesystem with a hidden
+journal. You could control the size of the journal using the optional
+flag -Jsize=&lt;n&gt; (n is the preferred size of the journal in Mb).  
+
+<li>Upgrade an existing ext2 filesystem to ext3. Just use tune2fs:
+
+<pre>
+tune2fs -j /dev/xxx
+</pre>
+
+
+You should do that either on mounted or unmounted filesystem. If the
+filesystem is mounted a file .journal is created in the top-level
+directory of the filesystem; if it is unmounted a  hidden system inode
+is used for the journal. In such a way all the data in the filesystem 
+are preserved.
+</ul>
+
+You can mount the ext3 filesystem using the command:
+
+<pre>
+mount -t ext3 /dev/xxx /mount_dir
+</pre>
+
+Since ext3 is basically ext2 with journalling, a cleanly unmounted ext3
+filesystem could be remounted as ext2 without any other commands.
+
+
+
+
+
+<h1 align=center>Installing XFS</h1>
+
+For a technical overview of XFS filesystem refer to <a
+href="http://linux-xfs.sgi.com/projects/xfs/">SGI linux XFS page</a>
+and to <a
+href="http://linux-xfs.sgi.com/projects/xfs/publications.html">SGI
+publications page</a>.<br>
+Also see the <a href="http://oss.sgi.com/projects/xfs/faq.html">FAQ page</a>.
+<p>
+
+XFS is a journalling filesystem for Linux available from SGI.
+It is a mature technology that has been proven on
+IRIX systems as the default filesystem for all SGI customers. 
+XFS is licensed under GPL. <br>
+
+XFS Linux 1.0 is released for the Linux 2.4 kernel, and I tried the
+2.4.2 patch. So the first step is to acquire a linux-2.4.2 kernel from one
+mirror of kernel.org.<br>
+The patches are at <a
+href="ftp://oss.sgi.com/projects/xfs/download/Release-1.0/patches/">oss.sgi.com/projects/xfs/download/Release-1.0/patches</a>.
+From this directory download:
+
+<ul>
+<li>
+<a
+href="ftp://oss.sgi.com/projects/xfs/download/Release-1.0/patches/linux-2.4-xfs-1.0.patch.gz">linux-2.4-xfs-1.0.patch.gz</a>
+<li>
+<a
+href="ftp://oss.sgi.com/projects/xfs/download/Release-1.0/patches/linux-2.4.2-core-xfs-1.0.patch.gz">linux-2.4.2-core-xfs-1.0.patch.gz</a>
+<li>
+<a
+href="ftp://oss.sgi.com/projects/xfs/download/Release-1.0/patches/linux-2.4.2-kdb-04112001.patch.gz">linux-2.4.2-kdb-04112001.patch.gz</a>
+</ul>
+
+Copy the Linux kernel linux-2.4.2.tar.bz2 in <em>/usr/src</em> directory, rename the
+existing linux directory to linux-old and extract the new kernel:
+
+<pre>
+mv linux linux-old
+tar -Ixf inux-2.4.2.tar.bz2
+</pre>
+
+Copy each patch in the top directory of your linux source tree
+(i.e. /usr/src/linux) and apply them:
+
+<pre>
+zcat patchfile.gz | patch -p1 
+</pre>
+
+Then configure the  kernel, enabling the options "XFS
+filesystem support" (CONFIG_XFS_FS) and "Page Buffer support"
+(CONFIG_PAGE_BUF) in the filesystem section. 
+
+Note that you will also need to upgrade the following system utilities to
+these versions or later: 
+
+<ul>
+<li><a
+href="http://www.kernel.org/pub/linux/utils/kernel/modutils/v2.4/">modutils-2.4.0</a>
+<li><a href="http://www.gnu.org/software/autoconf/autoconf.html">autoconf-2.13</a> 
+<li><a href="http://e2fsprogs.sourceforge.net/">e2fsprogs-devel-1.18</a>
+</ul>
+
+Install the new kernel and reboot.<br>
+Now download the <a
+href="ftp://oss.sgi.com/projects/xfs/download/Release-1.0/cmd_tars/xfsprogs-1.2.0.src.tar.gz">xfs
+progs tools</a>. This tarball contains a set of commands to use the
+XFS filesystem, such as mkfs.xfs. To build them:
+
+<pre>
+tar -zxf  xfsprogs-1.2.0.src.tar.gz
+cd xfsprogs-1.2.0
+make configure 
+make 
+make install
+</pre>
+
+After installing this set of commands you can create a new XFS
+filesystem with the command:  
+
+<pre>
+mkfs -t xfs /dev/xxx
+</pre>
+
+One important option that you may need is "-f" which will force the
+creation of a new filesystem, if a filesystem already exists on that
+partition. Again, note that this will destroy all data currently on
+that partition: 
+
+<pre>
+mkfs -t xfs -f /dev/xxx
+</pre>
+
+You can then mount the new filesystem with the command: 
+
+<pre>
+mount -t xfs /dev/xxx /mount_dir
+</pre>
+
+
+
+
+
+
+<h1 align=center>Installing ReiserFS</h1>
+
+For technical notes about reiserFS refer to <a
+href="http://www.namesys.com/">NAMESYS home page</a>
+and to <a
+href="http://www.namesys.com/faq.html">FAQ page</a>.<p>
+
+ReiserFS has been in the official Linux kernel since
+2.4.1-pre4. You always need to get the utils (e.g. mkreiserfs to
+create ReiserFS on an empty partition, the resizer, etc.).<br>
+The up-to-date ReiserFS version is available as a patch against either
+2.2.x and 2.4.x kernels. I tested the patch against 2.2.19 Linux kernel.<p>
+
+The first step, as usual, is to get a linux-2.2.19.tar.bz2 standard
+kernel from a mirror of kernel.org.
+Then get the reiserfs <a
+href="ftp://ftp.namesys.com/pub/reiserfs-for-2.2/">2.2.19
+patch</a>. At present time the last patch is 3.5.33.<br>
+Please note that, if you choose to get the patch against 2.4.x kernel,
+you should get also the utils tarball <a
+href="ftp://ftp.namesys.com/pub/reiserfsprogs/reiserfsprogs-3.x.0j.tar.gz
+">reiserfsprogs-3.x.0j.tar.gz</a>. <br>
+
+Now unpack the kernel and the patch. Copy the tarballs in <em>/usr/src</em> and
+move the linux directory to linux-old; then run the commands:
+
+<pre>
+tar -Ixf linux-2.2.19.tar.bz2
+bzcat linux-2.2.19-reiserfs-3.5.33-patch.bz2 | patch -p0
+</pre>
+
+Compile the Linux kernel setting reiserfs support on filesystem section.<br>
+Compile and install the reiserfs utils: 
+
+<pre>
+cd /usr/src/linux/fs/reiserfs/utils 
+make
+make install 
+</pre> 
+
+Install the new kernel and reboot.
+Now you can create a new reiserfs filesystem with the command:
+
+<pre>
+mkreiserfs /dev/xxxx 
+</pre>
+
+and mount it:
+
+<pre>
+mount -t reiserfs /dev/xxx /mount_dir
+</pre>
+
+
+
+
+
+
+<h1 align=center>Filesystems benchmark</h1>
+
+For the test I used a Pentium III - 16 Mb RAM - 2 Gb HD with a Linux RedHat 6.2 installed. <br>
+All the filesystems worked fine for me, so I started a little benchmark
+analysis to compare their performances. As a first test I simulated a
+crash turning off the power, in order to control the journal
+recovery process. All filesystems passed successfully this phase and 
+the machine was on line in few
+seconds with each filesystem.  <p>
+
+The next step is a benchmark analysis using bonnie++ program,
+available at <a href="http://www.coker.com.au/bonnie++/">www.coker.com.au/bonnie++</a>.
+The program tests database type access to a single file, and it tests
+creation, reading, and 
+deleting of small files 
+which can simulate the usage of programs such as Squid, INN, or
+Maildir-format programs (qmail). <br>
+
+The benchmark command was:
+
+<pre>
+bonnie++ -d/work1 -s10 -r4 -u0
+</pre>
+
+which executes the test using 10Mb (-s10) in the
+filesystem mounted in /work1 directory. So, before launching the
+benchmark, you must create the requested filesystem on a partition
+and mount it on /work1 directory. The other flags specify the RAM
+amount in Mb (-r4) and the user (-u0, i.e. run as root).<p> 
+
+The results are shown in the following table.<p>
+
+<table BORDER=3 CELLPADDING=2 NOSAVE >
+<tr NOSAVE>
+<td COLSPAN="2" NOSAVE class="header"></td>
+
+<td COLSPAN="6" class="header"><b><font size=+2>Sequential Output</font></b></td>
+
+<td COLSPAN="4" class="header"><b><font size=+2>Sequential Input</font></b></td>
+
+<td COLSPAN="2" ROWSPAN="2" class="header"><b><font size=+2>Random</font></b>
+<br><b><font size=+2>Seeks</font></b></td>
+
+
+</tr>
+
+<tr ALIGN=CENTER NOSAVE>
+<td NOSAVE></td>
+
+<td>Size:Chunk Size</td>
+
+<td COLSPAN="2" BGCOLOR="#FFCC00" NOSAVE>Per Char</td>
+
+<td COLSPAN="2" BGCOLOR="#FFFF00" NOSAVE>Block</td>
+
+<td COLSPAN="2" BGCOLOR="#CCFFFF" NOSAVE>Rewrite</td>
+
+<td COLSPAN="2" BGCOLOR="#FFCC00" NOSAVE>Per Char</td>
+
+<td COLSPAN="2" BGCOLOR="#FFFF00" NOSAVE>Block</td>
+
+
+</tr>
+
+<tr>
+<td COLSPAN="2"></td>
+
+<td class="ksec"><font size=-2>K/sec</font></td>
+
+<td class="ksec"><font size=-2>% CPU</font></td>
+
+<td class="ksec"><font size=-2>K/sec</font></td>
+
+<td class="ksec"><font size=-2>% CPU</font></td>
+
+<td class="ksec"><font size=-2>K/sec</font></td>
+
+<td class="ksec"><font size=-2>% CPU</font></td>
+
+<td class="ksec"><font size=-2>K/sec</font></td>
+
+<td class="ksec"><font size=-2>% CPU</font></td>
+
+<td class="ksec"><font size=-2>K/sec</font></td>
+
+<td class="ksec"><font size=-2>% CPU</font></td>
+
+<td class="ksec"><font size=-2>/ sec</font></td>
+
+<td class="ksec"><font size=-2>% CPU</font></td>
+
+
+</tr>
+
+<tr>
+<td class="rowheader"><b><font size=+1>ext2</font></b></td>
+
+<td BGCOLOR="#FFCCFF" NOSAVE class="size">10M</td>
+
+<td>1471</td>
+
+<td>97</td>
+
+<td>14813</td>
+
+<td>67</td>
+
+<td>1309</td>
+
+<td>14</td>
+
+<td>1506</td>
+
+<td>94</td>
+
+<td>4889</td>
+
+<td>15</td>
+
+<td>309.8</td>
+
+<td>10</td>
+
+
+</tr>
+
+<tr>
+<td class="rowheader"></td>
+
+<td class="size"></td>
+
+<td></td>
+</tr>
+
+<tr>
+<td class="rowheader"><b><font size=+1>ext3</font></b></td>
+
+<td BGCOLOR="#FFCCFF" NOSAVE class="size">10M</td>
+
+<td>1366</td>
+
+<td>98</td>
+
+<td>2361</td>
+
+<td>38</td>
+
+<td>1824</td>
+
+<td>22</td>
+
+<td>1482</td>
+
+<td>94</td>
+
+<td>4935</td>
+
+<td>14</td>
+
+<td>317.8</td>
+
+<td>10</td>
+
+
+</tr>
+
+<tr>
+<td class="rowheader"></td>
+
+<td class="size"></td>
+
+<td></td>
+</tr>
+
+<tr>
+<td class="rowheader"><b><font size=+1>xfs</font></b></td>
+
+<td BGCOLOR="#FFCCFF" NOSAVE class="size">10M</td>
+
+<td>1206</td>
+
+<td>94</td>
+
+<td>9512</td>
+
+<td>77</td>
+
+<td>1351</td>
+
+<td>33</td>
+
+<td>1299</td>
+
+<td>98</td>
+
+<td>4779</td>
+
+<td>80</td>
+
+<td>229.1</td>
+
+<td>11</td>
+
+
+</tr>
+
+<tr>
+<td class="rowheader"></td>
+
+<td class="size"></td>
+
+<td></td>
+</tr>
+
+<tr>
+<td class="rowheader"><b><font size=+1>reiserfs</font></b></td>
+
+<td BGCOLOR="#FFCCFF" NOSAVE class="size">10M</td>
+
+<td>1455</td>
+
+<td>99</td>
+
+<td>4253</td>
+
+<td>31</td>
+
+<td>2340</td>
+
+<td>26</td>
+
+<td>1477</td>
+
+<td>93</td>
+
+<td>5593</td>
+
+<td>26</td>
+
+<td>174.3</td>
+
+<td>5</td>
+
+
+</tr>
+</table>
+
+<p>
+
+<table BORDER=3 CELLPADDING=2 NOSAVE >
+<tr NOSAVE>
+<td COLSPAN="2" class="header"></td>
+
+<td COLSPAN="6" class="header"><b><font size=+2>Sequential Create</font></b></td>
+
+<td COLSPAN="6" class="header"><b><font size=+2>Random Create</font></b></td>
+</tr>
+
+<tr>
+<td> </td>
+<td>Num Files</td>
+
+<td COLSPAN="2" BGCOLOR="#66FF99" NOSAVE>Create</td>
+
+<td COLSPAN="2" BGCOLOR="#33FF33" NOSAVE>Read</td>
+
+<td COLSPAN="2" BGCOLOR="#33CC00" NOSAVE>Delete</td>
+
+<td COLSPAN="2" BGCOLOR="#66FF99" NOSAVE>Create</td>
+
+<td COLSPAN="2" BGCOLOR="#33FF33" NOSAVE>Read</td>
+
+<td COLSPAN="2" BGCOLOR="#33CC00" NOSAVE>Delete</td>
+</tr>
+
+<tr>
+<td></td>
+
+<td> </td>
+<td class="ksec"><font size=-2>/ sec</font></td>
+
+<td class="ksec"><font size=-2>% CPU</font></td>
+
+<td class="ksec"><font size=-2>/ sec</font></td>
+
+<td class="ksec"><font size=-2>% CPU</font></td>
+
+<td class="ksec"><font size=-2>/ sec</font></td>
+
+<td class="ksec"><font size=-2>% CPU</font></td>
+
+<td class="ksec"><font size=-2>/ sec</font></td>
+
+<td class="ksec"><font size=-2>% CPU</font></td>
+
+<td class="ksec"><font size=-2>/ sec</font></td>
+
+<td class="ksec"><font size=-2>% CPU</font></td>
+
+<td class="ksec"><font size=-2>/ sec</font></td>
+
+<td class="ksec"><font size=-2>% CPU</font></td>
+</tr>
+
+<tr>
+<td class="rowheader"><b><font size=+1>ext2</font></b></td>
+
+<td BGCOLOR="#FFCCFF" NOSAVE>16</td>
+
+<td>94</td>
+
+<td>99</td>
+
+<td>278</td>
+
+<td>99</td>
+
+<td>492</td>
+
+<td>97</td>
+
+<td>95</td>
+
+<td>99</td>
+
+<td>284</td>
+
+<td>100</td>
+
+<td>93</td>
+
+<td>41</td>
+</tr>
+
+<tr>
+<td class="rowheader"><b><font size=+1>ext3</font></b></td>
+
+<td BGCOLOR="#FFCCFF" NOSAVE>16</td>
+
+<td>89</td>
+
+<td>98</td>
+
+<td>274</td>
+
+<td>100</td>
+
+<td>458</td>
+
+<td>96</td>
+
+<td>93</td>
+
+<td>99</td>
+
+<td>288</td>
+
+<td>99</td>
+
+<td>97</td>
+
+<td>45</td>
+</tr>
+
+<tr>
+<td class="rowheader"><b><font size=+1>xfs</font></b></td>
+
+<td BGCOLOR="#FFCCFF" NOSAVE >16</td>
+
+<td>92</td>
+
+<td>99</td>
+
+<td>251</td>
+
+<td>96</td>
+
+<td>436</td>
+
+<td>98</td>
+
+<td>91</td>
+
+<td>99</td>
+
+<td>311</td>
+
+<td>99</td>
+
+<td>90</td>
+
+<td>41</td>
+</tr>
+
+<tr>
+<td class="rowheader"><b><font size=+1>reiserfs</font></b></td>
+
+<td BGCOLOR="#FFCCFF" NOSAVE>16</td>
+
+<td>1307</td>
+
+<td>100</td>
+
+<td>8963</td>
+
+<td>100</td>
+
+<td>1914</td>
+
+<td>99</td>
+
+<td>1245</td>
+
+<td>99</td>
+
+<td>9316</td>
+
+<td>100</td>
+
+<td>1725</td>
+
+<td>100</td>
+</tr>
+</table>
+
+
+
+
+
+
+
+
+
+<p>
+Two data are shown for each test: the speed of the filesystem (in
+K/sec) and the CPU usage (in %). The higher the speed the better the
+filesystem. The opposite is true for the CPU usage. <br>
+As you can see reiserFS reports a hands down victory in managing files 
+(section <em>Sequential Create</em> and <em>Random Create</em>),
+overwhelming its opponents by a factor higher than 10. In addition to
+that is almost as good as the other filesystem in the <em>Sequential
+Output</em> and <em>Sequential Input</em>.
+There isn't any significant difference among the other filesystems. XFS
+speed is similar to ext2 filesystem, and ext3 is, as expected, a
+little slower than ext2 (it is basically the same thing, and it wastes
+some time during the journalling calls). <p>
+
+As a last test I get the mongo benchmark program available at reiserFS 
+benchmark page at 
+<a href="http://www.namesys.com">www.namesys.com</a>,
+and I modified it in order to test the three journalling filesystems. I
+inserted in the mongo.pl perl script the commands to mount the xfs and
+ext3 filesystem and to format them. Then I started a benchmark analysis.<br>
+
+The script formats partition /dev/xxxx, mounts it and runs given number
+of processes during each phase: Create, Copy, Symlinks, Read, Stats,
+Rename and Delete. Also, the program calculates fragmentation after Create
+and Copy phases: 
+
+<pre>
+Fragm = number_of_fragments / number_of_files 
+</pre>
+
+You can find the same results in the directory <em>results</em> in the files: 
+
+<pre>
+log       - raw results
+log.tbl   - results for compare program
+log_table - results in table form
+</pre>
+
+The tests was executed as in the following example:
+
+<pre>
+mongo.pl ext3 /dev/hda3 /work1 logext3 1
+</pre>
+
+where ext3 must be replaced by reiserfs or xfs in order to test the
+other filesystems. The other arguments are the device to mount, where
+the filesystem to test is located, the mounting directory, the
+filename where the results are stored and the number of processes to
+start.<p>
+
+In the following tables there are the results of this analysis. The data
+reported is time (in sec). The lower the value, the better the
+filesystem.
+In the first table the median dimension of files managed is 100 bytes, in the
+second one it is 1000 bytes and in the last one 10000 bytes.<p>
+
+<table BORDER NOSAVE >
+
+<tr ALIGN=LEFT VALIGN=TOP NOSAVE>
+<td NOSAVE><tt></tt>
+<br><font size=-1></font></td>
+
+
+<td BGCOLOR="#FFCCFF" NOSAVE><tt>ext3</tt>
+<br><tt><font size=-1>files=68952</font></tt>
+<br><tt><font size=-1>size=100 bytes</font></tt>
+<br><tt><font size=-1>dirs=242</font></tt></td>
+
+<td BGCOLOR="#FFCCFF" NOSAVE><tt>XFS</tt>
+<br><tt><font size=-1>files=68952</font></tt>
+<br><tt><font size=-1>size=100 bytes</font></tt>
+<br><tt><font size=-1>dirs=241</font></tt></td>
+
+<td BGCOLOR="#FFCCFF" NOSAVE><tt>reiserFS</tt>
+<br><tt><font size=-1>files=68952</font></tt>
+<br><tt><font size=-1>size=100 bytes</font></tt>
+<br><tt><font size=-1>dirs=241</font></tt></td>
+</tr>
+
+<tr>
+<td><tt>Create</tt></td>
+
+<td>90.07</td>
+
+<td>267.86</td>
+
+<td>53.05</td>
+</tr>
+
+<tr>
+<td><tt>Fragm.</tt></td>
+
+<td>1.32</td>
+
+<td>1.02</td>
+
+<td>1.00</td>
+</tr>
+
+<tr>
+<td><tt>Copy</tt></td>
+
+<td>239.02</td>
+
+<td>744.51</td>
+
+<td>126.97</td>
+</tr>
+
+<tr>
+<td><tt>Fragm.</tt></td>
+
+<td>1.32</td>
+
+<td>1.03</td>
+
+<td>1.80</td>
+</tr>
+
+<tr>
+<td><tt>Slinks</tt></td>
+
+<td>0</td>
+
+<td>203.54</td>
+
+<td>105.71</td>
+</tr>
+
+<tr>
+<td><tt>Read</tt></td>
+
+<td>782.75</td>
+
+<td>1543.93</td>
+
+<td>562.53</td>
+</tr>
+
+<tr>
+<td><tt>Stats</tt></td>
+
+<td>108.65</td>
+
+<td>262.25</td>
+
+<td>225.32</td>
+</tr>
+
+<tr>
+<td><tt>Rename</tt></td>
+
+<td>67.26</td>
+
+<td>205.18</td>
+
+<td>70.72</td>
+</tr>
+
+<tr>
+<td><tt>Delete</tt></td>
+
+<td>23.80</td>
+
+<td>389.79</td>
+
+<td>85.51</td>
+</tr>
+</table>
+
+<p>
+
+<table BORDER NOSAVE >
+<tr ALIGN=LEFT VALIGN=TOP  NOSAVE>
+<td NOSAVE><tt></tt>
+<br></td>
+
+<td BGCOLOR="#FFCCFF" NOSAVE><tt>ext3</tt>
+<br><tt><font size=-1>files=11248</font></tt>
+<br><tt><font size=-1>size=1000 bytes</font></tt>
+<br><tt><font size=-1>dirs=44</font></tt></td>
+
+<td BGCOLOR="#FFCCFF" NOSAVE><tt>XFS</tt>
+<br><tt><font size=-1>files=11616</font></tt>
+<br><tt><font size=-1>size=1000 bytes</font></tt>
+<br><tt><font size=-1>dirs=43</font></tt></td>
+
+<td BGCOLOR="#FFCCFF" NOSAVE><tt>ReiserFS</tt>
+<br><tt>f<font size=-1>iles=11616</font></tt>
+<br><tt><font size=-1>size=1000 bytes</font></tt>
+<br><tt><font size=-1>dirs=43</font></tt></td>
+</tr>
+
+<tr>
+<td><tt>Create</tt></td>
+
+<td>30.68</td>
+
+<td>57.94</td>
+
+<td>36.38</td>
+</tr>
+
+<tr>
+<td><tt>Fragm.</tt></td>
+
+<td>1.38</td>
+
+<td>1.01</td>
+
+<td>1.03</td>
+</tr>
+
+<tr>
+<td><tt>Copy</tt></td>
+
+<td>75.21</td>
+
+<td>149.49</td>
+
+<td>84.02</td>
+</tr>
+
+<tr>
+<td><tt>Fragm.</tt></td>
+
+<td>1.38</td>
+
+<td>1.01</td>
+
+<td>1.43</td>
+</tr>
+
+<tr>
+<td><tt>Slinks</tt></td>
+
+<td>16.68</td>
+
+<td>29.59</td>
+
+<td>19.29</td>
+</tr>
+
+<tr>
+<td><tt>Read</tt></td>
+
+<td>225.74</td>
+
+<td>348.99</td>
+
+<td>409.45</td>
+</tr>
+
+<tr>
+<td><tt>Stats</tt></td>
+
+<td>25.60</td>
+
+<td>46.41</td>
+
+<td>89.23</td>
+</tr>
+
+<tr>
+<td><tt>Rename</tt></td>
+
+<td>16.11</td>
+
+<td>33.57</td>
+
+<td>20.69</td>
+</tr>
+
+<tr>
+<td><tt>Delete</tt></td>
+
+<td>6.04</td>
+
+<td>64.90</td>
+
+<td>18.21</td>
+</tr>
+</table>
+
+<p>
+
+
+<table BORDER NOSAVE >
+<tr ALIGN=LEFT VALIGN=TOP  NOSAVE>
+<td NOSAVE><tt></tt>
+<br></td>
+
+<td BGCOLOR="#FFCCFF" NOSAVE><tt>ext3</tt>
+<br><tt><font size=-1>files=2274</font></tt>
+<br><tt><font size=-1>size=10000 bytes</font></tt>
+<br><tt><font size=-1>dirs=32</font></tt></td>
+
+<td BGCOLOR="#FFCCFF" NOSAVE><tt>XFS</tt>
+<br><tt><font size=-1>files=2292</font></tt>
+<br><tt><font size=-1>size=10000 bytes</font></tt>
+<br><tt><font size=-1>dirs=31</font></tt></td>
+
+<td BGCOLOR="#FFCCFF" NOSAVE><tt>reiserFS</tt>
+<br><tt><font size=-1>files=2292</font></tt>
+<br><tt><font size=-1>size=10000 bytes</font></tt>
+<br><tt><font size=-1>dirs=31</font></tt></td>
+</tr>
+
+<tr>
+<td><tt>Create</tt></td>
+
+<td>27.13</td>
+
+<td>25.99</td>
+
+<td>22.27</td>
+</tr>
+
+<tr>
+<td><tt>Fragm.</tt></td>
+
+<td>1.44</td>
+
+<td>1.02</td>
+
+<td>1.05</td>
+</tr>
+
+<tr>
+<td><tt>Copy</tt></td>
+
+<td>55.27</td>
+
+<td>55.73</td>
+
+<td>43.24</td>
+</tr>
+
+<tr>
+<td><tt>Fragm.</tt></td>
+
+<td>1.44</td>
+
+<td>1.02</td>
+
+<td>1.12</td>
+</tr>
+
+<tr>
+<td><tt>Slinks</tt></td>
+
+<td>1.33</td>
+
+<td>2.51</td>
+
+<td>1.43</td>
+</tr>
+
+<tr>
+<td><tt>Read</tt></td>
+
+<td>40.51</td>
+
+<td>50.20</td>
+
+<td>56.34</td>
+</tr>
+
+<tr>
+<td><tt>Stats</tt></td>
+
+<td>2.34</td>
+
+<td>1.99</td>
+
+<td>3.52</td>
+</tr>
+
+<tr>
+<td><tt>Rename</tt></td>
+
+<td>0.99</td>
+
+<td>1.10</td>
+
+<td>1.25</td>
+</tr>
+
+<tr>
+<td><tt>Delete</tt></td>
+
+<td>3.40</td>
+
+<td>8.99</td>
+
+<td>1.84</td>
+</tr>
+</table>
+
+<p>
+From these tables you can see that ext3 is usually faster in Stats
+Delate and Rename, while reiserFS wins in Create and Copy. Also note
+that the performance of reiserFS in better in the first case (small
+files) as expected by its technical documentation.
+
+
+<h1 align=center>Conclusions</h1>
+
+There are at present time at least two robust and reliable journalling 
+filesystems for Linux (i.e. XFS and reiserFS) which can be utilized 
+without fear.<br>
+
+ext3 is still an alpha release and can undergo several failures. I had 
+some 
+problems using bonnie++ on this filesystem: the system reported some
+ VM 
+errors and killed the shell I was using. <p>
+
+Considering the benchmark results my advice is to install a reiserFS 
+filesystem in the future (I'll surely do it).
+
+
+
+<!-- *** BEGIN bio *** -->
+<SPACER TYPE="vertical" SIZE="30">
+<P> 
+<H4><IMG ALIGN=BOTTOM ALT="" SRC="../gx/note.gif">Matteo Dell'Omodarme</H4>
+<CITE>I'm a student at the University of Pisa and a Linux user since 1994.
+Now I'm working on the administrations of Linux boxes at the Astronomy section
+of the Department of Physics, with special experience about security.  My
+primary email address is 
+<A HREF="mailto:matt@martine2.difi.unipi.it">matt@martine2.difi.unipi.it</A>.
+</CITE>
+
+<!-- *** END bio *** -->
+
+<!-- *** BEGIN copyright *** -->
+<P> <hr> <!-- P --> 
+<H5 ALIGN=center>
+
+Copyright &copy; 2001, Matteo Dell'Omodarme.<BR>
+Copying license <A HREF="../copying.html">http://www.linuxgazette.net/copying.html</A><BR> 
+Published in Issue 68 of <i>Linux Gazette</i>, July 2001</H5>
+<!-- *** END copyright *** -->
+
+<!--startcut ==========================================================-->
+<HR><P>
+<CENTER>
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="collinge.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../faq/index.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="ghosh.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+</CENTER>
+</BODY></HTML>
+<!--endcut ============================================================-->

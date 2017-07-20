@@ -1,0 +1,307 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>History of visited directories in BASH LG #109</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="lg_laundrette3.html" >&lt;-- prev</A> | <A HREF="odonovan.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>History of visited directories in BASH</h1>
+<p id="by"><b>By <A HREF="../authors/marinov.html">Petar Marinov</A></b></p>
+
+<p>
+<h3>Deficiencies of the CD command</h3>
+
+<p>Do you realize how many times you type <tt>cd</tt> per day? Do you
+realize how many times you retype the same directory names again
+and again? Ever since I migrated from 4DOS/NT shell on Windows to
+using Bash on Unix platforms, I've missed its <tt>cd</tt> history access. In
+4DOS/NT the history of the visited directories can be navigated by
+Ctrl+PgUp/Dn. Every time you go to a new directory by <tt>cd</tt>, its
+name automatically goes on top of an easily accessible history
+list.</p>
+
+<p>In Bash, <tt>cd -</tt> switches between the last two directories. This
+is a function in the right direction but many times I wanted to go
+to the directory before the last, I dreamed of something
+like&nbsp;<tt>cd -2</tt>.</p>
+
+<p>A little scripting creates some sanity in the directory
+navigation of Bash.</p>
+
+<h3>Installing the CD history function</h3>
+
+<p>To install the modified CD function, copy <a href=
+"misc/marinov/acd_func.sh">acd_func.sh</a> to any directory in your $PATH,
+or even your home directory.  At the end of your .bashrc add <tt>source
+acd_func.sh</tt>. Restart your bash session and then type <tt>cd
+--</tt>.</p>
+
+<pre>
+<i>lotzmana@safe$</i> cd --
+0  ~
+</pre>
+
+<p>Type <tt>cd --</tt> to verify if the installation works. Above you may
+see the result <tt>0 ~</tt>. This shows that you have one directory in
+your history.</p>
+
+<pre>
+<i>lotzmana@safe$</i> cd work
+<i>lotzmana@safe$</i> cd scripts
+<i>lotzmana@safe$</i> pwd
+/home/petarma/work/scripts
+<i>lotzmana@safe$</i> cd --
+ 0  ~/work/scripts
+ 1  ~/work
+ 2  ~
+<i>lotzmana@safe$</i> cd -2
+<i>lotzmana@safe$</i> pwd
+/home/petarma
+</pre>
+
+<p>The <tt>cd</tt> command works as usual. The new feature is the
+history of the last 10 directories and the <tt>cd</tt> command expanded
+to display and access it. <tt>cd --</tt> (or simply pressing ctrl+w)
+shows the history. In front of every directory name you see
+a number. <tt>cd -<i>num</i></tt> with the number you want jumps to the
+corresponding directory from the history.</p>
+
+<h3>How CD with history works</h3>
+
+<pre>
+<i>lotzmana@safe$</i> nl -w2 -s' '  acd_func.sh
+ 1 # do ". acd_func.sh"
+ 2 # acd_func 1.0.5, 10-nov-2004
+ 3 # petar marinov, http:/geocities.com/h2428, this is public domain
+
+ 4 cd_func ()
+ 5 {
+ 6   local x2 the_new_dir adir index
+ 7   local -i cnt
+
+ 8   if [[ $1 ==  "--" ]]; then
+ 9     dirs -v
+10     return 0
+11   fi
+
+12   the_new_dir=$1
+13   [[ -z $1 ]] &amp;&amp; the_new_dir=$HOME
+
+14   if [[ ${the_new_dir:0:1} == '-' ]]; then
+15     #
+16     # Extract dir N from dirs
+17     index=${the_new_dir:1}
+18     [[ -z $index ]] &amp;&amp; index=1
+19     adir=$(dirs +$index)
+20     [[ -z $adir ]] &amp;&amp; return 1
+21     the_new_dir=$adir
+22   fi
+
+23   #
+24   # '~' has to be substituted by ${HOME}
+25   [[ ${the_new_dir:0:1} == '~' ]] &amp;&amp; the_new_dir="${HOME}${the_new_dir:1}"
+
+26   #
+27   # Now change to the new dir and add to the top of the stack
+28   pushd "${the_new_dir}" &gt; /dev/null
+29   [[ $? -ne 0 ]] &amp;&amp; return 1
+30   the_new_dir=$(pwd)
+
+31   #
+32   # Trim down everything beyond 11th entry
+33   popd -n +11 2&gt;/dev/null 1&gt;/dev/null
+
+34   #
+35   # Remove any other occurence of this dir, skipping the top of the stack
+36   for ((cnt=1; cnt &lt;= 10; cnt++)); do
+37     x2=$(dirs +${cnt} 2&gt;/dev/null)
+38     [[ $? -ne 0 ]] &amp;&amp; return 0
+39     [[ ${x2:0:1} == '~' ]] &amp;&amp; x2="${HOME}${x2:1}"
+40     if [[ "${x2}" == "${the_new_dir}" ]]; then
+41       popd -n +$cnt 2&gt;/dev/null 1&gt;/dev/null
+42       cnt=cnt-1
+43     fi
+44   done
+
+45   return 0
+46 }
+
+47 alias cd=cd_func
+
+48 if [[ $BASH_VERSION &gt; "2.05a" ]]; then
+49   # ctrl+w shows the menu
+50   bind -x "\"\C-w\":cd_func -- ;"
+51 fi
+
+</pre>
+
+<p>4-7: cd_func() is a function, variables are declared local and
+are automatically deleted at the end of the function</p>
+
+<p>8-11: if the function is called with a parameter "--" then it
+dumps the current content of the directory history. It is stored in
+the same place pushd/popd keep names -- the directory stack.
+Storage is the same, access is different.</p>
+
+<p>12-13: Argument $1 is transferred into $the_new_dir for some
+post-processing. Immediately after that, if there are no parameters
+we assume that user asked for his home directory.</p>
+
+<p>14-22: If parameter begins with '-' then the user is attempting to
+access one of the names in the history list. $index gets the number of the
+directory, then we extract the corresponding name into $adir. For example,
+<tt>dirs +3</tt> dumps directory #3 from the stack.</p>
+
+<p>At this point in $the_new_dir we have either a name specified
+explicitly as a parameter or a name obtained from the history of
+previously visited directories.</p>
+
+<p>23-25: If a directory name begins with '~' then this character
+has to be replaced by the actual home directory name.</p>
+
+<p>26-30: pushd does the actual 'cd'. It also puts the name on top of
+the directory stack. stdout is redirected to /dev/null in order to
+completely imitate how 'cd' works. Notice that any output to stderr,
+for example a message telling that the directory specified by the
+user doesn't exist will show up, which is again similar to what 'cd'
+does. The function aborts if pushd fails. We also need the new
+directory name for further analysis and $the_new_dir carries it
+down the function.</p>
+
+<p>31-33: Keeping track of more than 10 directories is
+unproductive. Since we have just pushed one on top of the stack, we
+trim off any that fall below 11 names deep.</p>
+
+<p>34-44: We loop through all the names in the directory stack. Any name
+that matches the new current directory is eliminated. Again, we have to
+translate any name from the list which begins with '~' to its format of
+fully expanded home directory.</p>
+
+<p>47: We assign cd to be cd_func().</p>
+
+<p>48-51: If the bash version allows for macros to be assigned we make
+ctrl+w summon the history of visited directories.</p>
+
+<p>This script defines a function. It must be sourced and not
+executed, so that cd_func() is parsed and stored in the current
+environment. Try <tt>env</tt> and you must see it after all environment
+variables.</p>
+
+<h3>Documentation page of the script</h3>
+
+<p>Visit the <a href="misc/marinov/acd_func.html">
+acd_func.sh man page</a>.</p>
+<br>
+
+<p>For comments on this article please visit or join <a href=
+"http://yahoogroups.com/groups/zepp/">zepp mailing list</a>.<br>
+The text of this page is public domain.</p>
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<!-- P>
+<img ALIGN="LEFT" ALT="[BIO]" SRC="../gx/2002/note.png" class="bio">
+<em>
+</em>
+<br CLEAR="all" -->
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2004, Petar Marinov. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 109 of Linux Gazette, December 2004
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="lg_laundrette3.html" >&lt;-- prev</A> | <A HREF="odonovan.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">December 2004 (#109)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/2003/sit3-shine.7-2.gif" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

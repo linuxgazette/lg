@@ -1,0 +1,701 @@
+<!DOCTYPE html
+	PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+	 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="utf-8" xml:lang="utf-8">
+<head>
+<title>Joey's Notes: Sendmail and Dovecot e-mail on RHEL 5 LG #158</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link rel="stylesheet" href="../lg.css" type="text/css" media="screen, projection"  />
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<!-- link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" / -->
+<link rel="shortcut icon" href="../favicon.ico" />
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+</head>
+<body>
+
+<a href="../">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+<div id="navigation">
+<table summary="masthead" width="100%">
+<tr>
+<td align="center" colspan="3" style="font-size: 10px; font-weight: bold">
+<a href="../index.html">Home</a>
+<a href="http://linuxgazette.net">Main Site</a>
+<a href="../faq/index.html">FAQ</a>
+
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/mailman/listinfo/">Mailing Lists</a>
+<a href="../jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+<hr width="99%" style="border: 1px inset #000033">
+</td>
+</tr>
+<tr>
+<td width="40%" align="left" style="font-size: 10px; font-weight: bold">
+The Free International Online Linux Monthly
+</td>
+<td width="20%" align="center" style="font-size: 10px; font-weight: bold">
+ISSN: 1934-371X
+</td>
+<td width="40%" align="right" style="font-size: 10px; font-weight: bold">
+Main site: <a href="http://linuxgazette.net">http://linuxgazette.net</a> 
+</td>
+</table>
+</div>
+
+
+<div id="breadcrumbs1">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">January 2009 (#158)</a> &gt; 
+Article
+
+</div>
+
+<div class="articlecontent1">
+<div class="content">
+
+<div id="previousnexttop">
+<A HREF="janert.html" >&lt;-- prev</A> | <A HREF="vogel.html" >next --&gt;</A>
+</div>
+
+<h1>Joey's Notes: Sendmail and Dovecot e-mail on RHEL 5</h1>
+<p id="by"><b>By <a href="../authors/prestia.html">Joey Prestia</a></b></p>
+
+<img src="../gx/minilogos/joeys_notes.png" alt="Joey's Notes image" align="left" />
+
+<p>
+The topic of this month's article is setting up and configuring a Sendmail
+and Dovecot e-mail server on RHEL 5.x to provide secure IMAPS mail
+retrieval with SMTP authenticated relay for our users. Configuring a mail
+server is an easy task, but it must be done with a security-focused
+mindset: careless mistakes or misconfiguration are what the spammers are
+looking for in order to use your mailserver as a slave relay. If a
+company's server is hijacked, this could have some nasty consequences. The
+company's IP could be blacklisted; their legitimate mail could be rejected;
+they might even get shut down by their ISP. Such a situation could cost the
+company a great deal of money and their reputation, and you (as system
+administrator) your job. SMTP authenticated relay allows the users to
+safely connect from wherever they are while keeping the undesirables out. 
+</p>
+
+
+<p>
+For this configuration, I used RHEL 5, Sendmail, and Dovecot (Red Hat's
+default mail programs). If you selected the Mail Server package group at
+install time, everything you need will already be installed. In addition,
+the Sendmail program will already be running by default in runlevels 2-5.
+The Cyrus SASL (Simple Authentication and Security Layer) library will
+provide us with a generic method for adding authentication support for
+connection-based protocols. I will be referring to the Cyrus SASL daemon by
+its program name (<tt>saslauthd</tt>) from here on.
+</p>
+
+<h3>Overview</h3>
+
+<p>
+The tasks we must accomplish are:
+</p>
+
+<strong>Sendmail</strong>
+<ol>
+<li>Create a Sendmail certificate.</li> 
+<li>Modify Sendmail to accept mail from any host (subject to authentication).</li>
+<li>Modify Sendmail to require authentication.</li>
+<li>Modify Sendmail to use the certificate we will create.</li>
+<li>Rebuild the Sendmail configuration file and restart the Sendmail service.</li>
+<li>Test our Sendmail program.</li>
+</ol>
+
+<strong>Cyrus SASL</strong>
+
+<ol> 
+<li>Start the saslauthd daemon so we can use it to authenticate.</li>
+<li>Ensure saslauthd stays on through a reboot.</li>
+<li>Test saslauthd.</li>
+</ol>
+
+<strong>Dovecot</strong> 
+
+<ol>
+<li>Rename the original sample certificate files.</li>
+<li>Edit the template file.</li> 
+<li>Generate the new self-signed certificates for our server.</li>
+<li>Modify Dovecot to use only the appropriate protocols.</li>
+<li>Modify Dovecot to enable SSL and use the new certificates.</li>
+<li>Start the Dovecot service.</li> 
+<li>Ensure that Dovecot stays on through a reboot.</li>
+<li>Test our Dovecot setup.</li>
+</ol>
+
+<h3>Sendmail</h3>
+
+<p>
+First, let's create our sendmail.pem file - this is required for the
+Transport Layer Security (TLS) to work. When creating the self-signed
+certificate, you will need to answer several questions about your location
+and organization.
+</p>
+
+<pre class="code">
+
+# <b>cd /etc/pki/tls/certs</b>
+# <b>make sendmail.pem</b>
+umask 77 ; \
+        PEM1=`/bin/mktemp /tmp/openssl.XXXXXX` ; \
+        PEM2=`/bin/mktemp /tmp/openssl.XXXXXX` ; \
+        /usr/bin/openssl req -utf8 -newkey rsa:1024 -keyout $PEM1 -nodes -x509 -days 365 -out $PEM2 -set_serial 0 ; \
+        cat $PEM1 &gt;  sendmail.pem ; \
+        echo ""   &gt;&gt; sendmail.pem ; \
+        cat $PEM2 &gt;&gt; sendmail.pem ; \
+        rm -f $PEM1 $PEM2
+Generating a 1024 bit RSA private key
+............++++++
+............................++++++
+writing new private key to '/tmp/openssl.EU9964'
+-----
+You are about to be asked to enter information that will be incorporated
+into your certificate request.
+What you are about to enter is what is called a Distinguished Name or a DN.
+There are quite a few fields but you can leave some blank
+For some fields there will be a default value,
+If you enter '.', the field will be left blank.
+-----
+Country Name (2 letter code) [GB]:<b>US</b>
+State or Province Name (full name) [Berkshire]:<b>Arizona</b>
+Locality Name (eg, city) [Newbury]:<b>Phoenix</b>
+Organization Name (eg, company) [My Company Ltd]:<b>Example Corp.</b>
+Organizational Unit Name (eg, section) []:<b>IT</b>
+Common Name (eg, your name or your server's hostname)[]:<b>rhce-prep.example.com</b>
+E-mail Address []:<b>root@rhce-prep.example.com</b>
+
+</pre>
+
+<p>
+At this point we will need to back up the original configuration 
+files located in /etc/mail/. Next, we'll add several lines to 
+the sendmail.mc file and then regenerate the sendmail.cf file.
+</p>
+
+
+<pre class="code">
+# <b>cd /etc/mail</b>
+# <b>cp sendmail.mc sendmail.mc.orig</b>
+# <b>cp sendmail.cf sendmail.cf.orig</b>
+# <b>vi sendmail.mc</b>
+</pre>
+
+<p>
+Find and comment out the line below by adding a 'dnl' before it, as I 
+have done. 
+</p>
+
+<pre class="code">
+dnl DAEMON_OPTIONS(`Port=smtp,Addr=127.0.0.1, Name=MTA')dnl
+</pre>
+
+<p>
+This line restricts Sendmail to only listening on the loopback interface
+for mail. Commenting it out will allow us to accept mail from other
+machines.
+</p>
+
+<p>
+Next, find this line:
+</p>
+
+<pre class="code"> 
+define(`confAUTH_OPTIONS', `A')dnl
+</pre>
+
+<p>
+Change it to read: 
+</p>
+
+<pre class="code">
+define(`confAUTH_OPTIONS', `A p y')dnl
+</pre>
+
+<p>
+The 'p' option disallows plain text logins, which are susceptible to simple
+packet sniffing, unless a  security layer is active.  Additionally the 'y'
+prohibits anonymous logins. 
+</p>
+
+<p>
+Next, we'll define the authentication mechanisms.  Remove 'dnl' from the
+beginning of the following lines:
+</p>
+
+<pre class="code">
+TRUST_AUTH_MECH(`EXTERNAL DIGEST-MD5 CRAM-MD5 LOGIN PLAIN')dnl
+define(`confAUTH_MECHANISMS', `EXTERNAL GSSAPI DIGEST-MD5 CRAM-MD5 LOGIN PLAIN')dnl
+</pre>
+
+<p>
+And finally add these lines to specify the certificate path.
+</p>
+
+<pre class="code">
+define(`CERT_DIR', `/etc/pki/tls/certs')dnl
+define(`confCACERT_PATH', `CERT_DIR')dnl
+define(`confCACERT', `CERT_DIR/sendmail.pem')dnl
+define(`confSERVER_CERT', `CERT_DIR/sendmail.pem')dnl
+define(`confSERVER_KEY', `CERT_DIR/sendmail.pem')dnl
+define(`confCLIENT_CERT', `CERT_DIR/sendmail.pem')dnl
+define(`confCLIENT_KEY', `CERT_DIR/sendmail.pem')dnl
+</pre>
+
+<p>
+Having made the changes, we will need to rebuild sendmail.cf by processing
+sendmail.mc with the m4 macro processor. After that, start saslauthd
+daemon for authentication and make sure it stays on. Finish by restarting
+the Sendmail daemon to implement our changes.
+</p>
+
+<pre class="code">
+# <b>m4 sendmail.mc > sendmail.cf</b>
+# <b>service sendmail restart</b>
+Shutting down sm-client:                                   [  OK  ]
+Shutting down sendmail:                                    [  OK  ]
+Starting sendmail:                                         [  OK  ]
+Starting sm-client:                                        [  OK  ]
+
+</pre>
+
+<strong>Testing Sendmail</strong>
+
+<p>
+Test it to confirm proper TLS operation: 
+</p>
+
+<pre class="code">
+# <b>openssl s_client -starttls smtp -crlf -connect 127.0.0.1:25</b>
+CONNECTED(00000003)
+depth=0 /C=US/ST=Arizona/L=Phoenix/O=Example Corp./OU=IT/CN=rhce-prep.example.com/emailAddress=root@rhce-prep.example.com
+verify error:num=18:self signed certificate
+verify return:1
+depth=0 /C=US/ST=Arizona/L=Phoenix/O=Example Corp./OU=IT/CN=rhce-prep.example.com/emailAddress=root@rhce-prep.example.com
+verify return:1
+---
+Certificate chain
+ 0 s:/C=US/ST=Arizona/L=Phoenix/O=Example Corp./OU=IT/CN=rhce-prep.example.com/emailAddress=root@rhce-prep.example.com
+   i:/C=US/ST=Arizona/L=Phoenix/O=Example Corp./OU=IT/CN=rhce-prep.example.com/emailAddress=root@rhce-prep.example.com
+---
+Server certificate
+-----BEGIN CERTIFICATE-----
+MIIDvTCCAyagAwIBAgIBADANBgkqhkiG9w0BAQUFADCBoTELMAkGA1UEBhMCVVMx
+EDAOBgNVBAgTB0FyaXpvbmExEDAOBgNVBAcTB1Bob2VuaXgxFjAUBgNVBAoTDUV4
+YW1wbGUgQ29ycC4xCzAJBgNVBAsTAklUMR4wHAYDVQQDExVyaGNlLXByZXAuZXhh
+bXBsZS5jb20xKTAnBgkqhkiG9w0BCQEWGnJvb3RAcmhjZS1wcmVwLmV4YW1wbGUu
+Y29tMB4XDTA4MDkwNTAzMTU0NVoXDTA5MDkwNTAzMTU0NVowgaExCzAJBgNVBAYT
+AlVTMRAwDgYDVQQIEwdBcml6b25hMRAwDgYDVQQHEwdQaG9lbml4MRYwFAYDVQQK
+Ew1FeGFtcGxlIENvcnAuMQswCQYDVQQLEwJJVDEeMBwGA1UEAxMVcmhjZS1wcmVw
+LmV4YW1wbGUuY29tMSkwJwYJKoZIhvcNAQkBFhpyb290QHJoY2UtcHJlcC5leGFt
+cGxlLmNvbTCBnzANBgkqhkiG9w0BAQEFAAOBjQAwgYkCgYEAxtJ0zDBsxnTi6Am7
+qGzN7s6cty2QI1g4FkjiD7Zp02t1vJy47bNr5FNbjMTyGs1SE4lValAwSawOydgH
+ziOBCSgpS6GzKumyfXFDxO2ZVL1nkQcjc8ZG5SBITw3SZVGoT7qitWHXs17FIOnO
+oAxjuhTvpsc0NUOyWwZUnZWQ2Q8CAwEAAaOCAQEwgf4wHQYDVR0OBBYEFCm3nHNz
+eRHNuIyLt9oaLrQ6yoXoMIHOBgNVHSMEgcYwgcOAFCm3nHNzeRHNuIyLt9oaLrQ6
+yoXooYGnpIGkMIGhMQswCQYDVQQGEwJVUzEQMA4GA1UECBMHQXJpem9uYTEQMA4G
+A1UEBxMHUGhvZW5peDEWMBQGA1UEChMNRXhhbXBsZSBDb3JwLjELMAkGA1UECxMC
+SVQxHjAcBgNVBAMTFXJoY2UtcHJlcC5leGFtcGxlLmNvbTEpMCcGCSqGSIb3DQEJ
+ARYacm9vdEByaGNlLXByZXAuZXhhbXBsZS5jb22CAQAwDAYDVR0TBAUwAwEB/zAN
+BgkqhkiG9w0BAQUFAAOBgQCxYPkMpdv+uuAIozapvMb7xoQpnL9XNEDoTrxmiqvu
+XB8M2hrj2HDL2lZxMCwjHXtGP2rqO10koHXor/NSQHsbh+/lZBRRe4j1CDoz0Paa
+2vXwmEWAwBoVQmGfwuqQqStii2Z0HJ2pIpR9YJUTNiiC3il84L2kuI8klvX5oycv
+VA==
+-----END CERTIFICATE-----
+subject=/C=US/ST=Arizona/L=Phoenix/O=Example Corp./OU=IT/CN=rhce-prep.example.com/emailAddress=root@rhce-prep.example.com
+issuer=/C=US/ST=Arizona/L=Phoenix/O=Example Corp./OU=IT/CN=rhce-prep.example.com/emailAddress=root@rhce-prep.example.com
+---
+Acceptable client certificate CA names
+/C=US/ST=Arizona/L=Phoenix/O=Example Corp./OU=IT/CN=rhce-prep.example.com/emailAddress=root@rhce-prep.example.com
+---
+SSL handshake has read 1692 bytes and written 289 bytes
+---
+New, TLSv1/SSLv3, Cipher is DHE-RSA-AES256-SHA
+Server public key is 1024 bit
+Compression: NONE
+Expansion: NONE
+SSL-Session:
+    Protocol  : TLSv1
+    Cipher    : DHE-RSA-AES256-SHA
+    Session-ID: 71A2164B37A24EBA80860BA2FEC356BC0104C5D759C94E0ABD1390C7E520B994
+    Session-ID-ctx: 
+    Master-Key: CBBDD5EB892E597C0479FC9B53CB86DAB7E93A513E49E23B39C4896DF46DD48390A9651C8A842821BAAEF5E09BCF01FD
+    Key-Arg   : None
+    Krb5 Principal: None
+    Start Time: 1220586756
+    Timeout   : 300 (sec)
+    Verify return code: 18 (self signed certificate)
+---
+220 rhce-prep.example.com ESMTP Sendmail 8.13.8/8.13.8; Thu, 4 Sep 2008 20:52:36 -0700
+</pre>
+
+<p>
+Success! We can now connect via the TLS encrypted tunnel.
+</p>
+
+<h3>Cyrus SASL</h3>
+
+<p>
+The saslauthd daemon is used as an authentication program. We need to make
+sure it runs on bootup; to do this, we'll use the chkconfig utility. (For
+now, we'll also start it manually.)
+</p>
+
+<pre class="code">
+# <b>service saslauthd start</b>
+Starting saslauthd:                                        [  OK  ]
+# <b>chkconfig saslauthd on</b>
+ 
+</pre>
+
+<strong>Testing Cyrus SASL</strong>
+
+<p>
+Verifying that the Cyrus SASL daemon is operating is very simple:
+</p>  
+
+<pre class="code">
+# <b>testsaslauthd -u <em>username</em> -p <em>password</em> -s smtp</b>
+0: OK "Success."
+ 
+</pre>
+
+
+<h3>Dovecot</h3>
+
+<p>
+Now it's time to configure Dovecot for IMAP mail retrieval via SSL (IMAPS).
+Default SSL certificates for Dovecot already exist; we will need to rename
+them so that we can generate our own. In addition, we will need to edit
+/etc/pki/dovecot-openssl.cnf and customize it for our needs. Since the
+certificates are in different directories, we can use the find command to
+do this in one step.
+</p>
+
+<pre class="code">
+# <b>find /etc -name dovecot.pem -execdir mv {} dovecot.pem.orig \;</b>
+</pre>
+
+</p>
+Now we'll edit the template:
+</p>
+
+<pre class="code">
+# <b>vi /etc/pki/dovecot/dovecot-openssl.cnf</b>
+ [ req ]
+default_bits = 1024
+encrypt_key = yes
+distinguished_name = req_dn
+x509_extensions = cert_type
+prompt = no
+
+[ req_dn ]
+# country (2 letter code)
+#C=FI
+<b>C=US</b>
+
+# State or Province Name (full name)
+#ST=
+<b>ST=Arizona</b>
+
+# Locality Name (eg. city)
+#L=Helsinki
+<b>L=Phoenix</b>
+
+# Organization (eg. company)
+#O=Dovecot
+<b>O=Example Corp.</b>
+
+# Organizational Unit Name (eg. section)
+OU=IMAP server
+
+# Common Name (*.example.com is also possible)
+#CN=imap.example.com
+<b>CN=rhce-prep.example.com</b>
+
+# E-mail contact
+#emailAddress=postmaster@example.com
+<b>emailAddress=root@rhce-prep.example.com</b>
+
+[ cert_type ]
+nsCertType = server
+</pre>
+
+<p>
+As you can see, this file contains the same questions we were asked earlier
+when creating our sendmail.pem file. When you are done customizing it, be
+sure to save the changes. Next, generate the new dovecot.pem certificates
+using the mkcert.sh script located at
+'/usr/share/doc/dovecot-1.0.7/examples/mkcert.sh'. The output from the command
+should look similar to this:
+</p>
+
+<pre class="code">
+# <b>/usr/share/doc/dovecot-1.0.7/examples/mkcert.sh</b>
+Generating a 1024 bit RSA private key
+.++++++
+..................++++++
+writing new private key to '/etc/pki/dovecot/private/dovecot.pem'
+-----
+
+subject= /C=US/ST=Arizona/L=Phoenix/O=Example Corp./OU=IMAP server/CN=rhce-prep.example.com/emailAddress=root@rhce-prep.example.com
+SHA1 Fingerprint=31:E9:65:45:86:97:A8:E4:F4:76:DC:35:28:5F:25:05:0B:FD:9E:61
+ 
+</pre>
+
+<p>
+Now that we have good certificates customized for our server, we move on to
+the dovecot.conf file. We need to define the protocol we want to use, and
+uncomment some lines to allow SSL support, which is disabled by default.
+First things first, though - back up the original conf file. 
+</p>
+
+<pre class="code">
+# <b>cp /etc/dovecot.conf /etc/dovecot.conf.orig</b> 
+# <b>vi /etc/dovecot.conf</b>
+</pre>
+
+<p>
+Dovecot can use any of these protocols; just select which you prefer. I
+intend to use IMAPS. Please note: I make it a habit to leave the original
+values in place in configuration files.
+</p>  
+
+<pre class="code">
+#protocols = imap imaps pop3 pop3s
+protocols = imaps
+</pre>
+
+<p>
+Now we will need to uncomment the ssl_disable option, as well as the lines
+specifying the paths for our SSL certificates.
+</p>
+
+<pre class="code">
+ssl_disable = no
+
+ssl_cert_file = /etc/pki/dovecot/certs/dovecot.pem
+ssl_key_file = /etc/pki/dovecot/private/dovecot.pem
+</pre>
+
+<p>
+Once this is done, we'll start the service and make it run automatically at
+boot time. 
+</p>
+
+<pre class="code">
+# <b>service dovecot start</b>
+Starting Dovecot Imap:                                     [  OK  ]
+# <b>chkconfig dovecot on</b>
+ 
+</pre>
+
+<strong>Testing Dovecot</strong> 
+
+<p>
+We'll use the openssl command to check that Dovecot is using our
+certificate and is listening at port 993. Your output should look
+similar to the following: 
+</p>
+
+<pre class="code">
+# <b>openssl s_client -connect 127.0.0.1:993</b>  
+CONNECTED(00000003)
+depth=0 /C=US/ST=Arizona/L=Phoenix/O=Example Corp./OU=IMAP server/CN=rhce-prep.example.com/emailAddress=root@rhce-prep.example.com
+verify error:num=18:self signed certificate
+verify return:1
+depth=0 /C=US/ST=Arizona/L=Phoenix/O=Example Corp./OU=IMAP server/CN=rhce-prep.example.com/emailAddress=root@rhce-prep.example.com
+verify return:1
+---
+Certificate chain
+ 0 s:/C=US/ST=Arizona/L=Phoenix/O=Example Corp./OU=IMAP server/CN=rhce-prep.example.com/emailAddress=root@rhce-prep.example.com
+   i:/C=US/ST=Arizona/L=Phoenix/O=Example Corp./OU=IMAP server/CN=rhce-prep.example.com/emailAddress=root@rhce-prep.example.com
+---
+Server certificate
+-----BEGIN CERTIFICATE-----
+MIIC5zCCAlCgAwIBAgIJAIXMfHZA/S69MA0GCSqGSIb3DQEBBQUAMIGpMQswCQYD
+VQQGEwJVUzEQMA4GA1UECBMHQXJpem9uYTEQMA4GA1UEBxMHUGhvZW5peDEWMBQG
+A1UEChMNRXhhbXBsZSBDb3JwLjEUMBIGA1UECxMLSU1BUCBzZXJ2ZXIxHjAcBgNV
+BAMTFXJoY2UtcHJlcC5leGFtcGxlLmNvbTEoMCYGCSqGSIb3DQEJARYZcm9vdEBy
+aGNlLXByZXBleGFtcGxlLmNvbTAeFw0wODA5MDUwNTIxNTRaFw0wOTA5MDUwNTIx
+NTRaMIGpMQswCQYDVQQGEwJVUzEQMA4GA1UECBMHQXJpem9uYTEQMA4GA1UEBxMH
+UGhvZW5peDEWMBQGA1UEChMNRXhhbXBsZSBDb3JwLjEUMBIGA1UECxMLSU1BUCBz
+ZXJ2ZXIxHjAcBgNVBAMTFXJoY2UtcHJlcC5leGFtcGxlLmNvbTEoMCYGCSqGSIb3
+DQEJARYZcm9vdEByaGNlLXByZXBleGFtcGxlLmNvbTCBnzANBgkqhkiG9w0BAQEF
+AAOBjQAwgYkCgYEAyqK3hI+ZP+E7iP2lzFih9QbvXw0lYl8IkbkjVcs9xulnYgmZ
+Tc2NxoPYMkyeui2HWmu6SJq4ffs7EQRQ4/Hfew69eBA1U3bFxse5+Rr7d2e/YA/U
+Rdz6KK78VfmBBONf81LwvYimhIeNQp6HdqBThteZm0lJUq2wtDiD/l+GGE8CAwEA
+AaMVMBMwEQYJYIZIAYb4QgEBBAQDAgZAMA0GCSqGSIb3DQEBBQUAA4GBAFEgtPTK
+hycp7u/JNdb+FNz+JDacCO9c3Vb/QkDOmyKLb4eiokqgeM6Tkq747CuhYeu7EBYl
+wo8hd81G0tVf6tBdrhr4JhyAsL7qDySGlp94Zr41okcNMGKumXIAHyVSNxcA9guz
+5oVVFpOS9jx0WaaYs+Z+JQvQkmzMQiHe58Wu
+-----END CERTIFICATE-----
+subject=/C=US/ST=Arizona/L=Phoenix/O=Example Corp./OU=IMAP server/CN=rhce-prep.example.com/emailAddress=root@rhce-prep.example.com
+issuer=/C=US/ST=Arizona/L=Phoenix/O=Example Corp./OU=IMAP server/CN=rhce-prep.example.com/emailAddress=root@rhce-prep.example.com
+---
+No client certificate CA names sent
+---
+SSL handshake has read 1311 bytes and written 331 bytes
+---
+New, TLSv1/SSLv3, Cipher is DHE-RSA-AES256-SHA
+Server public key is 1024 bit
+Compression: NONE
+Expansion: NONE
+SSL-Session:
+    Protocol  : TLSv1
+    Cipher    : DHE-RSA-AES256-SHA
+    Session-ID: ECC39D63565DC7CB37879C9BFBA39B9A020DFC770044638BFF960767E7D814B1
+    Session-ID-ctx: 
+    Master-Key: D9A47CC99CC6D023DC07EE743B88C42D609D3719F82BDA24630AEEBB9C1727746CDD016BDD42CD0663CCB47278B974D2
+    Key-Arg   : None
+    Krb5 Principal: None
+    Start Time: 1220630411
+    Timeout   : 300 (sec)
+    Verify return code: 18 (self signed certificate)
+---
+* OK Dovecot ready.
+</pre>
+
+<p>
+At this point, you're done; all that remains is for the users to set up
+their mail clients to send and retrieve mail using the protocols we
+selected earlier. On the administration side, I'd also suggest setting up
+MailScanner to protect against the inevitable barrages of spam and viruses.
+</p>
+
+<p>
+It's also a good idea to do a little testing to ensure that everything's
+set up correctly. There are many tools out there to test your mail server
+for vulnerability to slave relaying. I use RelayScanner; you can get it at
+<a
+href="http://www.cirt.dk/tools/relayscanner/relayscanner.zip">http://www.cirt.dk/tools/relayscanner/relayscanner.zip</a>.
+Make sure and test your mail server from a different network than the
+machine is on when you are testing it for unauthenticated relaying.  
+</p>
+
+<h3>Resources</h3>
+
+<ul>
+<li><a href="http://www.sendmail.org/~ca/email/auth.html">Sendmail SMTP Auth.</a></li>
+
+<li><a href="http://www.joreybump.com/code/howto/smtpauth.html">Jorey Bump's Quickstart Guide</a></li> 
+
+<li><a href="http://qmail.jms1.net/test-auth.shtml">John M. Simpson's Testing SMTP Auth Connections</a></li> 
+
+<li><a href="http://www.jonfullmer.com/smtpauth">Jon Fullmer's SMTP Auth.</a></li>
+
+<li>Sobell, Mark G., "A Practical Guide to Red Hat Linux", Third
+	Edition</li>
+
+<li>Costales, Bryan et al., "Sendmail", Fourth Edition</li> 
+</ul>
+
+
+<br clear="all" />
+
+<script type='text/javascript'>
+digg_url = 'http://linuxgazette.net/158/prestia.html';
+digg_title = 'Joey\'s Notes: Sendmail and Dovecot e-mail on RHEL 5';
+digg_bodytext = '<p> The topic of this month\'s article is setting up and configuring a Sendmail and Dovecot e-mail server on RHEL 5.x to provide secure IMAPS mail retrieval with SMTP authenticated relay for our users. Configuring a mail server is an easy task, but it must be done with a security-focused mindset: careless mistakes or misconfiguration are what the spammers are looking for in order to use your mailserver as a slave relay. If a company\'s server is hijacked, this could have some nasty consequences. The company\'s IP could be blacklisted; their legitimate mail could be rejected; they might even get shut down by their ISP. Such a situation could cost the company a great deal of money and their reputation, and you (as system administrator) your job. SMTP authenticated relay allows the users to safely connect from wherever they are while keeping the undesirables out.  </p> ';
+digg_topic = 'linux_unix';
+</script>
+<script src="http://digg.com/tools/diggthis.js" type="text/javascript"></script>
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:158/prestia.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/authors/prestia.jpg" class="bio">
+</p>
+
+<em>
+<p>
+Joey was born in Phoenix and started programming at the age fourteen on
+ a Timex Sinclair 1000. He was driven by hopes he might be able to do
+ something with this early model computer. He soon became proficient in
+ the BASIC and Assembly programming languages. Joey became a programmer
+ in 1990 and added COBOL, Fortran, and Pascal to his repertoire of
+ programming languages. Since then has become obsessed with just about
+ every aspect of computer science. He became enlightened and discovered
+ RedHat Linux in 2002 when someone gave him RedHat version six. This 
+ started off a new passion centered around Linux. Currently Joey is 
+ completing his degree in Linux Networking and working on campus
+ for the college's RedHat Academy in Arizona. He is also on the staff of
+ the Linux Gazette as the Mirror Coordinator.
+</p>
+
+
+
+</em>
+
+<br clear="all">
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2009, Joey Prestia. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication License</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 158 of Linux Gazette, January 2009
+</p>
+
+</div>
+
+<div id="previousnextbottom">
+<A HREF="janert.html" >&lt;-- prev</A> | <A HREF="vogel.html" >next --&gt;</A>
+</div>
+
+</div>
+</div>
+
+<script src="http://www.google-analytics.com/urchin.js"
+type="text/javascript">
+</script>
+<script type="text/javascript">
+_uacct = "UA-1204316-1";
+urchinTracker();
+</script>
+
+
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+</body>
+</html>
+

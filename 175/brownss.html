@@ -1,0 +1,395 @@
+<!DOCTYPE html
+	PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+	 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="utf-8" xml:lang="utf-8">
+<head>
+<title>NAT routing with a faulty uplink LG #175</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link rel="stylesheet" href="../lg.css" type="text/css" media="screen, projection"  />
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="../lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="../lg.rdf" />
+<!-- link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" / -->
+<link rel="shortcut icon" href="../favicon.ico" />
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+</head>
+<body>
+
+<a href="../">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+<div id="navigation">
+<table summary="masthead" width="100%">
+<tr>
+<td align="center" colspan="3" style="font-size: 10px; font-weight: bold">
+<a href="../index.html">Home</a>
+<a href="http://linuxgazette.net">Main Site</a>
+<a href="../faq/index.html">FAQ</a>
+
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/listinfo.cgi">Mailing Lists</a>
+<a href="../jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+<hr width="99%" style="border: 1px inset #000033">
+</td>
+</tr>
+<tr>
+<td width="40%" align="left" style="font-size: 10px; font-weight: bold">
+The Free International Online Linux Monthly
+</td>
+<td width="20%" align="center" style="font-size: 10px; font-weight: bold">
+ISSN: 1934-371X
+</td>
+<td width="40%" align="right" style="font-size: 10px; font-weight: bold">
+Main site: <a href="http://linuxgazette.net">http://linuxgazette.net</a> 
+</td>
+</table>
+</div>
+
+
+<div id="breadcrumbs1">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">June 2010 (#175)</a> &gt; 
+Article
+
+</div>
+
+<div class="articlecontent1">
+<div class="content">
+
+<div id="previousnexttop">
+<A HREF="lg_bytes.html" >&lt;-- prev</A> | <A HREF="dyckoff.html" >next --&gt;</A>
+</div>
+
+<h1>NAT routing with a faulty uplink</h1>
+<p id="by"><b>By <a href="../authors/brownss.html">Silas Brown</a></b></p>
+
+
+<p>
+Faulty uplinks are common, especially if you are using a UMTS (or GPRS)
+modem over a mobile phone network.  In some cases <tt>pppd</tt> will
+automatically re-establish the connection whenever it goes down, but if it
+doesn't you can run a script like this:
+</p>
+
+<pre>
+export GoogleIp=74.125.127.100
+while true; do
+  if ! ping -s 0 -c 1 -w 5 $GoogleIp &gt;/dev/null
+  &amp;&amp; ! ping -s 0 -c 1 -w 5 $GoogleIp &gt;/dev/null
+  &amp;&amp; ! ping -s 0 -c 1 -w 5 $GoogleIp &gt;/dev/null
+  &amp;&amp; ! ping -s 0 -c 1 -w 5 $GoogleIp &gt;/dev/null; then
+    echo "Gone down for more than 20secs, restarting"
+    killall pppd ; sleep 1 ; killall -9 pppd ; sleep 5
+    # TODO restart pppd here; give it time to start
+  fi
+  sleep 10
+done
+</pre>
+
+<p>
+Each <tt>ping</tt> command send a single empty ICMP packet to Google and
+waits up to 5 seconds for a response.  Four failures in a row mean the
+connection is probably broken so we restart <tt>pppd</tt>. I use a more
+complex version of this script which, if it cannot get connectivity back by
+restarting <tt>pppd</tt>, will play a voice alert over the speakers (as
+there is no display on the router machine); the message asks for the modem
+to be physically reset.  (This message is in Chinese because that's what
+I'm learning; it tends to surprise anyone who's visiting me at the time.
+See <A HREF="http://linuxgazette.net/141/brownss.html">An NSLU2 (Slug)
+reminder server</A> in LG #141.)
+</p>
+
+<H2>NAT</H2>
+
+<p>
+Many Linux administrators will be familiar with how to set up a NAT
+router using <tt>iptables</tt>, for connecting other computers on a local
+network to the outside world.  NAT (Network Address Translation) will not
+only forward outgoing IP packets from any of your computers, but will also
+keep track of the virtual connections that these packets are making, so it
+knows which computer to forward the replies to when they arrive.  The basic
+way to set up NAT is:<p>
+
+
+<pre>
+modprobe iptable_nat
+iptables -P FORWARD ACCEPT
+echo 1 &gt; /proc/sys/net/ipv4/ip_forward
+iptables -t nat -F POSTROUTING
+iptables -t nat -A POSTROUTING -j MASQUERADE
+</pre>
+
+<p>
+However, there is a problem with this basic NAT setup: It doesn't cope
+at all well if the uplink to the outside world has to change its IP
+address.
+</P>
+
+<H2>Stuck connections</H2>
+
+<P>
+If the uplink is broken and re-established, but one of your other
+computers continues to send IP packets on a previously-opened connection,
+then the kernel's NAT system will try to forward those packets using the
+same source port and IP address as it had done before the uplink failed,
+and this is not likely to work.  Even in the unlikely event that
+<tt>pppd</tt> acquired the same IP address as before, the ISP's router
+might still have forgotten enough of the state to break the connections.
+One simply cannot assume that already-open connections can continue to be
+used after a modem link has been re-established.
+</p>
+
+<p>
+The problem is, there may be nothing to tell the applications running on
+your other computers that their individual connections need to be dropped
+and re-established.  Applications on the <em>same</em> computer stand a
+chance because the operating system can automatically cut their connections
+when the interface (ppp) goes down, but it's not so easy to tell
+<em>other</em> computers about what just happened to the interface.  Should
+any of them try to continue sending IP packets on an old connection, the
+packets will be faithfully forwarded by NAT using the old settings, and
+probably get nowhere.  In the best case, some upstream router will reply
+with an ICMP Reject packet which will tell the application something has
+gone wrong, but more often than not the packets simply get lost, and your
+application will continue to hold onto the opened connection until it
+reaches its timeout, which could take very many minutes.  (One example of
+an application where this is annoying is the Pidgin instant messaging
+client.  It may look like you're online and ready to receive messages from
+your contacts, but those messages won't reach you because Pidgin is holding
+onto an old connection that it should have discarded when your uplink was
+renewed.)
+</p>
+
+<h2>Clearing the connections</h2>
+
+<p>
+Ideally, it would be nice if the NAT router could, as soon as the
+connection is renewed, send a TCP "reset" (RST) packet on all open TCP
+connections of all your computers, telling them straight away that these
+old connections are no longer useful.  Unfortunately, this is not practical
+because to send a reset packet you need to know the current TCP "sequence
+number" of each connection, and that information is not normally stored by
+the NAT lookup tables because NAT doesn't need it for normal operation.
+(It <em>is</em> possible to flood your local network with thousands of
+reset packets on all possible sequence numbers, for example by using a
+packet-manipulation library like Perl's <tt>Net::RawIP</tt> or a modified
+version of the <tt>apsend</tt> script that uses it, but it takes far too
+long to go through all the sequence numbers.)
+</p>
+
+<p>
+Unless you patch the kernel to make NAT store the sequence number, the
+best you can hope for is to send a reset packet the next time an outgoing
+IP packet from the old connection is seen going through your router.  This
+is normally soon enough, as most applications will at least have some kind
+of "keep-alive" mechanism that periodically checks the connection by
+sending something on it.
+</p>
+
+<p>
+Here is the modified NAT setup script.  Besides <tt>iptables</tt>, you
+will need a program called <tt>conntrack</tt> which is normally available
+as a package.
+</p>
+
+<pre>
+modprobe iptable_nat
+iptables -P FORWARD ACCEPT
+iptables -F FORWARD
+iptables -A FORWARD -m conntrack --ctstate ESTABLISHED -j ACCEPT
+iptables -A FORWARD -p tcp --syn -j ACCEPT
+iptables -A FORWARD -p tcp -j REJECT --reject-with tcp-reset
+conntrack -F
+echo 1 &gt; /proc/sys/net/ipv4/ip_forward
+iptables -t nat -F POSTROUTING
+iptables -t nat -A POSTROUTING -j MASQUERADE
+</pre>
+
+<p>
+The <tt>conntrack -F</tt> command tells the kernel to flush (i.e. clear)
+its connection-tracking tables, so it doesn't know about old connections
+anymore.  That by itself is not enough, however, since any further attempt
+to send IP packets on these old connections will cause NAT to add them back
+into its tables and the packets will still be forwarded; this time they
+probably will reach the remote server, but it won't recognise them because
+they'll be coming from a different source port (and probably a different IP
+address), and if it's not very nice (as many servers aren't because they
+have to live in a big bad world where people launch denial-of-service
+attacks), it won't bother to respond to these stray packets with ICMP
+rejections, so your application still won't know any better.
+</p>
+
+<p>
+Therefore, as well as flushing the connection-tracking tables, we add
+some filtering rules to the <tt>FORWARD</tt> queue that tell the kernel to
+reject any attempt to send TCP packets, unless it's either making a new
+connection (SYN set), or it's on a connection that we know about.  (Note
+that we do have to specify that a new TCP connection is one that has SYN
+set; we can't use the <tt>NEW</tt> criterion in iptables' conntrack module,
+because that will say it's new if it's part of an old connection that just
+isn't in the table.  For the same reason, we can't use conntrack's
+<tt>INVALID</tt> criterion here.) If the IP packet is not from an established
+connection that we know about, then it's probably from a connection that
+existed before we flushed the tables, so we reply to it with a reset
+packet, which should cause the application to realise that this connection
+is no longer working and it should try to make a new one.  (Pidgin will
+actually prompt the user about this, but if it's left unattended then after
+a short time it will answer its own question automatically and
+reconnect.)
+</p>
+
+<p>
+Non-TCP packets (UDP etc) are not affected by this filter, because it
+would be very hard to determine accurately whether they're part of an old
+"connection" or a new one. (It's also not possible to send a "reset" packet
+outside of TCP, although an ICMP rejection can still be generated. For TCP
+connections I'm using reset rather than ICMP-reject because reset seems to
+have a more immediate effect, although I haven't proved that properly.)
+Thankfully, most Internet applications (particularly the ones that are
+likely to run unattended) use TCP at least for their main connections, so
+TCP is probably all we need to concern ourselves with here.
+</p>
+
+<p>
+All that remains is to arrange for the above NAT script to be re-run
+whenever <tt>pppd</tt> is restarted.  That's why it includes the
+<tt>iptables -F</tt> instructions to clear the IP tables before adding
+rules to them; if you always start by clearing the table then running the
+script multiple times will not cause the tables to become cluttered with
+more and more duplicate rules.
+</p>
+
+<h2>Et tu, ISP?</h2>
+
+<p>
+In conclusion I'd like to hazard a guess about some of the cases of
+"stuck SSH sessions" that happen even when the uplink in general seems to
+be working.  Sometimes it seems that new connections work but old
+connections are frozen, although nothing ever happened to the uplink (it's
+still running and was not restarted).  I wonder if in this case some NAT
+box at the ISP simply forgot its association table, and has not been
+configured to send reset packets as above.
+</p>
+
+<p>
+Of course I do set <tt>ServerAliveInterval</tt> in my
+<tt>~/.ssh/config</tt> to make sure that any idle SSH sessions I have will
+periodically send traffic to keep reminding the ISP's NAT boxes I'm still
+here so please don't discard my table entry yet.  I use the line
+<tt>ServerAliveInterval 200</tt> in <tt>~/.ssh/config</tt> for this.
+</p>
+
+<p>
+But sometimes a session can still hang permanently, even while I'm
+actively using it, and I have to close its window or press <tt>~.</tt> to
+quit it, although at the same time any <em>new</em> connections I make work
+just fine.  Perhaps this happens when some event at the ISP causes a NAT
+box to forget its translation table ahead of schedule.  It would be nice if
+they could use a script like the above to kindly send their customers
+TCP-reset packets when this happens, so we're not just left hanging
+there.
+</p>
+
+
+<br clear="all" />
+
+<table align='center' cellspacing='10'>
+<tr>
+<td>
+<script type='text/javascript'>
+digg_url = 'http://linuxgazette.net/175/brownss.html';
+digg_title = 'NAT routing with a faulty uplink';
+digg_bodytext = '<p> Faulty uplinks are common, especially if you are using a UMTS (or GPRS) modem over a mobile phone network.  In some cases <tt>pppd</tt> will automatically re-establish the connection whenever it goes down, but if it doesn\'t you can run a script like this: </p> ';
+digg_topic = 'linux_unix';
+</script>
+<script src="http://digg.com/tools/diggthis.js" type="text/javascript"></script>
+</td>
+<td>
+<a name="fb_share" type="box_count" href="http://www.facebook.com/sharer.php">Share</a>
+<script src="http://static.ak.fbcdn.net/connect.php/js/FB.Share" type="text/javascript"></script>
+</td>
+<td>
+<a href="http://twitter.com/home?status=Currently%20reading:%20http://linuxgazette.net/175/brownss.html%20at%20Linux%20Gazette%20%23linuxgazette" title="Click to share this post on Twitter"><img src="../gx/twitter.png" width="50" height="85" border="0"></a>
+</td>
+</tr>
+</table>
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:175/brownss.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/authors/brownss.jpg" class="bio">
+
+<em>
+Silas Brown is a legally blind computer scientist based in Cambridge UK.
+ He has been using heavily-customised versions of Debian Linux since
+ 1999.
+</p>
+</em>
+
+<br clear="all">
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2010, Silas Brown. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication License</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 175 of Linux Gazette, June 2010
+</p>
+
+</div>
+
+<div id="previousnextbottom">
+<A HREF="lg_bytes.html" >&lt;-- prev</A> | <A HREF="dyckoff.html" >next --&gt;</A>
+</div>
+
+</div>
+</div>
+
+<script src="http://www.google-analytics.com/urchin.js"
+type="text/javascript">
+</script>
+<script type="text/javascript">
+_uacct = "UA-1204316-1";
+urchinTracker();
+</script>
+
+
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+</body>
+</html>
+

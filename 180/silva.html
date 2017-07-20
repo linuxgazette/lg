@@ -1,0 +1,407 @@
+<!DOCTYPE html
+	PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+	 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="utf-8" xml:lang="utf-8">
+<head>
+<title>Installing/Configuring/Caching Django on your Linux server LG #180</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link rel="stylesheet" href="../lg.css" type="text/css" media="screen, projection"  />
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="../lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="../lg.rdf" />
+<!-- link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" / -->
+<link rel="shortcut icon" href="../favicon.ico" />
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+</head>
+<body>
+
+<a href="../">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+<div id="navigation">
+<table summary="masthead" width="100%">
+<tr>
+<td align="center" colspan="3" style="font-size: 10px; font-weight: bold">
+<a href="../index.html">Home</a>
+<a href="http://linuxgazette.net">Main Site</a>
+<a href="../faq/index.html">FAQ</a>
+
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/listinfo.cgi">Mailing Lists</a>
+<a href="../jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+<hr width="99%" style="border: 1px inset #000033">
+</td>
+</tr>
+<tr>
+<td width="40%" align="left" style="font-size: 10px; font-weight: bold">
+The Free International Online Linux Monthly
+</td>
+<td width="20%" align="center" style="font-size: 10px; font-weight: bold">
+ISSN: 1934-371X
+</td>
+<td width="40%" align="right" style="font-size: 10px; font-weight: bold">
+Main site: <a href="http://linuxgazette.net">http://linuxgazette.net</a> 
+</td>
+</table>
+</div>
+
+
+<div id="breadcrumbs1">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">November 2010 (#180)</a> &gt; 
+Article
+
+</div>
+
+<div class="articlecontent1">
+<div class="content">
+
+<div id="previousnexttop">
+<A HREF="grebler1.html" >&lt;-- prev</A> | <A HREF="temme.html" >next --&gt;</A>
+</div>
+
+<h1>Installing/Configuring/Caching Django on your Linux server</h1>
+<p id="by"><b>By <a href="../authors/silva.html">Anderson Silva</a> and <a href="../authors/milner.html">Steve 'Ashcrow' Milner</a></b></p>
+
+<p>
+In today's world, web development is all about turnaround. Businesses want to
+ maximize production outcome while minimizing development and production time. 
+Small, lean development teams are increasingly becoming the norm in large 
+development departments. Enter <a href="http://www.djangoproject.com/" id="u1jv" title="Django">Django</a>: 
+a popular <a href="http://www.python.org/" title="Python">Python</a> web framework 
+that invokes the RWAD (rapid web application development) and DRY (don't repeat 
+yourself) principles with clean, pragmatic design.
+</p>
+<p>
+This article is not about teaching you how to program in Python, nor how to use 
+the Django framework. It's about showing how to promote your Django applications
+ onto an existing Apache or Lighttpd environment.
+</p>
+<p>
+We will conclude with a simple way that you can improve the performance of your 
+Django application by using caching to speed up access time. This article also 
+assumes that you are running Fedora as your web application server, but all the 
+packages mentioned in this article are also available in many OS's including under the 
+<a href="http://fedoraproject.org/wiki/EPEL">Extra Packages for Enterprise Linux
+ repository</a>, which means these instructions should also be valid under 
+Red Hat Enterprise Linux or CentOS servers.
+</p>
+<h3>
+What you need
+</h3>
+<p>
+You must have Django installed:
+</p>
+<pre class="code">$ yum install Django
+</pre>
+<p>
+If you want to serve Django apps under Apache you will need 
+<a href="http://code.google.com/p/modwsgi/">mod_wsgi</a>:
+</p>
+<pre class="code">$ yum install httpd mod_wsgi
+</pre>
+
+<p>
+If you want to serve Django apps under Lighttpd:
+</p>
+<pre class="code">$ yum install lighttpd lighttpd-fastcgi python-flup
+</pre>
+<p>
+Installing memcached to 'speed up' Django apps:
+</p>
+<pre class="code">$ yum install memcached python-memcached
+</pre>
+<h3>
+Starting a new Django project
+</h3>
+<p>
+1. Create a development workspace.
+</p>
+<pre class="code">$ mkdir -p $LOCATION_TO_YOUR_DEV_AREA 
+$ cd $LOCATION_TO_YOUR_DEV_AREA
+</pre>
+<p>
+2. Start a new base Django project. This creates the boiler plate project 
+structure.
+</p>
+<pre class="code">$ django-admin startproject my_app
+</pre>
+<p>
+3. Start the Django development web server on port 8080 (or whatever other port 
+you'd like).
+</p>
+<p>
+Note: The development web server is just for testing and verification. Do not 
+use it as a production application server!
+</p>
+<pre class="code">$ python manage.py runserver 8080
+</pre>
+<p>
+4. Run your Django project under Apache with mod_wsgi by enabling mod_wsgi.
+<i>Note</i> that to do this you will need to have your project in an SELinux
+friendly location (don't use home directories!) as well as readable by apache.
+On Fedora mod_wsgi is auto added upon install via /etc/httpd/conf.d/wsgi.conf.
+Upon restarting of apache, the module will be loaded.
+</p>
+<p>
+5. Create virtual hosts by creating a new file at 
+/etc/httpd/conf.d/myapp.conf.
+</p>
+<pre class="code">WSGIScriptAlias / /path/to/myapp/apache/django.wsgi
+
+DocumentRoot /var/www/html/
+ServerName your_domain_name
+ErrorLog logs/my_app-error.log
+CustomLog logs/my_app-access_log common
+</pre>
+6. In step 5 we defined a script alias and now we need to create the wsgi file
+it references.
+<pre class="code">import os
+import sys
+
+import django.core.handlers.wsgi
+
+# Append our project path to the system library path
+sys.path.append('/path/to/')
+
+# Sets the settins module so Django will work properly
+os.environ['DJANGO_SETTINGS_MODULE'] = 'myapp.settings'
+
+# sets application (the default wsgi app) to the Django handler
+application = django.core.handlers.wsgi.WSGIHandler()
+</pre>
+
+<h3>
+Running your Django project under Lighthttpd with fastcgi
+</h3>
+<p>
+The first thing you must do is start up your FastCGI server.
+</p>
+<pre class="code">./manage.py runfcgi method=prefork socket=/var/www/myapp.sock pidfile=django_myapp.pid</pre>
+<p>
+Then modify your lighttpd.conf file to use the FastCGI server.
+</p>
+<pre class="code">server.document-root = "/var/www/django/"
+fastcgi.server = (
+&nbsp;&nbsp;&nbsp; "/my_app.fcgi" =&gt; (
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; "main" =&gt; (
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; # Use host / port instead of socket for TCP fastcgi
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; # "host" =&gt; "127.0.0.1",
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; # "port" =&gt; 3033,
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; "socket" =&gt; "/var/www/my_app.sock",
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; "check-local" =&gt; "disable",
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; )
+&nbsp;&nbsp;&nbsp; ),
+)
+alias.url = (
+&nbsp;&nbsp;&nbsp; "/media/" =&gt; "/var/www/django/media/",
+)
+url.rewrite-once = (
+&nbsp;&nbsp;&nbsp; "^(/media.*)$" =&gt; "$1",
+&nbsp;&nbsp;&nbsp; "^/favicon\.ico$" =&gt; "/media/favicon.ico",
+&nbsp;&nbsp;&nbsp; "^(/.*)$" =&gt; "/my_app.fcgi$1",
+)
+</pre>
+<h3>
+  Setting up caching in Django
+</h3>
+<p>
+  Django has many different caching backends, including database, memory, 
+filesystem, and the ever popular memcached. According to 
+<a href="http://www.danga.com/memcached/">http://www.danga.com/memcached/</a>, 
+memcached is "a high-performance, distributed memory object caching system, 
+generic in nature, but intended for use in speeding up dynamic web applications 
+by alleviating database load." It's used by high traffic sites such as 
+<a href="http://www.slashdot.org/">Slashdot</a> and 
+<a href="http://www.wikipedia.com/">Wikipedia</a>. This makes it a prime candidate
+ for caching in your cool new web app.
+</p>
+<p>
+First, install memcached.
+</p><pre class="code">$ yum install memcached
+</pre>
+<p>
+Next, install the python bindings for memcached.
+</p><pre class="code">$ yum install python-memcached
+</pre>
+<p>
+  Next, verify that memcached is running using the memcached's init script.
+</p>
+<pre class="code">$ /etc/init.d/memcached status 
+memcached (pid 6771) is running...</pre>
+<p>
+  If it's not running, you can manually start it.
+</p>
+<pre class="code">$ /sbin/service memcached start</pre>
+<p>
+  If you want to make sure it will automatically start every time after a reboot:
+</p>
+<pre class="code">$ /sbin/chkconfig --level 35 memcached on</pre>
+<p>
+  Now that you have verified that memcached is running, you will want to tell 
+your Django application to use memcached as it's caching backend. You can do 
+this by adding a CACHE_BACKEND entry to your settings.py file.
+</p>
+<pre class="code">CACHE_BACKEND = 'memcached://127.0.0.1:11211/'
+</pre>
+<p>
+  The format is "backend://host:port/" or "backend:///path" depending on the 
+backend chosen. Since we are using memcached, we have the option to run multiple
+ daemons on different servers and share the cache across multiple machines. If 
+you want to do this all you must do is add in the servers:port combinations in 
+the CACHE_BACKEND and separate them by semicolons. In this example we share the 
+cache across three different memcached servers:
+</p>
+<pre class="code">CACHE_BACKEND = 'memcached://127.0.0.1:11211;192.168.0.10:11211;192.168.0.11/'
+</pre>
+<p>
+  For more information on the different types of caching that can be performed 
+in the Django framework, please refer to their 
+<a href="http://www.djangoproject.com/documentation/cache/">official documentation</a>.
+</p>
+<p>
+  Finally, whenever you are ready to get your applications into production, 
+you can always write your own Django 
+<a href="http://code.djangoproject.com/wiki/InitdScriptForLinux" title="service script">service script</a>, 
+so your application can start up at boot time.
+</p>
+<p>
+  The original article was published on June 5th, 2008 by Red Hat Magazine,
+ and revised for the 2010 November Issue of Linux Gazette.
+</p>
+
+<br clear="all" />
+
+<table align='center' cellspacing='10'>
+<tr>
+<td>
+<script type='text/javascript'>
+digg_url = 'http://linuxgazette.net/180/silva.html';
+digg_title = 'Installing/Configuring/Caching Django on your Linux server';
+digg_bodytext = '<p> In today\'s world, web development is all about turnaround. Businesses want to  maximize production outcome while minimizing development and production time.  Small, lean development teams are increasingly becoming the norm in large  development departments. Enter Django:  a popular Python web framework  that invokes the RWAD (rapid web application development) and DRY (don\'t repeat  yourself) principles with clean, pragmatic design. </p> ';
+digg_topic = 'linux_unix';
+</script>
+<script src="http://digg.com/tools/diggthis.js" type="text/javascript"></script>
+</td>
+<td>
+<a name="fb_share" type="box_count" href="http://www.facebook.com/sharer.php">Share</a>
+<script src="http://static.ak.fbcdn.net/connect.php/js/FB.Share" type="text/javascript"></script>
+</td>
+<td>
+<a href="http://twitter.com/home?status=Currently%20reading:%20http://linuxgazette.net/180/silva.html%20at%20Linux%20Gazette%20%23linuxgazette" title="Click to share this post on Twitter"><img src="../gx/twitter.png" width="50" height="85" border="0"></a>
+</td>
+</tr>
+</table>
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:180/silva.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<H4>Anderson Silva</H4>
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/authors/silva.jpg" class="bio">
+</p>
+
+<em>
+<p>
+Anderson Silva works as an IT Release Engineer at Red Hat, Inc. He holds a
+BS in Computer Science from Liberty University, a MS in Information Systems
+from the University of Maine. He is a Red Hat Certified Architect and has
+authored several Linux based articles for publications like: Linux Gazette,
+Revista do Linux, and Red Hat Magazine. Anderson has been married to his
+High School sweetheart, Joanna (who helps him edit his articles before
+submission), for 11 years, and has 3 kids. When he is not working or
+writing, he enjoys photography, spending time with his family,  road
+cycling, watching Formula 1 and Indycar races, and taking his boys karting,
+</p>
+
+</em>
+
+<br clear="all">
+
+
+<H4>Steve 'Ashcrow' Milner</H4>
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/2002/note.png" class="bio">
+</p>
+
+<em>
+<p>
+Steve 'Ashcrow' Milner works as a Security Analyst at Red Hat, Inc. He
+ is a Red Hat Certified Engineer and is certified on ITIL Foundations.
+ Steve has two dogs, Anubis and Emma-Lee who guard his house. In his
+ spare time Steve enjoys robot watching, writing open code, caffeine,
+ climbing downed trees and reading comic books.
+</p>
+
+
+
+</em>
+
+<br clear="all">
+
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2010, Anderson Silva and Steve 'Ashcrow' Milner. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication License</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 180 of Linux Gazette, November 2010
+</p>
+
+</div>
+
+<div id="previousnextbottom">
+<A HREF="grebler1.html" >&lt;-- prev</A> | <A HREF="temme.html" >next --&gt;</A>
+</div>
+
+</div>
+</div>
+
+<script src="http://www.google-analytics.com/urchin.js"
+type="text/javascript">
+</script>
+<script type="text/javascript">
+_uacct = "UA-1204316-1";
+urchinTracker();
+</script>
+
+
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+</body>
+</html>
+

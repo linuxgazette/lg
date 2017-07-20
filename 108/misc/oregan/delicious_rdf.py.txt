@@ -1,0 +1,59 @@
+from xml.dom import minidom
+
+import urllib2, base64
+
+user = 'username'
+passwd = 'password'
+
+rdf = open(user+'.rdf', 'w')
+rdf.write('<?xml version="1.0"?>\n')
+rdf.write('<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"\n')
+rdf.write('\txmlns:taxo="http://purl.org/rss/1.0/modules/taxonomy/"\n')
+rdf.write('\txmlns:dc="http://purl.org/dc/elements/1.1/">\n')
+
+rdf.write('<rdf:Description rdf:about="http://del.icio.us/%s">\n' % user)
+rdf.write('<dc:title>del.icio.us page for %s</dc:title>\n' % user)
+rdf.write('</rdf:Description>\n')
+
+rdf.write('\n')
+
+def auth_open(url):
+    request = urllib2.Request(url)
+    base64string = base64.encodestring('%s:%s' % (user,passwd))[:-1]
+    request.add_header("User-Agent", "delicious_rdf v.1")
+    request.add_header("Authorization", "Basic %s" % base64string)
+    return urllib2.urlopen(request)
+
+recent_post_data = auth_open('http://del.icio.us/api/posts/recent?count=100').read()
+# With a prefetched file
+#recent_post_data = open('recent.xml').read()
+posts = minidom.parseString(recent_post_data).documentElement.getElementsByTagName("post")
+
+# This would be needed for RSS 1.0, but not for plain RDF.
+#rdf.write('<rdf:Seq>\n')
+#for rdfli in posts:
+#    rdf.write('<rdf:li rdf:resource="%s" />\n' % (
+#	rdfli.getAttribute("href").encode('ascii', 'xmlcharrefreplace').replace('&', '&amp;')))
+#rdf.write('</rdf:Seq>\n\n')
+    
+
+for post in posts:
+    rdf.write('<rdf:Description rdf:about="%s">\n' % (
+        post.getAttribute("href").encode('ascii', 'xmlcharrefreplace').replace('&', '&amp;')))
+    rdf.write('<dc:title>%s</dc:title>\n' % (
+        post.getAttribute("description").encode('ascii', 'xmlcharrefreplace').replace('"','&quot;').replace('&', '&amp;')))
+    rdf.write('<dc:creator>%s</dc:creator>\n' % (user))
+    desc = post.getAttribute("extended").encode('ascii', 'xmlcharrefreplace').replace('"','&quot;').replace('&', '&amp;')
+    if desc != "":
+        rdf.write('<dc:description>\n%s\n</dc:description>\n' % (desc))
+    rdf.write('<dc:date>\n%s\n</dc:date>\n' % (
+        post.getAttribute("time").encode('ascii', 'xmlcharrefreplace').replace('"','&quot;').replace('&', '&amp;')))
+    tags = post.getAttribute("tag").split()
+    for tag in tags:
+        rdf.write('<dc:subject>%s</dc:subject>\n' % (tag))
+    rdf.write('<taxo:topics>\n  <rdf:Bag>\n')
+    for tag in tags:
+        rdf.write('    <rdf:li resource="http://del.icio.us/tag/%s" />\n' % (tag))
+    rdf.write('  </rdf:Bag>\n</taxo:topics>\n')
+    rdf.write('</rdf:Description>\n\n')
+rdf.write('</rdf:RDF>\n')

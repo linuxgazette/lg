@@ -1,0 +1,316 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Plotting time series data with Gnuplot LG #126</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="howell.html" >&lt;-- prev</A> | <A HREF="pfeiffer.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Plotting time series data with Gnuplot</h1>
+<p id="by"><b>By <A HREF="../authors/peterson.html">Ron Peterson</A></b></p>
+
+<p>
+<h3>Introduction</h3>
+
+<p>Good systems administrators log stuff.  Lots of stuff.  A lot of the
+information we collect consists of time series data: a set of numerical
+values assocated with a sequence of discrete time values.</p>
+
+<p>There are any number of tools to help the diligent sysadmin monitor
+this data visually as it is collected.  A good many of them are built
+using Tobias Oetiker's excellent <a
+href="http://people.ee.ethz.ch/~oetiker/webtools/rrdtool/">RRDTool</a>.
+Some noteworthy examples include Cacti, Cricket, and Smokeping.  There
+are many others.</p>
+
+<p>That's all well and good as long as you know what you want to
+monitor.  However, sometimes you'd just like to do some quick ad hoc
+visualization.  As you might surmise, most Linux systems provide a myriad
+of visualization tools (<a
+href="http://plasma-gate.weizmann.ac.il/Grace/">Grace</a> and <a
+href="http://gri.sourceforge.net/">GRI</a> come to mind).  In this
+article, I'll introduce you to <a
+href="http://www.gnuplot.info/">Gnuplot</a>, focusing specifically on
+how to plot time series data.</p>
+
+<h3>Prepare some data</h3>
+
+<p>Gnuplot without data is like gravy without potatoes.  So before we
+get to the gravy, let's make some potatoes.  Let's say for the sake of
+argument, or at least for the purpose of giving the rest of the article
+something to talk about, I include the following line in my system's
+crontab file:</p>
+
+<p><pre class="code">
+*/1 * * * * root /bin/cat /proc/loadavg 2&gt;&amp;1 | /usr/bin/logger -p local3.info -t CRON-LOADAVG
+</pre></p>
+
+<p>If you're like me, and have configured your system's syslog.conf as
+follows:</p>
+
+<p><pre class="code">
+local3.*  /var/log/cron.log
+</pre></p>
+
+<p>...then you will find all local3 facility messages in their own
+special file.  Because we're telling 'logger' to tag all of our load
+average data, it will be easy to extract this information from the rest
+of our logfile clutter.  A simple 'grep CRON-LOADAVG /var/log/cron.log &gt;
+load.dat.1' should do nicely.  This will give us a file that looks like
+so:</p>
+
+<p><pre class="code">
+Mar 19 00:30:02 ahost CRON-LOADAVG: 0.40 0.78 1.19 11/296 3690
+Mar 19 00:31:01 ahost CRON-LOADAVG: 3.54 1.55 1.41 4/311 3997
+Mar 19 00:32:01 ahost CRON-LOADAVG: 2.68 1.59 1.43 2/278 4142
+...
+</pre></p>
+
+<p>Now let's extract just the data we want:</p>
+
+<p><pre class="code">
+cat load.dat.1 | tr -s ' ' ' ' | cut -d' ' -f1,2,3,6 &gt; load.dat.2
+</pre></p>
+
+<p>The translate command 'tr' squishes multiple spaces into a single
+space, so that we can expect more consistent behaviour from the 'cut'
+command.  In this case, the translate command 'tr' is superfluous, but
+I think it's a good habit nonetheless.  With any luck, our data now
+looks something like:</p>
+
+<p><pre class="code">
+Mar 19 00:30:02 0.40
+Mar 19 00:31:01 3.54
+Mar 19 00:32:01 2.68
+...
+</pre></p>
+
+<p>That's almost perfect.  Unfortunately, our gnuplot example will
+expect two space delimited columns of input, so we need to replace the
+spaces delimiting our timestamp components with some other character,
+like a hyphen.
+
+<p><pre class="code">
+perl -pe 's/(.*?)\s(.*?)\s(.*)/$1-$2-$3/;' load.dat.2 &gt; load.dat.3
+</pre></p>
+
+<p>This isn't a Perl article, so I won't bore you with the details of
+what this command is doing. In the interest of pedagogy though, I think
+it's helpful to illustrate how sausages are sometimes made; even if it
+does make me look like a butcher. Our data now looks like:</p>
+
+<p><pre class="code">
+Mar-19-00:30:02 0.40
+Mar-19-00:31:01 3.54
+Mar-19-00:32:01 2.68
+...
+</pre></p>
+
+<h3>Plot it</h3>
+
+<p>Now it's time for the gravy.  First I'll give you a taste, and then I'll
+explain the recipe.  Create a file with the following contents,
+excluding the line numbers.  Call it 'plot-load.conf'.  Edit the date
+range on line six to include the extents of your data.</p>
+
+<p><pre class="code">
+1  set terminal png size 1200,800
+2  set xdata time
+3  set timefmt "%b-%d-%H:%M:%S"
+4  set output "load.png"
+5  # time range must be in same format as data file
+6  set xrange ["Mar-25-00:00:00":"Mar-26-00:00:00"]
+7  set yrange [0:50]
+8  set grid
+9  set xlabel "Date\\nTime"
+10 set ylabel "Load"
+11 set title "Load Averages"
+12 set key left box
+13 plot "load.dat.3" using 1:2 index 0 title "ahost" with lines
+</pre></p>
+
+<p>If you run the following command, you should end up with a file
+called 'load.png'.  Use your favorite image viewer to take a look.
+Hopefully nothing too alarming shows up.</p>
+
+<p><pre class="code">
+cat plot-load.conf | gnuplot
+</pre></p>
+
+<p>The first line of our gnuplot command file says to create a PNG file,
+and gives its dimensions.  PNG is only one of a myriad possible output
+formats.  The second line says our X axis represents time data.  The
+third line uses standard date format specification (see 'man date') to
+indicate what our data file's timestamp data looks like.  We must use
+the same format in line six, where we indicate our graph's start time
+and end time.  You can omit this, but I find it's useful to anchor the
+endpoints, particularly when plotting multiple data sources in a single
+graph. Line seven sets the plot limits of our Y axis.</p>
+
+<p>Line 13 deserves a little bit of extra attention.  The name of our
+data source comes first.  The 'using 1:2' bit means to extract data from
+columns one and two of our data source.  The 'index 0' bit means to use
+the first data set in the file.  Data sets are delimited by pairs of
+blank records.  Our file was simple.  It only comprised col1 and col2 of
+data set zero in the following pseudo data file.</p>
+
+<p><pre class="code">
+# data set zero
+col1 col2 col3 col4
+col1 col2 col3 col4
+col1 col2 col3 col4
+
+
+# data set one
+col1 col2 col3 col4
+col1 col2 col3 col4
+col1 col2 col3 col4
+col1 col2 col3 col4
+
+
+# data set two
+col1 col2 col3 col4
+col1 col2 col3 col4
+col1 col2 col3 col4
+</pre></p>
+
+<p>Asuuming we had multiple data sets in a single file (perhaps we want
+to compare load averages from multiple hosts), one way we could combine
+this data into a single graph would be to expand our line 13 as
+follows:</p>
+
+<p><pre class="code">
+plot "load.dat.3" using 1:2 index 0 title "ahost" with lines, \
+plot "load.dat.3" using 1:2 index 1 title "bhost" with lines, \
+plot "load.dat.3" using 1:2 index 2 title "chost" with lines
+</pre></p>
+
+<h3>Conclusion</h3>
+
+<p>Potatoes are nice, but as Trotsky once noted, they are "the classic
+symbol of poverty".  Knowing how to quickly whip up some time series
+plots is useful, but Gnuplot is capable of far more than I've even
+hinted at in this article.  Hopefully I've managed to whet your appetite
+to learn even more.</p>
+
+<p>Best.</p>
+
+
+</p>
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:126/peterson.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<!-- *** BEGIN bio *** -->
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/authors/peterson.jpg" class="bio">
+</p>
+<p>
+<em>
+
+Ron Peterson is a Network & Systems Manager at Mount Holyoke College in
+the happy hills of western Massachusetts. He enjoys lecturing his three
+small children about the maleficent influence of proprietary media
+codecs while they watch Homestar Runner cartoons together.
+
+</em>
+</p>
+<br clear="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2006, Ron Peterson. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 126 of Linux Gazette, May 2006
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="howell.html" >&lt;-- prev</A> | <A HREF="pfeiffer.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">May 2006 (#126)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

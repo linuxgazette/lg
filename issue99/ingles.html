@@ -1,0 +1,428 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Lightweight, (Almost) Crypto-Free Remote System Operation LG #99</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="lg_answer.html" >&lt;-- prev</A> | <A HREF="lovett.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Lightweight, (Almost) Crypto-Free Remote System Operation</h1>
+<p id="by"><b>By <A HREF="../authors/ingles.html">Ray Ingles</A></b></p>
+
+<p>
+<blockquote>"There are two ways of constructing a software design. One
+way is to make it so simple that there are obviously no deficiencies,
+and the other is to make it so complicated that there are no obvious
+deficiencies." - C.A.R. Hoare</blockquote>
+<p>
+<blockquote>"Sure I'm paranoid, but am I paranoid
+ENOUGH?" - Unknown</blockquote>
+<p>
+<h2>Introduction</a></h2>
+<p>
+System administrators frequently want to be able to work on the machines
+they run even when they are far away from them. There are secure tools
+that allow full remote shell access, like ssh and lsh, but due to their
+complexity they have suffered critical exploits from time to time.
+In addition, their overhead can be excessive for some purposes. Fortunately,
+other options are available that can be used alone or can be combined with
+remote shells to create a more secure overall system.
+<p>
+<h2>Overview</h2>
+<p>
+Maybe the pager has just gone off when you're home in bed, and the boss
+wants you to fix the broken database <i>now</i>. Or perhaps you're out
+for lunch and someone calls to tell you the mailserver has been cracked
+and is currently spamming the world, and you need to bring it down fast.
+Possibly you've checked and your Web server has wedged itself and needs to
+be restarted. Or suppose you're just on vacation and find you want to
+update your home Web site with some new photos. In all these cases, you'd
+like to do something to the machine over the Internet without having to
+actually sit in front of it - things you don't want just <i>anybody</i>
+to be able to do.
+<p>
+<h3>The Problem</h3>
+<p>
+Tools like <a href="http://www.openssh.org/">ssh</a> and <a
+href="http://www.lysator.liu.se/~nisse/lsh/">lsh</a> are great for allowing
+secure remote access to your system. They offer essentially full, flexible
+remote control of a machine, in an encrypted and authenticated manner. But
+they are complex pieces of software; there's no way to do what they do
+<i>without</i> being complex. And with complexity comes bugs. SSH and lsh,
+and related tools like <a href="http://www.webmin.com/">Webmin</a>, have
+all had serious flaws that would allow an attacker to get full control over
+your system. Leaving them available all the time is a risk - sometimes it's
+necessary, but it's still a risk. And in some cases, you'd like to be able
+to tell the machine to do something, but it's not even attached to the
+network on a regular basis.
+<p>
+<h3>Some Solutions</h3>
+<p>
+It would be nice to enable remote shell access only when necessary. And
+perhaps (for something like shutting down a mail server) you don't even
+need a full shell, just a way to fire off a script remotely. Of course, the
+problem then becomes, how do you know that the alternative software is any
+more secure than ssh itself? Various people have worked on this problem in
+the past, and several potential solutions are available, ranging from the
+simple and venerable to the new and exotic.
+<p>
+<a href="#xringd">Xringd</a> uses a modem to control a machine remotely.
+<a href="#mail">Mail filters</a> can be used to trigger actions based on
+special messages. Some solutions (like <a href="#knock">'port knocking'</a>
+and <a href="#pcap">'Net::Pcap'</a>) use the network, but without requiring
+even a single open port. <a href="#lando">Lando</a> runs commands over a
+network, using username and password. Most recently, a program specifically
+for secure remote execution called <a href="#ost">Ostiary</a> has been
+developed.
+<p>
+<h2>The Options</h2>
+<p>
+<h3><a name="xringd">Old School Remote Operation - Xringd</a></h3>
+<p>
+<a href="http://freshmeat.net/projects/xringd/">The eXtended Ring
+Daemon</a>, or "Xringd", uses a modem to monitor rings on a phone line. It
+counts the number of rings, and the time between them. If a 'sequence'
+matches one of the ones that it has been set up to detect, Xringd will run
+an associated command.
+<p>
+This is very nice from a security perspective. Since it uses no network
+connection at all, it's entirely immune to network attacks like buffer
+overflows. It can be used even when a network connection is unavailable
+(it's often used to cause a computer to initiate a dialup connection).
+The only 'client' you need is a phone. If you use it to start up ssh on
+demand, then the attacker needs to know the right phone number and the
+right ring pattern - it's quite hard to sniff that kind of thing remotely.
+It's also highly resistant to a <a
+href="http://en2.wikipedia.org/wiki/Man-in-the-middle_attack">man in the
+middle attack</a>. (If you have to worry about someone rerouting your
+phone calls, you're in more trouble than Xringd can save you from.)
+<p>
+There <i>are</i> some practical issues that may make this unattractive in
+some circumstances. You need a modem and a telephone line to the server.
+(Fortunately, you don't need a <i>fast</i> modem at all; even a 1200 baud
+one will do nicely, but some servers are not placed close to a telephone
+jack.) Also, things like answering machines or voicemail (or even other
+people answering the telephone) can interfere with Xringd. If you give the
+server a dedicated line, you can avoid these problems, but that can be
+costly.
+<p>
+Finally, note that the rings you hear when making a call are not
+necessarily synchronized with the ring signals actually sent to the
+telephone. In most circumstances, they are close enough, but reliability can
+be an issue at times.
+<p>
+<h3><a name="mail">Procmail And Other Mail Filters</a></h3>
+<p>
+Most of the mail filtering programs have a way to invoke scripts when
+mail matching a pattern is received (in the simplest case, mail to a
+particular address). Assuming the server is running an SMTP daemon,
+this can be a nice way of <a
+href="http://www.appelsiini.net/keitai l/archives/2001 12/0142.html">triggering
+actions remotely</a>. Technically, one could even send a shell script
+to be run, and have it e-mail the results back to you, giving you the
+equivalent of a <i>very</i> slow remote shell. The only client needed
+is an e-mail program, or even a webmail account.
+<p>
+The first problem is that if the box you want to talk to doesn't accept
+e-mail, this obviously won't work. (Adding an entire mail server, with the
+attendant risks of bugs, spam load, etc., just for remote execution doesn't
+make a lot of sense.) Some machines only periodically collect e-mail from
+a primary server, so there can be a substantial delay between when a
+command is sent and when it is acted upon.
+<p>
+Furthermore, if you don't encrypt the traffic in some way (or at least
+sign it with PGP), then anyone sniffing traffic between you and your server
+may be able to take advantage of the same channel to do mischief, or
+perform a man-in-the-middle-attack. (E-mail traffic is notoriously easy to
+falsify; hence the avalanche of spam these days.)
+<p>
+<a href="http://cvtsa.sourceforge.net/">CVTSA</a>, or "ClairVoyanT
+SysAdmin", is a system designed specifically for running commands
+through e-mail. It has some support for using passwords, but does not
+(currently) encrypt them in transit, so a sniffer could capture them
+and use them again.
+<p>
+Of course, if the only things you want to do with this type of system
+are emergency shutdowns and other such (hopefully rare) crisis management,
+then even an unencrypted channel might work. However, you'll need to
+change the 'magic trigger pattern' each time after you use it, or you
+take the risk that an attacker might capture it and 'replay' it at an
+inconvenient time.
+<p>
+<p>
+<h3><a name="knock">Port Knocking</a></h3>
+<p>
+With <a href=http://www.linuxjournal.com/article.php?sid=6811>port
+knocking</a>, a daemon monitors firewall logs, looking for particular
+sequences of connection attempts to particular (closed) ports. When it
+sees a sequence it recognizes, it runs the associated command. This
+isn't terribly bandwidth efficient, but it has some nice properties.
+First, it's hard to tell if a server is listening for port knocks.
+Second (and most important), it's <i>awfully</i> hard to crack a closed
+port. (Linksys routers have had a simple version of this for a while,
+BTW, that they call <a
+href=http://www.dslreports.com/forum/remark,1020195;root=equip,16;mode=flat>port
+triggering</a>.)
+<p>
+However, a clever attacker with a sniffer could notice this traffic,
+and duplicate it for their own use. More complicated encodings could
+express something like a PGP signature (indeed, in theory one could
+create an entire network protocol based on port knocks), but things
+rapidly become difficult to work with. As with 'mail filtering'
+solutions, one can either use it sparingly in emergencies, or move to
+real cryptography.
+<p>
+It's also important to realize that this system is critically dependent
+on the probe packets actually being delivered, and delivered in the
+order that they were sent. This is <i>not</i> guaranteed on the Internet.
+What's more, depending on where you're at (e.g., an Internet cafe or
+behind a business firewall), you might not be allowed to connect out to
+arbitrary ports. The more complex you make the 'knocks', the less
+reliable the system will be.
+<p>
+Also, notice that at least one entire IP packet (28 bytes or so minimum)
+is used to transmit roughly one bit of information. In terms of network
+efficiency, it's almost hideous. For a simple 'open up ssh' message, it's
+not a consideration, but actually adding cryptographic security to this
+system could use up a decent chunk of the available bandwidth.
+<p>
+Finally, this increases the CPU load for each entry in the firewall
+log. Depending on how detailed the logs are, and how fast and busy
+the network is, this can be a significant drain on resources.
+<p>
+<h3><a name="pcap">'Sniffer' Triggers - libpcap and friends</a></h3>
+<p>
+Another interesting approach is to use <a
+href=http://www.hackinglinuxexposed.com/articles/20030730.html>Net::Pcap</a>
+or other network capturing software to look for specific packets on the
+network (e.g., DNS requests) and examine them for particular data (e.g.,
+a particular address). If found, it can enable ssh temporarily, or
+perform other actions.
+<p>
+One potential benefit of this approach is that a computer doesn't have
+to have an <i>address</i> on a network in order to monitor traffic on
+that network. You can set the card to 'promiscuous mode' and examine
+all the traffic on the wire. (It's <i>very</i> hard to hack a machine
+you don't even know is there.) Once the 'trigger' is spotted, the
+sniffer can use other means (a separate network, a serial link, even
+Xringd) to open up SSH on a target machine. Of course, you can also
+simply run the sniffer directly on the target.
+<p>
+Again, a clever attacker with their own sniffer may be able to detect
+the unusual activity and correlate it. To make this system truly
+secure, you would need more complex encoding/encryption of the 'trigger'
+traffic.
+<p>
+Additionally, the CPU load for this solution can be even worse than for
+'port knocking' systems. A 'port knocking' daemon monitors firewall
+logs, which can have variable levels of detail. By necessity, a
+'sniffer' solution must examine <i>every packet on the network
+segment</i>, which can be a substantial task for a busy gigabit line.
+<p>
+<h3><a name="lando">Lando - Simple & Flexible</a></h3>
+<p>
+<a href="http://www.moonglade.com/lando/">Lando</a> allows a user to
+run a preconfigured set of commands remotely, using passwords, and even
+allowing the user to supply arguments to them. While it currently has
+only a Windows client, and passwords are sent in the clear (making it
+suitable only for use on a trusted local network, or perhaps on a VPN),
+it can be very useful for, e.g. operating a local firewall box without
+going to the trouble of logging in.
+<p>
+<h3><a name="ost">Okay, A <i>Little</i> Crypto - Ostiary</a></h3>
+<p>
+All of the above solutions have their advantages, but each has some
+practical issues that can make them unsuitable for particular
+applications. <a
+href="http://ingles.homeunix.org/software/ost/">Ostiary</a> was designed
+to be a secure alternative that uses minimal resources. It tackles this
+problem with what might be termed "aggressive simplicity". It <i>does</i>
+require an active connection to the network (unlike Xringd and sniffing),
+but allows for much better default security with very low CPU, RAM, disk,
+and network bandwidth requirements.
+<p>
+An Ostiary server has one open port that it listens on. When someone
+connects, the server sends a random fixed length 'salt' message 16
+bytes in size - the size of an MD5 <a
+href="http://www.rsasecurity.com/rsalabs/faq/2 1 6.html">hash</a>. It
+then waits (with a timeout) for a reply from the client. It reads (at
+most) 16 bytes of reply, and closes the connection.
+<p>
+Ostiary has a list of commands to run, with associated passwords. It
+runs through the list, and <a
+href="http://www.faqs.org/rfcs/rfc2104.html">hashes these passwords with
+the 'salt' it sent to the client</a>. If one of these hashes matches the
+reply from the client, the associated command is run. (One final touch
+is that a record is kept of connections, and clients with too many
+failed attempts are 'locked out', and all subsequent communication from
+them is ignored.)
+<p>
+A detailed <a
+href="http://ingles.homeunix.org/software/ost/faqs.html">security
+analysis</a> is available, but a few things about this system should
+be clear. With a protocol this simple, the chances for dangerous
+bugs are drastically reduced. Using fixed-length messages essentially
+eliminates the chances of a <a
+href="http://www.catb.org/esr/jargon/html/B/buffer overflow.html">buffer
+overflow</a> or other memory error. (Indeed, Ostiary does no dynamic
+memory allocation of any kind - everything is stored in static,
+fixed-size data structures.) Replay and man-in-the-middle attacks are
+also effectively useless. Ostiary limits how fast it accepts connections,
+enforcing low CPU and network usage. (The first production Ostiary server
+was a 16MHz 68030 machine.) Client requirements are even lower:  Clients
+are available for Palm Pilots and even Windows.
+<p>
+Unlike a procmail-based solution, where you can put arbitrary commands (with
+arguments) in the message, Ostiary can only run the fixed set of commands
+you have preconfigured. The only argument it supplies to the commands is the
+IP address of the client that initiated the command. It requires an active
+network connection (unlike Xringd) and an open port (unlike port knocking or
+sniffing), which may entail configuring a firewall to open a new port.
+(Although one <i>could</i> run Ostiary on, say, port 22, and upon receipt of
+the correct command, it could terminate itself and spawn sshd...)
+<p>
+Since Ostiary uses TCP, it is as reliable as the network it uses to
+communicate. Problems with miscounted phone rings (a la Xringd) or randomly
+dropped packets (a la port knocking) are not a concern.
+<p>
+<h2>Summary</h2>
+<p>
+The following table summarizes the pros and cons of the various systems
+outlined above. "Replay" and "Man-in-the-middle" indicate if the default
+system is vulnerable to the corresponding attacks. "Command arguments"
+indicates if the system can run arbitrary commands with arguments. "CPU
+load" indicates that CPU time can be a significant consideration. "Special
+client" indicates that a specific client program is needed to work with
+that system.
+<p>
+<TABLE BORDER=1>
+<TR><TD>System</TD><TD>Xringd</TD><td>Mail filter</td><td>Port knocking</td><td>Sniffers</td><td>Lando</td><td>Ostiary</td></TR>
+<TR><TD>Network Required?</TD><TD> </TD><td>Yes</td><td>Yes</td><td>Yes</td><td>Yes</td><td>Yes</td></TR>
+<TR><TD>Port Required?</TD><TD> </TD><td>Yes</td><td> </td><td> </td><td>Yes</td><td>Yes</td></TR>
+<TR><TD>Modem Required?</TD><TD>Yes</TD><td> </td><td> </td><td> </td><td> </td><td> </td></TR>
+<TR><TD>Replay?</TD><TD> </TD><td>Yes</td><td>Yes</td><td>Yes</td><td>Yes</td><td> </td></TR>
+<TR><TD>Man-in-the-middle?</TD><TD> </TD><td>Yes</td><td>Yes</td><td>Yes</td><td>Yes</td><td> </td></TR>
+<TR><TD>Command arguments?</TD><TD> </TD><td>Yes</td><td> </td><td> </td><td>Yes</td><td> </td></TR>
+<TR><TD>CPU load?</TD><TD> </TD><td>Sometimes</td><td>Yes</td><td>Yes</td><td> </td><td> </td></TR>
+<TR><TD>Special client?</TD><TD> </TD><td> </td><td>Sometimes</td><td>Sometimes</td><td>Yes</td><td>Yes</td></TR>
+</TABLE>
+<p>
+None of these approaches is right for everyone. But all of them can be
+used to make attacks at least more inconvenient, and in many cases far
+more difficult. Remember, though, to analyze their pros and cons
+relative to your specific situation. Also remember that true security
+is a process, not a goal - you can never just install some software
+and be done thinking about it.
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<P>
+<img ALIGN="LEFT" ALT="[BIO]" SRC="../gx/2002/note.png" class="bio">
+<em>
+Ray Ingles has been involved with Linux since 1995. In 
+addition to being an active member of the 
+<a href="http://www.mdlug.org">Metro Detroit Linux User's Group</a>,
+he has made minor contributions to the UPS HOWTO and the Linux
+Joystick Driver.
+</em>
+<br CLEAR="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2004, Ray Ingles. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 99 of Linux Gazette, February 2004
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="lg_answer.html" >&lt;-- prev</A> | <A HREF="lovett.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">February 2004 (#99)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/2003/sit3-shine.7-2.gif" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

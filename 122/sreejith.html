@@ -1,0 +1,696 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Stepper motor driver for your Linux Computer LG #122</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="smith.html" >&lt;-- prev</A> | <A HREF="collinge.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Stepper motor driver for your Linux Computer</h1>
+<p id="by"><b>By <A HREF="../authors/sreejith.html">Sreejith N</A></b></p>
+
+<p>
+<h3>An introduction intended for people with no prior device driver
+knowledge</h3>
+
+<p>This article is intended for those newbie Linux users who wish
+to use their Linux-box for some <strong>real</strong> work. I will
+also share some interesting experiments that I did with my AMD
+machine.</p>
+
+<h3>INIT</h3>
+
+<p>Learning new stuff is fun, but can be a bit frustrating. So, you
+want to write a <em>device driver</em>. The name itself is high-tech! You
+have some skills in the C programming language and want to explore the
+same. Also, you've written a few normal programs to run as processes
+in user space, and now you want to enter kernel space - where the
+real action takes place. Why Linux device drivers? The answer
+is,</p>
+
+<ul>
+<li>For fun</li>
+
+<li>For profit (Linux is HOT right now, especially embedded
+Linux)</li>
+
+<li>Because you can! The source is with you.</li>
+</ul>
+
+<p>Although it is possible to learn device driver coding by
+reading some books and PDFs written by the masters, this is a
+complicated and time-consuming approach. We will take the quick and
+easy approach, which is:</p>
+
+<ul>
+<li>Find some pre-written, working code</li>
+
+<li>Understand how this code works</li>
+
+<li>Modify it to suit our needs</li>
+</ul>
+
+<p>Let's make an easy start with some fundamentals.</p>
+
+<h3>Stepper motor basics</h3>
+
+<p>Stepper motors are special direct-current (DC) motors, typically used in
+applications like camera zoom drive and film feed, fax machines, printers,
+copying machines, paper feeders/sorters, disk drives and robotics.</p>
+
+<p>A DC stepper motor translates current pulses into motor rotation. A
+typical unipolar (single voltage) motor contains four winding coils.
+Applying voltage to these coils forces the motor to advance one step. In
+normal operation, two winding coils are activated at the same time, causing
+the motor to move one step clockwise. If the sequence is applied in
+reverse order, the motor will run counterclockwise. The speed of rotation
+is controlled by the frequency of the pulses.</p>
+
+<p><img alt="Basic Stepper Motor Conceptual Wiring Diagram" src=
+"misc/sreejith/windingdiag.png">
+</p>
+
+<p>A typical full step rotation is 1.8 degrees, or 200 steps per rotation
+(360 degrees).  By changing the time delay between successive steps, the
+speed of the motor can be regulated, and by counting the number of steps,
+the rotation angle can be controlled.</p>
+
+<p> <img alt=
+"Stepper Motor Full Step Signal Timing Diagram" src=
+"misc/sreejith/timingdiag.png"></p>
+
+<table border="1" cellpadding="2" frame="border">
+  <caption>Bit Pattern for Full Step Mode</caption>
+  <tbody align="center">
+    <tr>
+      <td></td>
+      <td>Green</td>
+      <td>Blue</td>
+      <td>Orange</td>
+      <td>Red</td>
+      <td>Hex Output Value</td>
+    </tr>
+    <tr>
+      <td>Step 0</td>
+      <td>1</td>
+      <td>0</td>
+      <td>1</td>
+      <td>0</td>
+      <td>A</td>
+    </tr>
+    <tr>
+      <td>Step 1</td>
+      <td>1</td>
+      <td>0</td>
+      <td>0</td>
+      <td>1</td>
+      <td>9</td>
+    </tr>
+    <tr>
+      <td>Step 2</td>
+      <td>0</td>
+      <td>1</td>
+      <td>0</td>
+      <td>1</td>
+      <td>5</td>
+    </tr>
+    <tr>
+      <td>Step 3</td>
+      <td>0</td>
+      <td>1</td>
+      <td>1</td>
+      <td>0</td>
+      <td>6</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>Hardware ideas</h3>
+
+<p>The circuit diagram for the drive is shown below.</p>
+
+<p> <img alt="Unipolar Stepper Motor Drive Circuit" src=
+"misc/sreejith/motordriveckt.png"></p>
+
+<p>The circuit consists of four TIP122 power transistors (T1, T2, T3 and T4),
+220&Omega; resistors (R1, R2, R3 and R4), 3.3K&Omega; resistors
+(R5, R6, R7 and R8), 1N4148 freewheeling diodes (D1, D2, D3 and D4), and
+one LM7407 buffer chip (IC1). The 7407 buffer used here is a hex-type
+open-collector high-voltage buffer. The 3.3K&Omega; resistors 
+are the pull-up resistors for the open-collector buffer. The input for this buffer
+comes from the parallel port. The output of the buffer is of higher
+current capacity than the parallel port output, which is necessary for
+triggering the transistor; it also isolates the circuit from the PC
+parallel port and hence provides extra protection against potentially
+dangerous feedback voltages that may occur if the circuit fails. The diode
+connected across the supply and the collector is used as a freewheeling
+diode and also to protect the transistor from the back EMF of the motor
+inductance. The motor used in my experiments (and documented here) was an
+STM 901 from <a href="http://www.srijandrives.com/product.htm">Srijan
+Control Drives</a>.</p>
+
+<p>During normal operation, the output pattern from the PC drives
+the buffer, and corresponding transistors are switched on. This
+leads to the conduction of current through those coils of the
+stepper motor which are connected to the energized transistor.
+This makes the motor move forward one step. The next pulse will
+trigger a new combination of transistors, and hence a new set of
+coils, leading to the motor moving another step. The scheme of
+excitation that we have used here has already been shown above.</p>
+
+<h3>How do we interface the hardware with the Linux-box?</h3>
+
+<p>You can use either the parallel port or the serial port for this
+purpose. We will be using parallel port as a digital interface
+between PC and the hardware (stepper motor drive). The parallel port
+can be considered as a register, and the I/O operations can be done
+simply by writing bit patterns (numbers like 0xA, 10, '1010', etc.)
+to this register. The base address of parallel port is 0x378. The PC
+parallel port is a 25 pin D-shaped female connector in the back of
+the computer. It is normally used for connecting computer to
+printer, but many other types of hardware for that port are
+available.</p>
+
+<p><!-- IMG height=200 alt=[pport]
+src="misc/sreejith/pport.png"
+width=300 --> <img alt="Parallel Port Pinout" src=
+"misc/sreejith/pport.png"></p>
+
+<p>The original IBM PC's Parallel Printer Port had a total of 12
+digital outputs and 5 digital inputs accessed via 3 consecutive
+8-bit ports in the processor's I/O space.</p>
+
+<ol>
+<li>8 output pins accessed via the DATA Port</li>
+
+<li>5 input pins (one inverted) accessed via the STATUS Port</li>
+
+<li>4 output pins (three inverted) accessed via the CONTROL
+Port</li>
+
+<li>The remaining 8 pins are grounded</li>
+</ol>
+
+<p>To read a byte (8 bits) coming <em>into</em> a port, call <code>inb
+(port)</code>; to <em>output</em> a byte, call <code>outb (value,
+port)</code> (please note the order of the parameters). The data outputs
+are provided by an 74LS374 totem-pole TTL integrated circuit, which can
+source (+) 2.6 mA and sink (-) 24 mA. The best option for preventing
+damage to the port is to use optocouplers; by doing so, the port is
+completely electrically isolated from external hardware devices.</p>
+
+<h3>What is a module?</h3>
+
+<p>Modules are pieces of code that can be loaded into and unloaded from a
+running kernel upon demand. They extend the functionality of the kernel
+without the need to reboot the system. Device drivers are a class of
+modules which allows the kernel to control hardware connected to the system.
+In this article, I have written a simple device driver to control a stepper
+motor drive; now it is time to log on to your console and start coding your
+very first module.</p>
+
+<p>Let's have an unusual start! You have written so many "Hello,
+World" programs. So this time something different - "No gates, No
+windows, it's open". You will get these words printed on your
+console when you insert your first module.</p>
+
+<pre class="code">
+/*mymodule.c - The simplest kernel module.*/
+#include &lt;linux/module.h&gt; /* Needed by all modules */
+#include &lt;linux/kernel.h&gt; /* Needed for KERN_ALERT */
+
+int init_module(void)
+{
+        printk("&lt;1&gt;No gates, No windows, it's open\n");
+        return 0;/* A non-0 return means init_module failed; module can't be loaded.*/
+}
+
+void cleanup_module(void)
+{
+        printk("Goodbye\n");
+}
+</pre>
+
+<p>The "start" function in a kernel module is init_module () which
+is called when the module is insmoded into the kernel, and the
+"end" (cleanup) function cleanup_module() is called just before it
+is rmmoded.</p>
+
+<h3>Compiling kernel modules</h3>
+
+<p>Kernel modules need to be compiled with certain GCC options to
+make them work. In addition, they also need to be compiled with certain
+symbols defined. This is because kernel header files need to behave
+differently, depending on whether we're compiling a kernel module or
+executable.</p>
+
+<ol>
+<li>-C: A kernel module is not an independent executable, but an
+<em>object file</em> which will be linked into the kernel during runtime
+using insmod.</li>
+
+<li>-O2: The kernel makes extensive use of inline functions, so
+modules must be compiled with the optimization flag turned on.
+Without optimization, some of the assembler macro calls will fail. This
+will cause loading the module to fail, since insmod won't find those
+functions in the kernel.</li>
+
+<li>-D_KERNEL_: Defining this symbol tells the header files that
+the code will be run in kernel mode, not as a user process.</li>
+
+<li>-W -Wall : Enable All Warnings.</li>
+</ol>
+
+<h3><a href="misc/sreejith/Makefile">Makefile</a> (2.4.24
+kernel)</h3>
+ 
+<p> As an example, let's take a look at the options we're going to use in
+compiling the "stepper" module that we'll see a little later in this
+article:</p>
+
+<pre class="code">
+TARGET := stepper
+WARN   := -W -Wall
+INCLUDE:= /usr/src/linux-2.4/include
+#INCLUDE:= -isystem /usr/src/`uname -r`/include
+CFLAGS := -O2 -DMODULE -D__KERNEL__ ${WARN} -I${INCLUDE}
+all : stepper.o
+#${TARGET}.o : ${TARGET}.c
+clean:
+        rm -rf *.o
+</pre>
+
+<p>You can learn more about <code>make</code> utility by reading "man make".</p>
+
+<h3>Anatomy of device drivers</h3>
+
+<p>There is a lot of documentation on the Web, including PDFs and ebooks,
+on device drivers; also, you can download some useful guides from The Linux
+Documentation Project website. For the time being, just read these
+points carefully; later, you can move on to some detailed references.</p>
+
+<ul>
+<li>A device driver has two sides. One side talks to the rest of
+the kernel and to the hardware, and the other side talks to the
+user.</li>
+
+<li>To talk to the kernel, the driver registers with subsystems to
+respond to events. Such an event might be the opening of a file,
+writing some useful data, the plugging in of a pen-drive (USB
+device), etc.</li>
+
+<li>Since Linux is a type of UNIX, and in UNIX everything is a file, users
+talk with device drivers through device files, which are like a digital
+representation of a hardware device.</li>
+
+<li>A stepper is a <em>character</em> device, and thus the user talks to it
+through a character device file. The other common type of device file is
+<em>block</em>. We will only discuss character device files in this
+article.</li>
+
+<li>The user controls the stepper motor through the /dev/stepper
+device file</li>
+
+<li>When the user opens /dev/stepper, the kernel calls stepper's
+open routine</li>
+
+<li>When the user closes /dev/stepper, the kernel calls stepper's
+release routine</li>
+
+<li>When the user reads or writes from or to /dev/stepper - I think
+you got the idea...</li>
+</ul>
+
+<p>Now let's examine our code.</p>
+
+<pre class="code">
+#define MODULE
+
+#include &lt;linux/module.h&gt;
+#include &lt;asm/uaccess.h&gt;
+#include &lt;sys/io.h&gt;
+#include &lt;linux/fs.h&gt;
+
+#define LPT_BASE 0x378
+#define DEVICE_NAME "stepper"
+
+static int Major,i,j,k;
+static int Device_Open = 0;
+
+
+//static int pattern[2][8][8] = {
+//        {{0xA,0x9,0x5,0x6},{0xA,0x8,0x9,0x1,0x5,0x4,0x6,0x2}},
+//        {{0x6,0x5,0x9,0xA},{0x2,0x6,0x4,0x5,0x1,0x9,0x8,0xA}}
+//};
+
+static int pattern[2][8][8] = {
+        {{0xA,0x9,0x5,0x6,0xA,0x9,0x5,0x6},{0xA,0x8,0x9,0x1,0x5,0x4,0x6,0x2}},
+        {{0x6,0x5,0x9,0xA,0x6,0x5,0x9,0xA},{0x2,0x6,0x4,0x5,0x1,0x9,0x8,0xA}}
+};
+
+int step()
+{
+        if(k&lt;8) {
+//              if(pattern[i][j][k]==0) {
+//                      k=0;
+//                      printk("%d\n",pattern[i][j][k]);
+//                      k++;
+//              }
+//              else {
+                        printk("%d\n",pattern[i][j][k]);
+                        k++;
+//              }
+        }
+        else  {
+                k=0;
+                printk("%d\n",pattern[i][j][k]); /*#####*/
+                k++; /*#####*/
+        }
+        return 0;
+}
+
+static int stepper_open(struct inode *inode,struct file *filp)
+{
+        static int counter = 0;
+        if(Device_Open) return -EBUSY;
+        printk("Opening in WR mode...\n");
+        Device_Open++;
+        MOD_INC_USE_COUNT;
+        return 0;
+}
+
+static int stepper_release(struct inode *inode,struct file *filp)
+{
+        printk("Clossing...\n");
+        Device_Open --;
+        MOD_DEC_USE_COUNT;
+        return 0;
+}
+static int stepper_write(struct file *file, const char *buffer, size_t len,
+loff_t *offset)
+{
+        char *data;
+        char cmd;
+        get_user(data,buffer);
+        switch (cmd=data) {
+                case 'H':
+                        printk("Reffer README file\n");
+                        break;
+                case 'h':
+                        printk("Half-Step mode initialized\n");
+                        j=0;
+                        break;
+                case 'f':
+                        printk("Full-Step mode initialized\n");
+                        j=1;
+                        break;
+                case 'F':
+                        i=0;
+                        step();
+                        break;
+                case 'R':
+                        i=1;
+                        step();
+                        break;
+//              default:
+//                      printk("Give 'H' for Help\n");
+//                      break;
+        }
+        return 1;
+}
+
+static struct file_operations fops={
+        open:stepper_open,
+        write:stepper_write,
+        release:stepper_release,
+};
+
+int init_module(void)
+{
+        Major = register_chrdev(0, DEVICE_NAME, &amp;fops);
+        if (Major &lt; 0) {
+                printk("&lt;1&gt;Registering the character device failed with %d
+\n",Major);
+                return Major;
+        }
+        printk("&lt;1&gt;Registered, got Major no= %d\n",Major);
+        return 0;
+}
+
+void cleanup_module(void)
+{
+        printk("&lt;1&gt;Unregistered\n");
+        unregister_chrdev(Major,DEVICE_NAME);
+}
+</pre>
+Follow this <a href="misc/sreejith/stepper.c">link</a> to download
+the code.
+
+<h3>Driver initialization</h3>
+
+<ol>
+<li>The init_module() function is called on the driver's
+initialization</li>
+
+<li>The cleanup_module () function is called when the driver is
+removed from the system</li>
+
+<li>The init function will register hooks that will get the
+driver's code called when the appropriate event happens</li>
+
+<li>There are various hooks that can be registered: file
+operations, PCI operations, USB operations, network operations.
+Ours is a file operation.</li>
+
+<li>The driver registers a character device tied to a given major
+number and a user can create access points corresponding to this
+major number.The following command will do it for you:</li>
+</ol>
+
+<pre class="code">
+mknod /dev/stepper c 254 0
+</pre>
+
+<h3>How stuff works</h3>
+
+<p>A user space program can write commands to the device file to
+rotate the stepper motor through a desired angle at desired speed.
+The speed of rotation depends upon the delay given in the user
+program.</p>
+
+<p>The built in commands for controlling the stepper motor is given
+below.</p>
+
+<ul>
+<li>H ----------- Help</li>
+
+<li>h ----------- Half-step mode</li>
+
+<li>f ----------- Full-step mode</li>
+
+<li>F ----------- Rotate one step clockwise</li>
+
+<li>R ----------- Rotate one step anti-clockwise</li>
+</ul>
+
+<h3>File operations</h3>
+
+<p>The driver makes use of the following device file
+operations:</p>
+
+<ol>
+<li>open for allocating resources</li>
+
+<li>release for releasing resources</li>
+
+<li>write the required pattern to the parallel port.</li>
+
+<li>there is no reading in our program, but if you want, you
+can read the current pattern at the parallel port.</li>
+</ol>
+
+<p>If you write 'F' once to "/dev/stepper", the motor will rotate
+through its minimum step-angle. If you keep on writing 'F' to
+"/dev/stepper", it will rotate continuously. The "write" system
+call will do this for you.</p>
+
+<pre class="code">
+#include "<a href="misc/sreejith/header.h">header.h</a>"
+
+main ()
+{
+        char t,buf[6] = {'h','f','F','R','H','q'};
+        int fd,rt,i,j;
+        size_t count;
+        printf("Select Mode \n(1) [Half-step clockwise]\n(2) [Half-step
+anti-clockwise]\n(3) [Full-step clockwise]\n(4) [Full-step anti-clockwise]  :
+");
+        t=getchar();
+        if(t=='1') {i=0; j=2;}
+        else if(t=='2') {i=0; j=3;}
+        else if(t=='3') {i=1; j=2;}
+        else {i=1; j=3;}
+        fd=open("stepper",O_WRONLY);
+        rt=write(fd,&amp;amp;buf[i],count);
+        for(i=0;i&lt;1000;i++) {
+                rt=write(fd,&amp;buf[j],count);
+                usleep (100000);
+        }
+        close(fd);
+}
+</pre>
+
+<p> Also, if you are familiar with shell scripting, you can do the same by
+writing a simple shell script. Now you can start talking to the device
+/dev/stepper. It will be really interesting if you talk in Linux's language
+- I mean a <a href="misc/sreejith/sscript">shell script</a>. Just use
+simple echo commands as given below:</p>
+
+<pre class="code">
+echo H &gt; /dev/stepper
+</pre>
+
+<p>Do you think that Morpheus is talking to you? Your kernel is replying to
+your commands. How's that! Now, you too can feel like you are The One.</p>
+
+<h3>Conclusion</h3>
+
+<p>I hope I have given you some basics of device driver coding and perhaps
+a "small step toward Robotics". Here is a detailed schematic of a
+stepper-controlled <a href= "misc/sreejith/robotichandscematic.png">robotic
+arm</a>; feel free to <a href= "misc/sreejith/robotichand/diagram.html">try
+it out</a>. One can connect three stepper motors simultaneously to the PC
+parallel port and can achieve step-wise mobility; this allows anyone to
+start thinking of complex innovative mobility with multi-threaded
+programming in Linux. You can also add C functions to our module to enhance
+its functionality... the possibilities are endless!</p>
+
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<p>
+
+<img align="left" alt="[BIO]" src="../gx/authors/sreejith.jpg" class="bio">
+
+<em>
+<p>
+I am a Linux enthusiast living in India. I enjoy the freedom and power that
+Linux offers. I must thank my mentor Mr. Pramode C. E. for introducing me to
+the wonderful world of Linux.
+</p>
+
+<p>
+I completed my B-Tech in Electrical and Electronics Engineering from Govt.
+Engineering College, Thrissur (Kerala, India) (2001 - 2005). Presently I am
+working in inDSP Audio Technologies Pvt. Ltd, Trivandrum, India as an
+Embedded Systems Engineer.
+</p>
+
+<p>
+I spend my free time reading books on Linux and exploring the same. My
+other areas of interest include device drivers, embedded
+systems, robotics and process control.
+</p>
+</em>
+
+<br clear="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2006, Sreejith N. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 122 of Linux Gazette, January 2006
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="smith.html" >&lt;-- prev</A> | <A HREF="collinge.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">January 2006 (#122)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

@@ -1,0 +1,53 @@
+#!/bin/bash
+
+PIP='xxx.xxx.xxx.xxx'           # Palm's IP address
+DEV=/dev/ttyUSB1              	# ttyUSB Port for comms
+PPPD=/usr/sbin/pppd		# where is pppd?
+BAUD=57600			# BPS Rate for connection
+PSTR="Product=Palm Handheld"    # String present when palm is attached
+
+# Detect the IP interface and DNS
+# This does not use NAT, but I am sure the NATterers will know what to do
+#
+IF=`/sbin/ifconfig eth0 | grep 'inet addr'`
+IP=`echo "$IF" | sed "s/^.*addr://" | cut -f1 -d' '`
+MASK=`echo "$IF" | sed "s/^.*Mask://" | cut -f1 -d' '`
+DNS=`cat /etc/resolv.conf  | grep nameserver | head -1 | sed "s/nameserver //"`
+OPT="$BAUD crtscts $IP:$PIP ms-dns $DNS"
+OPT="$OPT nopersist noauth passive asyncmap 0"
+
+echo "Listening for palm connection..."
+while true; do
+  PDEV=`cat /proc/bus/usb/devices`
+  if echo "$PDEV" | grep "$PSTR" > /dev/null; then	# Palm wakeup
+    sleep 2						# wait a bit
+    CHR=""
+    FUSR=`/usr/bin/fuser $DEV`
+    if [ -z "$FUSR" ]; then      	# Anyone else out there?
+      CHR=`head -c1 $DEV`		# read a character from the device
+    fi
+    if [ "$CHR" = "~" ]; then		# Initial character for PPP is a tilde
+      echo "Palm wants to PPP"
+      PDEVT=`echo "$PDEV" | grep -B4 "$PSTR"`
+      PDEV_T=`echo "$PDEVT" | grep "^T:"`
+      echo "$PDEV_T"			# some verbosity
+      sleep 2
+
+      echo executing cmd: $PPPD $DEV $OPT
+
+      $PPPD $DEV $OPT 			# exec pppd
+    else
+      echo "Palm is HotSynching"
+    fi
+    while echo "$PDEV" | grep "$PSTR" > /dev/null; do
+      PDEV=`cat /proc/bus/usb/devices`
+      sleep 1				# Just wait for device to go away
+    done
+    if [ "$CHR" = "~" ]; then
+      echo "Done. Killing pppd..."	# Kill off our pppd
+      killall pppd
+    fi
+    echo "Listening for palm connection..."
+  fi
+  sleep 1
+done

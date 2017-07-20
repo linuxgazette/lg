@@ -1,0 +1,352 @@
+<!--startcut ======================================================= -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<html>
+<head>
+<META NAME="generator" CONTENT="lgazmail v1.3B.f">
+<TITLE>The Answer Guy 50: Redirecting stdin into telnet</TITLE>
+</HEAD><BODY BGCOLOR="#FFFFFF" TEXT="#000000"
+	LINK="#3366FF" VLINK="#A000A0">
+<!-- ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::: -->
+<H4>"The Linux Gazette...<I>making Linux just a little more fun!</I>"</H4>
+<P> <hr> <P>
+<!-- ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::: -->
+<center>
+<H1><A NAME="answer">
+	<img src="../../gx/dennis/qbubble.gif" alt="(?)" 
+		border="0" align="middle">
+	<font color="#B03060">The Answer Guy</font>
+	<img src="../../gx/dennis/bbubble.gif" alt="(!)" 
+		border="0" align="middle">
+</A></H1> 
+<BR>
+<H4>By James T. Dennis,
+	<a href="mailto:tag@lists.linuxgazette.net">tag@lists.linuxgazette.net</a><BR>
+	LinuxCare,
+	<A HREF="http://www.linuxcare.com/">http://www.linuxcare.com/</A> 
+</H4>
+</center>
+
+<p><hr><p>
+<!--  endcut ======================================================= -->
+<!-- begin 34 -->
+<H3 align="left"><img src="../../gx/dennis/qbubble.gif" 
+	height="50" width="60" alt="(?) " border="0"
+	>Redirecting stdin into telnet</H3>
+
+
+<p><strong>From Christopher Smith  on Tue, 18 Jan 2000  
+</strong></p>
+<!-- ::
+Redirecting stdin into telnet
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+:: -->
+<P><STRONG>
+I'm running <A HREF="http://www.redhat.com/">Red Hat</A> 6.0, and I'm 
+trying to redirect my telnet
+stdin from a file.  Whenever I use either a pipe or <tt>&lt;</tt> input, the
+client connects, informs me that the <tt>escape is ^]</tt>, and says <tt>the
+remote server has closed the connection</tt>.  What's wrong?
+</STRONG></P>
+<P><STRONG>
+Example: $ <tt>telnet csmith &lt; input.txt</tt>
+</STRONG></P>
+<P><STRONG>
+Christopher Smith
+</STRONG></P>
+<BLOCKQUOTE><IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	>
+I've seen examples of telnet scripting being done this
+way.  However, I think it probably depends on the
+version of telnet that you're using and there is a
+better way.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+For example when I do an strace on my copy of
+telnet I find a number of system calls like:
+</BLOCKQUOTE>
+
+<blockquote><pre>ioctl(0, SNDCTL_TMR_STOP, {B134 -opost -isig -icanon echo ...}) = -1 ENOTTY (Inappropriate ioctl for device)
+</pre></blockquote>
+<BLOCKQUOTE>
+Note that result: <tt>ENOTTY</tt> which is kernel speak for
+"Error, this file handle doesn't refer to a terminal
+device (TTY)"
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+This suggests that telnet is detecting that its
+input file handle is not a terminal device, and is
+bailing at that point.  
+<ul><li> (It would be nice if it
+gave an error message a unique error code and if
+they listed this constraint in their man pages).</ul>
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+Anyway, simple redirection is not the way to
+run interactive programs like telnet under scripted
+control.  You probably want to use the 'expect'
+scripting language instead.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+For example, here's a simple 'expect' script to
+control telnet sessions:
+</BLOCKQUOTE>
+
+<blockquote><pre>#!/usr/bin/expect -f
+# Sample telnet automation
+## call with autotel host username password
+
+set host [lindex $argv 0]
+set rcfile [open ~/.autotel/$host  r ]
+gets $rcfile user
+gets $rcfile pass
+spawn telnet  "$host"
+expect "login:"
+send "$user\r"
+expect "word:"
+send "$pass\r"
+interact
+</pre></blockquote>
+<BLOCKQUOTE>
+This appears in my book (<a href="http://www.amazon.com/exec/obidos/ASIN/1562059343/linuxsystemadmin/104-3347499-9099625"
+	>Linux System Administration</a>,
+published by New Riders Publishing).  You call it like:
+</BLOCKQUOTE>
+<BLOCKQUOTE><BlockQuote><Code>
+autotel foo
+</Code></BlockQuote></BLOCKQUOTE>
+<BLOCKQUOTE>
+... and it will automatically look for a .autotel/foo
+file under you home directory, read a pair of lines
+for the user name and password.  Then it uses them to
+login to the host (whose name must match the
+<tt>.autotel/</tt> filename (*) ).
+</BLOCKQUOTE>
+<BLOCKQUOTE><ul><li>
+(Actually the version of this on my own
+system read three lines from the autotel
+files: a location, and the username/password
+pair).
+</UL></BLOCKQUOTE>
+<BLOCKQUOTE>
+As I say this is a very simple 'expect' script.  It
+shows the most basic features of the language:
+you can do all of the normal things like open
+files, read from and write to them, do basic string
+handling and arithmetic, etc.  But the features of
+'expect' for which it is renouned include the ability
+to '<tt>spawn</tt>' interactive processes on psuedo-terminals
+(ptys), and to '<tt>expect</tt>' certain patterns from the
+them, and '<tt>send</tt>' strings back to them.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+Of course 'expect' has support for the common conditional
+and looping structures, and the '<tt>expect</tt>' function supports
+timeouts values.  So you can write arbitrary handling for
+errors and situations that don't match your intended
+dialog.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+There's also the '<tt>interact</tt>' function which allows
+your script to turn the keyboard back over to you,
+so that the script then passively relays your input
+and the program's output.  Actually the '<tt>interact</tt>'
+function is even more powerful than than since it
+can also monitor the communications and dynamically
+"catch" certain key sequences, expanding them into
+macros, or using them as triggers to execute your
+own defined procedures or to break out of the
+interaction and complete other parts of the script.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+So, I'd check out the 'expect' programming language
+and see if that will help.  Here's an untested script
+that would do something like what you wanted:
+</BLOCKQUOTE>
+
+<blockquote><pre>#!/usr/bin/expect -f
+# Sample telnet "feeder"
+
+set host [lindex $argv 0]
+set infilename [lindex $argv 1]
+set infile [open $infilename r ]
+spawn telnet  "$host"
+while [ gets $infile line ] {
+    sleep 1
+    send -- $line
+    }
+
+</pre></blockquote>
+<BLOCKQUOTE>
+(This would just blindly feed lines into a telnet
+session from your input file.  It's pretty stupid,
+but you'd call it with something like:
+</BLOCKQUOTE>
+<BLOCKQUOTE><BlockQuote><Code>
+telfeeder host.domain.not ./filename
+</Code></BlockQuote></BLOCKQUOTE>
+<BLOCKQUOTE>
+... note the lack of redirection here).
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+Note that it's also possible to use C-Kermit
+(the kermit communications package from Columbia
+University <A HREF="http://www.columbia.edu/kermit"
+	>http://www.columbia.edu/kermit</A>) to automate
+and script a communications session.  I wrote an
+article about this for SysAdmin Magazine
+(<A HREF="http://www.samag.com/archive/0607/index.shtml"
+	>http://www.samag.com/archive/0607/index.shtml</A>) back
+in 1997.  The key point of that article (which is
+not online, though I could probably re-publish myself
+now) is that Kermit is not just a file transfer protocol
+and it is not limited simply to modem and serial
+communications, it has support for telnet and rlogin
+protocols.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+In fact Kermit as improved since my article:
+</BLOCKQUOTE>
+<BLOCKQUOTE><ul><li>
+it now supports Kerberos authentication and encryption
+
+<li>
+it has internal SSL support
+
+<li>
+it can use some other program like ssh for its
+communications channel.
+
+<li>
+it can now operate as an alternative to FTP
+using providing a number of advantages over the
+somewhat decrepit FTP protocol.
+
+<li>
+the license has been clarified and liberalized
+a bit, to allow re-distribution with free OS
+packages (like Linux, *BSD, etc) etc.
+</UL></BLOCKQUOTE>
+<BLOCKQUOTE>
+(Some of these were features I recommended to Frank
+de la Cruz, the father of Kermit, during my research and
+in subsequent e-mail conversations.  However, I'm by no
+means the only person to make these sorts of suggestions and
+I couldn't claim any credit for their development).
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+One other alternatives to 'expect' that comes to mind is the
+<tt>Expect.pm</tt>, PERL module which add 'expect' features to the
+PERL 5 language.  (The old PERL 4 had a <tt>comm.pl</tt> library that
+offered some of these features as well).
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+I'm sure there are others.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+Hopefully this will help you solve the real problem that
+you're bumping into.  Obviously, solving the problem goes
+way beyond just answering the question you asked.
+</BLOCKQUOTE>
+
+<!-- sig -->
+
+
+<!-- end 34 -->
+<!--startcut ======================================================= -->
+<P> <hr> <P>
+<H5 align="center"><a href="http://www.linuxgazette.net/copying.html"
+	>Copyright &copy;</a> 2000, James T. Dennis 
+<BR>Published in <I>The Linux Gazette</I> Issue 50 February 2000</H5>
+<H6 ALIGN="center">HTML transformation  by
+	<A HREF="mailto:star@starshine.org">Heather Stern</a> of
+	Starshine Technical Services,
+	<A HREF="http://www.starshine.org/">http://www.starshine.org/</A> 
+</H6>
+<P> <hr> <P>
+<!-- begin tagnav ::::::::::::::::::::::::::::::::::::::::::::::::::-->
+<TABLE WIDTH="95%"><TR VALIGN="center" ALIGN="center">
+<TD colspan="2" rowspan="2"><A 
+	HREF="../lg_answer50.html"
+	><IMG SRC="../../gx/dennis/answernew.gif"
+              ALT="[ Answer Guy Current Index ]"></A>
+<TD colspan="2" rowspan="2"><A 
+	HREF="../../tag/kb.html"
+	><IMG SRC="../../gx/dennis/answertoc.gif"
+              ALT="[ Index of Past Answers ]"></A></td>
+  <TD WIDTH="11%"><A HREF="../lg_answer50.html#greeting"><img
+	src="../../gx/dennis/smily.gif" alt="greetings" border="0"></A></TD>
+  <TD WIDTH="11%"><A HREF="1.html">1</A></TD>
+  <TD WIDTH="11%"><A HREF="2.html">2</A></TD>
+  <TD WIDTH="11%"><A HREF="3.html">3</A></TD>
+  <TD WIDTH="11%"><A HREF="4.html">5</A></TD>
+</TR><TR VALIGN="center" ALIGN="center">
+  <TD WIDTH="11%"><A HREF="5.html">5</A></TD>
+  <TD WIDTH="11%"><A HREF="6.html">6</A></TD>
+  <TD WIDTH="11%"><A HREF="7.html">7</A></TD>
+  <TD WIDTH="11%"><A HREF="8.html">8</A></TD>
+  <TD WIDTH="11%"><A HREF="9.html">9</A></TD>
+</TR><TR VALIGN="center" ALIGN="center">
+  <TD WIDTH="10%"><A HREF="10.html">10</A></TD>
+  <TD WIDTH="10%"><A HREF="11.html">11</A></TD>
+  <TD WIDTH="10%">&nbsp;</TD>
+  <TD WIDTH="10%"><A HREF="13.html">13</A></TD>
+  <TD WIDTH="11%"><A HREF="14.html">14</A></TD>
+  <TD WIDTH="11%"><A HREF="15.html">15</A></TD>
+  <TD WIDTH="11%"><A HREF="16.html">16</A></TD>
+  <TD WIDTH="11%"><A HREF="17.html">17</A></TD>
+</TR><TR VALIGN="center" ALIGN="center">
+  <TD WIDTH="10%"><A HREF="18.html">18</A></TD>
+  <TD WIDTH="10%"><A HREF="19.html">19</A></TD>
+  <TD WIDTH="10%"><A HREF="20.html">20</A></TD>
+  <TD WIDTH="10%"><A HREF="21.html">21</A></TD>
+  <TD WIDTH="11%"><A HREF="22.html">22</A></TD>
+  <TD WIDTH="11%"><A HREF="23.html">23</A></TD>
+  <TD WIDTH="11%"><A HREF="24.html">24</A></TD>
+  <TD WIDTH="11%">&nbsp;</TD>
+</TR><TR VALIGN="center" ALIGN="center">
+  <TD WIDTH="10%"><A HREF="26.html">26</A></TD>
+  <TD WIDTH="10%"><A HREF="27.html">27</A></TD>
+  <TD WIDTH="10%"><A HREF="28.html">28</A></TD>
+  <TD WIDTH="10%"><A HREF="29.html">29</A></TD>
+  <TD WIDTH="11%"><A HREF="30.html">30</A></TD>
+  <TD WIDTH="11%"><A HREF="31.html">31</A></TD>
+  <TD WIDTH="11%"><A HREF="32.html">32</A></TD>
+  <TD WIDTH="11%"><A HREF="33.html">33</A></TD>
+</TR><TR VALIGN="center" ALIGN="center">
+  <TD WIDTH="10%"><A HREF="34.html">34</A></TD>
+  <TD WIDTH="10%">&nbsp;</TD>
+  <TD WIDTH="10%"><A HREF="36.html">36</A></TD>
+  <TD WIDTH="10%"><A HREF="37.html">37</A></TD>
+  <TD WIDTH="11%"><A HREF="38.html">38</A></TD>
+  <TD WIDTH="11%"><A HREF="39.html">39</A></TD>
+  <TD WIDTH="11%"><A HREF="40.html">42</A></TD>
+  <TD WIDTH="11%"><A HREF="41.html">41</A></TD>
+</TR><TR VALIGN="center" ALIGN="center">
+  <TD WIDTH="10%"><A HREF="42.html">42</A></TD>
+  <TD WIDTH="10%"><A HREF="43.html">43</A></TD>
+  <TD WIDTH="10%"><A HREF="44.html">44</A></TD>
+  <TD WIDTH="10%"><A HREF="45.html">45</A></TD>
+  <TD WIDTH="11%"><A HREF="46.html">46</A></TD>
+  <TD WIDTH="11%"><A HREF="47.html">47</A></TD>
+  <TD WIDTH="11%"><A HREF="48.html">48</A></TD>
+</TR></TABLE>
+</TR><TR VALIGN="center" ALIGN="center">
+<!-- end tagnav ::::::::::::::::::::::::::::::::::::::::::::::::::::-->
+<P> <hr> <P>
+<!-- begin lgnav ::::::::::::::::::::::::::::::::::::::::::::::::::: -->
+<A HREF="../index.html"
+	><IMG SRC="../../gx/indexnew.gif" ALT="[ Table Of Contents ]"></A>
+<A HREF="../../index.html"
+	><IMG SRC="../../gx/homenew.gif" ALT="[ Front Page ]"></A>
+<A HREF="../lg_bytes50.html"
+	><IMG SRC="../../gx/back2.gif" ALT="[ Previous Section ]"></A>
+<A HREF="../../faq/index.html"
+	><IMG SRC="../../gx/dennis/faq.gif"
+              ALT="[ Linux Gazette FAQ ]"></A>
+<A HREF="../lg_tips50.html"
+	><IMG SRC="../../gx/fwd.gif" ALT="[ Next Section ]"></A>
+<!-- end lgnav ::::::::::::::::::::::::::::::::::::::::::::::::::::: -->
+<!-- ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::: -->
+</BODY></HTML>
+<!--endcut ========================================================= -->

@@ -1,0 +1,224 @@
+<!--startcut ==========================================================-->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML>
+<HEAD>
+<TITLE>Debugging CGI Programs over TCP Sockets LG #34</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#A000A0"
+ALINK="#FF0000">
+<!--endcut ============================================================-->
+
+<H4>
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H1><font color="maroon">Debugging CGI Programs over TCP
+Sockets</font></H1>
+<H4>by <A HREF="mailto:omalley@umich.edu">Kevin O'Malley</A></H4>
+</center>
+<P> <HR> <P>  
+
+<!--
+<center>
+<img src="udb.gif">
+</center>
+-->
+
+<H3>BACKGROUND</H3>
+<P>
+This article evolved from my frustration in developing and debugging CGI
+programs
+written for the
+<A HREF="http://auction.eecs.umich.edu">AuctionBot</A>, a multi-purpose
+auction server.
+I found that the available C libraries, C++ class libraries and web
+server extensions did not fit my needs so I decided to implement a
+different approach based on
+debugging over TCP sockets.  Using this approach, I have successfully
+implemented and debugged most of the CGI's for this project.  
+
+<P>
+My development machine at work is a Sun Ultra 1 running
+Solaris 2.5.  At home I have a Linux box running RedHat 5.0.  I
+developed all my debugging code under Linux.  Linux provides a very
+stable development environment that allowed me to develop, test and 
+experiment locally, without requiring remote login to the Sun.
+Once the code was running, I simply moved it over to the Sun, built it
+and started using it.
+
+<P>
+<H3>OVERVIEW</H3>
+
+Debugging CGI (Common Gateway Interface) programs present unique
+challenges not found when debugging programs in more traditional
+environments.  CGI's are executed by a web server and run within the
+environment created by the web server.  This makes a CGI's
+runtime behavior strongly coupled to the environment setup by the web
+server.  A developer can not simply run a CGI from a shell, or under a
+debugger, and expect it to behave as it does while running within the
+web server environment.
+<P>
+A common CGI debugging technique involves capturing the
+environment that a CGI is run under (usually to a disk file),
+restoring the environment on a local machine and running the CGI
+locally within the restored environment.  Using this technique, 
+CGI's can be run from the command-line, or from within a debugger
+(<CODE>gdb</CODE> for example) and debugged using familiar debugging
+techniques. This technique is straight forward, but requires the developer
+to perform the extra work of capturing and restoring the CGI runtime
+environment. 
+<P>
+
+Another problem in debugging CGI's is viewing the output of a CGI that
+fails to run correctly.  If you are using Apache 1.2 or later, this can be
+addressed by configuring the web server to log error messages to a
+error log file.  This approach works for some classes of problems, but
+does not provide the granularity I wanted.
+<P>
+
+One could write debugging/status information to log files and use
+<code>tail -f logfile</code> to view the file.  This works, but can
+produce deadlock conditions if multiple copies of your CGI are
+running and they attempt to use the same shared resource (the log file) and
+do not use file locking.  Developers must provide file locking code
+and handle possible deadlock conditions, including cases where a CGI
+crashes before it releases its file lock [1]. In addition, all writes
+must be atomic to ensure correct output.
+<P>
+
+Ideally, one would like to debug the CGI in its natural surroundings,
+i.e. from within environment created by the web server, without any
+extra setup work.
+
+<H3>MY SOCKET-BASED SOLUTION</H3>
+
+An alternative technique is to use network sockets to write
+debugging information using printf-like statements to a debug server
+application running on the developers local machine, or any machine
+on the network.  Using this technique, CGI's can be debugged and
+monitored quickly and easily while running within the server environment.
+
+The class <CODE>SocketDB</CODE> provides the required behavior
+to debug CGI's over TCP sockets.  The class supplies methods to
+connect to the server and write strings over a TCP socket.
+
+<PRE>
+class SocketDB
+{
+private:
+  int mSD;
+  ErrorTypes mErrorType;
+  int mConnected;
+  
+public:
+  SocketDB();
+  SocketDB(char *name, int port);
+  ~SocketDB();
+
+  int Connected() { return mConnected; }      
+  int ErorType() { return mErrorType; }      
+  int Connect(char *name, int port);
+  
+  int Print(char *format,...);
+  int Println(char *format,...);
+};
+</PRE>
+
+To connect to the server use the <CODE>SocketDB</CODE> constructor passing
+the server name and port, or use the <CODE>Connect</CODE> method.  Both
+will
+attempt to connect to the server on the specified port.  Use the
+<CODE>Connected</CODE> method to determine if the connection was
+successful or you can use the return value of <CODE>Connect</CODE>.
+The <CODE>Connect</CODE> method returns 1 if connected, otherwise, 0.
+If a connect error occurs, use the <CODE>ErorType</CODE> method to get
+error information.  The file <CODE>Socket.C</CODE> enumerates the
+error types.
+
+<H4>THE CLIENT</H4>
+
+The program <CODE>DebugClient</CODE> (see DebugClient.C) shows how to use
+the class.
+For simplicity, I designed this program to run from the command-line,
+rather than a CGI program run by the web server.  I choose this approach
+so users could quickly run the program and see how the socket
+debug class works.  Integrating the class into a CGI is very straight
+forward.  
+<P>
+The program attempts to connect to the debug server program specified
+by the command-line arguments host and port (see source code).  If
+it fails to connect, it prints a message, and the error code and
+exits.  If it connects, it prints the test string, writes the same
+string over a TCP socket to debug server and reports the result of
+the debug server write. 
+
+<H4>A DEBUG SERVER</H4>
+
+The program <CODE>DebugServer</CODE> (see DebugServer.C) implements an
+example
+debug server [2]. This program is a simple echo server that creates a
+socket, binds to it and accepts connections from clients.  Once it
+gets a connection it forks off and handles the connection.  In this
+case it just reads a string and echoes it.
+
+<H4>USING THE PROGRAMS</H4>
+
+To use the client program and the debug server, <CODE>cd</CODE> to the
+directory
+containing the example programs and type <CODE>DebugServer [port]</CODE>
+where
+port is the port you want the server to listen on.  For example, to run the
+program
+on port 4000, type <CODE>DebugServer 4000</CODE>.
+<P>
+In another shell <CODE>cd</CODE> to the directory containing the example
+programs and type <CODE>DebugClient [host] [port]</CODE> where host is the
+host name
+of the machine the server is running on (get this by typing
+<CODE>hostname</CODE>
+at the command prompt) and the port is the port were the server to
+listening (4000 for example).
+<P>
+You should see a text string written to the server and to the shell.
+
+<H3>CONCLUSIONS</H3>
+Using network sockets to write debugging and state information to a server
+application is a flexible and effective technique for monitoring and
+debugging CGI programs.  Using this method, developers can quickly
+debug CGI's while they run within the server environment.
+
+<H3>RESOURCES</H3>
+
+[1]. W. R. Steven, 1990, <i>UNIX Network Programming</i>. New Jersey:
+Prentice-Hall, Inc, pp. 88-101. 
+<br>
+[2].  W. R. Steven, 1990, <i>UNIX Network Programming, Network APIs:
+Sockets and XTI Volume 1</i>. New Jersey: Prentice-Hall, Inc. 
+<P> 
+Code: <A
+HREF="http://groucho.eecs.umich.edu/~omalley/software/socket_debug-1.0.tar.gz">
+http://groucho.eecs.umich.edu/~omalley/software/socket_debug-1.0.tar.gz</A> 
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<center><H5>Copyright &copy; 1998, Kevin O'Malley <BR> 
+Published in Issue 34 of <i>Linux Gazette</i>, November 1998</H5></center>
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<A HREF="./index.html"><IMG ALIGN=BOTTOM SRC="../gx/indexnew.gif" 
+ALT="[ TABLE OF CONTENTS ]"></A>
+<A HREF="../index.html"><IMG ALIGN=BOTTOM SRC="../gx/homenew.gif"
+ALT="[ FRONT PAGE ]"></A>
+<A HREF="./york.html"><IMG SRC="../gx/back2.gif"
+ALT=" Back "></A>
+<A HREF="./adler.html"><IMG SRC="../gx/fwd.gif" ALT=" Next "></A>
+<P> <hr> <P> 
+<!--startcut ==========================================================-->
+</BODY>
+</HTML>
+<!--endcut ============================================================-->

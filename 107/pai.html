@@ -1,0 +1,830 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Understanding Threading in Python LG #107</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="odonovan.html" >&lt;-- prev</A> | <A HREF="pramode.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Understanding Threading in Python</h1>
+<p id="by"><b>By <A HREF="../authors/pai.html">Krishna G Pai</A></b></p>
+
+<p>
+<p><EM> When programming, in any language, the capability to spawn worker 
+threads is integral to the performance of any application. Whether it be 
+running a separate thread to handle user interaction in a GUI app, while 
+running a potentially blocking process in the background (like your browser is 
+doing now), threading is essential. This document attempts to show what is 
+possible and what not while Threading in Python.</EM></p> 
+
+<H2>1.Why Threading in Python?</H2>
+<P> Let us say you write, in Python, a nifty utility that lets you filter your 
+mail.</P>
+<P>
+You build a GUI Frontend using PyGTK. Now if you embed the filter code in the 
+frontend, you risk making the application unresponsive (you still have a dial up
+connection, and any server interaction entails a considerable waiting time). 
+Since you don't work at Microsoft, you decide this is unacceptable and thus you 
+start a separate thread each time you want to filter your mail. </P>
+<p>Thus threads increase the responsiveness of your programs. Threads also 
+increase efficiency and speed of a program, not to mention the algorithmic 
+simplicity.</p>
+<p>Combined with the power of python, this makes programming in python very 
+attractive indeed.
+</P>
+
+<h2>2.The Basics </h2>
+
+<P> Let us first see how to start a simple thread. Threading is supported via 
+the <TT>thread</TT> and <TT>threading</TT> modules. 
+These modules are supposed to be optional, but if you use an OS that doesn't 
+support threading, you'd better switch to Linux.</P>
+	
+<P>The code given below runs a simple thread in the background.
+(<a href="misc/pai/simple.py.txt">Text version</a>)</P>
+	
+<PRE CLASS="code">
+#!/usr/bin/env python
+
+import time
+import thread
+
+def myfunction(string,sleeptime,*args):
+    while 1:
+       
+        print string
+        time.sleep(sleeptime) #sleep for a specified amount of time.
+
+if __name__=="__main__":
+
+    thread.start_new_thread(myfunction,("Thread No:1",2))
+
+    while 1:pass
+</PRE>
+
+<P>We start a new thread by using the <code>start_new_thread()</code> function 
+which takes the address of the object to be run, along with  arguments to be 
+passed to the object, which are passed in a tuple.</P>
+
+<h3>2.1 Locks </h3>
+<p> Now that we have one thread running, running multiple threads is as simple 
+as calling <code>start_new_thread()</code> multiple times. The problem now would
+be to synchronize the many threads which we would be running. Synchronization 
+is done using a <tt>Lock</tt> object. <tt>Locks</tt> are created using the 
+<code>allocate_lock()</code> factory function. </p>
+
+<P><tt>Locks</tt> are used as mutex objects, and are used for handling critical 
+sections of code. A thread enters the critical section by calling the 
+<code>acquire()</code> method, which can either be blocking or non-blocking. A 
+thread exits the critical section, by calling the <code>release()</code> method.</p>
+<p>The following listing shows how to use the <tt>Lock</tt> object. 
+(<a href="misc/pai/lock.py.txt">Text version</a>)
+</p>
+<pre class="code">
+#!/usr/bin/env python
+
+import time
+import thread
+
+def myfunction(string,sleeptime,lock,*args):
+    while 1:
+	#entering critical section
+        lock.acquire() 
+        print string," Now Sleeping after Lock acquired for ",sleeptime
+        time.sleep(sleeptime) 
+        print string," Now releasing lock and then sleeping again"
+        lock.release()
+	#exiting critical section
+        time.sleep(sleeptime) # why?
+
+if __name__=="__main__":
+
+    lock=thread.allocate_lock()
+    thread.start_new_thread(myfunction,("Thread No:1",2,lock))
+    thread.start_new_thread(myfunction,("Thread No:2",2,lock))
+
+    while 1:pass
+</pre>
+
+<p>The code given above is fairly straight forward. We call 
+<code>lock.acquire()</code> just before entering the critical section and then 
+call <code>lock.release()</code> to exit the critical section.</p>
+
+<p>The inquisitive reader now may be wondering why we sleep after exiting the 
+critical section.</p>
+
+<p>Let us examine the output of the above listing.</p>
+
+<p><b>Output.</b></p>
+<hr>
+<pre>
+Thread No:2  Now Sleeping after Lock acquired for  2
+Thread No:2  Now releasing lock and then sleeping again
+Thread No:1  Now Sleeping after Lock acquired for  2
+Thread No:1  Now releasing lock and then sleeping again
+Thread No:2  Now Sleeping after Lock acquired for  2
+Thread No:2  Now releasing lock and then sleeping again
+Thread No:1  Now Sleeping after Lock acquired for  2
+Thread No:1  Now releasing lock and then sleeping again
+Thread No:2  Now Sleeping after Lock acquired for  2
+</pre>
+<hr>
+<p>Here every thread is given an opportunity to enter the critical section. But 
+the same <i>cannot</i> be said if we remove <code>time.sleep(sleeptime)</code> 
+from the above listing.  </p>
+
+<p><b>Output without time.sleep(sleeptime) </b></p>
+<hr>
+<pre>
+Thread No:1  Now Sleeping after Lock acquired for  2
+Thread No:1  Now releasing lock and then sleeping again
+Thread No:1  Now Sleeping after Lock acquired for  2
+Thread No:1  Now releasing lock and then sleeping again
+Thread No:1  Now Sleeping after Lock acquired for  2
+Thread No:1  Now releasing lock and then sleeping again
+Thread No:1  Now Sleeping after Lock acquired for  2
+Thread No:1  Now releasing lock and then sleeping again
+Thread No:1  Now Sleeping after Lock acquired for  2
+Thread No:1  Now releasing lock and then sleeping again
+Thread No:1  Now Sleeping after Lock acquired for  2
+Thread No:1  Now releasing lock and then sleeping again
+Thread No:1  Now Sleeping after Lock acquired for  2
+Thread No:1  Now releasing lock and then sleeping again
+Thread No:1  Now Sleeping after Lock acquired for  2
+</pre>
+<hr>
+
+<p> <i>Why</i> does this happen? The answer lies in the fact that Python is 
+<b><em>not fully threadsafe</em></b>.
+Unlike Java, where threading was considered to be so important that it is a 
+part of the syntax, in Python threads were laid down at the altar of 
+Portability. 
+<p>In fact the documentation reads: </p>
+<ul>
+<li>
+Not all built-in functions that may block waiting for I/O allow other threads 
+to run. (The most popular ones (<code>time.sleep()</code>, 
+<code>file.read()</code>, <code>select.select()</code>) work as expected.)</li>
+<li>It is not possible to interrupt the <code>acquire()</code> method on a lock 
+-- the KeyboardInterrupt exception will happen after the lock has been acquired.
+</li>
+</ul>
+
+<P>What this means is that quite probably any code like the following:</p>
+<pre class="code">
+while 1:
+	lock.acquire()
+	.....
+	#some operation
+	.....
+	lock.release()
+</pre>
+<p>will cause starvation of one or more threads. </p>
+
+<h2> 3. The Global Interpreter Lock</h2>
+
+<p> Currently, The Python Interpreter (Python 2.3.4) is not thread safe.
+There are no priorities, no thread groups. Threads cannot be stopped and 
+suspended, resumed or interrupted. That is, the support provided is very much 
+basic. However a lot can still be accomplished with this meager support, with 
+the use of the <tt>threading</tt> module, as we shall see in the following 
+sections. One of the main reasons is that in actuality only one thread is 
+running at a time. This is because of some thing called a <b>Global Interpreter
+Lock (GIL)</b>. In order to support multi-threaded Python programs, there's a 
+global lock that must be held by the current thread before it can safely access 
+Python objects. Without the lock competing threads could cause havoc, for 
+example: when two threads simultaneously increment the reference count of the 
+same object, the reference count could end up being incremented only once 
+instead of twice. Thus only the thread that has acquired the GIL may operate on 
+Python Objects or call Python C API functions.  </p>
+ 
+<p>In order to support multi threaded Python programs the interpreter regularly 
+releases and reacquires the lock, by default every 10 bytecode instructions. 
+This can however be changed using the <code>sys.setcheckinterval()</code> 
+function. The lock is also released and reacquired around <em>potentially</em> 
+blocking I/O operations like reading or writing a file, so that other threads 
+can run while the thread that requests the I/O is waiting for the I/O operation 
+to complete.</p>
+<p>In particular note: </p>
+<ul>
+<li> C extensions can release the GIL.</li>
+<li> Blocking I/O can release the GIL.</li>
+</ul>
+
+<P>The Python Interpreter keeps some book keeping info per thread, for which it 
+uses a data structure called <tt>PyThreadState</tt>. Earlier the state was 
+stored in global variables and switching threads could cause problems. In 
+particular, exception handling is now thread safe when the application uses  
+<code>sys.exc_info()</code> to access the exception last raised in the current 
+thread. There's one global variable left, however: the pointer to the current 
+<tt>PyThreadState</tt> structure. While most thread packages have a way to 
+store ``per-thread global data,'' Python's internal platform independent thread 
+abstraction doesn't support this yet. Therefore, the current thread state must 
+be manipulated explicitly. The global interpreter lock is used to protect the 
+pointer to the current thread state. When releasing the lock and saving the 
+thread state, the current thread state pointer must be retrieved before the 
+lock is released (since another thread could immediately acquire the lock and 
+store its own thread state in the global variable). Conversely, when acquiring 
+the lock and restoring the thread state, the lock must be acquired before 
+storing the thread state pointer</P>
+<hr>
+<pre>
+  ------------------------------------------------------------------
+  Global Thread | Global Thread  | Global Thread  | Global Thread  | 
+  Pointer 1     | Pointer 2      | Pointer 2      | Pointer 2      |
+  ------------------------------------------------------------------
+        ^            ^               ^                ^
+	|            |               |                |
+	|            |               |                |
+	|            |               |                |
+	------------------------------------------------
+	|                                              |
+	|            Global  Interpreter  Lock         |
+	|                                              |
+	------------------------------------------------
+	 ^         ^            ^           ^      
+	 |         |            |           |  
+	 |         |            |           |
+	Thread No   Thread No    Thread No  Thread No
+	    1           2           3          4   
+         
+   
+</pre>
+<hr>
+  
+<h2> 4.Using the Threading Module </h2>
+
+<p> Python manages to get a lot done using so little. The Threading module uses 
+the built in thread package to provide some very interesting features that 
+would make your programming a whole lot easier. There are in built mechanisms 
+which provide critical section locks, wait/notify locks etc. In particular we 
+shall look at: </p>
+<ul>
+<li> Using the Thread object</li>
+<li> Profiling the Threaded code</li>
+<li> Using the Condition, Event, and Queue object.</li></p>
+</ul>
+
+<h3> 4.1 Using the Threading Library</h3>
+<p> The major Components of the Threading module are:
+<ul>
+<li> Lock object</li>
+<li> RLock object</li>
+<li> Semaphore Object</li>
+<li> Condition Object</li>
+<li> Event Object</li>
+<li> Thread Object</li>  
+</ul>
+<p> While we have visited the <tt>Lock</tt> object in the previous sections, the
+<tt>RLock</tt> object is something new. <tt>RLock</tt> provides a mechanism for 
+a thread to acquire multiple instances of the same lock, each time incrementing 
+the depth of locking when acquiring and decrementing the depth of locking when 
+releasing. <tt>RLock</tt> makes it very easy to write code which conforms to 
+the classical Readers Writers Problem. The <tt>Semaphore</tt> Object (rather 
+the Semaphore Object Factory) is the general implementation of the Semaphore 
+mooted by Dijikstra. We shall understand the implementation of the Condition,
+Event and Thread Objects via some examples. </p>
+ 
+<h3>4.2 The Thread Object</h3>
+<p> The Thread Object is a wrapper to the <code>start_new_thread()</code> 
+function, which we saw earlier, but with a little more functionality. The 
+Thread object is never used directly, but only by subclassing the 
+<tt>threading.Thread</tt> interface. The user is supposed then to override 
+possibly the <code>__init__()</code> or <code>run()</code> function. Do not 
+override the <code>start()</code> function, or provide more than one argument 
+to <code>run</code>. Note that you are supposed to call 
+<code>Thread.__init__()</code> if you are overriding <code>__init__()</code>. 
+</p>
+
+<p>Let us see a <a href="misc/pai/simple2.py.txt">simple example:</a></p>
+ 
+<pre class="code">
+#!/usr/bin/env python
+#simple code which uses threads
+
+import time
+from threading import Thread
+
+class MyThread(Thread):
+
+    def __init__(self,bignum):
+
+        Thread.__init__(self)
+        self.bignum=bignum
+    
+    def run(self):
+
+        for l in range(10):
+            for k in range(self.bignum):
+                res=0
+                for i in range(self.bignum):
+                    res+=1
+
+
+def test():
+    bignum=1000
+    thr1=MyThread(bignum)
+    thr1.start()
+    thr1.join()
+    
+if __name__=="__main__":
+    test()
+</pre>
+
+<p>There are 2 things to note here, the thread does not start running until the 
+<tt>start()</tt> method is called, and that <tt>join()</tt> makes the calling 
+thread wait until the thread has finished execution.  
+</p> 
+<p> So Far, So Good! However being ever curious we wonder wether there are any 
+performance gains in using threads. </p>
+
+<h3>4.3 Profiling Threaded Code.</h3>
+
+<p> It is the practice of every good programmer to profile his code, to find 
+out his weak spots, his strengths, and in general to know his inner soul ;-). 
+And since we are dealing with the Tao of Threading in Python, we might as well 
+as ask ourselves which is the faster, two threads sharing the load or one heavy 
+duty brute force thread? </p>
+
+<hr>
+<pre>
+Which is faster?
+ 
+  thread1                                   thread2
+  --------                                  ---------
+  
+  for i in range(bignum):                   for i in range(bignum):
+    for k in range(bignum):                   for k in range(bignum):
+         res+=i                                    res+=i            
+
+or?
+
+        thread 3  
+--------------------
+for i in range(bignum):                 
+    for k in range(bignum):            
+       res+=i
+	      
+for i in range(bignum):                 
+    for k in range(bignum):            
+       res+=i	
+</pre>
+<hr>
+
+<p> Following the way of the masters we make no assumptions, and let the code 
+do the talking. Generally there are 2 ways to profile code in Python, the most 
+common and comprehensive way would be to use the <tt>profile.run()</tt> method, 
+or time the execution of the code using time.clock(). We shall do both. 
+Consider the listing shown below. </p>
+<pre class="code">
+#!/usr/bin/env python
+
+#Let us profile code which uses threads
+import time
+from threading import Thread
+
+class MyThread(Thread):
+
+    def __init__(self,bignum):
+
+        Thread.__init__(self)
+        self.bignum=bignum
+    
+    def run(self):
+
+        for l in range(10):
+            for k in range(self.bignum):
+                res=0
+                for i in range(self.bignum):
+                    res+=1
+
+
+def myadd_nothread(bignum):
+
+    for l in range(10):
+        for k in range(bignum):
+            res=0
+            for i in range(bignum):
+                res+=1
+
+    for l in range(10):
+        for k in range(bignum):
+            res=0
+            for i in range(bignum):
+                res+=1
+
+def thread_test(bignum):
+    #We create 2 Thread objects  for the 2 threads.
+    thr1=MyThread(bignum)
+    thr2=MyThread(bignum)
+
+    thr1.start()
+    thr2.start()
+
+    thr1.join()
+    thr2.join()
+    
+
+def test():
+
+    bignum=1000
+
+    #Let us test the threading part
+
+    starttime=time.clock()
+    thread_test(bignum)
+    stoptime=time.clock()
+
+    print "Running 2 threads took %.3f seconds" % (stoptime-starttime)
+    
+    #Now run without Threads.
+    starttime=time.clock()
+    myadd_nothread(bignum)
+    stoptime=time.clock()
+
+    print "Running Without Threads took %.3f seconds" % (stoptime-starttime)
+
+
+if __name__=="__main__":
+
+    test()
+</pre>
+<p> <a href="misc/pai/prof3.py.txt">Profiling Threaded Code in Python</a></p>
+<p>We get some surprising results, notably the following..</p>
+<pre>
+Running 2 threads took 0.000 seconds
+Running Without Threads took 5.160 seconds
+</pre>
+<p>Being ever sceptically we try to profile the threaded code by running, 
+<tt>profile.run('test()')</tt>. What we see seems to add credence to the 
+results achieved earlier.</p>
+<pre>
+       42 function calls in 5.170 CPU seconds
+ 
+   Ordered by: standard name
+ 
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        1    0.000    0.000    5.170    5.170 <string>:1(?)
+        2    0.000    0.000    0.000    0.000 prof3.py:10(__init__)
+        1    5.170    5.170    5.170    5.170 prof3.py:24(myadd_nothread)
+        1    0.000    0.000    0.000    0.000 prof3.py:38(thread_test)
+        1    0.000    0.000    5.170    5.170 prof3.py:50(test)
+        1    0.000    0.000    5.170    5.170 profile:0(prof3.test())
+        0    0.000             0.000          profile:0(profiler)
+        2    0.000    0.000    0.000    0.000 threading.py:147(Condition)
+        2    0.000    0.000    0.000    0.000 threading.py:152(__init__)
+        1    0.000    0.000    0.000    0.000 threading.py:180(_release_save)
+        1    0.000    0.000    0.000    0.000 threading.py:183(_acquire_restore)
+        1    0.000    0.000    0.000    0.000 threading.py:186(_is_owned)
+        1    0.000    0.000    0.000    0.000 threading.py:195(wait)
+        2    0.000    0.000    0.000    0.000 threading.py:356(_newname)
+        2    0.000    0.000    0.000    0.000 threading.py:373(__init__)
+        2    0.000    0.000    0.000    0.000 threading.py:387(_set_daemon)
+        4    0.000    0.000    0.000    0.000 threading.py:39(__init__)
+        2    0.000    0.000    0.000    0.000 threading.py:402(start)
+        6    0.000    0.000    0.000    0.000 threading.py:44(_note)
+        2    0.000    0.000    0.000    0.000 threading.py:468(join)
+        2    0.000    0.000    0.000    0.000 threading.py:507(isDaemon)
+        5    0.000    0.000    0.000    0.000 threading.py:609(currentThread)
+</pre>
+<p> As I said it seems to add credence, until we notice that <tt>run()</tt> 
+isn't even called! What does this teach us? Apart from distrusting the profiler,
+never follow any mechanical way of testing your code. The reason why the output 
+is misleading and the profiler silent is because both <tt>time.clock()</tt> 
+and the profiler <em>measure the time spent in running the current thread</em>.
+</p> 
+
+<p>How then do we measure time taken by the two threads? We use the 
+<tt>time.time()</tt> function.</p>
+
+<p> But doesn't <tt>time.time()</tt> give the absolute time, you ask? What 
+about Context switches? True, but since we are only interested in the measuring 
+the total time taken and not the work distribution, we can ignore context 
+switches (and indeed the code has been structured to ignore context switches). 
+</p>
+<p> The correct way to profile the code is given in the following listing:
+<a href="misc/pai/prof2.py.txt"> Correct Way to Profile the Code</a>.</p>
+
+<p> The results we now obtain are more realistic and reliable.</p>
+
+<pre>
+Running 2 threads took 5.125 seconds
+Running Without Threads took 5.137 seconds</pre>
+<br> As we can see there is no significant difference between threaded and non 
+threaded apps.
+</p>
+ 
+<h3>4.4 Condition, Event and Queue Objects.</h3>  
+<p> Conditions are a way of synchronizing access between multiple threads, 
+which wait for a particular condition to be true to start any major processing. 
+Condition Objects are a very elegant mechanism by which it is possible to 
+implent the Producer Consumer Problem. Indeed this is true for anything in 
+Python. Conditions take a <tt>lock</tt> object or if none is supplied creates 
+its own <tt>RLock</tt> object. A Thread waits for a particular condition to be 
+true by using the <tt>wait()</tt> function, while it signals another thread by 
+using the <tt> notify()</tt> or <tt>notifyAll()</tt> method.</p>
+<p> Let us see how the classical Producer Consumer Problem is solved using 
+this.</p>
+<pre class="code">
+#!/usr/bin/env python
+
+#Let us profile code which uses threads
+import thread
+import time
+from threading import *
+
+class itemQ:
+
+    def __init__(self):
+        self.count=0
+
+    def produce(self,num=1):
+        self.count+=num
+
+    def consume(self):
+        if self.count: self.count-=1
+
+    def isEmpty(self):
+        return not self.count
+
+
+class Producer(Thread):
+
+    def __init__(self,condition,itemq,sleeptime=1):
+        Thread.__init__(self)
+        self.cond=condition
+        self.itemq=itemq
+        self.sleeptime=sleeptime
+
+    def run(self):
+        cond=self.cond
+        itemq=self.itemq
+
+        while 1 :
+            
+            cond.acquire() #acquire the lock
+            print currentThread(),"Produced One Item"
+            itemq.produce()
+            cond.notifyAll()
+            cond.release()
+
+            time.sleep(self.sleeptime)
+
+
+class Consumer(Thread):
+
+    def __init__(self,condition,itemq,sleeptime=2):
+        Thread.__init__(self)
+        self.cond=condition
+        self.itemq=itemq
+        self.sleeptime=sleeptime
+
+    def run(self):
+        cond=self.cond
+        itemq=self.itemq
+
+        while 1:
+            time.sleep(self.sleeptime)
+            
+            cond.acquire() #acquire the lock
+            
+            while itemq.isEmpty():
+                cond.wait()
+                
+            itemq.consume()
+            print currentThread(),"Consumed One Item"
+            cond.release()
+        
+        
+
+        
+if __name__=="__main__":
+
+    q=itemQ()
+
+    cond=Condition()
+
+    pro=Producer(cond,q)
+    cons1=Consumer(cond,q)
+    cons2=Consumer(cond,q)
+
+    pro.start()
+    cons1.start()
+    cons2.start()
+    while 1: pass
+</pre>
+<p><a href="misc/pai/cond.py.txt">Producer Consumer Listing in Python</a></p>
+
+<p> Here the <tt>currentThread()</tt> function returns the id of the currently 
+running thread. Note that <tt>wait()</tt> has an optional argument specifying 
+the seconds it should wait before it times out. I would discourage this use 
+because they used a polling mechanism to implement this, and according to the 
+source code we poll atleast 20 times ever second. 
+Once again I would like to point out how not to use the Condition Object. 
+Consider the following, borrowed from <tt>Python-2.3.4/Libs/threading.py</tt> 
+ 
+<pre class="code"> 
+def notify(self, n=1):
+        currentThread() # for side-effect
+        assert self._is_owned(), "notify() of un-acquire()d lock"
+        __waiters = self.__waiters
+        waiters = __waiters[:n]
+        if not waiters:
+            if __debug__:
+                self._note("%s.notify(): no waiters", self)
+            return
+        self._note("%s.notify(): notifying %d waiter%s", self, n,
+                   n!=1 and "s" or "")
+        for waiter in waiters:
+            waiter.release()
+            try:
+                __waiters.remove(waiter)
+            except ValueError:
+                pass
+                                                                                       
+    def notifyAll(self):
+        self.notify(len(self.__waiters))
+                                                                                       
+Python-2.3.4/Lib/threading.py 
+</pre>
+
+What <tt>threading.py</tt> does is to maintain a list of threads waiting on the 
+current condition.
+It then attempts to notify them by <em>removing the first n waiters</em> from the 
+list. And since it removes the <em>same first n waiters</em> every time, this
+can potentially cause starvation to certain threads. So to test our theory out, 
+let us modify the Producer consumer listing given above by making the following 
+changes: 
+<pre class="code">
+cons1=Consumer(cond,q,sleeptime=1)
+cons2=Consumer(cond,q,sleeptime=1)
+</pre>
+This will potentially cause starvation to one of the threads depending upon how 
+they are inserted into the list. In fact a test run by making the above changes 
+shows this to be the case. Thus you will have to be carefull to potential 
+pitfalls in using Python Threading. Notice that there is no point in calling 
+notifyAll() since it is inefficient and should be avoided.
+</p>
+ 
+<P> By now you must have a pretty good idea about how to go about threading in 
+Python. For closure I shall briefly describe the Event and Queue Objects and 
+describe how to use them.</p>
+
+<p>The Event Object is actually a thin wrapper on the Condition Object so that 
+we don't have to mess about with locks. The methods provided are very much self 
+explanatory: <tt>set() clear() isSet() wait(timeout)</tt>. One thing to note 
+is that the Event Object uses <tt>notifyAll()</tt>, thus use it only when 
+necessary.  </P>
+
+<p> The code given is a simple example of the event object. <a
+href="misc/pai/evnt.py.txt">event.py</a></p>
+
+<p> Although Queues dont come under the Threading module, they do provide an 
+easy interface which should be suitable to sovle most problems. The main 
+advantage of Queue is that it doesn't implement the <tt>threading</tt> module. 
+Thus you can instead use it with the <tt>thread</tt> module. Queues are a 
+simple and efficient way of implementing stack, priority queue etc. Since it 
+handles both data protection and synchronization. The methods used are 
+<tt>put(item,block) get(block) Queue(maxsize)  qsize() empty() full()</tt>.
+</p>
+
+<p>A simple example using Queues is given in the following listing. <a
+ href="misc/pai/q.py.txt">q.py</a> </p>
+  
+<hr>
+<h2> References</h2>
+<p> I suggest you read the following for more info:
+<ul>
+<li><tt>threading.py</tt></li>
+<li><a href="http://www.python.org/doc/current/api/threads.html">http://www.python.org/doc/current/api/threads.html</a></li>
+<li><a href="http://starship.python.net/crew/aahz">"http://starship.python.net/crew/aahz"</a></li>
+</ul>
+<hr>
+<p><b> Happy Hacking ! ;-} </b></p>
+
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/authors/pai.jpg" class="bio">
+
+<em>
+
+        I am a linux enthusiast living in India. I love to play around in
+linux never knowing what i might discover next.
+I enjoy the freedom and power that Linux offers.
+and I must thank my mentor Mr.Pramode C.E (who regularly  publishes in LG)
+for introducing me to the wonderful opportunities that Linux offers.
+
+<P> I have always enjoyed programming ,and have enjoyed it a lot more in Linux.
+( I shall not mention my previous OS :-) ).
+The Emacs editor has me hooked. Is it a compiler ? , editor? AI tool ?
+( No its super-macs , :-) )
+
+<P> I do small time programming in AI, especially Neural Networks, and I hope
+to release a Neural Network ToolKit that occasional Hardware hackers can
+use to do some interesting stuff.
+
+
+</em>
+<br clear="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2004, Krishna G Pai. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 107 of Linux Gazette, October 2004
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="odonovan.html" >&lt;-- prev</A> | <A HREF="pramode.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">October 2004 (#107)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/2003/sit3-shine.7-2.gif" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

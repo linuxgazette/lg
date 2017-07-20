@@ -1,0 +1,418 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>LinuxThreads Programming LG #48</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<!-- *** BEGIN navbar *** -->
+<A HREF="index.html"><IMG ALT="[ Table of Contents ]" 
+	SRC="../gx/indexnew.gif" WIDTH=163 HEIGHT=60 ALIGN=bottom ></A>
+<A HREF="../index.html"><IMG ALT="[ Front Page ]" 
+	SRC="../gx/homenew.gif" WIDTH=163 HEIGHT=60 ALIGN=bottom></A>
+<A HREF="blanchard.html"><IMG ALT="[ Prev ]" SRC="../gx/back2.gif" WIDTH=41 HEIGHT=60 ALIGN=bottom></A>
+<A HREF="../faq/index.html"><IMG ALT="[ Linux Gazette FAQ ]" 
+	SRC="./../gx/dennis/faq.gif"WIDTH=163 HEIGHT=60 ALIGN=bottom></A>
+<A HREF="fischer.html"><IMG ALT="[ Next ]" SRC="../gx/fwd.gif" WIDTH=41 HEIGHT=60 ALIGN=bottom  ></A>
+<!-- *** END navbar *** -->
+
+<!--endcut ============================================================-->
+
+<H4>
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H1><font color="maroon">LinuxThreads Programming</font></H1>
+<H4>By <a href="mailto:matt@martine2.difi.unipi.it">Matteo Dell'Omodarme</a></H4>
+</center>
+<P> <HR> <P>  
+
+<!-- END header -->
+
+
+
+
+<h2 align=center>Some theory...</h2>
+
+<b>Introduction</b><p>
+
+LinuxThreads 
+is a Linux library for multi-threaded programming. LinuxThreads
+provides kernel-level 
+threads: threads are created with the <em>clone()</em> system call and
+all scheduling is done in the kernel. It
+implements the Posix 1003.1c 
+API (Application Programming Interface) for threads and runs on any
+Linux system with kernel 2.0.0 
+or more recent, and a suitable C library.
+
+<p>
+<b>What are threads?</b>
+<p>
+
+A thread is a sequential flow of control through a
+program. Thus multi-threaded programming is a 
+form of parallel programming where several threads of control are
+executing concurrently in the program. 
+<p>
+Multi-threaded programming differs from Unix-style multi-processing in
+that all threads share the 
+same memory space (and a few other system resources, such as file
+descriptors), instead of running in 
+their own memory space as is the case with Unix processes.
+So a context switch between two threads in a single process is
+considerably cheaper than a context 
+switch between two processes
+<p>
+There are two main reasons to use threads:
+<OL>
+	<LI> Some programs reach their best performance only expressed as
+several threads that communicate together (i.e. servers), rather than
+a single flow of instructions.<P>
+	<LI> On a multiprocessor system, they can run in parallel on
+several processors, allowing a single program to divide its work
+between different processor. Such programs run faster than a single-thread 
+program which can exploits only a CPU at a time.<P>
+</OL>
+
+
+<b>Atomicity and volatility</b>
+<p>
+
+Accessing the memory shared from threads require some care, because 
+your parallel program can't access shared memory
+objects as they were in ordinary local memory.<p>
+
+<em>Atomicity</em> refers to the concept that an operation on an object is
+  accomplished as an indivisible, uninterruptible, sequence.
+
+Operations on data in shared memory can occur not atomically,
+and, in addition of that, GCC compiler will often performs some
+optimizations, buffering values of shared variables in registers,
+avoiding the memory operations needed to ensure that all processors
+can see the changes on shared data. <p>   
+
+  To prevent GCC's optimizer from buffering values of shared memory
+  objects in registers, all objects in shared memory should be declared
+  as having types with the <em>volatile</em> attribute, since
+volatile objects reads and writes that require just one word access will
+  occur atomically.<p>  
+
+<b>Locks</b>
+<p>
+ The load and store of the result are
+  separate memory transactions: ++<em>i</em> doesn't  always work to
+ add one to a variable <em>i</em> 
+  in shared memory because other processors could access <em>i</em>
+  between these two transactions.  So, having two processes
+  both perform ++<em>i</em> might only increment <em>i</em> by one,
+ rather than by two. 
+<p>
+  So you need a system call that prevents a thread to work
+  on a variable while another one is changing its value. This
+  mechanism is implemented by the lock scheme, explained just below.<br>
+
+Suppose that you have two threads running a routine which change the
+value of a shared variable. 
+To obtain the correct result the routine must:
+
+<ul>
+<li> assert a lock on variable <em>i</em>
+<li> modify the value of the locked variable
+<li> remove the lock
+</ul>
+
+When a lock is asserted on a variable only the thread which locked the
+variable can change its value. Even more the flux of the other thread
+is blocked on the lock assertion, since only one lock at a time is
+allowed for a variable. Only when the first thread remove the lock the
+second one can restart asserting its own lock.<p>
+
+Consequently using shared variables may delay memory activity from other
+  processors, whereas ordinary references may use local cache.
+
+
+<h2 align=center>... and some practice</h2>
+<p>
+
+<b>The header pthread.h</b>
+<p>
+
+The facilities provided by LinuxThreads are available trough the
+header /usr/include/pthread.h which declare the prototypes of the
+thread routines.<p>
+Writing a multi-thread program is basically a 2 step process:
+<ul>
+<li> use the pthread routines to assert locks on shared variables and
+generate the threads.
+<li> create a structure for all the parameters you must pass to the
+thread subroutine
+</ul>
+
+Let's analyze the two steps starting from a brief description of
+some basic pthread.h routines.<p>
+ 
+
+<b>Initialize locks</b>
+<p> 
+
+One of the first actions you must accomplish is initialize all the locks.
+POSIX locks are declared as variables of type <em>pthread_mutex_t</em>; 
+to initialize each lock you will need, call the routine:
+
+<pre>
+int pthread_mutex_init(pthread_mutex_t  *mutex,   
+                       const pthread_mutexattr_t *mutexattr);
+</pre>
+
+as in the costruction: 
+
+<pre>
+#include &lt;pthread.h&gt;
+...
+ pthread_mutex_t lock;
+ pthread_mutex_init(&amp;lock,NULL);
+...
+</pre>
+
+The function
+<em>pthread_mutex_init</em> initializes the mutex object pointed to
+by  mutex  according  to the mutex attributes specified in
+mutexattr.  If mutexattr is NULL, default  attributes  are
+used instead.<p>
+
+In the continuation is shown how to use this initialized locks.<p>
+
+<b>Spawning threads</b>
+<p>
+
+POSIX requires the user to declare a variable of type
+     <em>pthread_t</em>  to identify each thread. <br>
+A thread is generated by the call to:
+
+<pre> 
+int pthread_create(pthread_t *thread, pthread_attr_t *attr, 
+                   void *(*start_routine)(void *), void *arg);
+</pre>
+
+On success, the identifier of the newly created thread  is
+       stored in the location pointed by the thread argument, and
+       a 0 is returned.  On  error,  a  non-zero  error  code  is
+       returned.<p>
+
+To create a thread running the routine <em>f()</em> and pass to <em>f()</em>
+a pointer to the variable <em>arg</em> use:
+
+<pre>
+#include &lt;pthread.h&gt;
+...
+ pthread_t thread;
+ pthread_create(&amp;thread, NULL, f, &amp;arg).
+...
+</pre>
+
+The routine <em>f()</em> must have the prototype:
+
+<pre>
+void *f(void *arg);
+</pre>
+
+<b>Clean termination</b>
+<p>
+
+As the last step you need to wait for the termination of all the
+threads spawned before accessing the result of the routine
+<em>f()</em>. The call to:
+
+<pre>  
+int pthread_join(pthread_t th, void **thread_return);
+</pre>
+
+suspends the execution of the calling thread
+until the thread identified by th  terminates.<br>
+
+If  thread_return  is  not NULL, the return value of th is
+stored in the location pointed to by  thread_return. <p>
+
+<b>Passing data to a thread routine</b>
+<p>
+There are two ways to pass informations from a caller routine to a
+thread routine:
+
+<ul>
+<li> Global variables
+<li> Structures
+</ul>
+
+The second one is the best choice in order to preserve the modularity
+of the code.<br>
+The structure must contain three levels of information; first of all
+informations  about the shared variables and locks, second
+informations about all data needed by the routine; third an
+identification index distinguishing among threads and the number of
+CPU the program can exploit (making easy to provide this information
+at run time).<p>
+
+Let's inspect the first level of that structure; the information passed
+   must be shared among every threads, so you must use pointers to the
+   needed variables and locks. To pass a shared variable <em>var</em> of
+   the type <em>double</em>, and its lock, the structure must
+   contain two members:
+
+<pre>
+  double volatile *var;
+  pthread_mutex_t *var_lock;
+</pre>
+
+Note the use of the volatile attribute, specifying that not pointer
+itself but <em>var</em> is volatile.<p>
+
+<b>Example of parallel code</b>
+<p>
+An example of program which can be easily parallelized using threads  is the
+  computation of the scalar product of two vectors. <br>
+The code is shown below with comments inserted.  
+
+
+<pre>
+/* use gcc <progname> -D_REENTRANT -lpthread to compile */
+
+#include&lt;stdio.h&gt;
+#include&lt;pthread.h&gt;
+
+/* definition of a suitable structure */ 
+typedef struct
+{
+  double volatile *p_s;       /* the shared value of scalar product */
+  pthread_mutex_t *p_s_lock;  /* the lock for variable s */
+  int n;                      /* the number of the thread */
+  int nproc;                  /* the number of processors to exploit */
+  double *x;                  /* data for first vector */
+  double *y;                  /* data for second vector */
+  int l;                      /* length of vectors */
+} DATA;
+
+void *SMP_scalprod(void *arg)
+{
+  register double localsum;   
+  long i;
+  DATA D = *(DATA *)arg;
+
+  localsum = 0.0;
+  
+/* Each thread start calculating the scalar product from i = D.n 
+   with D.n = 1, 2, ... , D.nproc.
+   Since there are exactly D.nproc threads the increment on i is just
+   D.nproc */ 
+  
+  for(i=D.n;i&lt;D.l;i+=D.nproc)
+     localsum += D.x[i]*D.y[i];
+  
+/* the thread assert the lock on s ... */
+  pthread_mutex_lock(D.p_s_lock);
+
+/* ... change the value of s ... */
+  *(D.p_s) += localsum;
+
+/* ... and remove the lock */
+  pthread_mutex_unlock(D.p_s_lock);
+
+  return NULL;
+}
+
+#define L 9    /* dimension of vectors */
+
+int main(int argc, char **argv)
+{
+  pthread_t *thread;    
+  void *retval;
+  int cpu, i;
+  DATA *A;
+  volatile double s=0;     /* the shared variable */ 
+  pthread_mutex_t s_lock; 
+  double x[L], y[L];
+  
+  if(argc != 2)
+    {  
+      printf("usage: %s  &lt;number of CPU&gt;\n", argv[0]);
+      exit(1);
+    }
+	
+  cpu = atoi(argv[1]);
+  thread = (pthread_t *) calloc(cpu, sizeof(pthread_t));
+  A = (DATA *)calloc(cpu, sizeof(DATA));
+
+ 
+  for(i=0;i&lt;L;i++)
+    x[i] = y[i] = i;
+
+/* initialize the lock variable */
+  pthread_mutex_init(&amp;s_lock, NULL);
+  
+  for(i=0;i&amp;lt;cpu;i++)
+    {
+/* initialize the structure */
+      A[i].n = i;            /* the number of the thread */
+      A[i].x = x;
+      A[i].y = y;
+      A[i].l = L;
+      A[i].nproc = cpu;      /* the number of CPU */
+      A[i].p_s = &amp;s;
+      A[i].p_s_lock = &amp;s_lock;
+
+      if(pthread_create(&amp;thread[i], NULL, SMP_scalprod, &amp;A[i] ))
+	{
+	  fprintf(stderr, "%s: cannot make thread\n", argv[0]);
+	  exit(1);
+	}
+    }
+
+  for(i=0;i&lt;cpu;i++)
+    {
+      if(pthread_join(thread[i], &amp;retval))
+	{
+	  fprintf(stderr, "%s: cannot join thread\n", argv[0]);
+	  exit(1);
+	}
+    }
+
+  printf("s = %f\n", s);
+  exit(0);
+}
+</pre>
+
+
+
+
+
+
+
+<!-- *** BEGIN copyright *** -->
+<P> <hr> <P> 
+<H5 ALIGN=center>
+
+Copyright &copy; 1999, Matteo Dell'Omodarme<BR> 
+Published in Issue 48 of <i>Linux Gazette</i>, December 1999</H5>
+<!-- *** END copyright *** -->
+
+<!--startcut ==========================================================-->
+<P> <HR> <P>
+<!-- *** BEGIN navbar *** -->
+<A HREF="index.html"><IMG ALT="[ Table of Contents ]" 
+	SRC="../gx/indexnew.gif" WIDTH=163 HEIGHT=60 ALIGN=bottom ></A>
+<A HREF="../index.html"><IMG ALT="[ Front Page ]" 
+	SRC="../gx/homenew.gif" WIDTH=163 HEIGHT=60 ALIGN=bottom></A>
+<A HREF="blanchard.html"><IMG ALT="[ Prev ]" SRC="../gx/back2.gif" WIDTH=41 HEIGHT=60 ALIGN=bottom></A>
+<A HREF="../faq/index.html"><IMG ALT="[ Linux Gazette FAQ ]" 
+	SRC="./../gx/dennis/faq.gif"WIDTH=163 HEIGHT=60 ALIGN=bottom></A>
+<A HREF="fischer.html"><IMG ALT="[ Next ]" SRC="../gx/fwd.gif" WIDTH=41 HEIGHT=60 ALIGN=bottom  ></A>
+<!-- *** END navbar *** -->
+</BODY></HTML>
+<!--endcut ============================================================-->

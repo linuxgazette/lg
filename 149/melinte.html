@@ -1,0 +1,688 @@
+<!DOCTYPE html
+	PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+	 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="utf-8" xml:lang="utf-8">
+<head>
+<title>VPN Networking LG #149</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link rel="stylesheet" href="../lg.css" type="text/css" media="screen, projection"  />
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<!-- link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" / -->
+<link rel="shortcut icon" href="../favicon.ico" />
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+</head>
+<body>
+
+<a href="../">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+<div id="navigation">
+<table summary="masthead" width="100%">
+<tr>
+<td align="center" colspan="3" style="font-size: 10px; font-weight: bold">
+<a href="../index.html">Home</a>
+<a href="http://linuxgazette.net">Main Site</a>
+<a href="../faq/index.html">FAQ</a>
+
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/mailman/listinfo/">Mailing Lists</a>
+<a href="../jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+<hr width="99%" style="border: 1px inset #000033">
+</td>
+</tr>
+<tr>
+<td width="40%" align="left" style="font-size: 10px; font-weight: bold">
+The Free International Online Linux Monthly
+</td>
+<td width="20%" align="center" style="font-size: 10px; font-weight: bold">
+ISSN: 1934-371X
+</td>
+<td width="40%" align="right" style="font-size: 10px; font-weight: bold">
+Main site: <a href="http://linuxgazette.net">http://linuxgazette.net</a> 
+</td>
+</table>
+</div>
+
+
+<div id="breadcrumbs1">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">April 2008 (#149)</a> &gt; 
+Article
+
+</div>
+
+<div class="articlecontent1">
+<div class="content">
+
+<div id="previousnexttop">
+<A HREF="dyckoff.html" >&lt;-- prev</A> | <A HREF="pfeiffer.html" >next --&gt;</A>
+</div>
+
+<h1>VPN Networking</h1>
+<p id="by"><b>By <a href="../authors/melinte.html">Aurelian Melinte</a></b></p>
+
+<p>
+Creating your own Virtual Private Network (VPN) is quite easy
+on platforms that come with a tun driver: this will allow you
+to process network packet traffic in user space. While that's
+considerably easier than doing your network programming in the kernel
+space, there still are a few details to figure out. This article should
+walk you through my findings.
+</p>
+
+
+<h3>IFF_TUN versus IFF_TAP</h3>
+
+<p>
+The tun driver is a two-in-one device:
+</p>
+  <ul>
+  <li>A point-to-point device (IFF_TUN). The TUN device allows for processing 
+      IP packets.</li>
+  <li>An Ethernet-like device (IFF_TAP). The TAP device processes Ethernet 
+      frames.</li>
+  </ul>
+
+<p>
+This article discusses code written around the Ethernet device. If you
+choose the IP driver, then you will generate about 18 bytes per packet
+processed less traffic (the Ethernet header and trailer) but you will
+have to code a bit more to setup your network.
+</p>
+
+<h3>Activating the driver</h3>
+
+<p>
+First, we have to make sure the tun driver is active. On my Debian
+system, I simply have to load it:
+</p>
+
+<pre>
+# /sbin/modprobe tun
+# /sbin/lsmod | grep tun
+tun                    10208  0
+
+# /bin/ls -l /dev/net/tun
+crw-rw-rw- 1 root root 10, 200 2008-02-10 11:30 /dev/net/tun
+</pre>
+
+<h3>The setup</h3>
+
+<p>
+For demo purposes, we will build a virtual network of two hosts. Once we
+have our hands on the Ethernet frames, we will use UDP encapsulation to
+transmit them from a virtual interface on host A to the virtual interface
+of host B and vice-versa.The UDP socket will be used un-connected; this has
+the advantage of using the same socket to send and receive packets from any
+other host in our virtual network. However, the un-connected nature of our
+UDP socket raises some difficulties in getting the path MTU (more on this
+below).
+</p>
+
+<p>
+Each host in our virtual network will run an instance of the demo
+program. To illustrate it, the traffic from an application (here telnet)
+on host A to its corresponding application (inetd/telnetd) on host B
+will take the following path:
+</p>
+
+<img src="misc/melinte/setup.png" alt="Diagram of a Virtual Network">
+
+<h3>The discovery mechanism</h3>
+
+<p>
+In practice, we need a mechanism to map virtual IP addresses to real IP
+addresses. It is up to us to brew up some discovery method to resolve this
+mapping issue - but since this is not relevant to our topic, or for the
+purpose of our little demo described here, we'll cheat and pass the "map"
+to the tunneling program through command line parameters:
+</p>
+
+<pre>
+    Host A# ./udptun
+    Usage: ./udptun local-tun-ip remote-physical-ip
+    Host A# ./udptun 172.16.0.1   192.168.2.103
+    Host B# ./udptun 172.16.0.111 192.168.2.113
+</pre>
+
+<h3>Settting up the interface</h3>
+
+<p>
+The first thing we need is to create a virtual Ethernet (tap)
+interface. This is done with a simple open() call:
+</p>
+
+<pre class="code">
+    struct ifreq ifr_tun; 
+    int fd; 
+    
+    if ((fd = open("/dev/net/tun", O_RDWR)) &lt; 0) {
+        /*Process error, return.*/;
+    }
+
+    memset( &amp;ifr_tun, 0, sizeof(ifr_tun) );
+    ifr_tun.ifr_flags = IFF_TAP | IFF_NO_PI;
+    if ((ioctl(fd, TUNSETIFF, (void *)&amp;ifr_tun)) &lt; 0) {
+        /*Process error, return.*/;
+    }
+    
+    /*Configure the interface: set IP, MTU, etc*/
+</pre>
+
+<p>
+Here, the flag IFF_NO_PI requests that we manipulate raw frames. If not
+set, the frames will be prepended with a 4 bytes header.
+</p>
+
+<h3>Interface setup: the IP address</h3>
+
+<p>
+The virtual interface needs to be identified by an IP address. An
+ioctl() call will set it:
+</p>
+
+<pre class="code">
+    /* set the IP of this end point of tunnel */
+    int set_ip(struct ifreq *ifr_tun, unsigned long ip4)
+    {
+        struct sockaddr_in addr;
+        int sock = -1; 
+
+        sock = socket(AF_INET, SOCK_DGRAM, 0);
+
+        if (sock &lt; 0) {
+            /*Process error, return*/
+        }
+
+        memset(&amp;addr, 0, sizeof(addr));
+        addr.sin_addr.s_addr = ip; /*network byte order*/
+        addr.sin_family = AF_INET;
+        memcpy(&amp;ifr_tun-&gt;ifr_addr, &amp;addr, sizeof(struct sockaddr));
+
+        if (ioctl(sock, SIOCSIFADDR, ifr_tun) &lt; 0) {
+            /*Process error, return*/
+        }
+
+        /*Will be used later to set MTU.*/
+        return sock; 
+    }
+</pre>
+
+<h3>The Path Maximum Transmission Unit (PMTU)</h3>
+
+<p>
+The only other thing we have to set is the MTU (Maximum Transmit Unit)
+of the interface. For our pseudo-Ethernet interface, the MTU is largest
+payload that the Ethernet frames will carry. We will set the MTU based on
+the PMTU.
+</p>
+
+<p>
+Simply stated, the PMTU is the largest packet size that can traverse the
+path from your host to its destination host without suffering
+fragmentation.
+</p>
+
+<p>
+The PMTU is an important setting to get right. Consider this: upon
+(re)injecting your frames to the kernel, they will get a new set of
+headers (IP, UDP and Ethernet). Thus, if the size of the frame you send
+to the kernel is too close to the PMTU, the final frame that will
+be sent out of the real interface might be bigger than the PMTU. At
+worst, such a frame will be discarded somewhere "en route". At best, the
+frame will be split in two fragments and will generate a 100% processing
+overhead and some supplementary traffic.
+</p>
+
+<p>
+To avoid this, we have to discover what the PMTU value is and ensure that
+the new Ethernet frame will be appropriately sized for the PMTU. Thus, we
+will subtract from the PMTU the overhead of the new set of headers and
+set the MTU of the virtual interface to this value.
+</p>
+
+<p>
+With Linux, for a TCP socket, the task it easy: we just have to make
+sure the kernel mechanisms for PMTU discovery are set and we are done.
+</p>
+
+<p>
+For UDP sockets though, we the users have the responsibility of ensuring
+the UDP datagrams are of proper size. If the UDP socket is connected to
+your correspondent host, a simple getsockopt() call with the IP_MTU flag
+set will give us the PMTU.
+</p>
+
+<p>
+For unconnected sockets though, we have to probe the PMTU. First, the
+socket has to be set up so that datagrams are not fragmented (set the DF
+flag); then, we'll want to be notified of any ICMP error this might
+generate. If a host cannot handle the size of the datagram without
+fragmenting, then it will notify us accordingly (or so we hope):
+</p>
+
+<pre class="code">
+    int sock;
+    int on;
+
+    sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock &lt; 0) {
+        /*Process error, return*/;
+    }
+
+    on = IP_PMTUDISC_DO;
+    if (setsockopt(sock, SOL_IP, IP_MTU_DISCOVER, &amp;on, sizeof(on))) {
+        /*Process error, return*/;
+    }
+    
+    on = 1;
+    if (setsockopt(sock, SOL_IP, IP_RECVERR, &amp;on, sizeof(on))) {
+        /*Process error, return*/;
+    }
+    
+    /*Use sock for PMTU discovery.*/
+</pre> 
+
+<p>
+Next, we'll send out probe datagrams of various sizes:
+</p>
+
+<pre class="code">
+    int wrote = rsendto(sock, buf, len, 0, 
+                    (struct sockaddr*)target, 
+                    sizeof(struct sockaddr_in));
+                    
+</pre> 
+
+<p>
+And finally, sift through the errors until we get the PMTU right. If we
+get a PMTU error, we adjust the datagram size accordingly and start
+sending again, until the destination is reached:
+</p>
+
+<pre class="code">
+    char sndbuf[VPN_MAX_MTU] = {0};
+    struct iovec  iov;
+    struct msghdr msg;
+    struct cmsghdr *cmsg = NULL;
+    struct sock_extended_err *err = NULL;
+    struct sockaddr_in addr;
+    int res; 
+    int mtu;
+
+    if (recv(sock, sndbuf, sizeof(sndbuf), MSG_DONTWAIT) &gt; 0) {
+        /* Reply received. Enf of the PMTU discovery. Return.*/
+    }
+
+    msg.msg_name = (unsigned char*)&amp;addr;
+    msg.msg_namelen = sizeof(addr);
+    msg.msg_iov = &amp;iov;
+    msg.msg_iovlen = 1;
+    msg.msg_flags = 0;
+    msg.msg_control = cbuf;
+    msg.msg_controllen = sizeof(cbuf);
+    res = recvmsg(sock, &amp;msg, MSG_ERRQUEUE);
+    if (res &lt; 0) {
+        if (errno != EAGAIN)
+            perror("recvmsg");
+        /*Nothing for now, return.*/
+    }
+
+    for (cmsg = CMSG_FIRSTHDR(&amp;msg); cmsg; cmsg = CMSG_NXTHDR(&amp;msg, cmsg)) {
+        if (cmsg-&gt;cmsg_level == SOL_IP) {
+            if (cmsg-&gt;cmsg_type == IP_RECVERR) {
+                err = (struct sock_extended_err *) CMSG_DATA(cmsg);
+            }
+        }
+    }
+    if (err == NULL) {
+        /*PMTU discovery: no info yet. Return for now but keep probing.*/
+    }
+
+
+    mtu = 0; 
+    switch (err-&gt;ee_errno) {
+    ...
+    <strong>case EMSGSIZE:
+        debug("  EMSGSIZE pmtu %d\n", err->ee_info);
+        mtu = err->ee_info; </strong>
+        break;
+    ...
+    } /*end switch*/
+
+    return mtu; /*But keep probing until remote host reached!*/
+</pre> 
+
+
+<p>
+One last note: the PMTU is bound to change over time. Therefore, you'll
+have to retest once in a while, then set the MTU of the virtual interface
+accordingly. If you want to avoid this dance, you can set the MTU the
+"safe" but sub-optimal way: to the lesser of 576 and the MTU of the
+physical interface (minus the overhead we mentioned, of course.)
+</p>
+
+<h3>Interface setup: the MTU</h3>
+
+<p>
+And finally, having this magic PMTU value, we can set the MTU of our
+virtual interface correctly:
+</p>
+
+<pre class="code">
+    struct ifreq *ifr_tun;
+    ...
+    ifr_tun-&gt;ifr_mtu = mtu; 
+    if (ioctl(sock, SIOCSIFMTU, ifr_tun) &lt; 0)  {
+        /*Process error*/
+    }
+</pre>
+
+<h3>UDP encapsulation</h3>
+
+<p>
+Now we have the virtual interface up and configured properly. All we
+have to do is to relay frames in both directions. First, open an
+un-connected UDP socket (I will spare you the details), then:
+</p>
+<ol>
+  <li>read packets from the tap file descriptor and send them to the remote
+  physical IP of our corresponding host; this will send the packets in one
+  direction.
+
+<pre class="code">
+    char buf[VPN_MAX_MTU] = {0}; 
+    struct sockaddr_in cliaddr = {0}; 
+    int recvlen = -1; 
+    socklen_t clilen = sizeof(cliaddr); 
+    
+    recvlen = read(_tun_fd, buf, sizeof(buf));
+    if (recvlen &gt; 0)
+        sendto(_udp_fd, buf, recvlen, 0, (struct sockaddr*)&amp;cliaddr, clilen); 
+</pre>
+
+<strong>Caveat:</strong> read()ing from the tap file descriptor will block
+<em>solid</em>. What this means is that the read() call will not be interrupted in the
+eventuality you close the underlying file descriptor. This forces you to
+poll()/select() this file descriptor before read()ing from if you want
+to terminate this thread cleanly.
+</li>
+
+<li>read datagrams from the UDP socket and push them through the tap file
+  descriptor: the data will now flow in the other direction.
+
+<pre class="code">
+    recvlen = recvfrom(_udp_fd, buf, sizeof(buf), 0, 
+                       (struct sockaddr*)&amp;cliaddr, &amp;clilen);
+    if (recvlen &gt; 0)
+        write(_tun_fd, buf, recvlen); 
+</pre>
+</li>
+</ol>
+
+<p>
+Note that, in practice, if you have more than two hosts in your virtual
+network, you will have to look inside the frames for the source and
+destination IPs before deciding where to relay the frame.
+</p>
+
+<p>
+You can download the full source for <a href="misc/melinte/udptun.c">udptun.c</a>,
+<a href="misc/melinte/ttools.c">ttools.c</a>,
+<a href="misc/melinte/ttools.h">ttools.h</a> and
+<a href="misc/melinte/pathmtu.c">pathmtu.c</a> along with
+the <a href="misc/melinte/Makefile">Makefile</a> directly; all of the above
+are also available as a single <a href="misc/melinte/udptun.tgz">tarball</a>.
+</p>
+
+<h3>P as in private</h3>
+
+<p>
+Since you have full control over the traffic of the virtual network, you
+could encrypt it in user space. For the purpose of this demo, to
+build a complete VPN, we will encrypt the traffic with IPSEC (note:
+IPSEC also has tunnelling functionality built in).
+</p>
+
+<p>
+On Debian, just install the ipsec-tools package and use these files for
+manual keying:
+</p> 
+
+<p>
+For host A:
+</p>
+<pre>
+    ## Flush the SAD and SPD
+    flush;
+    spdflush;
+
+    # A &amp; B
+    add 172.16.0.1    172.16.0.111  ah 15700 -A hmac-md5  "123456789.123456"; 
+    add 172.16.0.111  172.16.0.1    ah 24500 -A hmac-md5  "123456789.123456"; 
+
+    add 172.16.0.1    172.16.0.111  esp 15701 -E 3des-cbc "123456789.123456789.1234"; 
+    add 172.16.0.111  172.16.0.1    esp 24501 -E 3des-cbc "123456789.123456789.1234"; 
+
+    # A
+    spdadd 172.16.0.1  172.16.0.111 any -P out ipsec
+            esp/transport//require
+            ah/transport//require;
+    spdadd 172.16.0.111  172.16.0.1 any -P in ipsec
+            esp/transport//require
+            ah/transport//require;
+</pre>
+
+<p>
+For host B:
+</p>
+<pre>
+    ## Flush the SAD and SPD
+    flush;
+    spdflush;
+
+    # A &amp; B
+    add 172.16.0.1    172.16.0.111  ah 15700 -A hmac-md5 "123456789.123456"; 
+    add 172.16.0.111  172.16.0.1    ah 24500 -A hmac-md5 "123456789.123456"; 
+
+    add 172.16.0.1    172.16.0.111  esp 15701 -E 3des-cbc 
+           "123456789.123456789.1234"; 
+    add 172.16.0.111  172.16.0.1    esp 24501 -E 3des-cbc 
+           "123456789.123456789.1234"; 
+
+    #dump ah;
+    #dump esp; 
+
+    # B
+    spdadd 172.16.0.111  172.16.0.1 any -P out ipsec
+            esp/transport//require
+            ah/transport//require;
+    spdadd 172.16.0.1  172.16.0.111 any -P in ipsec
+            esp/transport//require
+            ah/transport//require;
+</pre>
+
+<p>
+Note how the whole encryption mechanism is tied to the virtual
+addresses, thus isolating you from the physical networks your hosts are
+on. You can download the <a href="misc/melinte/ipsec-tools.conf">ipsec-tools.conf</a>
+directly.
+</p>
+
+<h3>The VPN at work</h3>
+
+<p>
+It's show time! Let's ping the other host's virtual interface with a
+payload of 100 bytes:
+</p>
+
+<pre>
+    Host A$ ping -s <strong>100</strong> 172.16.0.111
+</pre>
+
+<p>
+And watch the traffic with tcpdump on the virtual interface:
+</p>
+
+<pre>
+    #tcpdump -i tap0
+    ...
+    15:43:27.739218 IP 172.16.0.1 &gt; 172.16.0.111: AH(spi=0x00003d54,seq=0x1d):
+           ESP(spi=0x00003d55,seq=0x1d), length <strong>128</strong>
+    15:43:27.740673 IP 172.16.0.111 &gt; 172.16.0.1: AH(spi=0x00005fb4,seq=0x1d):
+           ESP(spi=0x00005fb5,seq=0x1d), length 128
+    15:43:28.738741 IP 172.16.0.1 &gt; 172.16.0.111: AH(spi=0x00003d54,seq=0x1e): 
+           ESP(spi=0x00003d55,seq=0x1e), length 128
+    15:43:28.740170 IP 172.16.0.111 &gt; 172.16.0.1: AH(spi=0x00005fb4,seq=0x1e):
+           ESP(spi=0x00005fb5,seq=0x1e), length 128
+    15:43:39.494298 IP 172.16.0.1 &gt; 172.16.0.111: AH(spi=0x00003d54,seq=0x1f):
+           ESP(spi=0x00003d55,seq=0x1f), length 64
+    15:43:39.496818 IP 172.16.0.111 &gt; 172.16.0.1: AH(spi=0x00005fb4,seq=0x1f):
+           ESP(spi=0x00005fb5,seq=0x1f), length 40
+</pre>
+
+<p>
+On the physical interface:
+</p>
+
+<pre>
+    # tcpdump -i eth2
+    ... 
+    15:45:46.878156 IP 192.168.40.128.11223 &gt; 192.168.40.129.11223: UDP, 
+            length <strong>186</strong>
+    15:45:46.879021 IP 192.168.40.129.11223 &gt; 192.168.40.128.11223: UDP, 
+            length 186
+    15:45:47.879479 IP 192.168.40.128.11223 &gt; 192.168.40.129.11223: UDP, 
+            length 186
+    15:45:47.887054 IP 192.168.40.129.11223 &gt; 192.168.40.128.11223: UDP, 
+            length 186
+    15:45:48.880268 IP 192.168.40.128.11223 &gt; 192.168.40.129.11223: UDP, 
+            length 186
+    15:45:48.882738 IP 192.168.40.129.11223 &gt; 192.168.40.128.11223: UDP, 
+            length 186
+</pre>
+
+<p>
+All figures in bold are payloads. When it goes out of the virtual
+interface, the encrypted datagram is 186 bytes: 14 bytes the Ethernet
+header, 20 bytes the IP header, an AH header of 24 bytes, and ESP as the
+remaining 128 bytes.
+</p>
+
+<p>
+When it goes out of the physical interface, the datagram is 232 bytes: 14
+bytes for the Ethernet header, 20 bytes for the IP header, 8 for the UDP
+one, 186 bytes of payload and 4 bytes for the Ethernet trailer. Thus, we
+introduce a 46 byte overhead per datagram.
+</p>
+
+<h3>Resources</h3>
+
+<ul>
+  <li><a href="http://www.mjmwired.net/kernel/Documentation/networking/tuntap.txt">
+      The TUN/TAP kernel documentation</a></li>
+  <li><a href="http://www.faqs.org/rfcs/rfc1191.html">
+      The Path MTU Discovery RFC</a></li>
+  <li><a href="http://linux.die.net/man/7/ip">
+      The Linux IPv4 man page</a></li>
+  <li><a href="http://www.networksorcery.com/enp/Protocol.htm">
+      The RFC Sourcebook</a></li>
+</ul>
+
+
+
+<script type='text/javascript'>
+digg_url = 'http://linuxgazette.net/149/melinte.html';
+digg_title = 'VPN Networking';
+digg_bodytext = '<p> Creating your own Virtual Private Network (VPN) is quite easy on platforms that come with a tun driver: this will allow you to process network packet traffic in user space. While that\'s considerably easier than doing your network programming in the kernel space, there still are a few details to figure out. This article should walk you through my findings. </p> ';
+digg_topic = 'linux_unix';
+</script>
+<script src="http://digg.com/tools/diggthis.js" type="text/javascript"></script>
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:149/melinte.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/authors/melinte.jpg" class="bio">
+</p>
+
+<em>
+<p>
+Aurelian is a software programmer by trade. Sometimes he programmed
+ Windows, sometimes Linux and sometimes embedded systems. He discovered
+ Linux in 1998 and enjoys using it ever since. He is currently settled
+ with Debian.
+</p>
+
+
+
+</em>
+
+<br clear="all">
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2008, Aurelian Melinte. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication License</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 149 of Linux Gazette, April 2008
+</p>
+
+</div>
+
+<div id="previousnextbottom">
+<A HREF="dyckoff.html" >&lt;-- prev</A> | <A HREF="pfeiffer.html" >next --&gt;</A>
+</div>
+
+</div>
+</div>
+
+<script src="http://www.google-analytics.com/urchin.js"
+type="text/javascript">
+</script>
+<script type="text/javascript">
+_uacct = "UA-1204316-1";
+urchinTracker();
+</script>
+
+
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+</body>
+</html>
+

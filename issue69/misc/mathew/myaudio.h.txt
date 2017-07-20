@@ -1,0 +1,221 @@
+#include <linux/modversions.h>
+#include <linux/module.h>
+#include <linux/version.h>
+#include <linux/linkage.h>
+#include <linux/malloc.h>
+#include <linux/soundcard.h>
+#include <asm/io.h>
+#include <asm/uaccess.h>
+/* #include <linux/kernel.h> */
+/* #include <include/vmalloc.h> */
+
+
+
+/* Among many hazy assumptions, we decide that 
+
+- gcc compiler specific operand passing assumption for type 'long', calling proc cleans up stack
+- Stack is push down, ie, grows to lower addresses
+- 32bit far return does popl eip, popl cs(msw neglected) in that order
+- 'leave' cleans up the stack...........................???
+for a baby of an interrupt handler routine.......               */
+
+
+/*****************helper functions in use***************/
+asmlinkage void myhandler(void);
+static int fops_sync_output(struct inode *inode, struct file *file);
+void sync_output();
+long getvect(long vector_number);
+long setvect(long vector_number, long new_handler_address);
+int helper_get_pit_count(void);
+void helper_set_pit_count(int count);
+static void speaker_close(struct inode *inode, struct file *file);
+static int speaker_open(struct inode *inode, struct file *file);
+
+
+static ssize_t speaker_read(struct file *file, char *buf, size_t count, loff_t *ppos);
+
+static ssize_t speaker_write(struct file *file, const char *buf, size_t count, loff_t *ppos);
+static int speaker_ioctl(struct inode *inode, struct file *file,
+			 unsigned int cmd, unsigned long arg);
+
+
+
+/********************GLOBAL STRUCTURES ********************/
+struct file_operations speaker_fops = {
+  NULL,
+  speaker_read,
+  speaker_write,
+  NULL,
+  NULL,
+  speaker_ioctl,  /* we'll support speaker_ioctl later, */
+  NULL,
+  speaker_open,
+  NULL,
+  speaker_close,
+  fops_sync_output,
+};
+
+static char berio;
+static long timer_idt_ptr, data_buffer, data_ptr;
+static unsigned long timeout=0xffffffff;
+static int sampling_factor, canplay, pit_counter,compensation_count, temp_pit_counter,old_pit_counter, buffer_length, virgin, device_major;
+static spinlock_t lock;
+static struct wait_queue *wait=NULL;
+
+
+
+
+
+
+
+struct __stack_pad_tag{ long  __stack_padding1, eax, __stack_padding2; }; 
+
+
+
+
+ 
+long setvect(long vector,long hook)
+{
+
+ struct __stack_pad_tag stack_pad __attribute__ ((packed));            
+            asm("sidt %3                    \n      
+            leal %3,%%eax                   \n      
+            movl 2(%%eax),%%eax             \n      
+            leal (%%eax,%1,8) , %%ecx       \n /* ecx is the 'pointer register' for int vector */
+            movl 4(%%ecx),%%eax             \n      
+            xorw %%ax,%%ax                  \n      
+            movw (%%ecx),%%ax              \n  
+            /* Remember , pointer to int handler is in eax, we've not pushed it */
+            cli                             \n
+            movw %%bx,(%%ecx)               \n
+            shrl $16,%%ebx                  \n
+            movw %%bx,6(%%ecx)              \n
+            /* I'm under the assumption that eax can safely be returned to pseudo register 'stackpad.eax' */
+            sti                             \n" : "=a" (stack_pad.eax) : "c" (vector),"m" (stack_pad.__stack_padding1), "m" (stack_pad.eax), "m" (stack_pad.__stack_padding2),"b" (hook));
+       
+              
+
+
+
+return  stack_pad.eax;
+}
+
+
+
+long getvect(long vector)
+{
+  long eax, __stack_padding1, __stack_padding2;
+            
+            asm("sidt %4                    \n      
+            leal %4,%%eax                   \n      
+            movl 2(%%eax),%%eax             \n      
+            leal (%%eax,%1,8) , %%ecx       \n      
+            movl 4(%%ecx) ,%%eax            \n      
+            xorw %%ax,%%ax                  \n      
+            movw (%%ecx),%%ax               \n        " : "=a" (eax) : "c" (vector),"m" (__stack_padding1), "m" (eax), "m" (__stack_padding2) );
+       return  eax;
+} 
+/* A little glitch in the stack padding-not to worry though, it works just fine...... (%4 vs %3 in setvect */
+
+
+
+asmlinkage void myhandler(void)
+{
+/* pushl %%ebp; movl %%esp,%%ebp */
+  asm volatile ("
+leave
+push timer_idt_ptr
+pushal
+
+movw canplay, %cx
+jcxz skip_isr
+
+inb $0x61, %al
+orb $3, %al
+outb %al, $0x61
+
+/* fetch data */
+movl data_ptr, %ebx
+movw (%ebx), %dx
+
+/* load mode register of pit */
+movb $0xb0, %al
+outb %al, $0x43
+
+movw pit_counter, %ax
+xorb %dh, %dh
+mulw %dx
+movb $8, %cl
+shrw %cl, %ax
+
+
+/* load counter 2 */
+
+orw $1, %ax
+outb %al, $0x42
+
+/* dump MSB into counter 2 assuming it to be zero */
+
+xorb %al, %al
+outb %al, $0x42
+
+
+
+
+
+/* increment data pointer */
+/* movb berio, %cl
+xorb %ch, %ch
+jcxz data_ptrplus
+add $1, data_ptr
+*/
+data_ptrplus:
+incl data_ptr
+movl data_ptr,%eax
+subl data_buffer, %eax
+cmpw %ax, buffer_length
+
+jnc skip_isr   /* We don't want to reset count everytime  */
+movw $0, canplay  /* So just switch off playback to indicate end of buffer */
+
+
+skip_isr:
+
+decw temp_pit_counter
+jz hop_to_kernel
+
+movb $0x20,%al         /* EOI to PIC */
+outb %al,$0x20
+
+popal
+/*subl $4,%esp        /* readjust stack for iret */
+pop timer_idt_ptr
+iret
+
+
+hop_to_kernel:
+
+movw compensation_count, %ax
+movw %ax, temp_pit_counter;
+
+
+
+
+
+
+");
+ 
+
+/* return stack has been set up -> oldhandler. End with popa; ret */
+
+ asm("popal
+ret");
+
+
+
+}
+
+
+
+
+

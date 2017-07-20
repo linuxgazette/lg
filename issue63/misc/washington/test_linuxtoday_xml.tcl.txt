@@ -1,0 +1,215 @@
+# return 1 (true) if strings are equal
+proc string_equal_p {str1 str2} {
+    if {[string compare $str1 $str2] == 0} {
+	return 1
+    }
+    return 0
+}
+
+# stolen from ACS 3x
+# return HTML text that can be inserted into HTML (by
+# qutoing special HTML chars)
+proc ad_quotehtml { arg } {
+    # we have to do & first or we'll hose ourselves with the ones lower down
+    regsub -all & $arg \\&amp\; arg
+    regsub -all \" $arg \\&quot\; arg
+    regsub -all < $arg \\&lt\; arg
+    regsub -all > $arg \\&gt\; arg
+    return $arg
+}
+
+# given url and title construct a story object with
+# those attributes
+proc define_story { url title } {
+    return [list $url $title]
+}
+
+proc headlines_get_stories_count { headlines } {
+    return [llength $headlines]
+}
+
+proc headlines_get_story { headlines story_no } {
+    return [lindex $headlines $story_no]
+}
+
+proc story_get_url { story } {
+    return [lindex $story 0]
+}
+
+proc story_get_title { story } {
+    return [lindex $story 1]
+}
+
+# does a name of the node identified by $node_id equals $name
+proc is_node_name_p { node_id name } {
+    set node_name [ns_xml node name $node_id]
+    if { [string_equal_p $name $node_name] } {
+	return 1
+    } else {
+	return 0
+    }
+}
+
+# does a type of the node identified by $node_id equals $type
+proc is_node_type_p { node_id type } {
+    set node_type [ns_xml node type $node_id]
+    if { [string_equal_p $type $node_type] } {
+	return 1
+    } else {
+	return 0
+    }
+}
+
+# is this an node of type "attribute"?
+proc is_attribute_node_p { node_id } {
+    return [is_node_type_p $node_id "attribute"]
+}
+
+# raise an error if node name is different than $name
+proc error_if_node_name_not {node_id name} {
+    if { ![is_node_name_p $node_id $name] } {
+	set node_name [ns_xml node name $node_id]
+	error "node name should be $name and not $node_name"
+    }
+}
+
+# raise an error if node type is different than $type
+proc error_if_node_type_not {node_id type} {
+    if { ![is_node_type_p $node_id $type] } {
+	set node_type [ns_xml node type $node_id]
+	error "node type should be $type and not $node_type"
+    }
+}
+
+# convert a node of name "story" into an object
+# that represents story
+proc story_node_to_story {node_id} {
+    set url ""
+    set title ""
+    # go through all children and extract content of url and title nodes
+    set children [ns_xml node children $node_id]
+    foreach node_id $children {
+	# we're only interested in nodes whose name is "url" or "title"
+	if { [is_attribute_node_p $node_id]} {
+	    if { [is_node_name_p $node_id "url"] || [is_node_name_p $node_id "title"]} {
+		set node_children [ns_xml node children $node_id]
+		# those should only have one children node with
+		# the name "text" and type "cdata_section"
+		if { [llength $node_children] != 1 } {
+		    set name [ns_xml node name $node_id]
+		    error "$name node should only have 1 child"
+		}
+		set one_node_id [lindex $node_children 0]
+		error_if_node_type_not $one_node_id "cdata_section"
+		error_if_node_name_not $one_node_id "text"
+		set txt [ns_xml node getcontent $one_node_id]
+		if { [is_node_name_p $node_id "url"] } {
+		    set url $txt
+		}
+		if { [is_node_name_p $node_id "title"]} {
+		    set title $txt
+		}
+	    }
+	}
+    }
+    return [define_story $url $title]
+}
+
+# convert XML doc to headlines object
+proc xml_to_headlines { doc_id } {
+    set headlines [list]
+    set root_id [ns_xml doc root $doc_id]
+    # root node should be named "linuxtoday" and of type "attribute"
+    error_if_node_name_not $root_id "linuxtoday"
+    error_if_node_type_not $root_id "attribute"
+    set children [ns_xml node children $root_id]
+    foreach node_id $children {
+	# only interested in attribute type nodes whose name is "story"
+	if { [is_node_name_p $node_id "story"] && [is_attribute_node_p $node_id]} {
+	    set story [story_node_to_story $node_id]
+	    lappend headlines $story
+	}
+    }
+    return $headlines
+}
+
+proc story_to_html_table_row { story } {
+    set url [story_get_url $story]
+    set title [story_get_title $story]
+    return "- <a href=\"$url\"><font color=#000000>$title</font></a><br>\n"
+}
+
+# given headlines generate HTML code of the table with this data
+proc headlines_to_html_table { headlines {header_bg_color "#cccccc"} {body_bg_color "#eeeeee"}} {
+    set to_return "<table width=\"50%\" border=0 cellspacing=1 cellpadding=3>"
+    append to_return "
+<tr>
+  <td align=center BGCOLOR=$header_bg_color>
+  <b>
+   <font face=\"Lucida,Verdana,Helvetica,Arial\">
+    <A href=\"http://linuxtoday.com\">
+      <FONT color=#000000>linuxtoday</FONT>
+    </A>
+  </FONT>
+  </B>
+  </TD>
+</TR>"
+
+    append to_return "
+<TR>
+  <TD BGCOLOR=$body_bg_color>
+  <SMALL><FONT FACE=\"Lucida,Verdana,Helvetica,Arial\">
+"
+    set stories_count [headlines_get_stories_count $headlines]
+    for {set i 0} {$i < $stories_count} {incr i} {
+	set story [headlines_get_story $headlines $i]
+	append to_return [story_to_html_table_row $story]
+    }
+
+    append to_return "</font></td></tr></table>\n"
+    return $to_return
+}
+
+# generate HTTP headers
+ns_write "HTTP/1.0 200 OK
+ MIME-Version: 1.0
+ Content-Type: text/html\n\n"
+
+# now generate HTML text of the document
+ns_write "<html>
+<head>
+<title>Second test of XML</title>
+</head>
+<body bgcolor=\#ffffff text=\#000000>
+<h2>Testing of XML parsing in AOLserver</h2>\n"
+
+set url "http://www.linuxtoday.com/backend/linuxtoday.xml"
+if { [catch {set xml_doc [ns_httpget $url]} err] } {
+    ns_write "Couldn't grab XML doc from $url\n"
+    ns_write "Error message is: <B> <PRE>\n"
+    ns_write [ad_quotehtml $err]
+    ns_write "\n</PRE></b>"
+    ns_write "</body></html>\n"
+    return
+}
+
+if { [catch {set doc_id [ns_xml parse $xml_doc]} err] } {
+    ns_write "There was an error parsing the following XML document: <PRE>\n"
+    ns_write [ad_quotehtml $xml_doc]
+    ns_write "\n</PRE> Error message is: <B> <PRE>\n"
+    ns_write [ad_quotehtml $err]
+    ns_write "\n</PRE></b>"
+    ns_write "</body></html>\n"
+    return
+}
+
+set hl [xml_to_headlines $doc_id]
+ns_write "Displaying current headlines from: <a href=\"$url\">$url</a>\n<p>"
+ns_write [headlines_to_html_table $hl]
+ns_write "<p>"
+ns_write [headlines_to_html_table $hl "red" "green"]
+
+ns_write "
+</body>
+</html>
+"

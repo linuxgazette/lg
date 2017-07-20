@@ -1,0 +1,76 @@
+#!/bin/bash
+#
+# chkconfig: 2345 20 40
+# description: Snort_inline is an IPS implementation of the popular snort IDS package
+# processname: snort_inline
+# config: /etc/snort_inline/snort_inline.conf
+
+# Source function library.
+. /etc/init.d/functions
+
+# Source networking configuration.
+. /etc/sysconfig/network
+
+[ -f /usr/local/bin/snort_inline ] || exit 0
+
+start() {
+        # Start daemons.
+        echo -n $"Starting ip_queue module:"
+        lsmod | grep ip_queue >/dev/null || /sbin/modprobe ip_queue;
+        echo -e '\t\t\t\t   [  \033[32mOK\033[37m  ]'
+        
+        echo -n $"Starting iptables rules:"
+        iptables -N ip_queue
+        iptables -I INPUT -p tcp -j ip_queue
+        #Add new IPTABLES rules here and they will be added into the ip_queue Ruleset
+        iptables -I ip_queue -p tcp --dport 80 -j QUEUE
+
+        echo -e '\t\t\t\t   [  \033[32mOK\033[37m  ]'
+        echo -n $"Starting snort_inline: "
+        daemon /usr/local/bin/snort_inline -c /etc/snort_inline/snort_inline.conf -Q -N -l /var/log/snort_inline -t /var/log/snort_inline -D
+
+        RETVAL=$?
+        echo
+        [ $RETVAL = 0 ] && touch /var/lock/subsys/snort_inline
+}
+
+stop() {
+        # Stop daemons.
+        echo -n $"Shutting down snort_inline: "
+        killproc snort_inline
+        echo -ne $"\nRemoving iptables rules:"
+        iptables -F ip_queue
+        iptables -D INPUT -p tcp -j ip_queue
+        iptables -X ip_queue
+        echo -e '\t\t\t\t   [  \033[32mOK\033[37m  ]'
+        echo -n $"Unloading ip_queue module:"
+        rmmod ip_queue
+        echo -en '\t\t\t\t   [  \033[32mOK\033[37m  ]'
+
+        RETVAL=$?
+        echo
+        [ $RETVAL = 0 ] && rm -f /var/lock/subsys/snort_inline
+}
+
+restart() {
+        stop
+        start
+}
+
+# Arguments passed.
+case "$1" in
+  start)
+        start
+        ;;
+  stop)
+        stop
+        ;;
+  restart)
+        restart
+        ;;
+  *)
+        echo $"Usage: $0 {start|stop|restart|}"
+        exit 1
+esac
+
+exit $RETVAL

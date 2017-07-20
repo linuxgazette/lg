@@ -1,0 +1,322 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>Exploring The sendfile System Call LG #91</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<!-- *** BEGIN navbar *** -->
+<A HREF="shuveb.html">&lt;&lt;&nbsp;Prev</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="index.html">TOC</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../index.html">Front Page</A>&nbsp;&nbsp;|&nbsp;&nbsp;Talkback&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../faq/index.html">FAQ</A>
+<!-- *** END navbar *** -->
+
+<!--endcut ============================================================-->
+
+<TABLE BORDER><TR><TD WIDTH="200">
+<A HREF="http://www.linuxgazette.net/">
+<IMG ALT="LINUX GAZETTE" SRC="../gx/2002/lglogo_200x41.png" 
+	WIDTH="200" HEIGHT="41" border="0"></A> 
+<BR CLEAR="all">
+<SMALL>...<I>making Linux just a little more fun!</I></SMALL>
+</TD><TD WIDTH="380">
+
+
+<CENTER>
+<BIG><BIG><STRONG><FONT COLOR="maroon">Exploring The sendfile System Call</FONT></STRONG></BIG></BIG>
+<BR>
+<STRONG>By <A HREF="../authors/tranter.html">Jeff Tranter</A></STRONG>
+</CENTER>
+
+</TD></TR>
+</TABLE>
+<P>
+
+<!-- END header -->
+
+
+
+<H2>Introduction</H2>
+
+The <TT>sendfile</TT> system call is a relatively recent addition to
+the Linux kernel that offers significant performance benefits to
+applications such as ftp and web servers that need to efficiently
+transfer files. In this article I will explore <TT>sendfile</TT>, what
+it does, and how to use it, illustrated by some example programs.
+
+<H2>Background</H2>
+
+A server application, such as a web server, spends much of its time
+transferring files stored on disk to a network connection connected to
+a client running a web browser. Simple pseudo-code for the data
+transfer might look like this:
+
+<PRE>
+    open source (disk file)
+    open destination (network connection)
+    while there is data to be transferred:
+        read data from source to a buffer
+        write data from buffer to destination
+    close source and destination
+</PRE>
+
+The reading and writing of data would typically use the <TT>read</TT>
+and <TT>write</TT> system calls respectively, or library functions
+built on top of them.
+
+<P>
+
+If we follow the path of the data from disk to network, it needs to be
+copied several times. Each time the <TT>read</TT> system call is
+invoked, data must be transferred from the disk hardware to a kernel
+buffer (typically using DMA). Then it needs to be copied into the
+buffer used by the application. When <TT>write</TT> is called, data in
+the application's buffer needs to be transferred to a kernel buffer
+and then from the kernel buffer to the hardware device (e.g. network
+card). Every time a system call is invoked by a user program, there is
+a <EM>context switch</EM> between user and kernel mode, which is a
+relatively expensive operation. If there are many calls to
+<TT>read</TT> and <TT>write</TT> in the program, there will be many
+context switches required.
+
+<P>
+
+This copying of data between kernel and application buffers and back
+is redundant if the data does not need to be changed. Many operating
+systems, including Windows NT, FreeBSD, and Solaris, offer what is
+called a zero-copy system call that can perform a file transfer in a
+single operation. Early versions of Linux were criticized for lacking
+this feature, until it was implemented in the 2.2 kernel series. It is
+now used by popular server applications such as Apache and Samba.
+
+<P>
+
+The implementation of <TT>sendfile</TT> varies on different operating
+systems. For the rest of this article we will just focus on the Linux
+version. Note that there is a file transfer utility called
+<TT>sendfile</TT>; this has nothing to do with the kernel system call.
+
+<H2>A Detailed Look</H2>
+
+To use <TT>sendfile</TT>, include the header file
+<TT>&lt;sys/sendfile.h&gt;</TT>, which declares a function with
+the following prototype:
+
+<PRE>
+    ssize_t sendfile(int out_fd, int in_fd, off_t *offset, size_t count);
+</PRE>
+
+
+The parameters are as follows:
+
+<DL>
+
+<DT>out_fd</DT>
+<DD>a file descriptor, open for writing, for the data to be written</DD>
+
+<DT>in_fd</DT>
+<DD>a file descriptor, open for reading, for the data to be read</DD>
+
+<DT>offset</DT> <DD>the offset in the input file to start transfer
+(e.g. a value of 0 indicates the beginning of the file). This is
+passed into the function and updated when the function returns.</DD>
+
+<DT>count</DT>
+<DD>the number of bytes to be transferred</DD>
+
+</DL>
+
+The function returns the number of bytes written or -1 if an error occurred.
+
+<P>
+
+On Linux, file descriptors can be true files or devices, such as a
+network socket. The <TT>sendfile</TT> implementation currently
+requires that the input file descriptor correspond to a true file
+or some device which supports <TT>mmap</TT>. This means, for example,
+it cannot be a network socket. The output file descriptor can
+correspond to a socket, and this is usually the case when it is used.
+
+<H2>Example 1</H2>
+
+Let's look at a simple example to illustrate using <TT>sendfile</TT>.
+Listing 1 shows <TT>fastcp.c</TT>, a simple file copy program that uses
+<TT>sendfile</TT> to perform a file copy.
+
+<P>
+
+The listing here is slightly abbreviated for clarity. The full listing
+available <A HREF="misc/tranter/fastcp.c.txt">here</A> has additional
+error checking and the include directives needed so it will compile.
+
+<P>
+
+<HR>
+
+<PRE>
+Listing 1: fastcp.c
+
+1     int main(int argc, char **argv) {
+2         int src;               /* file descriptor for source file */
+3         int dest;              /* file descriptor for destination file */
+4         struct stat stat_buf;  /* hold information about input file */
+5         off_t offset = 0;      /* byte offset used by sendfile */
+6
+7         /* check that source file exists and can be opened */
+8         src = open(argv[1], O_RDONLY);
+
+9         /* get size and permissions of the source file */
+10        fstat(src, &amp;stat_buf);
+
+11        /* open destination file */
+12        dest = open(argv[2], O_WRONLY|O_CREAT, stat_buf.st_mode);
+
+13        /* copy file using sendfile */
+14        sendfile (dest, src, &amp;offset, stat_buf.st_size);
+
+15        /* clean up and exit */
+16        close(dest);
+17        close(src);
+18    }
+</PRE>
+
+<HR>
+
+<P>
+
+On line 8 we open the input file, passed as the first command line
+argument. On line 10 we get information on the file using
+<TT>fstat</TT>, as we will need the file size and permissions
+later. On line 12 we open the output for for writing. Line 14 performs
+the call to sendfile, passing the output and input file descriptors,
+the offset (zero in this case), and specifying the number of bytes to
+transfer using the input file size. We then close the files in lines
+16 and 17.
+
+<P>
+
+Try compiling the program (using the full version <A
+HREF="misc/tranter/fastcp.c.txt">here</A>). I suggest experimenting
+with using it to copy various types of files, such as the following,
+and see which source and destination devices support
+<TT>sendfile</TT>:
+
+<UL>
+<LI> from a disk file to another disk file
+<LI> using files located on different disks or partitions
+<LI> from a mounted CD-ROM to a file
+<LI> from a disk file to /dev/null or /dev/full
+<LI> from /dev/zero or /dev/null to a disk file
+<LI> from a disk file to the floppy device (/dev/fd0)
+</UL>
+
+<H2>Example 2</H2>
+
+The first example was simple, but not very representative of the
+typical use of <TT>sendfile</TT> using a network destination. The
+second example illustrates sending a file over a network socket. This
+program is longer, mostly due to the setup required to work with
+sockets, so I don't include it in-line. You can see the full source
+listing <A HREF="misc/tranter/server.c.txt">here</A>.
+
+<P>
+
+The program, called <TT>server</TT>, does the following:
+
+<UL>
+<LI> Listens on a network socket for a client to connect.
+<LI> When a client connects, waits for the client to send it a filename.
+<LI> Sends the specified file back to the client using <TT>sendfile</TT>.
+<LI> Disconnects the client and listens for another connection.
+</UL>
+
+I assume here you are familiar with the basics of network socket
+programming. If not, there are many good books on the subject.
+such as <EM>UNIX Network Programming</EM> by Richard Stevens.
+
+<P>
+
+The server arbitrarily uses port 1234 but you can specify it as a
+command line option. Start the server by running it ("./server"). To
+act as the client side, you can use the <TT>telnet</TT> program. Run
+it from another console window while the server is running, specifying
+the host name and port number (e.g. "telnet localhost 1234"). Once
+<TT>telnet</TT> indicates it is connected, type the name of a file
+that exists, such as <TT>/etc/hosts</TT>. The server should send
+the contents of the file back to the client and then close the connection.
+
+<P>
+
+The server should remain running so you can connect again. If you use
+a filename of "quit" then the server will exit. If you have another
+machine on a network, try verifying that you can connect to the server
+and transfer a file from another machine.
+
+<P>
+
+Note that this is a very simplistic example of a server: it can only
+handle one client at a time and does does little error checking,
+exiting if an error occurs. There are also other performance
+optimizations that can be done at the TCP layer, that are outside the
+scope of what can be covered here.
+
+<H2>Summary</H2>
+
+The <TT>sendfile</TT> system call facilitates high performance network
+file transfers, a requirement for applications such as ftp and web
+servers. If you are developing a server application, consider using
+<TT>sendfile</TT> to give your code a performance boost. Outside of
+the server arena, it is an interesting feature in it's own right and
+you may find some other creative uses for it.
+
+<P>
+
+Finally, after all this discussion of <TT>sendfile</TT>, I will leave
+you with this question to ponder: why is there no corresponding
+<TT>receivefile</TT> system call?
+
+<H2>References</H2>
+
+<OL>
+<LI> The sendfile(2) man page.
+<LI> Kernel source for the <TT>sendfile</TT> implementation.
+</OL>
+
+
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<P>
+<img ALIGN="LEFT" ALT="[BIO]" SRC="../gx/2002/note.png">
+<em>
+Jeff has been using, writing about, and contributing to Linux
+since 1992. He works for Xandros Corporation in Ottawa, Canada.
+</em>
+<br CLEAR="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+
+<!-- *** BEGIN copyright *** -->
+<hr>
+<CENTER><SMALL><STRONG>
+Copyright &copy; 2003, Jeff Tranter.
+Copying license <A HREF="../copying.html">http://www.linuxgazette.net/copying.html</A><BR> 
+Published in Issue 91 of <i>Linux Gazette</i>, June 2003
+</STRONG></SMALL></CENTER>
+<!-- *** END copyright *** -->
+<HR>
+
+<!--startcut ==========================================================-->
+<CENTER>
+<!-- *** BEGIN navbar *** -->
+<A HREF="shuveb.html">&lt;&lt;&nbsp;Prev</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="index.html">TOC</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../index.html">Front Page</A>&nbsp;&nbsp;|&nbsp;&nbsp;Talkback&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../faq/index.html">FAQ</A>
+<!-- *** END navbar *** -->
+</CENTER>
+</BODY></HTML>
+<!--endcut ============================================================-->

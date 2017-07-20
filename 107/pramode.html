@@ -1,0 +1,646 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>AMD64 Linux kernel and the NX bit LG #107</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="pai.html" >&lt;-- prev</A> | <A HREF="schaffter.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>AMD64 Linux kernel and the NX bit</h1>
+<p id="by"><b>By <A HREF="../authors/pramode.html">Pramode C.E.</A></b></p>
+
+<p>
+<p>
+Buffer overflows are not uncommon in C programs. Attacks
+which exploit these bugs usually try to inject alien
+code into the program and execute it by overwriting return
+addresses stored on the stack. Hardware support for marking
+areas of memory non-executable would make such attacks
+difficult. The 64 bit processors manufactured by AMD have a
+`no-execute' bit added to page table entries. The Linux kernel
+compiled for X86_64 CPU's can make use of this bit to protect
+user/kernel level code against buffer overflow exploits. This 
+article describes a few experiments which I tried on an Athlon64
+system running the Linux kernel 2.6.8.1 to understand some
+of the issues behind the use of the NX bit. The on-the-stack
+machine code generation trick which GCC uses (the so-called
+`trampoline') to implement nested functions and its dependence
+on an executable stack will also be examined in some detail.
+<p>
+All the programs presented in this article have been tested on
+an AthlonXP (32 bit) system using gcc 3.3.2 (the code generated
+by the compiler can vary as the version changes). Code which demonstrates
+the utility of the NX bit has been tested on an Athlon64 system
+running Fedora Core 2 (for x86_64). 
+
+<h3>Let's execute the stack!</h3>
+<p>
+The `objdump' utility comes in handy when we wish to examine
+the machine code produced by the linker. We write a simple
+C program:
+<pre class="code">
+
+main()
+{
+}
+
+</pre>
+and compile and disassemble it by running:
+<pre>
+
+objdump --disassemble-all ./a.out
+
+</pre>
+Here is the output:
+<pre class="code">
+
+08048314 &lt;main&gt;:
+ 8048314:	55                   	push   %ebp
+ 8048315:	89 e5                	mov    %esp,%ebp
+ 8048317:	83 ec 08             	sub    $0x8,%esp
+ 804831a:	83 e4 f0             	and    $0xfffffff0,%esp
+ 804831d:	b8 00 00 00 00       	mov    $0x0,%eax
+ 8048322:	29 c4                	sub    %eax,%esp
+ 8048324:	c9                   	leave  
+ 8048325:	c3                   	ret    
+
+</pre>
+We note that the `ret' instruction has an opcode of 0xc3. We use
+it to write a cute C program:
+<p>
+<a href="misc/pramode/1.c.txt">Listing 1</a>
+<pre class="code">
+
+main()
+{
+	char a[10] = {0xc3};
+	
+	((void (*)())a)();
+}
+
+</pre>
+Now, what does that horrible looking cast do? We are telling the
+compiler to treat the address of the array as the address of a 
+function which returns void; so go on, generate code to execute
+the array! What is proof that the code is really executing the array?
+Well, it is not crashing, and that might be proof enough.
+<p>
+It's not too difficult to prove that the code actually executes the
+array. Let's compile (with -O2 option) and disassemble the 
+following C code segment:
+<p>
+<a href="misc/pramode/2.c.txt">Listing 2</a>
+<pre class="code">
+
+#include &lt;sys/io.h&gt;
+main()
+{
+	outb(0x34, 0x378);
+}
+
+</pre>
+The disassembled `main' is: 
+<pre class="code">
+
+08048314 &lt;main&gt;:
+ 8048314:	55                   	push   %ebp
+ 8048315:	89 e5                	mov    %esp,%ebp
+ 8048317:	83 ec 08             	sub    $0x8,%esp
+ 804831a:	83 e4 f0             	and    $0xfffffff0,%esp
+ 804831d:	b0 34                	mov    $0x34,%al
+ 804831f:	ba 78 03 00 00       	mov    $0x378,%edx
+ 8048324:	ee                   	out    %al,(%dx)
+ 8048325:	c9                   	leave  
+ 8048326:	c3                   	ret    
+ 8048327:	90                   	nop    
+
+</pre>
+We note that the `outb' is getting encoded as 8 bytes: 0xb0, 0x34, 0xba,
+0x78, 0x03, 0x00, 0x00 and 0xee.
+With this information in hand, we write another program:
+<p>
+<a href="misc/pramode/3.c.txt">Listing 3</a>
+<pre class="code">
+
+#include &lt;sys/io.h&gt;
+main()
+{
+	char a[20] = {0xb0, 0x34, 0xba, 
+                      0x78, 0x3, 0x0, 
+                      0x0, 0xee, 0xc3};
+
+	iopl(3);
+
+	((void (*)())a)();
+	printf("%x\n", inb(0x378));
+}
+
+</pre>
+0x378 is the address of the PC parallel port. Because the
+program is executing the array, it is writing 0x34 to the 
+parallel port; which is verified by the subsequent `inb'.
+<p>
+If our program has a buffer overflow bug in it, a clever
+attacker can exploit this to inject malicious code into the
+program (after all, code is nothing but a sequence of numbers)
+and execute it via some address overwriting tricks. But what if
+the OS, with the help of the machine's hardware, prevents the
+execution of memory areas which are supposed to contain only
+data? This is what the AMD64 NX bit which is supported by the 
+Linux kernel attempts to achieve.
+<p>
+An ELF binary (or shared library) can be `marked' as 
+requiring (or not requiring) an executable stack. This
+is done using the `execstack' command:
+<pre>
+
+execstack -s ./a.out #mark a.out as requiring
+                     #executable stack (we will call this `turning 
+                     #off the NX bit')
+execstack -c ./a.out #mark a.out as not requiring
+                     #executable stack (we will call this `turning
+                     #on the NX bit')
+
+</pre>
+The results of running the previous program on a 32 bit Athlon
+system with the executable marked first as requiring an executable
+stack and then as not requiring an executable stack were identical -
+in both cases, the program worked as expected, executing the
+array and thereby writing to the parallel port. This is because the
+hardware does not provide the no-execute facility. The program
+was then modified a bit (GCC for x86_64 generates different 
+code) and run on an Athlon64. When the executable stack bit was
+turned off, the program segfaulted.
+<p>
+<a href="misc/pramode/4.c.txt">Listing 4</a>
+<pre class="code">
+
+#include &lt;sys/io.h&gt;
+main()
+{
+	unsigned char a[] = {0xb8, 0x34, 0x0, 0x0, 0x0,
+                             0xba, 0x78, 0x03, 0x0, 0x0,
+                             0xee, 0xc3};
+
+	iopl(3);
+	((void (*)())a)();
+	printf("%x\n", inb(0x378));
+}
+
+</pre>
+
+<h3>Why turn off the no-execute bit?</h3>
+<p>
+It seems that having the NX bit on for all programs
+is a good thing. But there are certain situations where
+programming language compilers and interpreters might
+generate native machine code on-the-fly (or generate
+code which generates machine code on the fly), store it into
+an array and execute it. For such programs to work
+properly, an executable stack is a necessity. Let's look
+at an interesting example where the stack has got to be
+executable if the program is to work properly.
+
+<h3>Nested Functions</h3>
+<p>
+GCC supports nested functions. Here is an example
+program:
+<p>
+<a href="misc/pramode/5.c.txt">Listing 5</a>
+<pre class="code">
+
+void fun1()
+{
+	void fun2()
+	{
+		printf("fun2...\n");
+	}
+	fun2();
+}
+main()
+{
+	fun1();
+}
+
+</pre>
+<p>
+Let's try to understand how nested functions are implemented
+by compiling a slightly more complex program
+and reading the output produced by the compiler.
+<p>
+<a href="misc/pramode/6.c.txt">Listing 6</a>
+<pre class="code">
+
+void fun1()
+{
+	int i = 10;
+	void fun2()
+	{
+		i = 20;
+	}
+	void fun3()
+	{
+		fun2();
+	}
+	fun2();
+}
+main()
+{
+	fun1();
+}
+
+</pre>
+The assembly output produced by the compiler is shown
+in <a href="misc/pramode/7.asm.txt">Listing 7</a>. Let's say the
+value of the stack pointer in the very first line of fun1
+is 1000. 
+<pre class="code">
+
+	pushl	%ebp
+	movl	%esp, %ebp
+	subl	$8, %esp
+	movl	$10, -4(%ebp)
+	movl	%ebp, %ecx
+	call	fun2.0
+
+</pre>
+After the pushl, it becomes 996. This value is copied to ebp.
+The variable `i' is stored at location 992. The base pointer is
+copied to ecx and fun2 is called.
+<p>
+The register ecx is used for holding the address of the
+activation record of the function which lexically encloses the function
+being called. Whether fun2 is being called from within fun1 or
+fun3, the enclosing function is fun1 and that's where fun2 
+should look for when it is searching for symbols. Let's look at
+the segment of code where fun3 invokes fun2.
+<pre class="code">
+
+fun3.1:
+	pushl	%ebp
+	movl	%esp, %ebp
+	subl	$8, %esp
+	movl	%ecx, -4(%ebp)
+	movl	-4(%ebp), %ecx
+	call	fun2.0
+
+</pre>
+Within fun3 (the compiler has renamed fun3 to fun3.1), the
+value in ecx is the address of the frame which encloses fun3, 
+that is, fun1. Note that this value is simply passed on to
+fun2. The important thing here is that the compiler is able 
+to identify (at compile time) the address of the stack frame 
+of the function which encloses fun2, irrespective of the 
+location from where fun2 is being invoked because the function 
+is being called by its name.
+
+<h3>The trouble with function pointers</h3>
+<p>
+Compile time identification of the address of the
+lexically enclosing function's activation record becomes
+impossible when the function is called via a function
+pointer. Here is an example:
+<p>
+<a href="misc/pramode/8.c.txt">Listing 8</a>
+<pre class="code">
+
+void fun1()
+{
+	int m = 5;
+	void fun2()
+	{
+		printf("fun2: %d\n", m);
+		m = 10;
+	}
+	void fun3()
+	{
+		void fun5()
+		{
+			printf("fun5:%d\n", m);
+			m = 20;
+		}
+		void fun4(void (*p)())
+		{
+			p();
+		}
+		scanf("%d", &amp;m);
+		if (m == 1)  fun4(fun5);
+		else fun4(fun2);
+	}
+	fun3();
+}
+main()
+{
+	fun1();
+}
+
+</pre>
+The question is what value should be put in ecx when the
+function pointed to by `p' is called. If `p' contains the
+address of fun5, it should definitely be the address of the
+activation record of fun3; otherwise, it should be the address
+of the activation record of fun1. The trouble is that the
+actual address stored in `p' can be determined only at run
+time depending on what value the user assigns to `m' from the
+standard input.
+
+<p>
+Before we examine how GCC solves this problem, let's
+write yet another  little C program and run it on a 32
+bit system:
+<p>
+<a href="misc/pramode/9.c.txt">Listing 9</a>
+<pre class="code">
+
+fun1()
+{
+	printf("fun1...\n");
+}
+
+fun2()
+{
+	unsigned char a[100];
+
+	a[0] = 0xe9;
+	*((int*)(a+1)) = (int)fun1 - (int)(a+5);
+	((void (*)())a)();
+
+}
+
+main()
+{
+	fun2();
+}
+
+</pre>
+What is fun2 doing? The first cell of the array is filled
+with 0xe9, which is the opcode for the JMP instruction. The
+next four bytes get filled by the difference between the 
+addresses of the jump target and the next instruction (which
+is what jmp needs). The array is then typecast to a function
+pointer and called. Executing the code in the array results
+immediately in a jump to fun1; a return from fun1 will transfer
+control back to the end of fun2.
+
+<h3>Trampoline Magic</h3>
+<p>
+The solution to the problem is simple and efficient. At the
+point where the address of the function is taken, GCC knows
+the address of the activation record of the function which 
+encloses it - GCC generates code which copies this 4 byte value on to the 
+stack, prefixed with the opcode of the instruction which 
+copies a value to the ecx register. The next byte will
+be filled by GCC generated code with the opcode of the jmp
+instruction. This is followed by a 4 byte number, let's call it X. If
+we assume that the opcode of the instruction which copies
+a value to ecx is at a location on the stack whose address is Y,
+we have the following picture:
+
+<pre>
+
+   Y           --&gt;  Opcode of insn which moves a value to ecx
+   Y+1 to Y+4  --&gt;  The 4 byte value to be moved (address of the
+                       activation record of the function which encloses
+                       the function whose address is being taken)
+   Y+5         --&gt;  Opcode of jmp instruction
+   Y+6 to Y+9  --&gt;  A 4 byte number, let's call it X
+   Y+10        --&gt;  Next location on the stack.
+
+</pre>
+This 4 byte number is computed by GCC generated code as
+follows (let's call the function whose address is being taken
+`fun2'):
+<pre>
+
+X = address of fun2 - Y+10
+
+</pre>
+After doing all these subtle manipulations, the generated
+code stores the address
+Y in the function pointer, instead of storing the address of 
+fun2. Now, if some other function tries to call fun2 via `p', 
+the code which has been dynamically generated on the stack
+starts executing. It fills the ecx register with the address of
+the activation record of the function which encloses the function
+being called and then jumps into the actual function to be executed
+(ie, fun2). Let's try to trace this out by reading the code
+which the compiler produces for the following function:
+<p>
+<a href="misc/pramode/10.c.txt">Listing 10</a>
+<pre class="code">
+
+void fun1()
+{
+	int m = 5;
+	void (*p)();
+	void fun2()
+	{
+		printf("fun2: %d\n", m);
+		m = 10;
+	}
+	void fun3()
+	{
+		p();
+	}
+	p = fun2;
+	fun3();
+}
+main()
+{
+	fun1();
+}
+
+</pre>
+The assembly output is:
+<p>
+<a href="misc/pramode/11.asm.txt">Listing 11</a>
+<p>
+Let's look at the body of fun1 - that's where all the 
+action is. Note that -71 is in unsigned hex form 0xb9
+(opcode of `mov to ecx' instruction) and -23 is 0xe9
+(opcode of jmp instruction). Let's say the value of esp
+upon entry to fun1 is 1000. 
+<pre class="code">
+
+fun1:
+ pushl %ebp             ; esp = 996            
+ movl %esp, %ebp        ; ebp = 996
+ subl $40, %esp         ; esp = 956
+ leal -40(%ebp), %eax   ; eax = 956
+ addl $0, %eax
+ andb $255, %ah
+ movl $fun2.0, %ecx     ; ecx = address of fun2
+ leal 10(%eax), %edx    ; edx = 966
+ subl %edx, %ecx        ; ecx = address of fun2 - 966
+ movl %ecx, %edx        ; edx = ecx
+ movb $-71, (%eax)      ; location 956 = opcode of mov
+ leal -8(%ebp), %ecx    ; ecx = 988
+ movl %ecx, 1(%eax)     ; locations 957 to 960 = ecx
+ movb $-23, 5(%eax)     ; location 961 = opcode of jmp
+ movl %edx, 6(%eax)     ; locations 962 to 965 = edx
+ movl $5, -12(%ebp)     ; location 984 = 5 (variable `m')
+ leal -40(%ebp), %eax   ; eax = 956
+ addl $0, %eax
+ andb $255, %ah
+ movl %eax, -16(%ebp)   ; location 980 to 983 = eax
+                        ; (980 to 983 is the variable `p')
+ leal -8(%ebp), %ecx    ; ecx = 988
+ call fun3.1
+ leave
+ ret
+
+</pre>
+Locations 956 to 965 encode two instructions, a `mov-to-ecx'
+and `jmp-to-fun2' instruction. What's being stored in the 
+pointer variable `p' is the address 956. A look at the body
+of fun3 shows that the statement:
+<pre>
+
+p();
+
+</pre>
+is getting translated to a call of the instructions stored at
+956. Reading the code generated for fun2 makes it clear that
+the function is able to properly access the variable `m' in the
+outer scope.
+
+<h3>The NX bit, again</h3>
+<p>
+Doing an:
+<pre>
+
+execstack ./a.out
+
+</pre>
+on a program with nested functions, where we do NOT 
+take the address of a nested function, showed that the
+binary is marked as not requiring an executable stack.
+But, it was seen that whenever we took the address of a
+nested function, GCC was careful to mark the binary
+as requiring an executable stack. This was the case on
+both the Athlon32 and Athlon64 systems. On clearing the
+executable stack bit, the program was found to segfault
+on the Athlon64 system running the x86_64 Linux kernel.
+
+<h3>References</h3>
+<p>
+The buffer overflow exploit is examined in detail
+in this <a href="http://www.insecure.org/stf/smashstack.txt">interesting article</a>.
+The <a href="http://en.wikipedia.org/wiki/NX">Wikipedia</a> has
+an entry for the NX bit; readers would also find interesting
+the entries for <a href="http://en.wikipedia.org/wiki/Exec_Shield">Exec Shield</a>
+and <a href="http://en.wikipedia.org/wiki/PaX_%28Linux%29">PaX</a>. Ingo Molnar
+talks of the NX patch in this <a href="http://kerneltrap.org/node/view/3240/">Kerneltrap</a>
+article.
+
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<P>
+<img ALIGN="LEFT" ALT="[BIO]" SRC="../gx/2002/note.png" class="bio">
+<em>
+I am an instructor working for IC Software in Kerala, India. I would have loved
+becoming an organic chemist, but I do the second best thing possible, which is
+play with Linux and teach programming!
+</em>
+<br CLEAR="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2004, Pramode C.E.. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 107 of Linux Gazette, October 2004
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="pai.html" >&lt;-- prev</A> | <A HREF="schaffter.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">October 2004 (#107)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/2003/sit3-shine.7-2.gif" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

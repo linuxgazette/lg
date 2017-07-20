@@ -1,0 +1,71 @@
+#!/bin/bash
+
+# Home-Folders creator
+# Avinoam Levkovich. March 2004
+
+HOME_FOLDERS_PATH="/Home-Folders/" # Configure the path to your Home-Folders directory.
+        # It is essential to put the character "/" at the end of the path (e.g. /home/).
+
+SEPERATOR='+' # This is the Winbind separator from the smb.conf file.
+
+#
+TEMP_USER="koko14" # The template user (the quota template user),if you want to assign quota
+        # you should uncomment this line and the line which starts with: edquota -p
+
+TEMP_FILE="./TEMP.txt" # We need 2 temporary files, they will be deleted at the end of the script
+TEMP_FILE2="./TEMP2.txt"
+
+getent passwd > $TEMP_FILE2
+grep -n -e "$SEPERATOR" $TEMP_FILE2 > $TEMP_FILE
+sed -e 's/:/ /g' $TEMP_FILE > $TEMP_FILE2
+sed -e 's/+/ + /g' $TEMP_FILE2 > $TEMP_FILE
+cp -f $TEMP_FILE $TEMP_FILE2
+Count=$(grep --count "$SEPERATOR" $TEMP_FILE )
+echo "----------------------------------------"
+echo " Please Wait, Processing $Count Records "
+echo "----------------------------------------"
+NEW_FOLDERS=0
+while [ $Count != 0 ]; do
+        C_Line=$(grep -m 1 "$SEPERATOR" $TEMP_FILE )
+        sed '1d' $TEMP_FILE > $TEMP_FILE2
+        cp -f $TEMP_FILE2 $TEMP_FILE
+        N=1
+        for X in $C_Line ; do
+                case $N in
+                        2) DOMAIN=$X
+                        ;;
+                        4) Folder_Name=$(echo $X |tr "[A-Z]" "[a-z]" )
+                        if [ -d "$HOME_FOLDERS_PATH$Folder_Name" ]; then
+                                echo -n "."
+                        else
+                                mkdir "$HOME_FOLDERS_PATH$Folder_Name"
+                                chmod 770 -R "$HOME_FOLDERS_PATH$Folder_Name"
+                                chown "$DOMAIN$SEPERATOR$Folder_Name:root" -R "$HOME_FOLDERS_PATH$Folder_Name"
+                                # edquota -p $TEMP_USER $DOMAIN$SEPERATOR$Folder_Name # if you want to assign quota you should uncomment this line
+                                let "NEW_FOLDERS +=1"
+                                echo
+                                echo " New Folder : $HOME_FOLDERS_PATH$Folder_Name "
+                                echo
+                        fi
+                        ;;
+                esac
+                let "N+=1"
+        done
+        let "Count-=1"
+done
+
+if [ $NEW_FOLDERS -gt 0 ]; then
+        echo "============================================="
+>> /var/log/messages
+        echo " $(date '+%B.%d %T') Finish Analyzing the home folder list, $NEW_FOLDERS Folders were Added " >> /var/log/messages
+fi
+
+# Change the folder name Upercase Letters to Lower case.
+
+find $HOME_FOLDERS_PATH -maxdepth 1 -type d -print | perl -ne 'chomp; ($l=$_) =~ s:[^/]+$:lc($&):e; if ($l ne $_ && ! -e $l) { rename($_,$l); }'
+rm -f $TEMP_FILE
+rm -f $TEMP_FILE2
+echo
+echo "-----------------------------"
+echo " $NEW_FOLDERS New Folders"
+echo "-----------------------------"

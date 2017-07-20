@@ -1,0 +1,194 @@
+import java.lang.*;
+import java.io.*;
+import java.net.*;
+import java.util.*;
+
+
+// this thread will handle each connection
+
+class handler extends Thread {
+    
+    // our local server's names and IP addresses
+    String localhosts = new String("localhost  127.0.0.1  julia  11.22.33.1  11.22.44.1");
+    int localport = 80;
+
+    // our WinGate proxy's address
+    String proxy = new String ("11.22.33.10");
+    int proxyport = 80;
+        
+    Socket sock = null;
+    Socket f_sock = null;
+    
+    DataOutputStream os = null;
+    DataInputStream is = null;
+    
+    PrintStream f_os = null;
+    DataInputStream f_is = null;
+    
+    StringTokenizer st = null;
+    
+    
+    // see if s2 contains s1
+    static boolean containsString (String s1, String s2) {
+	
+	boolean found = false;
+	StringTokenizer st;
+	String token = new String ();
+	
+	if (s2.length() > 0) {
+	    st = new StringTokenizer (s2);
+	    try {
+		while (!found) {
+		    token = st.nextToken ();
+		    found = (token.compareTo (s1) == 0);
+		}
+	    } catch (NoSuchElementException e) {
+	    }
+	}
+	
+	return (found);
+    }
+    
+    // see if s2 contains the parameter string defined by tag s1
+    String getParam (String s1, String s2) {
+	
+	StringTokenizer st;
+	String token1 = new String ("");
+	String token2 = new String ();
+	
+	if (s2.length() > 0) {
+	    st = new StringTokenizer (s2);
+	    try {
+		token2 = st.nextToken ();
+		if (token2.compareTo (s1) == 0)
+		    token1 = st.nextToken ();
+	    } catch (NoSuchElementException e) {
+	    }
+	    st = null;
+	}
+	
+	return (token1);
+    }
+    
+    
+    // parent threads gives us our client socket number
+    public void setSocket (Socket so) {
+	sock = so;
+    }
+    
+    
+    public void run () {
+	
+	String host = new String ("");
+	String request = new String ("");
+	String s[];
+	s = new String[20];
+	int ns;            
+	int i;
+	
+	byte buffer[] = new byte[1024];
+	int lbuffer;
+	String aux = new String ();
+	
+	try {
+
+	    is = new DataInputStream (sock.getInputStream ());
+	    os = new DataOutputStream (sock.getOutputStream ());
+	    
+	    for (i = 0; i < 20; i++)
+		s[i] = new String(" ");
+	    ns = 0;
+	    while (s[ns].length() > 0) {
+		ns++;
+		s[ns] = is.readLine();
+
+       		aux = getParam ("Host:", s[ns]); if (aux.length() > 0) host = new String(aux);
+	     	aux = getParam ("GET", s[ns]); if (aux.length() > 0) request = new String (aux);
+	    }
+	    
+	    System.out.print ("host: ");
+	    System.out.print (host);
+	    System.out.print ("  request: ");
+	    System.out.print (request);
+	    if (containsString (host, localhosts)) {
+		System.out.println ("  -  Sent to localhost");
+		f_sock = new Socket ("127.0.0.1", localport);
+	    } else {
+		System.out.println ("  -  Sent to proxy");
+		f_sock = new Socket (proxy, proxyport);
+	    }
+	    
+	    f_is = new DataInputStream (f_sock.getInputStream ());
+	    f_os = new PrintStream (f_sock.getOutputStream ());
+	    
+	    for (i = 1; i <= ns; i++) {
+		f_os.print (s[i]);
+		f_os.print ("\r\n");
+	    }
+	    
+	    try {
+		while ((lbuffer = f_is.read (buffer, 1, 512)) > 0) 
+		    os.write (buffer, 1, lbuffer);
+		
+	    } catch (IOException e) {
+	    }
+	    
+	    f_is.close ();
+	    f_os.close ();
+	    f_sock.close ();
+	    
+	    is.close ();
+	    os.close ();
+	    sock.close ();
+	} catch (IOException e) {
+	    System.out.println ("Caught socket IO exception");
+	}
+	
+    }
+}
+    
+
+// main class: listens on port myport, and when a connection comes in 
+// creates a new handler thread for it
+
+public class proxy {   
+
+    static int myport = 8080;
+    
+    static public void main (String argv[]) {
+	
+       	ServerSocket serv = null;
+	Socket sock = null;
+	handler h = null;
+	
+	try {
+	    serv = new ServerSocket (myport);
+	} catch (IOException e) {
+	    System.out.println ("Caught server IO exception");
+	    System.exit (1);
+	}
+	
+	while (true) {
+	    try {
+		sock = serv.accept ();
+		
+		h = new handler ();
+		h.setSocket (sock);
+		h.start ();
+		
+	    } catch (IOException e) {
+		System.out.println ("Caught IO exception closing server");
+		System.exit (1);
+	    }
+	    
+	    
+	}
+	
+    }
+    
+}
+
+
+
+
+

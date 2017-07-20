@@ -1,0 +1,57 @@
+
+drop function update_job (int4,text,text,int4);
+CREATE FUNCTION update_job (int4,text,text,int4) RETURNS int2 AS '
+DECLARE
+    c_id_ins int4; j_name_ins text;  l_ins text; 
+    job_id1 ALIAS FOR $4; oid1 int4; test_id int4 := 0;
+    record1 RECORD; record2 RECORD; record3 RECORD; record4 RECORD; record5 RECORD;  
+    return_int4 int4 := 0; job_no1 int4 := 0;
+BEGIN
+   j_name_ins := $2; l_ins  := $3; c_id_ins := $1;
+
+     -- A few Perl procedures. 
+     -- Clean the name of the job.
+   SELECT INTO record4 clean_text(j_name_ins) as text1;
+   j_name_ins = record4.text1;
+     -- Clean the location of the job. 
+   SELECT INTO record5 clean_text(l_ins) as text1;
+   l_ins = record5.text1;
+     -- Verify the values we insert are okay.
+   SELECT INTO record3 job_values_verify (c_id_ins, j_name_ins, l_ins) as no;
+   IF record3.no < 0 THEN return (record3.no); END IF;
+
+     -- See if there is a duplicate job name for that contact.
+   FOR record1 IN SELECT job_id FROM jobs  
+      where contact_id = c_id_ins and job_name = j_name_ins
+        and job_id != job_id1
+      LOOP
+      test_id := record1.job_id;
+   END LOOP;
+     -- If the job_id is null, great, otherwise abort and return -1;
+   IF test_id > 0 THEN return (-1); END IF;
+
+     -- See if the job exists, otherwise return -2.
+   FOR record1 IN SELECT * FROM jobs where job_id = job_id1  
+      LOOP
+      update jobs set contact_id = c_id_ins,  
+        job_name = j_name_ins, job_location = l_ins
+	where job_id = job_id1;
+      GET DIAGNOSTICS return_int4 = ROW_COUNT;
+      test_id := 1;
+      job_no1 := record1.job_no;
+   END LOOP;
+
+     -- If the job does not exist, what are we updating? return error. 
+   IF test_id = 0 THEN return (-2); END IF;
+
+     -- Everything has passed, return return_int4.
+   insert into jobs_backup (contact_id, job_no, job_name, job_location, action, error_code, job_id)
+        values (c_id_ins, job_no1, j_name_ins, l_ins, ''update'', return_int4, job_id1);
+   return (return_int4);
+END;
+' LANGUAGE 'plpgsql';
+select update_job (3,'Changing title and owner.','Boston, MA',1);
+select * from jobs;
+  -- You should get an error on this one because you are duplicating name
+  -- and contact id. 
+select update_job (3,'Changing title and owner.','Boston, MA',1);

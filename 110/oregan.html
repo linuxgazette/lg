@@ -1,0 +1,728 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Flickr and Perl LG #110</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="nielsen.html" >&lt;-- prev</A> | <A HREF="oregan1.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Flickr and Perl</h1>
+<p id="by"><b>By <A HREF="../authors/oregan.html">Jimmy O'Regan</A></b></p>
+
+<p>
+<p> <a href="http://flickr.com">Flickr</a> is a photo-sharing service: it
+allows you to share your photos with friends, family, or the public in
+general. Flickr caters to "moblogging": photo blogging from mobile phones, 
+which is a great part of the appeal to me. It also comes with an API so
+you don't have to take apart its pages to scrape it, which is nice.
+
+<p> <a href="http://search.cpan.org/~iamcal/Flickr-API-0.03/API.pm">Flickr::API</a>,
+which was written by one of Flickr's developers, provides a way to interface
+to Flickr from Perl. (Flickr's API documentation is available <a 
+href="http://www.flickr.com/services/api/">here</a>). There is also
+<a href="http://search.cpan.org/~cpb/Flickr-Upload-1.10/Upload.pm">Flickr::Upload</a>,
+which does exactly as the name suggests.
+
+<h3>Getting started</h3>
+
+<p> The first step is to get an API key. Flickr is still a relatively new 
+service, and want to know who is writing software to access their service
+and why, and having people register for an API key is a common requirement
+of web services anyway. To register for an API key, follow the steps 
+outlined on <a href="http://www.flickr.com/services/api/misc.api_keys.html">this
+page</a> (at the time of writing, this simply involved emailing Cal Henderson,
+the author of <code>Flickr::API</code>).
+
+<p> API key at the ready, you can now start using Flickr. Flickr provides
+a test method <code>flickr.test.echo</code> to allow you to check that 
+everything is working, and this is used in the example given in
+<code>Flickr::API</code>'s POD. I've expanded on it slightly to give some
+output using the <code>Data::Dumper</code> module:
+
+<pre class="code">
+use Flickr::API;
+use Data::Dumper;
+
+my $api = new Flickr::API({'key' =&gt; ''});
+
+my $response = $api-&gt;execute_method('flickr.test.echo', {
+			    'foo' =&gt; 'bar',
+			    'baz' =&gt; 'quux',
+			    });
+
+print &quot;Success: $response-&gt;{success}\n&quot;;
+print &quot;Error code: $response-&gt;{error_code}\n&quot;;
+print Dumper ($response);
+</pre>
+
+<p> The output from this should be 
+<pre>
+Success: 1
+Error code: 0
+</pre>
+
+<p> followed by a lot of output from <code>Data::Dumper</code>. The part of
+this output that we're interested should look something like this:
+
+<pre>
+&lt;?xml version=&quot;1.0&quot; encoding=&quot;utf-8&quot; ?&gt;
+&lt;rsp stat=&quot;ok&quot;&gt;
+&lt;baz&gt;quux&lt;/baz&gt;
+&lt;method&gt;flickr.test.echo&lt;/method&gt;
+&lt;foo&gt;bar&lt;/foo&gt;
+&lt;api_key&gt;[snip]&lt;/api_key&gt;
+&lt;/rsp&gt;
+</pre>
+
+<h3>Doing something useful</h3>
+
+<p> Once everything is up and running, we're ready to start doing something
+of interest. I'm only really interested in using my own photos, so I first 
+need to get my user id. 
+
+<p> There are two ways of doing this: you can call 
+<code>flickr.urls.lookupUser</code> with the URL of a user's photo or user
+page, or if you know the user's username, with 
+<code>flickr.people.findByUsername</code>. Here's an example that uses both:
+
+<pre class="code">
+use Flickr::API;
+use Data::Dumper;
+
+use warnings;
+use strict;
+
+my $api = new Flickr::API({'key' =&gt; ''});
+
+my $user = shift;
+my $response;
+
+if ($user =~ m!http://!i)
+{
+$response = $api-&gt;execute_method ('flickr.urls.lookupUser', {
+				     'url' =&gt; $user,
+				     });
+}
+else			         
+{
+$response = $api-&gt;execute_method ('flickr.urls.findByUsername', {
+				     'username' =&gt; $user,
+				     });
+}
+
+my $debug = 1;
+if ($debug)
+{
+print &quot;Success: $response-&gt;{success}\n&quot;;
+print &quot;Error code: $response-&gt;{error_code}\n&quot;;
+print Dumper ($response);
+}
+</pre>
+
+<p> Cleaning it up to provide useful output is left as an exercise for
+the reader (don't worry, I'll get to that later). When called with either 
+a URL or username, it should have (among the usual <code>Data::Dumper</code> 
+output) something that looks like this:
+
+<pre>
+&lt;?xml version=&quot;1.0&quot; encoding=&quot;utf-8&quot; ?&gt;
+&lt;rsp stat=&quot;ok&quot;&gt;
+        &lt;user id=&quot;49502976979@N01&quot;&gt;
+                &lt;username&gt;jimregan&lt;/username&gt;
+        &lt;/user&gt;
+&lt;/rsp&gt;
+</pre>
+
+<p> So... I mentioned that I was going to do something useful. What I'm 
+looking to build is a little script that gives me a montage of the last
+few photos I posted, and a script that takes the coordinates of a photo
+note and generates an image map (at some point, I'd like to change that
+to be RDF, so I can use it in FOAF or what have you, but for now, an 
+image map is easier).
+
+<h3> Generating an Image Map</h3>
+
+<p> First, let's take a look at how we get the information, and what it
+looks like:
+
+<pre class="code">
+use Flickr::API;
+use Data::Dumper;
+
+use warnings;
+use strict;
+
+# Test photo: http://flickr.com/photos/jimregan/120856/
+# Photo url: http://photos1.flickr.com/120856_01b51464c0.jpg
+# http://www.flickr.com/services/api/flickr.photos.getInfo.html
+my $api = new Flickr::API({'key' =&gt; ''});
+
+my $response;
+
+$response = $api-&gt;execute_method ('flickr.photos.getInfo', {
+   	       	                  'photo_id' =&gt; '120856',
+				  'secret'   =&gt; '01b51464c0'
+				  });
+
+my $debug = 1;
+if ($debug)
+{
+	print &quot;Success: $response-&gt;{success}\n&quot;;
+	print &quot;Error code: $response-&gt;{error_code}\n&quot;;
+	print Dumper ($response);
+}
+</pre>
+
+<p> output:
+
+<pre>
+&lt;?xml version=&quot;1.0&quot; encoding=&quot;utf-8&quot; ?&gt;
+&lt;rsp stat=&quot;ok&quot;&gt;
+	&lt;photo id=&quot;120856&quot; secret=&quot;01b51464c0&quot; server=&quot;1&quot; dateuploaded=&quot;1090965387&quot; isfavorite=&quot;0&quot; license=&quot;4&quot;&gt;
+		&lt;owner nsid=&quot;49502976979@N01&quot; username=&quot;jimregan&quot; realname=&quot;Jimmy O\'Regan&quot; location=&quot;Ireland&quot; /&gt;
+		&lt;title&gt;IMAGE0006&lt;/title&gt;
+		&lt;description&gt;Mark, May 2002&lt;/description&gt;
+		&lt;visibility ispublic=&quot;1&quot; isfriend=&quot;0&quot; isfamily=&quot;0&quot; /&gt;
+		&lt;dates posted=&quot;1090965387&quot; taken=&quot;2004-07-27 14:56:27&quot; takengranularity=&quot;0&quot; /&gt;
+		&lt;editability cancomment=&quot;0&quot; canaddmeta=&quot;0&quot; /&gt;
+		&lt;comments&gt;0&lt;/comments&gt;
+		&lt;notes&gt;
+			&lt;note id=&quot;10840&quot; author=&quot;49502976979@N01&quot; authorname=&quot;jimregan&quot; 
+x=&quot;96&quot; y=&quot;103&quot; w=&quot;38&quot; h=&quot;24&quot;&gt;Look - missing his front teeth
+at the bottom!&lt;/note&gt;
+		&lt;/notes&gt;
+		&lt;tags&gt;
+			&lt;tag id=&quot;283784&quot; author=&quot;49502976979@N01&quot; raw=&quot;Mark&quot;&gt;mark&lt;/tag&gt;
+			&lt;tag id=&quot;283785&quot; author=&quot;49502976979@N01&quot; raw=&quot;2002&quot;&gt;2002&lt;/tag&gt;
+		&lt;/tags&gt;
+	&lt;/photo&gt;
+&lt;/rsp&gt;
+</pre>
+
+<p> So, how do we turn that rather useless code example into something that
+will generate a simple HTML page with an image map? I could have tried
+accessing <code>$response-&gt;tree</code> directly, but life's too short for
+that. The author of <code>Flickr::API</code> and 
+<code>XML::Parser::Lite::Tree</code> seems to have thought the same, because
+he also wrote <code>XML::Parser::Lite::Tree::XPath</code>, which allows some
+simple XPath expressions to be used on <code>XML::Parser::Lite::Tree</code>'s
+output.
+
+<p> With a look at the XML above, we want the contents of the 
+<code>&lt;note&gt;</code> tags: <code>/photo/notes/note</code>
+
+<pre class="code">
+#!/usr/bin/perl
+
+use Flickr::API;
+use Data::Dumper;
+use XML::Parser::Lite::Tree::XPath;
+
+use warnings;
+use strict;
+
+# Test photo: http://flickr.com/photos/jimregan/120856/
+my $photo = &quot;http://photos1.flickr.com/120856_01b51464c0.jpg&quot;;
+# http://www.flickr.com/services/api/flickr.photos.getInfo.html
+my $api = new Flickr::API({'key' =&gt; ''});
+
+my $response;
+
+$response = $api-&gt;execute_method ('flickr.photos.getInfo', {
+   	       	                  'photo_id' =&gt; '120856',
+				  'secret'   =&gt; '01b51464c0'
+				  });
+
+my $xpath = new XML::Parser::Lite::Tree::XPath($response-&gt;{tree});
+my @notes = $xpath-&gt;select_nodes('/photo/notes/note');
+
+print &quot;&lt;html&gt;\n&lt;head&gt;\n&lt;title&gt;Flickr Photo&lt;/title&gt;\n&lt;/head&gt;\n&quot;;
+print &quot;&lt;img src=\&quot;$photo\&quot; alt=\&quot;Flickr photo\&quot; usemap=\&quot;#genmap\&quot;&gt;\n&quot;;
+print &quot;&lt;map name=\&quot;genmap\&quot;&gt;\n&quot;;
+
+foreach (@notes)
+{
+	print &quot;&lt;area shape=\&quot;rect\&quot; coords=\&quot;&quot;;
+	print &quot;$_-&gt;{attributes}-&gt;{x}, &quot;;
+	print &quot;$_-&gt;{attributes}-&gt;{y}, &quot;;
+	print $_-&gt;{attributes}-&gt;{x} + $_-&gt;{attributes}-&gt;{w} .&quot;, &quot;;
+	print $_-&gt;{attributes}-&gt;{y} + $_-&gt;{attributes}-&gt;{h} .&quot;\&quot; &quot;;
+	print &quot;alt=\&quot;$_-&gt;{children}[0]-&gt;{content}\&quot; &quot;;
+	print &quot;title=\&quot;$_-&gt;{children}[0]-&gt;{content}\&quot; nohref&gt;\n&quot;;
+}
+print &quot;&lt;/map&gt;\n&lt;/html&gt;\n&quot;;
+</pre>
+
+<p> Now we're getting somewhere. The output is pretty shoddy HTML, but it works:
+
+<pre>
+&lt;html&gt;
+&lt;head&gt;
+&lt;title&gt;Flickr Photo&lt;/title&gt;
+&lt;/head&gt;
+&lt;img src=&quot;http://photos1.flickr.com/120856_01b51464c0.jpg&quot; alt=&quot;Flickr photo&quot; usemap=&quot;#genmap&quot;&gt;
+&lt;map name=&quot;genmap&quot;&gt;
+&lt;area shape=&quot;rect&quot; coords=&quot;96, 103, 134, 127&quot; alt=&quot;Look - missing his front teeth
+at the bottom!&quot; title=&quot;Look - missing his front teeth
+at the bottom!&quot; nohref&gt;
+&lt;/map&gt;
+&lt;/html&gt;
+</pre>
+
+<p> Let's go one better, and show what it looks like:
+
+<p>
+<img src="misc/oregan/120856_01b51464c0.jpg" alt="Flickr photo" usemap="#genmap1">
+<map name="genmap1">
+<area shape="rect" coords="96, 103, 134, 127" alt="Look - missing his front teeth
+at the bottom!" title="Look - missing his front teeth
+at the bottom!" nohref>
+</map>
+
+<p> Here's an improved version of that script that takes one or two 
+parameters from the command line (photo ID, and secret if available) and
+creates a web page with more information (<a 
+href="misc/oregan/flickrmap.pl.txt">text version</a>):
+
+<pre class="code">
+#!/usr/bin/perl
+
+use Flickr::API;
+use XML::Parser::Lite::Tree::XPath;
+use Date::Format qw(time2str);
+
+use warnings;
+use strict;
+
+my $api = new Flickr::API({'key' =&gt; ''});
+my $response;
+my $photo_id = $ARGV[0];
+my ($desc, $date, $title, $taken, $photo);
+
+if ($#ARGV == 1)
+{
+	$response = $api-&gt;execute_method ('flickr.photos.getInfo', {
+   		       	                  'photo_id' =&gt; $ARGV[0],
+					  'secret'   =&gt; $ARGV[1]
+					  });
+}
+else
+{
+	$response = $api-&gt;execute_method ('flickr.photos.getInfo', {
+   		       	                  'photo_id' =&gt; $ARGV[0],
+					  });
+}
+
+my $xpath = new XML::Parser::Lite::Tree::XPath($response-&gt;{tree});
+my @notes = $xpath-&gt;select_nodes('/photo/notes/note');
+
+my @tmp = $xpath-&gt;select_nodes('/photo/dates');
+$taken = $tmp[0]-&gt;{attributes}-&gt;{taken};
+
+@tmp = $xpath-&gt;select_nodes('/photo/dates');
+$date = time2str &quot;%a %b %e %H:%M:%S %Y&quot;, $tmp[0]-&gt;{attributes}-&gt;{posted};
+
+@tmp = $xpath-&gt;select_nodes('/photo/description');
+$desc = $tmp[0]-&gt;{children}[0]-&gt;{content};
+
+@tmp = $xpath-&gt;select_nodes('/photo/title');
+$title = $tmp[0]-&gt;{children}[0]-&gt;{content};
+
+@tmp = $xpath-&gt;select_nodes('/photo');
+$photo = &quot;http://photos&quot; 
+       . $tmp[0]-&gt;{attributes}-&gt;{server} 
+       . &quot;.flickr.com/&quot;
+       . $tmp[0]-&gt;{attributes}-&gt;{id} . &quot;_&quot;
+       . $tmp[0]-&gt;{attributes}-&gt;{secret} . &quot;.jpg&quot;;
+
+print &quot;&lt;html&gt;\n&lt;head&gt;\n&lt;title&gt;$title&lt;/title&gt;\n&lt;/head&gt;\n&quot;;
+print &quot;&lt;img src=\&quot;$photo\&quot; alt=\&quot;$title\&quot; usemap=\&quot;#genmap\&quot;&gt;\n&quot;;
+print &quot;&lt;map name=\&quot;genmap\&quot;&gt;\n&quot;;
+
+foreach (@notes)
+{
+	print &quot;&lt;area shape=\&quot;rect\&quot; coords=\&quot;&quot;;
+	print &quot;$_-&gt;{attributes}-&gt;{x}, &quot;;
+	print &quot;$_-&gt;{attributes}-&gt;{y}, &quot;;
+	print $_-&gt;{attributes}-&gt;{x} + $_-&gt;{attributes}-&gt;{w} .&quot;, &quot;;
+	print $_-&gt;{attributes}-&gt;{y} + $_-&gt;{attributes}-&gt;{h} .&quot;\&quot; &quot;;
+	print &quot;alt=\&quot;$_-&gt;{children}[0]-&gt;{content}\&quot; &quot;;
+	print &quot;title=\&quot;$_-&gt;{children}[0]-&gt;{content}\&quot; nohref&gt;\n&quot;;
+}
+print &quot;&lt;/map&gt;\n&quot;;
+print &quot;&lt;p&gt;$desc&lt;/p&gt;\n&quot;;
+print &quot;&lt;p&gt;Taken: $taken, Uploaded: $date&lt;/p&gt;\n&quot;;
+print &quot;&lt;/html&gt;\n&quot;;
+</pre>
+
+<p> Let's look at the output of that:
+
+<blockquote>
+<img src="misc/oregan/2120095_b52c4d906d.jpg" alt="Beata" usemap="#genmap">
+<map name="genmap">
+<area shape="rect" coords="10, 10, 61, 122" alt="Kennedy's" title="Kennedy's" nohref>
+<area shape="rect" coords="105, 8, 282, 218" alt="Beata" title="Beata" nohref>
+<area shape="rect" coords="23, 181, 73, 231" alt="Pat's shift's night out" title="Pat's shift's night out" nohref>
+</map>
+<p></p>
+<p>Taken: 2004-12-12 01:09:16, Uploaded: Sun Dec 12 01:09:16 2004</p>
+</blockquote>
+
+<p> I had a script earlier that did the basics of finding a userid, and said 
+that I was going to leave making it useful as an exercise for the reader.
+Well, the bulk of this article was written on Christmas Day, so Merry 
+Christmas: (<a href="misc/oregan/finduser.pl.txt">text version</a>)
+
+<pre class="code">
+use Flickr::API;
+use XML::Parser::Lite::Tree::XPath;
+
+use warnings;
+use strict;
+
+my $theuser = shift;
+
+sub finduser
+{
+	my $fuser = shift;
+	my ($xpath, @username, $userid);
+	if ($fuser =~ m!http://!i)
+	{
+		$response = $api-&gt;execute_method ('flickr.urls.lookupUser', {
+						  'url' =&gt; $fuser,
+					     	  });
+
+		$xpath = new XML::Parser::Lite::Tree::XPath($response-&gt;{tree});
+		@username = $xpath-&gt;select_nodes('/user');
+		$userid = $username[0]-&gt;{attributes}-&gt;{id};
+	}
+	else			         
+	{
+		$response = $api-&gt;execute_method ('flickr.people.findByUsername', {
+						  'username' =&gt; $fuser,
+						  });
+
+		$xpath = new XML::Parser::Lite::Tree::XPath($response-&gt;{tree});
+		@username = $xpath-&gt;select_nodes('/user');
+		$userid = $username[0]-&gt;{attributes}-&gt;{nsid};
+	}
+
+	return $userid;
+}
+
+print finduser ($theuser);
+</pre>
+
+<h3>Flickr::Upload</h3>
+
+<p> So how do we upload images? We use <code>Flickr::Upload</code>. There
+isn't much to using this module: the following script is based on the example
+from the POD, but with two minor differences.
+
+<p> First, the script takes the location of the image as a parameter, so it can
+be used more than once; second, it tells Mozilla to open a page so the uploader
+can edit the details of the photo (as the POD and Flickr's API documentation
+say it should). (<a href="misc/oregan/upload.pl.txt">text version</a>)
+
+<pre class="code">
+use LWP::UserAgent;
+use Flickr::Upload qw(upload);
+
+my $image = shift;
+
+my $ua = LWP::UserAgent-&gt;new;
+my $photoid = upload ($ua,
+                      'photo' =&gt; $image,
+                      'email' =&gt; '',
+                      'password' =&gt; '',
+                      'tags' =&gt; 'mobile',
+                      'is_public' =&gt; 1,
+                      'is_friend' =&gt; 1,
+                      'is_family' =&gt; 1
+                     ) or die &quot;Failed to upload $image&quot;;
+
+`mozilla -remote \&quot;openURL(http://www.flickr.com/tools/uploader_edit.gne?ids=$photoid)\&quot;`;
+</pre>
+
+<p> The only required parameters are <code>$ua</code>, <code>email</code>, 
+and <code>password</code>. These last two are left blank, for obvious 
+reasons.
+
+<h3> Creating a montage from Flickr </h3>
+
+<p> Here it is, the <em>pi&egrave;ste de r&eacute;sistance</em>: a script to generate a 
+montage from Flickr. (<a href="misc/oregan/montage.pl.txt">text version</a>)
+
+<pre class="code">
+use Flickr::API;
+use XML::Parser::Lite::Tree::XPath;
+use Getopt::Long;
+use Data::Dumper;
+use Image::Magick;
+use LWP::Simple;
+
+use warnings;
+use strict;
+
+# Getopt vars. All arguments with default values.
+# You probably want to set this a bit lower
+my $count = 24;
+my $theuser = &quot;http://flickr.com/photos/jimregan&quot;;
+my $type = 'photos';
+my $email = '';
+my $pass = '';
+
+my $xpath;
+
+my $result = GetOptions (&quot;user=s&quot;     =&gt; \$theuser,
+		         &quot;type=s&quot;     =&gt; \$type,
+		         &quot;count=i&quot;    =&gt; \$count,
+			 &quot;password=s&quot; =&gt; \$pass,
+			 &quot;email=s&quot;    =&gt; \$email);
+
+# For some reason Image::Magick doesn't read the 
+# last image on the list. &lt;shrug&gt;
+$count++;
+
+my $api = new Flickr::API({'key' =&gt; ''});
+my $response;
+
+my $debug = 1;
+
+my $user = finduser ($theuser);
+
+if ($type eq 'photos')
+{
+	$response = $api-&gt;execute_method ('flickr.people.getPublicPhotos', {
+					  'user_id'  =&gt; $user,
+					  'per_page' =&gt; $count,
+					  'page'     =&gt; 1});
+}
+elsif ($type eq 'favourites'||$type eq 'favorites')
+{
+	$response = $api-&gt;execute_method ('flickr.favorites.getList', {
+					  'user_id'  =&gt; $user,
+					  'per_page' =&gt; $count,
+					  'email'    =&gt; $email,
+					  'password' =&gt; $pass,
+					  'page'     =&gt; 1});
+}
+elsif ($type eq 'contacts')
+{
+	$response = $api-&gt;execute_method ('flickr.photos.getContactsPhotos', {
+					  'count'    =&gt; $count,
+					  'email'    =&gt; $email,
+					  'password' =&gt; $pass,});
+}
+else
+{
+	die &quot;--type must be 'photos', 'contacts' or 'favo[u]rites'\n&quot;;
+}
+
+if ($response-&gt;{success} == 0)
+{
+	die &quot;Error $response-&gt;{error_code}: $response-&gt;{error_message}&quot;
+	    . &quot;\nDid you remember to pass --email and --password?\n&quot;;
+}
+
+my $photolist = new XML::Parser::Lite::Tree::XPath($response-&gt;{tree});
+my @bphoto = $photolist-&gt;select_nodes('/photos/photo');
+my ($photo, $photofile, @photofiles);
+
+# Set up the image for our montage
+my $image=Image::Magick-&gt;new;
+
+foreach (@bphoto)
+{
+	$photo = &quot;http://photos&quot; 
+	       . $_-&gt;{attributes}-&gt;{server} 
+	       . &quot;.flickr.com/&quot;
+	       . $_-&gt;{attributes}-&gt;{id} . &quot;_&quot;
+	       . $_-&gt;{attributes}-&gt;{secret} . &quot;.jpg&quot;;
+	$photofile = &quot;tmp-$_-&gt;{attributes}-&gt;{id}.jpg&quot;;
+	push @photofiles, $photofile;
+	open (FILE, &quot;&gt;$photofile&quot;);
+	my $g = get($photo);
+	print FILE $g;
+}
+
+foreach (@photofiles)
+{
+	$image-&gt;Read($_);
+}
+
+if ($debug)
+{
+	warn &quot;$image\n&quot; if &quot;$image&quot;;
+	print 0+$image;
+	print &quot;\n&quot;;
+}
+
+print Dumper ($image);
+
+my $montage = $image-&gt;Montage;
+$montage-&gt;Write ('output.jpg');
+
+foreach (@photofiles)
+{
+	unlink $_;
+}
+
+sub finduser
+{
+	my $fuser = shift;
+	my ($xpath, @username, $userid);
+	if ($fuser =~ m!http://!i)
+	{
+		$response = $api-&gt;execute_method ('flickr.urls.lookupUser', {
+						  'url' =&gt; $fuser,
+					     	  });
+
+		$xpath = new XML::Parser::Lite::Tree::XPath($response-&gt;{tree});
+		@username = $xpath-&gt;select_nodes('/user');
+		$userid = $username[0]-&gt;{attributes}-&gt;{id};
+	}
+	else			         
+	{
+		$response = $api-&gt;execute_method ('flickr.people.findByUsername', {
+						  'username' =&gt; $fuser,
+						  });
+
+		$xpath = new XML::Parser::Lite::Tree::XPath($response-&gt;{tree});
+		@username = $xpath-&gt;select_nodes('/user');
+		$userid = $username[0]-&gt;{attributes}-&gt;{nsid};
+	}
+
+	return $userid;
+}
+</pre>
+
+<p> This does quite a bit more than the other scripts, and is a bit more neat too.
+Note that, because Flickr requires authentication, you need to pass your email
+and password if you are looking for a montage of images from your Favourites or
+Contacts.
+
+<p>
+I'll leave you with the default output of that script (though shrunk a bit):
+
+<p>
+<img src="misc/oregan/default-output.jpg" alt="Default script output">
+
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<P>
+<img ALIGN="LEFT" ALT="[BIO]" SRC="../gx/2004/authors/oregan.jpg" class="bio">
+<em>
+<!-- ../110/lg_laundrette.html#nottag.15 :) -->
+Jimmy is a single father of one, who enjoys long walks... Oh, right.
+
+<p> Jimmy has been using computers from the tender age of seven, when his father 
+inherited an Amstrad PCW8256. After a few brief flirtations with an Atari ST
+and numerous versions of DOS and Windows, Jimmy was introduced to Linux in 1998
+and hasn't looked back.
+
+<p> In his spare time, Jimmy likes to play guitar and read: not at the same time, 
+but the picks make handy bookmarks.
+</em>
+<br CLEAR="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2005, Jimmy O'Regan. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 110 of Linux Gazette, January 2005
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="nielsen.html" >&lt;-- prev</A> | <A HREF="oregan1.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">January 2005 (#110)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

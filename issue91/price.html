@@ -1,0 +1,357 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>Configuring Mailman on a Debian [Woody] system with Exim LG #91</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<!-- *** BEGIN navbar *** -->
+<A HREF="okopnik.html">&lt;&lt;&nbsp;Prev</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="index.html">TOC</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../index.html">Front Page</A>&nbsp;&nbsp;|&nbsp;&nbsp;Talkback&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../faq/index.html">FAQ</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="shuveb.html">Next&nbsp;&gt;&gt;</A>
+<!-- *** END navbar *** -->
+
+<!--endcut ============================================================-->
+
+<TABLE BORDER><TR><TD WIDTH="200">
+<A HREF="http://www.linuxgazette.net/">
+<IMG ALT="LINUX GAZETTE" SRC="../gx/2002/lglogo_200x41.png" 
+	WIDTH="200" HEIGHT="41" border="0"></A> 
+<BR CLEAR="all">
+<SMALL>...<I>making Linux just a little more fun!</I></SMALL>
+</TD><TD WIDTH="380">
+
+
+<CENTER>
+<BIG><BIG><STRONG><FONT COLOR="maroon">Configuring Mailman on a Debian [Woody] system with Exim</FONT></STRONG></BIG></BIG>
+<BR>
+<STRONG>By <A HREF="../authors/price.html">Rich Price</A></STRONG>
+</CENTER>
+
+</TD></TR>
+</TABLE>
+<P>
+
+<!-- END header -->
+
+
+
+<H2>INTRODUCTION</H2>
+<P>
+This mini HOWTO is a product of my attempt to configure Mailman on a 
+Debian [Woody] system that uses Exim as its MTA.  I started taking 
+notes when I realized that the information that I needed was scattered
+over a large number of FAQs and README files.
+<P>
+Please note that most of this material appears in the documentation 
+that comes with the Mailman package.  I have merely compiled it in a
+more coherent and readable form.
+<P>
+I assume at the start that both Apache and Exim are up and running.
+The Mailman package should be installed with "apt-get install mailman".
+<P>
+Debian mailman installs with the following directory structures:
+<PRE>
+/etc/mailman     is the location of the mailman config file [mm_cfg.py].
+/var/lib/mailman is where the lists and archives will be created.
+/usr/lib/mailman is where Mailman is installed.
+/usr/doc/mailman is where the documentation can be found.
+</PRE>
+<P>
+Note that for all installed files	User is "root" and Group is "list".
+
+<H2>THE EXIM CONFIGURATION FILE</H2>
+<P>
+First you should make the following changes to exim configuration file.
+<P>
+Insert this at end of main configuration settings section 
+(<A HREF="misc/price/exim1.txt">Text Version</A>):
+<PRE>
+# Mailman stuff
+# home dir for mailman
+MAILMAN_HOME=/var/lib/mailman
+# wrapper script for mailman
+MAILMAN_WRAP=MAILMAN_HOME/mail/wrapper
+# user and group for mailman
+MAILMAN_UID=list
+MAILMAN_GID=daemon
+</PRE>
+<P>
+Insert this at end of transports configuration  section
+(<A HREF="misc/price/exim2.txt">Text Version</A>):
+<PRE>
+# Mailman stuff
+##
+## Three transports for list mail, request mail and admin mail
+## respectively
+## Mailman is installed in MAILMAN_HOME
+## Mailman is configured to be invoked as user exim
+list_transport:
+        driver = pipe
+        command = MAILMAN_WRAP post ${lc:$local_part}
+        current_directory = MAILMAN_HOME
+        home_directory = MAILMAN_HOME
+        user = MAILMAN_UID
+        group = MAILMAN_GID                                                                                           
+list_request_transport:
+        driver = pipe
+        command = MAILMAN_WRAP mailcmd ${lc:$local_part}
+        current_directory = MAILMAN_HOME
+        home_directory = MAILMAN_HOME
+        user = MAILMAN_UID
+        group = MAILMAN_GID           
+list_admin_transport:
+        driver = pipe
+        command = MAILMAN_WRAP mailowner ${lc:$local_part}
+        current_directory = MAILMAN_HOME
+        home_directory = MAILMAN_HOME
+        user = MAILMAN_UID
+        group = MAILMAN_GID
+</PRE>
+<P>
+In directors configuration section change system_aliases to look like this 
+(<A HREF="misc/price/exim3.txt">Text Version</A>):
+<PRE>
+system_aliases:
+  driver = aliasfile
+  file_transport = address_file
+  pipe_transport = address_pipe
+  file = /etc/aliases
+  search_type = lsearch
+  user = list
+</PRE>
+<P>
+Insert this in directors configuration section just before the user mailbox part
+ (<A HREF="misc/price/exim4.txt">Text Version</A>):
+<PRE>
+# Mailman Stuff
+## Directors section [this deals with local addresses]
+##
+## First 2 directors rewrite list-owner or owner-list to list-admin
+## This is only done if the list exists.
+## List existence checks are done by seeing if the file
+## MAILMAN_HOME/lists//config.db exists.                                                                                            
+list_owner_director:
+   driver = smartuser
+   require_files = MAILMAN_HOME/lists/${lc:$local_part}/config.db
+   suffix = "-owner"
+   new_address = "${lc:$local_part}-admin@${domain}"                                                                                       
+owner_list_director:
+   driver = smartuser
+   require_files = MAILMAN_HOME/lists/${lc:$local_part}/config.db
+   prefix = "owner-"
+   new_address = "${lc:$local_part}-admin@${domain}"                                                                                 
+## The next 3 directors direct admin, request and list mail to the 
+## appropriate transport.  List existence is checked as above.                                                                                                            
+list_admin_director:
+   driver = smartuser
+   suffix = -admin
+   require_files = MAILMAN_HOME/lists/${lc:$local_part}/config.db
+   transport = list_admin_transport
+list_request_director:
+   driver = smartuser
+   suffix = -request
+   require_files = MAILMAN_HOME/lists/${lc:$local_part}/config.db
+   transport = list_request_transport                                                                                                       
+list_director:
+   driver = smartuser
+   require_files = MAILMAN_HOME/lists/${lc:$local_part}/config.db
+   transport = list_transport
+</PRE>
+<H2>THE APACHE CONFIGURATION FILE</H2>
+<P>
+Next you should make the following changes to the apache 
+configuration file.
+<P>
+Add this to the 'Main' server configuration 
+(<A HREF="misc/price/apache.txt">Text Version</A>): 
+<PRE>
+ScriptAlias /mailman/ /usr/lib/mailman/cgi-bin/
+&lt;Directory /usr/lib/mailman/cgi-bin/&gt;
+    AllowOverride None
+    Options ExecCGI
+    Order allow,deny
+    Allow from all
+&lt;/Directory&gt;
+Alias /pipermail/ /var/lib/mailman/archives/public/
+&lt;Directory /var/lib/mailman/archives/public&gt;
+    Options Indexes MultiViews FollowSymLinks
+    AllowOverride None
+    Order allow,deny
+    Allow from all
+&lt;/Directory&gt;
+Alias /mmimages/ /usr/share/doc/mailman/images/
+&lt;Directory /usr/share/doc/mailman/images&gt;
+    Options Indexes MultiViews
+    AllowOverride None
+    Order allow,deny
+    Allow from all
+&lt;/Directory&gt;
+</PRE>
+<P>
+Then syntax check your changes with this command.
+<P>
+apache -k -f <modified/config/file>
+<P>
+If all is well you won't get any error messages.
+<P>
+<H2>THE MAILMAN CONFIGURATION FILE</H2>
+
+Next make these changes to mailman configuration file [mm_cfg.py].
+Remember, this is the file found at /etc/mailman.
+<P>
+Modify these two existing lines as shown:
+<PRE>
+DEFAULT_HOST_NAME	= '{mail.server}'
+DEFAULT_URL      	= 'http://{web.server}/mailman/'
+</PRE>
+<P>
+Where {web.server} is the fully qualified name of your server
+and {mail.server} is the non-local part of your email address.
+<P>
+For example, let's say that your server ralph in your domain 
+bigboy.org has a DNS alias [c record] of www and an mx record 
+for bigboy.org.  In this case neither {web.server} nor
+{mail.server} would be ralph.bigboy.org.  Your config would be:
+<PRE>
+DEFAULT_HOST_NAME	= 'bigboy.org'
+DEFAULT_URL      	= 'http://www.bigboy.org/mailman/'
+</PRE>
+<P>
+You should also add the following new line to mm_cfg.py:
+<PRE>
+IMAGE_LOGOS       = '/mmimages/'
+</PRE>
+<H2>ALIASES</H2>
+<P>
+Add the following lines to /etc/aliases:
+<PRE>
+mailman-owner:	mailman
+mailman:       	postmaster
+</PRE>
+<P>
+This assumes that you already have a postmaster alias.
+
+<H2>SITE PASSWORD</H2>
+<P>
+Next create your site password with the command:
+<P>
+/usr/lib/mailman/bin/mmsitepass  <site-password>
+<P>
+Where <site-password> is the Mailman master password which can 
+be used anywhere that individual user or mailing list 
+administrator passwords are required.  This password gives the 
+mailman site administrator the ability to adjust things when 
+necessary.
+
+<H2>TESTING</H2>
+<P>
+You are now ready to test Mailman.  To do this, you should create
+a list named test. This list should be deleted after you are done
+using it.  If you find problems while testing then fix them and 
+then re do this test procedure from the start.
+<P>
+First run the job /usr/lib/mailman/bin/newlist
+and respond as follows to its prompts: 
+<PRE>
+Enter the name of the list: test
+Enter the email of the person running the list: {you@domain.name}
+Initial test password:  {you-pick-it}
+{Make note of the alias lines that are now printed.  See below.}
+Hit enter to continue with test owner notification...{Enter}
+</PRE>
+<P>
+Next add the lines specified by newlist to the alias file.  
+They should look something like this:
+<PRE>
+## test mailing list
+## created: 31-Mar-2003 root
+test:            "|/var/lib/mailman/mail/wrapper post test"
+test-admin:      "|/var/lib/mailman/mail/wrapper mailowner test"
+test-request:    "|/var/lib/mailman/mail/wrapper mailcmd test"
+test-owner:      test-admin
+</PRE>
+<P> 
+Wait for Mailman to send you [the list owner] an email. 
+This email will start with something like the following text:
+<P>
+----- start of excerpt -----
+<P>
+The mailing list `test' has just been created for you.  The following
+is some basic information about your mailing list.
+<P>
+Your mailing list password is:
+<P>
+    {password}
+<P>
+You need this password to configure your mailing list.  You also need
+it to handle administrative requests, such as approving mail if you
+choose to run a moderated list.
+<P>
+You can configure your mailing list at the following web page:
+<P>
+    http://{your.web.server}/mailman/admin/test
+<P>
+The web page for users of your mailing list is: 
+<P>
+    http://{your.web.server}/mailman/listinfo/test
+<P>
+----- end of excerpt -----
+<P>
+After you receive this email, go to the web page 
+"http://{your.web.server}/mailman/admin/test"
+and sign in with the supplied password.  At this time, you might want 
+to review the General Options section of this Administration web page.
+[The other sections of this web page are also worth a glance.]  Add 
+some text in the description sections to familiarize yourself with
+how updates are done.  [It's all rather straightforward and self
+documenting.] When you are done, save your updates and logout.
+<P>
+Next go to the web page 
+"http://{your.web.server}/mailman/listinfo/test"
+and review the page.  Use this page to subscribe to the list.
+<P>
+You should soon get a confirmation request email. Follow the 
+instructions on this email to confirm your subscription request.
+<P>
+Send an Email to the list.  If you get it, the install was a success. 
+</BODY></HTML>
+
+
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<P>
+<img ALIGN="LEFT" ALT="[BIO]" SRC="../gx/2002/note.png">
+<em>
+Rich Price has been using computers for around 35 years and Linux
+for around 10 years.  And he hasn't got tired of either quite yet.
+</em>
+<br CLEAR="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+
+<!-- *** BEGIN copyright *** -->
+<hr>
+<CENTER><SMALL><STRONG>
+Copyright &copy; 2003, Rich Price.
+Copying license <A HREF="../copying.html">http://www.linuxgazette.net/copying.html</A><BR> 
+Published in Issue 91 of <i>Linux Gazette</i>, June 2003
+</STRONG></SMALL></CENTER>
+<!-- *** END copyright *** -->
+<HR>
+
+<!--startcut ==========================================================-->
+<CENTER>
+<!-- *** BEGIN navbar *** -->
+<A HREF="okopnik.html">&lt;&lt;&nbsp;Prev</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="index.html">TOC</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../index.html">Front Page</A>&nbsp;&nbsp;|&nbsp;&nbsp;Talkback&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../faq/index.html">FAQ</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="shuveb.html">Next&nbsp;&gt;&gt;</A>
+<!-- *** END navbar *** -->
+</CENTER>
+</BODY></HTML>
+<!--endcut ============================================================-->

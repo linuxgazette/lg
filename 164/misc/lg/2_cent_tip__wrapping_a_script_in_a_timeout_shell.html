@@ -1,0 +1,141 @@
+<!DOCTYPE html PUBLIC '-//W3C//DTD XHTML 1.0 Transitional//EN'
+		 'http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd'>
+<html xmlns='http://www.w3.org/1999/xhtml' lang='utf-8' xml:lang='utf-8'>
+<head>
+<title>2-cent Tip: Wrapping a script in a timeout shell</title>
+<meta http-equiv='Content-Type; charset=utf-8' />
+<link rel='stylesheet' type='text/css' href='../../../lg.css' />
+</head>
+<body>
+<a href="../../../"><img alt="Linux Gazette" src="../../../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" /></a><img alt="Tux" src="../../../gx/tux_86x95_indexed.png" id="tux" /><p id="fun">...making Linux just a little more fun!</p><div class='content articlecontent'><a name="top"></a><h3>2-cent Tip: Wrapping a script in a timeout shell</h3>
+<p>
+<b><p>
+Ben Okopnik [ben at linuxgazette.net]
+
+</p>
+</b><br />
+<b>Thu, 4 Jun 2009 08:22:35 -0500</b>
+</p>
+
+<p>
+----- Forwarded message from Allan Peda &lt;tl082@yahoo.com&gt; -----
+</p>
+
+<pre>
+From: Allan Peda &lt;tl082@yahoo.com&gt;
+To: tag@lists.linuxgazette.net
+</pre>Sent: Wednesday, May 20, 2009 11:34:27 AM
+<pre>
+Subject: Two Cent tip
+</pre>
+I have written previously on other topics for LG, and then IBM, but it's
+been a while, and I'd like to first share this without creating a full
+article (though I'd consider one).
+</p>
+
+<p>
+This is a bit long for a two cent tip, but I wanted to share a solution
+I came up with for long running processes that sometimes hang for an
+indefinite period of time.  The solution I envisioned was to launch the
+process with a specified timeout period, so instead of running the
+problematic script directly, I would "wrap" it within a timeout shell
+function, which is no-coincidentally called "timeout".  This script
+could signal reluctant processes that their time is up, allowing the
+calling procedure to catch an OS error, and respond appropriately.
+</p>
+
+<p>
+Say the process that sometimes hung was called "long_data_load"; instead
+of running it directly from the command line (or a calling script), I
+would call it using the function defined below.
+</p>
+
+<p>
+The unwrapped program might be:
+</p>
+
+<p>
+long_data_load arg_one arg_two .... etc
+</p>
+
+<p>
+which, for a timeout limit of 10 minutes, this would then become:
+</p>
+
+<p>
+timeout 10 long_data_load arg_one arg_two .... etc
+</p>
+
+<p>
+So, in the example above, if the script failed to complete within ten
+minutes, it would instead be killed (using a hard SIGKILL), and an error
+would be retuned.  I have been using this on a production system for two
+months, and it has turned out to be very useful in re-attempting network
+intensive procedures that sometimes seem never to complete.  Source code
+follows:
+</p>
+
+<p>
+<pre class='code'>
+#!/bin/bash
+#
+# Allan Peda
+# April 17, 2009
+#
+# function to call a long running script with a
+# user set timeout period
+# Script must have the executable bit set
+#
+ 
+# Note that "at" rounds down to the nearest minute
+# best to use use full path
+function timeout {
+   if [[ ${1//[^[:digit:]]} != ${1} ]]; then
+      echo "First argument of this function is timeout in minutes." &gt;&amp;2
+      return 1
+   fi
+   declare -i timeout_minutes=${1:-1}
+   shift
+   # sanity check, can this be run at all?
+   if [ ! -x $1 ]; then
+      echo "Error: attempt to locate background executable failed." &gt;&amp;2
+      return 2
+   fi
+   "$@" &amp;
+   declare -i bckrnd_pid=$!
+   declare -i jobspec=$(echo kill -9 $bckrnd_pid |\
+                        at now + $timeout_minutes minutes 2&gt;&amp;1 |\
+                        perl -ne 's/\D+(\d+)\b.+/$1/ and print')
+   # echo kill -9 $bckrnd_pid | at now + $timeout_minutes minutes
+   # echo "will kill -9 $bckrnd_pid after $timeout_minutes minutes" &gt;&amp;2
+   wait $bckrnd_pid
+   declare -i rc=$?
+   # cleanup unused batch job
+   atrm $jobspec
+   return $rc
+}
+ 
+# test case:
+# ask child to sleep for 163 seconds
+# putting process into the background, the reattaching
+# but kill it after 2 minutes, unless it returns
+# before then
+ 
+# timeout 2 /bin/sleep 163
+# echo "returned $? after $SECONDS seconds."
+</pre>
+
+<p>
+----- End forwarded message -----
+</p>
+
+<pre>-- 
+* Ben Okopnik * Editor-in-Chief, Linux Gazette * <a href='http://LinuxGazette.NET'>http://LinuxGazette.NET</a> *
+</pre>
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_tips.html#mb-2_cent_tip__wrapping_a_script_in_a_timeout_shell">Back</a><hr width="50%" align="left" /><p><br /></p></div>
+</body>
+</html>

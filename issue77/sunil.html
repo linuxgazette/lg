@@ -1,0 +1,246 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>Setting Up a Linux-based PPP Callback server LG #77</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<CENTER>
+<A HREF="http://www.linuxgazette.net/">
+<IMG ALT="LINUX GAZETTE" SRC="../gx/lglogo.png" 
+	WIDTH="600" HEIGHT="124" border="0"></A> 
+<BR>
+
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="pitcher.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../lg_faq.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="taneja.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+<P>
+</CENTER>
+
+<!--endcut ============================================================-->
+
+<H4 ALIGN="center">
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H1><font color="maroon">Setting Up a Linux-based PPP Callback server</font></H1>
+<H4>By <a href="mailto:suniltt@vsnl.com">Sunil Thomas Thonikuzhiyil</a></H4>
+</center>
+<P> <HR> <P>  
+
+<!-- END header -->
+
+
+
+
+<h2><b>Introduction</b></h2>
+<p> In a PPP dialin server setup, users dial in through a telephone line and
+modem to establish a PPP connection with a remote server. It is possible to
+make a Linux box call back the user who dialed the server. This document
+describes the step-by-step procedure to set up a Linux-based callback
+server.
+<p><h2><b>Requirements</b></h2>
+<p> My server runs Debian Potato with kernel 2.4.17. A modem
+attached to ttyS0 serves as the dial in and callback modem. My
+client machine runs both Debian Potato and Win98. An external modem is
+attached to ttyS1. It is assumed that you have installed minimum software needed to  dial out to an ISP on both server and client.
+In addition to this you have to install mgetty+sendfax package on the server.
+<p><h2><b>The idea</b></h2>
+<p> The principle behind a callback server may be summarized as follows. First  I (the client) dial the telephone number of my callback server's modem. The modem on the server is
+configured to accept incoming connections. Once the connection
+is established, the server prompts me back with a welcome message
+and a login prompt. I login as a special callback user. The modem on the
+server drops the connection and dials back a specified number
+attached to my client machine. The modem on my client machine is
+kept ready to accept the callback connection, and once the connection is
+established I am again prompted with a login prompt. Now I log in as
+a normal PPP user and the connection is completed.
+
+<p><h2><b>Configuring the dialin Server</b></h2>
+<p> The first step to achieve the above setup is to configure your
+server to accept incoming PPP connection.
+<p>Here is what I did on the server
+<p>1) Create a new user called pppuser
+<p> Change the /etc/passwd entry for pppuser to
+<br>pppuser:x:1001:1001:,,,:/home/pppuser:/usr/sbin/pppd
+<p>2) Add a line to your /etc/inittab  so that serial port can accept incoming connection.
+<p> T0:23:respawn:/sbin/mgetty ttyS0 -D /dev/ttyS0
+<p> Restart init by typing 'init q'
+<br> This enables  the ttyS0 line to accept incoming connections
+<p>3) Change directory to /etc/mgetty (This is where configuration
+files for mgetty is kept. On Redhat distributions it is at
+/etc/mgetty+sendfax)
+<br> Edit login.config and add the following line to it
+<p> /AutoPPP/ - a_ppp  /usr/sbin/pppd file /etc/ppp/options
+<p> Comment out all other lines
+<p>4) Change /etc/ppp/options to the following
+<pre>
+	 -detach
+	 asyncmap 0
+	 modem
+	 crtscts
+	 proxyarp
+	 lock
+	 require-pap
+	 refuse-chap
+	 ms-dns 192.168.50.100 #put your dns server ip here
+	 usepeerdns
+</pre>
+<p>5) Create a file options.ttyS0 in /etc/ppp with following content
+<pre>
+     192.168.0.100:192.168.0.2
+     noauth 
+</pre>
+<p>The two ip addresses above are the address of your server and
+the address the client should receive from server. Change them according
+to your IP numbering scheme. If your modem is connected to ttyS1 name
+the above file as options.ttyS1
+<p>6) Change permission of pppd (on some distributions pppd is already
+suid)
+<br>
+ chmod u+s /usr/sbin/pppd
+<p>7) Add an alias for ppp
+<br>
+<p> Add the following lines to /etc/profile
+<pre>
+ alias ppp=`/usr/sbin/pppd -detach'`
+</pre>
+<br>
+<p> Now try dialing to the server from a client. For this if you are using MS 
+windows, click dial up networking  and then select new connection and fill out various
+fields. Login as pppuser and verify whether your dialin server is
+working perfectly. Check the connection by pinging the server from client.
+Also you can verify the ip address assigned to client by typing winipcfg on command
+prompt.
+<p><h2><b>Configuring callback</b></h2>
+<p>Once the dialin server is ready, configuring callback is quite
+easy
+<br>
+<p>Here is what I did.
+<p>1) Create a new user named back.
+<p>2) Create an empty file named callback.conf in /ete/mgetty/ . (You can add init strings for your modem in this file if needed. But generally an empty file will do)        
+<p>3) Add the following line to /ete/mgetty/login.config.
+<p> back - - /usr/sbin/callback -S 2561
+<p>The number on the above line after -S is the number to be
+called back. Change it to the phone number attached to your client.
+<p><h2><b>Configuring clients</b></h2>
+<p> <h3>1) MS Windows 98</h3>
+Open dialup networking and start a new connection.
+Fill out the various fields. Right click on the newly-created icon and select
+properties. Select modem-&gt; Configure-&gt;connection-&gt;Advanced
+options.
+<br>Add &amp;c0s0=1 to Extra settings
+<br>Select options and tick the checkbox to bring the terminal window
+after dialing.
+<p> You can leave the user name and password field empty.
+<p> Now start dialing the server. Once the dialing is over a terminal screen will popup and you
+will be presented with a login screen from the server.
+<br>
+<p>Login as 'back' (the special callback user).
+<p>Now the server side modem cuts off the connection, wait for a few
+seconds  and will call you back . Once the callback connection is established you will again be prompted with login prompt.
+Type login name as pppuser and enter password. Press continue on the terminal screen . Now you will
+be logged in. Again check your connection by pinging the server.
+<br>
+<p>It is possible to write a script for this but I have not tried it yet. For other versions of Windows the procedure is similar. The important thing to setup is the modem init string ( &amp;c0s0=1)
+<br>
+<p><h3>2) Linux</h3>
+<br> 
+<p>Configuring Linux client is little more trickier. Here is what I did on my Debian machine running kernel 2.4.17
+<p>1) Create /etc/options file with following content
+
+<pre>
+	lock
+	defaultroute
+	noipdefault
+	modem
+	115200
+	crtscts
+	debug
+	passive
+	asyncmap 0
+</pre>
+<p> 2) Create a file called pppcalback in /etc/ppp/peers/ with following
+content
+<pre>
+    ttyS1 19200 crtscts
+    connect '/usr/sbin/chat -v -f /etc/ppp/chat-callback'
+    noauth
+</pre>
+<p> 3) Create a file called /etc/ppp/chat-callback with following
+content
+<pre>
+	ABORT BUSY
+	ABORT VOICE
+	ABORT "NO DIALTONE"
+	ABORT "NO ANSWER"
+	"" ATZ
+	OK ATDT2562             # Telephone number of server
+	CONNECT \d\d
+	ogin: \q\dback
+	TIMEOUT 90
+	RING AT&amp;C0S0=1
+	ogin: \q\dpppuser
+	assword: \q\dpasswordforppuser
+</pre>
+
+<p>Properly change the lines above to reflect login names and passwords
+for the accounts you have created.(Also refer to your modem's documentation for necessary init strings. May be you will have to replace  ATZ with some thing like AT&amp;FX2)
+<br>
+<p>4) Create a script called /usr/bin/pppcall with following
+contents
+<pre> 
+   #!/bin/bash
+   /usr/sbin/pppd -detach call pppcall &amp;
+</pre>
+<p> Make this script executable
+<br>Now you can dial the server by calling the script pppcall
+<p><h2><b>Related Information</b></h2>
+<p>The following documents helped me to figure it out
+<br> 1) <a href="http://linuxdoc.org/HOWTO/mini/Call-back.html">Callback
+mini howto</a>
+<br> 2 <a href="http://www.bdcol.ee/linux/callback.shtml">Linux
+callback</a>
+<br> 3) Man pages of pppd 
+<br> 4) <a href="http://www.leo.org/~doering/mgetty/">Mgetty+Sendfax
+Archive/Documentation</a>
+<p> If you find any problems in setting up callback servers don't hesitate 
+drop me a mail. Comments and suggestions for improvement of this document are most welcome.
+
+<!-- *** BEGIN bio *** -->
+<SPACER TYPE="vertical" SIZE="30">
+<P> 
+<H4><IMG ALIGN=BOTTOM ALT="" SRC="../gx/note.gif">Sunil Thomas Thonikuzhiyil</H4>
+<EM>I work as  consultant information technology at the Kerala  Legislative
+Assembly Trivandrum India. I have been hooked on Linux since 1996. I have a
+Masters in Computer Science from Cochin University. I am interested in all
+sorts of operating systems. In my free time I love to listen to Indian
+classical music.</EM>
+
+<!-- *** END bio *** -->
+
+<!-- *** BEGIN copyright *** -->
+<P> <hr> <!-- P --> 
+<H5 ALIGN=center>
+
+Copyright &copy; 2002, Sunil Thomas Thonikuzhiyil.<BR>
+Copying license <A HREF="../copying.html">http://www.linuxgazette.net/copying.html</A><BR> 
+Published in Issue 77 of <i>Linux Gazette</i>, April 2002</H5>
+<!-- *** END copyright *** -->
+
+<!--startcut ==========================================================-->
+<HR><P>
+<CENTER>
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="pitcher.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../lg_faq.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="taneja.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+</CENTER>
+</BODY></HTML>
+<!--endcut ============================================================-->

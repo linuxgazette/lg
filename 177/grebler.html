@@ -1,0 +1,716 @@
+<!DOCTYPE html
+	PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+	 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="utf-8" xml:lang="utf-8">
+<head>
+<title>Tunnel Tales 2 LG #177</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link rel="stylesheet" href="../lg.css" type="text/css" media="screen, projection"  />
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="../lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="../lg.rdf" />
+<!-- link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" / -->
+<link rel="shortcut icon" href="../favicon.ico" />
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+</head>
+<body>
+
+<a href="../">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+<div id="navigation">
+<table summary="masthead" width="100%">
+<tr>
+<td align="center" colspan="3" style="font-size: 10px; font-weight: bold">
+<a href="../index.html">Home</a>
+<a href="http://linuxgazette.net">Main Site</a>
+<a href="../faq/index.html">FAQ</a>
+
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/listinfo.cgi">Mailing Lists</a>
+<a href="../jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+<hr width="99%" style="border: 1px inset #000033">
+</td>
+</tr>
+<tr>
+<td width="40%" align="left" style="font-size: 10px; font-weight: bold">
+The Free International Online Linux Monthly
+</td>
+<td width="20%" align="center" style="font-size: 10px; font-weight: bold">
+ISSN: 1934-371X
+</td>
+<td width="40%" align="right" style="font-size: 10px; font-weight: bold">
+Main site: <a href="http://linuxgazette.net">http://linuxgazette.net</a> 
+</td>
+</table>
+</div>
+
+
+<div id="breadcrumbs1">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">August 2010 (#177)</a> &gt; 
+Article
+
+</div>
+
+<div class="articlecontent1">
+<div class="content">
+
+<div id="previousnexttop">
+<A HREF="dyckoff.html" >&lt;-- prev</A> | <A HREF="hoogland.html" >next --&gt;</A>
+</div>
+
+<h1>Tunnel Tales 2</h1>
+<p id="by"><b>By <a href="../authors/grebler.html">Henry Grebler</a></b></p>
+
+
+<h3>Introduction</h3>
+
+<p>
+In a previous article, <A
+HREF="../172/grebler.html">Tunnel Tales 1</A> I
+described how to use SSH tunnels and a third machine to provide
+network access from one machine to a second machine which was
+otherwise not directly accessible. Today's scenario is quite
+different.
+</p>
+
+<p>
+We want convenient access to a machine which can only be reached by
+navigating a chain of intermediate machines.
+</p>
+
+<p>
+Whereas the earlier task could be accomplished with a single command,
+the current task is far more formidable and requires more powerful
+magic.
+</p>
+
+<p>
+This article will assume that you are very familiar with SSH. I will
+not repeat points I made in the earlier article.
+</p>
+
+
+<p>
+<strong>Keywords</strong>: SSH tunnels, expect
+</p>
+
+<h3>The Scenario</h3>
+
+<p>
+Networks come in all shapes and sizes. I'm sure that the original
+network was designed. I guess that, over time, a machine was added
+here, another was removed there - much like a well loved suit might be
+modified as its owner ages and changes shape.
+</p>
+
+<p>
+By the time I arrived, the network was looking quite convoluted. It
+was easy enough to get to the newer machines. But some of the legacy
+machines required some serious tap-dancing before they could be
+reached.
+</p>
+
+
+<div style="margin: 0px auto 10px; text-align:center" />
+<a name="Diag1"></a> <img src="misc/grebler/diag_TT2_1.jpeg"
+alt="Diagram 1" border="0">
+</div>
+
+<pre>
+target	the machine I need to work on
+jump1	an intermediate machine
+jump2	another intermediate machine
+laptop	my laptop
+</pre>
+
+<p>
+If I only needed to get to the target machine once or twice, I would
+just <tt>ssh</tt> from my laptop to <b>jump1</b>; then again from
+there to <b>jump2</b>; and finally from there to the target machine.
+</p>
+
+<p>
+But I knew that I would be visiting <b>target</b> many times over the
+next week or two. And further, and more interestingly, I would need to
+transfer files between my laptop and the target machine.
+</p>
+
+<p>
+Again, for transferring files, most people would suggest in
+exasperation to just transfer them from one machine to the next until
+they reached the required destination.
+</p>
+
+
+
+<h3>Analysing the Task</h3>
+
+This task provides an educational "compare and contrast" with the task
+of the earlier article. 
+
+<ul>
+<li>The previous scenario was handled by a single <tt>ssh</tt>
+command. It should be obvious that we will need several commands this
+time.</li>
+
+<li>The two endpoints previously were on remote machines (neither end
+was on the laptop). This time the laptop constitutes one end of the
+required tunnel.</li>
+
+</ul>
+
+<h3>The First Step</h3>
+
+<p>
+I invoke the following command on my laptop:
+
+<pre class="code">
+	ssh -L 9922:localhost:9822 jump1
+</pre>
+</p>
+
+<p>
+The command says to establish an SSH connection to
+<strong>jump1</strong>. "While you're at it, I want you to listen on a
+port numbered <strong>9922</strong> on <strong>localhost</strong> (ie
+the laptop). If someone makes a connection to that port, connect the
+call through to port <strong>9822</strong> on <strong>jump1</strong>."
+</p>
+
+<p>
+Why <strong>9922</strong>? The port number is arbitrary, but I use the
+form <strong>XX22</strong> to remind me that this relates to <tt>SSH</tt>.
+</p>
+
+<p>
+Why <strong>9822</strong>? It seems that this port number is as
+arbitrary as <strong>9922</strong>, but that's not entirely true.
+We'll examine this a little later.
+</p>
+
+<p>
+So far we have not achieved much.
+</p>
+
+
+<h3>The Second Step</h3>
+
+The previous command landed me on <strong>jump1</strong>, where I now
+issue the following command:
+
+<pre class="code">
+	ssh -L 9822:localhost:9722 jump2
+</pre>
+</p>
+
+<p>
+You should be able to work out what this command does. Of course this
+time, <strong>localhost</strong> means <strong>jump1</strong>.
+</p>
+
+<p>
+The port number on the left (in this case <strong>9822</strong>)
+<i>must</i> be the same as the one on the right for the preceding
+command.
+</p>
+
+<p>
+Before I explain more, I'll just add one more command.
+</p>
+
+<h3>All Three Steps</h3>
+
+<p>
+By now, the last step should be obvious. (It isn't. There's one
+final wrinkle.) To make the subsequent analysis easier to follow, I'll
+list all three commands and then discuss.
+
+<pre class="code">
+	ssh -L 9922:localhost:9822 jump1
+	ssh -L 9822:localhost:9722 jump2
+	ssh -L 9722:localhost:22 target
+</pre>
+</p>
+
+<div style="margin: 0px auto 10px; text-align:center" />
+<a name="Diag2"></a> <img src="misc/grebler/diag_TT2_2.jpeg"
+alt="Diagram 2"/>
+</div>
+
+<p>
+The three commands get me to the target machine, where I can do
+whatever work I need to do. That's one effect. The side-effect is more
+interesting.
+</p>
+
+<p>
+Quite often, when I visit a machine, I like to run several sessions,
+not just a single session. To start a second session, I <i>could</i>
+use a similar set of <tt>ssh</tt> commands (with or without the
+<strong>-L</strong> option). Or, on my laptop, I could just go:
+
+<pre class="code">
+	ssh -p 9922 localhost
+</pre>
+</p>
+
+<p>
+The reference to port <strong>9922</strong> on
+<strong>localhost</strong> connects me to port <strong>9822</strong>
+on <strong>jump1</strong>, which automatically on-connects me to port
+<strong>9722</strong> on <strong>jump2</strong>, which automatically
+on-connects me to port <strong>22</strong> on <strong>jump2</strong>.
+</p>
+
+<p>
+The individual tunnels combine to provide me with a "super-tunnel".
+</p>
+
+<div style="margin: 0px auto 10px; text-align:center" />
+<a name="Diag3"></a> <img src="misc/grebler/diag_TT2_3.jpeg"
+alt="Diagram 3"/>
+</div>
+
+<h3>Notes</h3>
+
+<ul>
+<li>
+It should be easy enough to extend my example from four machines to
+any arbitrary number of machines. That's not rocket science.
+</li>
+
+<li>
+<p>
+It should now be clear that the <tt>ssh</tt> command that gets you to
+the target (the last machine), must have <strong>22</strong> as the
+port number on the right of <strong>localhost</strong> in the
+<strong>-L</strong> option. All the previous <tt>ssh</tt> commands are
+creating "stepping-stones". The last <tt>ssh</tt> command must take
+you to the real port on which the <tt>SSH</tt> daemon listens (usually
+<strong>22</strong>).
+</p>
+</li>
+
+<li>
+<p>
+As in the earlier article, the arrows in the diagram are significant:
+the tunnels are unidirectional for invocation. In other words, I can
+use the tunnel to get to the target from my laptop; but I can't use
+<i>this</i> tunnel to get to my laptop from the target. (I'd have to do
+something different if that's what I wanted. I'll leave that as an
+exercise for the reader.)
+</p>
+
+<p>
+That's not really very restrictive. After all, I'm doing all this work
+while I'm sitting at my laptop, using its keyboard, mouse and screen.
+</p>
+</li>
+
+<li>
+<p>
+The last point may help clarify the difference between
+<strong>-L</strong> (local) and <strong>-R</strong> (remote). The
+tunnel can be described as having a "mouth" at one end - the end where
+it is entered. (I may have chosen an unfortunate metaphor. Let's not
+concern ourselves with the other end!) On the diagrams, the arrowheads
+represent the other end of each tunnel.
+</p>
+
+<p>
+Thus the previous article used <strong>-R</strong> because the mouth
+of the tunnel was on a remote machine (remote relative to the machine
+on which the <tt>ssh</tt> command was issued); whereas this article
+uses <strong>-L</strong> because, in each case, the mouth of the
+tunnel is on the local machine (the machine on which the <tt>ssh</tt>
+command is issued).
+</p>
+</li>
+
+<li>
+<p>
+Arguably of even more value than being able to <tt>ssh</tt> to the
+remote machine in a single command is the ability to <tt>scp</tt> (or
+<tt>rsync</tt>) to and from the remote machine in a single command.
+</p>
+
+<p>
+Use commands of the following form:
+
+<pre class="code">
+	scp -p -o 'port 9922' /path/to/single.file localhost:/tmp
+	scp -p -o 'port 9922' localhost:/path/to/single.file /tmp
+
+	RSYNC_RSH="ssh -o 'NoHostAuthenticationForLocalhost yes' \
+		-o 'UserKnownHostsFile /dev/null' -p 9922"
+	export RSYNC_RSH
+	rsync -urlptog /path/to/top_dir localhost:/tmp
+</pre>
+
+</p>
+</li>
+
+<li>
+It should now be clear what I meant by "unidirectional for invocation"
+and why I said that that is "not really very restrictive". Yes, I have
+to invoke commands on my laptop. But the copy commands of the previous
+point can be used to transfer files in <i>either</i> direction (ie to
+the laptop or from the laptop).
+</li>
+
+<li>
+<p>
+Bear in mind that the copies occur between the laptop and the target
+machine in a single <i>command</i> not a single <i>step</i>. We
+haven't found a magical way to bypass the intermediate machines. Under
+the covers, the data goes from each machine to the adjacent machine in
+the tunnel. We have only saved typing. But that's still hugely valuable.
+</p>
+</li>
+
+
+<li>
+<p>
+Did anyone wonder why I kept using different port numbers?
+</p>
+
+<p>
+Why did I not do this:
+
+<pre class="code">
+	ssh -L 9922:localhost:9922 jump1
+</pre>
+
+If you were going to ask this question, well spotted.
+</p>
+
+<p>
+The way I have drawn the diagrams, and the way the problem originally
+presented, it would have been perfectly reasonable to have all the
+<strong>9X22</strong> be the same. (The <strong>22</strong> would
+still have to be <strong>22</strong>.)
+</p>
+
+<p>
+Because, of course, each <tt>ssh</tt> command is being issued on a
+different machine, and ports only have to be unique on a single
+machine (strictly, interface of a machine). [And that last little
+parenthetic addition just taught me something. More later.]
+</p>
+
+<p>
+It turns out that when I was attempting to <i>solve</i> the problem, I
+was no longer at work. I was at home where I did not happen to have 3
+spare machines available to simulate the conditions of the scenario.
+</p>
+
+<p>
+Undaunted, I began to work through the problem by repeatedly
+connecting back to my own machine. But this took away the premise of
+an earlier paragraph: I was no longer issuing each <tt>ssh</tt>
+command on a different machine. And so I had to use different port
+numbers.
+</p>
+
+<p>
+It does not hurt to use different port numbers; arguably, it makes the
+solution more general. On the other hand there is a risk of running
+out of port numbers if the chain gets ridiculously long.
+</p>
+
+<p>
+It is important that the port number to the left of each
+<strong>localhost</strong> (except the first) be the same as the port
+number to the right of the previous <strong>localhost</strong>. So
+that's an argument to keep it simple and only use one port number all
+the way through (except for the final <strong>22</strong>).
+</p>
+</li>
+</ul>
+
+<h3>Getting there automatically</h3>
+
+<p>
+That's all you need to improve your life substantially when you
+encounter a similar scenario.
+</p>
+
+<p>
+What's that? You think that there is still too much typing? You want more?
+</p>
+
+<p>
+Oh, all right.
+</p>
+
+<p>
+Here's a fairly long <tt>expect</tt> script:
+
+<pre>
+#!/usr/local/bin/expect -f
+#	ssh_tunnel.exp - ssh to a remote machine via intermediate machines
+
+set timeout -1
+
+	set HOSTS [list jump1 jump2 target]
+	set PORTS [list 9922 9822 9722 9622 9522 9422 9322 9122 9022]
+
+# The port of the last machine must be 22
+
+	set jj [llength  $HOSTS]
+	lset  PORTS $jj 22
+
+	set i 0
+	foreach HOST $HOSTS {
+		puts "HOST= $HOST PORT= [lindex $PORTS $i]"
+		set i [expr {$i + 1}]
+	}
+
+	send_user "\n"
+
+#----------------------------------------------------------------------#
+#	Procedure to get to a machine
+#----------------------------------------------------------------------#
+
+proc gotomachine {lport rport host} {
+	send_user "Getting on to machine $host ... "
+	send -- "ssh -L $lport:localhost:$rport $host\r"
+	log_user 0
+	expect -exact "Starting .bash_profile"
+	expect -exact "Finished .bash_profile"
+	expect -exact "-bash"
+	send -- "env | grep SSH_CONNECTION\r"
+	log_user 1
+	send_user "done.\n"
+}
+
+#----------------------------------------------------------------------#
+match_max 100000
+
+	set dollar "$"
+	spawn bash
+	log_user 0
+	expect -exact "-bash"
+	send  -- "unset HISTFILE\r"
+	expect -exact "-bash"
+	send  -- "unset ignoreeof\r"
+	expect -exact "-bash"
+	send  -- "PS1='\nYou need one more exit to get back "
+	send  -- "to where you started\nUse ^D. $ '\n"
+	expect -exact "started" 
+	log_user 1
+	set i 0
+	foreach HOST $HOSTS {
+		set lport [lindex $PORTS $i]
+		set i [expr {$i + 1}]
+		gotomachine $lport [lindex $PORTS $i] $HOST
+	}
+
+	puts "
+Houston, this is Tranquility Base. The eagle has landed. 
+You should now be able to get to this machine ($HOST) directly
+using:
+
+	ssh -p [lindex $PORTS 0] localhost
+
+To disconnect the tunnel, use the following repeatedly:
+"
+	puts {	[ "$SSH_CONNECTION" = '' ] || exit }
+	puts "
+Good luck!
+"
+	interact
+	exit
+
+</pre>
+</p>
+
+<h3>Notes</h3>
+
+<ul>
+<li>
+To adapt this script to your situation, you need only change the list
+in the first command which references HOSTS (line 6).
+</li>
+
+<li>
+The script can handle up to 9 other machines (line 7). If you need
+more machines, simply add entries to the first command which
+references PORTS.
+</li>
+
+<li>
+For more information, see expect(1).
+</li>
+</ul>
+
+<h3>Tying up Loose Ends</h3>
+
+<p>
+When I developed the solution on my machine I was under the
+misapprehension that I had no choice but to use different port
+numbers. As I wrote this article, I said that ports only have to be
+unique on a single machine - and then corrected myself and said they
+only have to be unique on a single interface.
+</p>
+
+<p>
+This opens the possibility of a simplification of the script
+<strong>ssh_tunnel.exp</strong> - at the expense of setting up some
+virtual interfaces on my single machine. If I were doing this from
+scratch now, that's what I would do.
+
+<p>
+It gets very confusing constantly connecting back to a single machine.
+That accounts for the large number of lines dealing with disconnecting
+the tunnel. I was scared I would exit too often and blow my xterm away.
+</p>
+
+<h3>Risks and Analysis</h3>
+
+<p>
+This is a nice safe use of <tt>expect</tt>. As usual, I've set up
+certificates on all relevant machines, so no paswords are necessary.
+</p>
+
+<h3>Conclusion</h3>
+
+<p>
+You should now have the tools to navigate conveniently across any
+chain of machines.
+</p>
+
+<p>
+Read with the previous article, this article should have given you
+enough information to handle the earlier scenario without "cheating".
+</p>
+
+<p>
+You should be able to extrapolate from these articles to almost any
+configuration of machines.
+</p>
+
+
+<br clear="all" />
+
+<table align='center' cellspacing='10'>
+<tr>
+<td>
+<script type='text/javascript'>
+digg_url = 'http://linuxgazette.net/177/grebler.html';
+digg_title = 'Tunnel Tales 2';
+digg_bodytext = '<p> In a previous article, "Tunnel Tales 1", I described how to use SSH tunnels and a third machine to provide network access from one machine to a second machine which was otherwise not directly accessible. Today\'s scenario is quite different. </p> ';
+digg_topic = 'linux_unix';
+</script>
+<script src="http://digg.com/tools/diggthis.js" type="text/javascript"></script>
+</td>
+<td>
+<a name="fb_share" type="box_count" href="http://www.facebook.com/sharer.php">Share</a>
+<script src="http://static.ak.fbcdn.net/connect.php/js/FB.Share" type="text/javascript"></script>
+</td>
+<td>
+<a href="http://twitter.com/home?status=Currently%20reading:%20http://linuxgazette.net/177/grebler.html%20at%20Linux%20Gazette%20%23linuxgazette" title="Click to share this post on Twitter"><img src="../gx/twitter.png" width="50" height="85" border="0"></a>
+</td>
+</tr>
+</table>
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:177/grebler.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/authors/grebler.jpg" class="bio">
+</p>
+
+<em>
+<p>
+Henry has spent his days working with computers, mostly for computer
+ manufacturers or software developers. His early computer experience
+ includes relics such as punch cards, paper tape and mag tape. It is
+ his darkest secret that he has been paid to do the sorts of things he
+ would have paid money to be allowed to do. Just don't tell any of his
+ employers. 
+</p>
+
+<p>
+He has used Linux as his personal home desktop since the family got its
+ first PC in 1996. Back then, when the family shared the one PC, it was a
+ dual-boot Windows/Slackware setup. Now that each member has his/her own
+ computer, Henry somehow survives in a purely Linux world.
+</p>
+
+<p>
+He lives in a suburb of Melbourne, Australia.
+</p>
+
+
+
+</em>
+
+<br clear="all">
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2010, Henry Grebler. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication License</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 177 of Linux Gazette, August 2010
+</p>
+
+</div>
+
+<div id="previousnextbottom">
+<A HREF="dyckoff.html" >&lt;-- prev</A> | <A HREF="hoogland.html" >next --&gt;</A>
+</div>
+
+</div>
+</div>
+
+<script src="http://www.google-analytics.com/urchin.js"
+type="text/javascript">
+</script>
+<script type="text/javascript">
+_uacct = "UA-1204316-1";
+urchinTracker();
+</script>
+
+
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+</body>
+</html>
+

@@ -1,0 +1,64 @@
+#!/usr/bin/perl
+# Dufus_Move.pl
+# Delete all partitions on a hard drive using expect.  
+# Requires the Expect module.
+# DANGEROUS PROGRAM!!  RUN AT YOUR OWN RISK!!
+
+  ## Load the Perl module
+use Expect;
+
+  ## Get the IDE hard drive they want to delete from the command line
+my $Letter = shift @ARGV;
+my $Drive = "hd$Letter";
+
+  ## If the drive choosen isn't an IDE drive, abort
+if (!(grep($_ eq $Letter, ("a","b","c","d"))))
+   {
+   print "Please choose a,b,c, or d.\n";
+   exit;
+   }
+else
+  {
+  print "You entered \"$Letter\" to delete all partitions on /dev/hda$Letter\n";
+  print "Enter \"y\" if you want to do this.\n";
+  $R = <STDIN>; chomp $R;
+  if ($R ne "y") {exit;}
+  else {print "Okay dare devil, here we go.\n";}
+  }
+  
+  ## Initialize the fdisk program
+$Fdisk = Expect->spawn("/sbin/fdisk /dev/$Drive");
+
+  ### Print out the partitions
+print $Fdisk "p\n";
+  ### Get the line right before it prints the partitions out
+$match=$Fdisk->expect(30,"Device Boot    Start");
+  ### Get everything after this line
+my $Temp = $Fdisk->exp_after();
+  ### chop off all newlines and split the lines into an array
+my @Temp = split(/\n/, $Temp);
+  ### filter out any lines that don't list a partition
+my @Partitions = grep($_ =~ /^\/dev\//, @Temp);
+
+  ### For each element in the array, do this
+foreach my $Line (reverse @Partitions)
+  {
+     ### get the first part of the line, the partition name
+  my ($Part,$Junk) = split(/[\t ]/, $Line,2);
+  my $No = $Part;
+     ### Get rid of the anything but the partition number
+  $No =~ s/^\/dev\/$Drive//;
+  
+  print "Deleting partition $No on the drive $Drive\n";     
+     ### Issue the "d" command to fdisk to delete a partition
+  print $Fdisk "d\n";    
+     ### Wait to see if it asks for a partition number
+  $match=$Fdisk->expect(30,"Partition number");
+     ### Give it the partition number to delete
+  print $Fdisk "$No\n";
+     ### Goto the next command
+  $match=$Fdisk->expect(30,"Command (m for help):");
+  }
+
+  ### Now save the changes
+print $Fdisk "w\n";

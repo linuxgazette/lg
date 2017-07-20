@@ -1,0 +1,330 @@
+<!--startcut ==========================================================-->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML>
+<HEAD>
+<title>CHAOS Part 2: Readying System Software #33</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#A000A0"
+ALINK="#FF0000">
+<!--endcut ============================================================-->
+
+<H4>
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H1><font color="maroon">CHAOS Part 2: Readying System Software</font></H1>
+<H4>By <a href="mailto:P29131@gegpo6.geg.mot.com">Alex Vrenios</a></H4>
+</center>
+<P> <HR> <P>  
+
+<H4>Introduction</H4> 
+<P>
+	My first article, "CHAOS: CHeap Array of Obsolete Systems" (see Linux Gazette, volume 30, July, 1998), describes a somewhat bazaar set of circumstances that led to my building a network of aging PCs, running Red Hat Linux. A number of readers contacted me after reading it, asking me how it was going and if there would be a follow-up article - this is it!
+<P>
+A few PCs, an Operating System, and networking hardware form the largest part of the infrastructure necessary for the kind of software systems that I want to design and work with, but systems cannot run on basics alone. A little administration, a few shell scripts, and a couple of utility programs will bring it all together into what I want it to be: a distributed system.
+<P>
+Distributed algorithms often consist of several identical copies of a single program, each running on a different computer in the network. I can write and debug a single copy on my <EM>big</EM> '486 machine, named "omission," but that's just the first step. Debugging the final product, running on seven machines simultaneously, requires me to develop a way to remotely start a process on each machine, to see how well that process is running, and to kill them all, if necessary, centralizing their trace file data so I can figure out what went wrong.
+<P>
+This article describes what I added to my system to make this all happen.
+<P> <HR> <P>  
+<H4>System Administration</H4> 
+<P>
+I have worked on many Unix networks in the past. I thought nothing of using the remote shell command, "rsh," to switch to some other machine in the network, to get access to its local data. I thought nothing of it, that is, until I wanted to work like that on my own network.
+<P>
+>From omission, there are three ways I can think of to switch over to one of the '386 machines. I can use the telnet command, which puts up a login prompt, asking me for a userid and password. I can "rlogin" to another machine, which asks me for a userid, but not a password, if the system files are properly set up. Finally, there is "rsh" which lets me go about my business without so much as a userid if all the system files are just so; getting them just so, I find, is a black art.
+<P>
+I knew that my userid's home directory, /home/alex, needed a ".rhosts" file with my userid: a single line with "alex" in it. I knew too, that the /etc/hosts.equiv file played a part, but I wasn't sure exactly how, so I started reading, and asking a lot of questions. Most references to these system files, it seemed, were more interested in telling me how to keep others out instead of welcoming them in!
+<P>
+I am not above a brute force approach to solving problems. I'll bet that a smart sysadmin reading this article might be appalled by my methods, but they worked for me and sometimes that's enough of a reward.
+<P>
+My domain name, as you may recall from the first article, is "chaos.org" and my seven '386s are named after the seven deadly sins. User alex has a home directory on omission, which is nfs mounted on each of the seven other machines. My /home/alex/.rhosts and each /etc/hosts.equiv file contain exactly the same eight line entries, as follows:
+<pre>
+<FONT FACE="Courier" SIZE="-1">
+omission.chaos.org alex
+greed.chaos.org alex
+lust.chaos.org alex
+anger.chaos.org alex
+pride.chaos.org alex
+gluttony.chaos.org alex
+envy.chaos.org alex
+sloth.chaos.org alex</FONT>
+</pre>
+I am not sure where I got my initial ideas about how this all worked, but what's listed above works on my systems and again, that's enough for me for now.
+<P>
+I wanted to have at least some reasonable time-of-day clock synchronization, so I added a "clock reset" command to the boot process. The following lines were added to each remote machine's rc.local file:
+<pre>
+<FONT FACE="Courier" SIZE="-1">
+# reset date and time from server
+date `rsh omission "date +%m%d%H%M"`</FONT>
+</pre>
+<P>
+I boot omission first and wait for it to come up before starting others because it contains the /home directory that each of the other machines must mount. When each of the other machine boots, it sets its time-of-day to that of omission, accurate to the minute.
+<P> <HR> <P>  
+<H4>System File Distribution</H4> 
+<P>
+There is only one copy of /home/alex/.rhosts file, but every system has its own copy of /etc/hosts.equiv. Maintaining a set of eight identical copies of anything is not a pleasant task, especially when you are making subtle changes, trying to get them all to work in your favor.
+<P>
+One way to handle this is to copy the file to a diskette and load it onto every machine, but that's too much of a pain. The sophisticates might have a separate partition for such files, local to their main server, and remotely mounted everywhere else. Since I am both the system administrator and the user community, I overlapped things a bit.
+<P>
+I created a /home/alex/root subdirectory, owned by root, and copied each of these volatile system files into it. That way I could make changes in only one file and distribute it more easily than from a floppy. I copied /etc/hosts to that area, additions to large system files, like rc.local, and all the shell scripts that the root user on each machine might use, too. I'll discuss these next.
+<P>
+<P> <HR> <P>  
+<H4>System Shell Scripts and Utility Programs:</H4>
+<P>
+I might want to reset the time-of-day clock manually, so I used the same clock set command (above) in a shell script named "settime":
+<pre>
+<FONT FACE="Courier" SIZE="-1">
+#!/bin/csh -f
+#
+#   settime - resets data and time from server
+#
+date `rsh omission "date +%m%d%H%M"`</FONT>
+</pre>
+<P>
+I might be monitoring some long running tests and, being the nervous type, I might want to watch the overall system performance. Here is my "ruptime" (which stands for remote uptime) script:
+<pre>
+<FONT FACE="Courier" SIZE="-1">
+#!/bin/csh -f
+#
+#   ruptime - remote uptime displays system performance
+#
+cat /etc/hosts \
+ | grep -v localhost \
+ | awk '{ print $3": ";system("rsh "$3" uptime") }'</FONT>
+</pre>
+<P>
+This displays the loading on each of my machines and I use this as a high level indication of overall system performance. The word loading, by the way, means the number of processes on the operating system's ready queue, waiting for the cpu. (The cpu is usually busy running the active task. The three numbers uptime displays are the 1, 5, and 15 minute loading averages - see the uptime man page for more information.) If I see what might be a problem, all zeros e.g., I can follow up with other commands that give me more specific information.
+<P>
+The "ps" command presents process status for every process in the system. The addition of a "grep" for my userid, alex, will limit the display to only the ones I happen to be running, but it will include the grep command itself. Additional greps with a "-v" option can reduce the content of the display to just those processes that I am interested in monitoring:
+<pre>
+<FONT FACE="Courier" SIZE="-1">
+#!/bin/csh -f
+#
+#   rps - remote process status
+#
+ps -aux | grep alex \
+ | grep -v rps \
+ | grep -v aux \
+ | sed -e "s/alex\ \ \ \ \ /`hostname -s`/" \
+ | grep -v sed \
+ | grep -v hostname \
+ | grep -v grep</FONT>
+</pre>
+<P>
+The "sed" command substitutes the remote host name for my userid. I use this script along with the rsh command to display the status of remote processes:
+<pre>
+<FONT FACE="Courier" SIZE="-1">
+omission:/home/alex&gt; rsh pride rps
+pride  218  0.4  7.0  1156   820   1 S   13:34   0:02 /bin/login -- alex
+pride  240  0.7  6.6  1296   776   1 S   13:37   0:01 -csh
+pride  309  0.3  1.8   856   212   1 S   13:41   0:00 ser
+pride  341  0.0  4.4  1188   524  ?  R   13:41   0:00 /bin/sh /home/alex/bin
+</FONT>
+</pre>
+<P>
+Careful readers might notice that the ruptime script displays uptime for all machines on the network, while rps targets only one machine. My general version of rps works through a pair of programs named "rstart" and "psm," controlled by a script named rpsm:
+<pre>
+<FONT FACE="Courier" SIZE="-1">
+#!/bin/csh -f
+#
+#   rpsm - remote process status for my userid
+#
+rstart psm</FONT>
+</pre>
+<P>
+The program rstart.c accepts the name of an executable in the user's path:
+<pre>
+<FONT FACE="Courier" SIZE="-1">
+#include &lt;stdio.h&gt;
+#include &lt;chaos.h&gt; /* a list of all the remote host names in chaos.org */
+main(argc, argv)
+char *argv[];
+int argc;
+/*
+**   rstart.c - start a process named in argv[1] on all remote systems
+*/
+{
+   int i, j, pids[NUM];
+   char command[64];
+   /*
+   **   insist on at least two command line arguments
+   */
+   if(argc &lt; 2) {
+      printf("\n\tUsage: %s &lt;process&gt; [&lt;parameters&gt;]\n\n", argv[0]);
+      exit(-1);
+   }
+   close(0); /* avoid stdin problems if we run in the background */
+   /*
+   **   initialize the remote process name
+   */
+   strcpy(command, argv[1]);
+   if(command[0] != '/') /* prepend path if nec */
+      sprintf(command, "%s%s", Bin, argv[1]);
+   /*
+   **   append any other command line parameters specified
+   */
+   for(i=2; i&lt;argc; i++) {
+      strcat(command, " "); /* append a blank */
+      strcat(command, argv[i]); /* append a parameter */
+   }
+   /*
+   **   start remote tasks
+   */
+   for(i=0; i&lt;NUM; i++) {
+      if(i) /* pause between starts */
+         sleep(1);
+      if((pids[i] = fork()) == 0) {
+         if(execl("/usr/bin/rsh", "rsh", Hosts[i], command, NULL) == -1) {
+            perror("execl()");
+            exit(-1);
+         }
+      }
+   }
+   /*
+   **   wait for all processes to complete
+   */
+   for(i=1; i&lt;NUM; i++)
+      waitpid(pids[i]);
+   return(0);
+}</FONT>
+</pre>
+<P>
+     The rpsm script (above) runs the rstart program, which runs psm:
+<FONT FACE="Courier" SIZE="-1">
+<pre>
+#include &lt;string.h&gt;
+#include &lt;stdio.h&gt;
+main()
+/*
+**   psm.c - lists process status for my userid
+*/
+{
+   FILE *fp;
+   int len, pid1, pid2;
+   char host[32], *p;
+   char line[128];
+   /* request name of local host */
+   gethostname(host, sizeof(host));
+   if((p = strchr(host, '.')) != NULL)
+      *p = '\0'; /* cut domain name */
+   len = strlen(host);
+   /* our proc id */
+   pid1 = getpid();
+   /* request listing of all process' status */
+   fp = popen("ps -aux", "r");
+   while(fgets(line, sizeof(line), fp) != NULL) {
+      if(strstr(line, "alex ") == NULL)
+         continue; /* not our userid */
+      if(strstr(line, "psm") != NULL)
+         continue; /* skip ourself */
+      sscanf(line, "%*s %d", &amp;pid2);
+      if(pid2 &gt;= pid1)
+         continue; /* skip higher pids */
+      /* replace userid with host name */
+      strncpy(line, host, len);
+      printf("%s", line);
+   }
+   return(0);
+}
+</FONT>
+</pre>
+<P>
+Here is a sample run:
+<pre>
+<FONT FACE="Courier" SIZE="-1">
+&gt; rpsm
+pride   218  0.0  7.0  1156   820   1 S   13:34   0:02 /bin/login -- alex 
+pride   240  0.0  6.6  1296   776   1 S   13:37   0:01 -csh 
+pride   309  0.0  1.8   856   212   1 S   13:41   0:00 ser 
+pride   487 38.3  5.4  1240   636  ?  S   14:17   0:01 csh -c /home/alex/bin
+greed   222 35.8  7.3  1240   636  ?  S   14:17   0:01 csh -c /home/alex/bin
+   .
+   .
+   .
+sloth   201 36.5  7.1  1240   636  ?  S   14:17   0:01 csh -c /home/alex/bin
+</FONT>
+</pre>
+<P>
+The rstart program concept can be expanded to gather a good deal more than process status. I created script-program pairs that dump trace and log files from a particular machine. I can also kill a remote process by name on all my remote machines by running rstart with k.c:
+<pre>
+<FONT FACE="Courier" SIZE="-1">
+#include &lt;string.h&gt;
+#include &lt;stdio.h&gt;
+main(argc, argv)
+int argc;
+char *argv[];
+/*
+**   k.c - kills the named user process
+*/
+{
+   FILE *fp;
+   int pid1, pid2;
+   char line[128];
+   char shell[32];
+   char host[32];
+   char proc[16];
+   if(argc &lt; 2 || argc &gt; 3) {
+      printf("\tUsage: k &lt;process_name&gt; [noconf]\n\n");
+      exit(-1);
+   }
+   /* get process name for strstr line compares */
+   sprintf(proc, "%s ", argv[1]); /* add blank */
+   sprintf(shell, "-c k %s", proc); /* our mom */
+   pid1 = getpid();
+   /* get host for print message */
+   gethostname(host, sizeof(host));
+   /* request listing of all process' status */
+   fp = popen("ps -aux", "r");
+   while(fgets(line, sizeof(line), fp) != NULL) {
+      if(strstr(line, "alex ") == NULL)
+         continue; /* not our userid */
+      if(strstr(line, shell) != NULL)
+         continue; /* skip shell */
+      if(strstr(line, proc) == NULL)
+         continue; /* must match */
+      sscanf(line, "%*s %d", &amp;pid2);
+      if(pid2 &gt;= pid1)
+         continue; /* skip higher pids */
+      /* kill the process */
+      system(line);
+      sprintf(line, "kill -9 %d", pid2);
+      if(argc != 3)
+         printf("%s: %s\n", host, line);
+   }
+   return(0);
+}</FONT>
+</pre>
+<P>
+All of the above programs and scripts were pasted into this article from tested source code, but I removed blank lines and made other cosmetic changes to make it more readable and to manage its size. Please accept my apologies in advance for any difficulties you may experience. I cannot assume any liability for your use of the above, so you must do so at your own risk.
+<P> <HR> <P>  
+<H4>Conclusions</H4> 
+<P>
+I feel like I am ready now to start developing software according to my original plans. I hope some of my solutions will help you too, should you try this yourself.
+<P>
+My next step is to develop a central "manager" process, running on omission, that will display real-time status and behavior of the <EM>system</EM> of distributed processes running on all the other machines. I want to be able to "drive" the system by sending requests to one of the processes on a randomly chosen machine, and then to "watch" how all the remote processes interact in developing their response. Each remote process interacts with a local "agent" process running in parallel with it. Each agent will send messages back to the manager, telling it what state that part of the system is in; the manager combines these remote states into a global state display for the entire distributed system. If you're interested in this sort of thing, stay tuned!
+<P>
+This project has been quite a learning experience for me. I am proud of what I've built and I hope these simple tools will motivate some of you to give this a try - perhaps with only three or four systems, perhaps with more than the eight machines that I combined. Home networking is in vogue now, and developing software that takes the greatest advantage of a network cannot be far behind. Try this if you dare, and be ready for the future.
+<!--===================================================================-->
+<P> <hr> <P> 
+<center><H5>Copyright &copy; 1998, Alex Vrenios <BR> 
+Published in Issue 33 of <i>Linux Gazette</i>, October 1998</H5></center>
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<A HREF="./index.html"><IMG ALIGN=BOTTOM SRC="../gx/indexnew.gif" 
+ALT="[ TABLE OF CONTENTS ]"></A>
+<A HREF="../index.html"><IMG ALIGN=BOTTOM SRC="../gx/homenew.gif"
+ALT="[ FRONT PAGE ]"></A>
+<A HREF="./lg_answer33.html"><IMG SRC="../gx/back2.gif"
+ALT=" Back "></A>
+<A HREF="./york.html"><IMG SRC="../gx/fwd.gif" ALT=" Next "></A>
+<P> <hr> <P> 
+<!--startcut ==========================================================-->
+</BODY>
+</HTML>
+<!--endcut ============================================================-->
+

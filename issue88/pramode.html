@@ -1,0 +1,295 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>Programming the SA1110 Watchdog timer on the Simputer  LG #88</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="piszcz.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../lg_faq.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="puryear.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+
+<!--endcut ============================================================-->
+
+<TABLE BORDER><TR><TD WIDTH="200">
+<A HREF="http://www.linuxgazette.net/">
+<IMG ALT="LINUX GAZETTE" SRC="../gx/2002/lglogo_200x41.png" 
+	WIDTH="200" HEIGHT="41" border="0"></A> 
+<BR CLEAR="all">
+<SMALL>...<I>making Linux just a little more fun!</I></SMALL>
+</TD><TD WIDTH="380">
+
+
+<CENTER>
+<BIG><BIG><STRONG><FONT COLOR="maroon">Programming the SA1110 Watchdog timer on the Simputer </FONT></STRONG></BIG></BIG>
+<BR>
+<STRONG>By <A HREF="../authors/pramode.html">Pramode C.E</A></STRONG>
+</CENTER>
+
+</TD></TR>
+</TABLE>
+<P>
+
+<!-- END header -->
+
+
+
+<p>
+
+In last month's article (Fun with Simputer and Embedded Linux),
+I had described the process of developing programs for the
+Simputer, a StrongArm based handheld device. The Simputer
+can be used as a platform for learning microprocessor and
+embedded systems programming. This article describes my
+attempts at programming the watchdog timer unit attached
+to the SA1110 CPU which powers the Simputer. The experiments
+should work on any Linux based handheld which uses the same
+CPU. 
+
+<h2> The Watchdog timer </h2>
+
+<p>
+
+Due to obscure bugs, your computer system is going to lock
+up once in a while - the only way out would be to reset
+the unit. But what if you are not there to press the switch?
+You need to have some form of `automatic reset'.
+The watchdog timer presents such a solution.
+
+<p>
+
+Imagine that your microprocessor contains two registers -
+one which gets incremented every time there is a low to
+high (or high to low) transition of a clock signal (generated
+internal to the microprocessor or coming from some external
+source) and another one which simply stores a number. Let's
+assume that the first register starts out at zero and is
+incremented at a rate of 4,000,000 per second. Lets assume
+that the second register contains the number 4,000,000,0.
+The microprocessor hardware compares these two registers
+every time the first register is incremented and issues
+a reset signal (which has the result of rebooting the system)
+when the value of these registers match. Now, if we do not
+modify the value in the second register, our system is sure
+to reboot in 10 seconds - the time required for the values
+in both registers to become equal.
+
+<p>
+
+The trick is this - we do not allow the values in these registers
+to become equal. We run a program (either as part of the
+OS kernel or in user space) which keeps on moving the value
+in the second register forward before the values of both
+become equal. If this program does not execute (because
+of a system freeze), then the unit would be automatically
+rebooted the moment the value of the two registers match.
+Hopefully, the system will start functioning normally after
+the reboot.
+
+<h2> Resetting the SA1110 </h2>
+
+<p>
+
+The Intel StrongArm manual specifies that a software reset
+is invoked when the Software Reset (SWR) bit of a register
+called RSRR (Reset Controller Software Register) is set.
+The SWR bit is bit D0 of this 32 bit register. My first
+experiment was to try resetting the Simputer by setting
+this bit. I was able to do so by compiling a simple module
+whose `init_module' contained only one line:
+
+<p>
+RSRR = RSRR | 0x1
+</p>
+
+<h2> The Operating System Timer </h2>
+
+<p>
+
+The StrongArm CPU contains a 32 bit timer that is clocked
+by a 3.6864MHz oscillator. The timer contains an OSCR (operating
+system count register) which is an up counter and four 32
+bit match registers (OSMR0 to OSMR3). Of special interest
+to us is the OSMR3.
+
+<p>
+
+If bit D0 of the OS Timer Watchdog Match Enable Register
+(OWER) is set, a reset is issued by the hardware when the
+value in OSMR3 becomes equal to the value in OSCR. It seems
+that bit D3 of the OS Timer Interrupt Enable Register (OIER)
+should also be set for the reset to occur.
+
+<p>
+
+Using these ideas, it is easy to write a simple character
+driver with only one method - `write'. A write will delay
+the reset by a period defined by the constant `TIMEOUT'. 
+
+<p>
+[<A HREF="misc/pramode/watchdog.c.txt">Text version of this listing</A>]
+
+<p>
+<pre>
+
+/*
+ * A watchdog timer. 
+ */
+
+#include &lt;linux/module.h&gt;
+#include &lt;linux/ioport.h&gt;
+#include &lt;linux/sched.h&gt;
+#include &lt;asm-arm/irq.h&gt;
+#include &lt;asm/io.h&gt;
+
+#define WME 1
+#define OSCLK 3686400 /* The OS counter gets incremented
+                       * at this rate
+                       * every second 
+                       */
+
+#define TIMEOUT 20 /*  20 seconds timeout */
+
+static int major;
+static char *name = "watchdog";
+
+void
+enable_watchdog(void)
+{
+    OWER = OWER | WME;
+}
+
+void
+enable_interrupt(void)
+{
+    OIER = OIER | 0x8;
+}
+
+ssize_t 
+watchdog_write(struct file *filp, const char *buf, size_t
+               count, loff_t *offp)
+{
+    OSMR3 = OSCR + TIMEOUT*OSCLK;   
+    printk("OSMR3 updated...\n");
+    return count;
+}
+
+static struct file_operations fops = {write:watchdog_write};
+
+int
+init_module(void)
+{
+    major = register_chrdev(0, name, &amp;fops);
+    if(major &lt; 0) {
+       printk("error in init_module...\n");
+       return major;
+    }
+    printk("Major = %d\n", major);
+    OSMR3 = OSCR + TIMEOUT*OSCLK;
+    enable_watchdog();
+    enable_interrupt();
+    return 0;
+}
+
+
+void
+cleanup_module()
+{
+    unregister_chrdev(major, name);
+}
+
+</pre>
+</p>
+
+<p>
+It would be nice to add an `ioctl' method which can be used
+at least for getting and setting the timeout period.
+
+<p>
+
+Once the module is loaded, we can think of running the following
+program in the background (of course, we have to first create
+a device file called `watchdog' with the major number which
+`init_module' had printed). As long as this program keeps 
+running, the system will not reboot.
+
+<p>
+[<A HREF="misc/pramode/shutter_upper.c.txt">Text version of this listing</A>]
+
+<p>
+<pre>
+
+#include &lt;sys/types.h&gt;
+#include &lt;sys/stat.h&gt;
+#include &lt;fcntl.h&gt;
+
+#define TIMEOUT 20
+
+main()
+{
+        int fd, buf;
+        fd = open("watchdog", O_WRONLY);
+        if(fd &lt; 0) {
+                perror("Error in open");
+                exit(1);
+        }
+        while(1) {
+                if(write(fd, &amp;buf, sizeof(buf)) &lt; 0) {
+                        perror("Error in write, System may reboot any moment...\n");
+                        exit(1);
+                }
+                sleep(TIMEOUT/2);
+        }
+}
+
+</pre>
+</p>
+
+<h2> Conclusion </h2>
+<p>
+If you are not bored to death reading this, you may
+be interested in knowing more about Linux on handheld
+devices (and in general, embedded applications). So,
+till next time, Bye!
+
+
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<P>
+<img ALIGN="LEFT" ALT="[BIO]" SRC="../gx/2002/note.png">
+<em>
+I am an instructor working for IC Software in Kerala, India. I would have loved
+becoming an organic chemist, but I do the second best thing possible, which is
+play with Linux and teach programming!
+</em>
+<br CLEAR="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+
+<!-- *** BEGIN copyright *** -->
+<hr>
+<CENTER><SMALL><STRONG>
+Copyright &copy; 2003, Pramode C.E.
+Copying license <A HREF="../copying.html">http://www.linuxgazette.net/copying.html</A><BR> 
+Published in Issue 88 of <i>Linux Gazette</i>, March 2003
+</STRONG></SMALL></CENTER>
+<!-- *** END copyright *** -->
+<HR>
+
+<!--startcut ==========================================================-->
+<CENTER>
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="piszcz.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../lg_faq.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="puryear.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+</CENTER>
+</BODY></HTML>
+<!--endcut ============================================================-->

@@ -1,0 +1,1304 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Lemon Parser Generator Tutorial LG #106</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="brown.html" >&lt;-- prev</A> | <A HREF="murray.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Lemon Parser Generator Tutorial</h1>
+<p id="by"><b>By <A HREF="../authors/chirico.html">Mike Chirico</A></b></p>
+
+<p>
+Lemon is a compact, thread safe, well-tested parser generator written by
+Dr. Richard Hipp.  Using a parser generator, along with a scanner like
+flex, can be advantageous because there is less code to write. You just
+write the grammar for the parser.
+
+<h2>Example 1: Getting started</h2>
+
+<p>
+
+Compare this to writing all of the raw code from scratch.  For instance,
+compare the basic C++ <a
+href="misc/chirico/desktop_calc.cc.txt">desktop
+calculator</a> to the file below.  Below is a syntax file which
+contains the grammar that the parser uses. "example1.y" is an example
+syntax file for a very basic calculator.
+
+<p>
+
+<a href="misc/chirico/example1.y.txt">example1.y</a>
+
+<p>
+
+<pre><code>
+    1  %token_type {int}
+    2
+    3  %left PLUS MINUS.
+    4  %left DIVIDE TIMES.
+    5
+    6  %include {
+    7  #include &lt;iostream&gt;
+    8  #include "example1.h"
+    9  }
+    10
+    11  %syntax_error {
+    12    std::cout &lt;&lt; "Syntax error!" &lt;&lt; std::endl;
+    13  }
+    14
+    15  program ::= expr(A).   { std::cout &lt;&lt; "Result=" &lt;&lt; A &lt;&lt; std::endl; }
+    16
+    17  expr(A) ::= expr(B) MINUS  expr(C).   { A = B - C; }
+    18  expr(A) ::= expr(B) PLUS  expr(C).   { A = B + C; }
+    19  expr(A) ::= expr(B) TIMES  expr(C).   { A = B * C; }
+    20  expr(A) ::= expr(B) DIVIDE expr(C).  {
+    
+    
+    21           if(C != 0){
+    22             A = B / C;
+    23            }else{
+    24             std::cout &lt;&lt; "divide by zero" &lt;&lt; std::endl;
+    25             }
+    26  }  /* end of DIVIDE */
+    
+    
+    27  expr(A) ::= INTEGER(B). { A = B; }
+</code></pre>
+
+<p>
+
+As you can see, this file is only 27 lines of code, not counting spaces.
+It is much easer to modify the grammar than it is to rewrite larger
+sections of raw code.
+
+<p>
+
+The parser generator (lemon.c and lempar.c) takes the input from the
+syntax file "example1.y" and creates the parser file "example1.c", along
+with two other files "example1.h", which contains definitions for the
+tokens, and "example1.out", which gives a detailed listing of the shift
+reduce states for the grammar listed in "example1.y".
+
+<p>
+
+Let's run through the steps, starting first with compiling the source
+code of lemon (available <a
+href="http://freshmeat.net/projects/lemon/">here</a>).  The first step
+is to compile lemon.c:
+
+<p>
+
+<pre><code>
+    $ gcc -o lemon lemon.c
+</code></pre>
+
+<p>
+
+Now we have our parser generator, <code>lemon</code>, so run the syntax
+file "example1.y" through it.
+
+<p>
+
+<pre><code>
+    $ ./lemon example1.y
+</code></pre>
+
+<p>
+
+This will create example1.c, example1.h, and example1.out.  What about
+lempar.c? Compare "example1.c" with "lempar.c", and you will see that it
+contains a lot of the same code.  "lempar.c" is a template file. You can
+modify the code if you want, and all modifications will be passed to
+"example1.c" (including any comments).
+
+<p>
+
+But "example1.c" is not complete.  We'll append the contents of the file
+"main_part", which contains a main function and tokens.  "main_part" is
+called a driver.
+
+<p>
+
+<a href="misc/chirico/main_part.txt">main_part</a>
+
+<p>
+
+<pre><code>
+    1  int main()
+    2  {
+    3    void* pParser = ParseAlloc (malloc);
+    
+    4    /* First input:
+    5        15 / 5
+    6                                  */
+    7    Parse (pParser, INTEGER, 15);
+    8    Parse (pParser, DIVIDE, 0);
+    9    Parse (pParser, INTEGER, 5);
+    10    Parse (pParser, 0, 0);
+    
+    11    /*  Second input:
+    12          50 + 125
+    13                                 */
+    
+    14    Parse (pParser, INTEGER, 50);
+    15    Parse (pParser, PLUS, 0);
+    16    Parse (pParser, INTEGER, 125);
+    17    Parse (pParser, 0, 0);
+    
+    18    /*  Third input:
+    19          50 * 125 + 125
+    20                                 */
+    
+    
+    
+    21    Parse (pParser, INTEGER, 50);
+    22    Parse (pParser, TIMES, 0);
+    23    Parse (pParser, INTEGER, 125);
+    24    Parse (pParser, PLUS, 0);
+    25    Parse (pParser, INTEGER, 125);
+    26    Parse (pParser, 0, 0);
+    
+    27    ParseFree(pParser, free );
+    
+    28  }
+</code></pre>
+
+<p>
+
+So, what is main_part doing? Well, line 3 initializes the parser.
+You'll note that pParser is passed to each call of the "Parse" function
+starting at line 7.  The expression 15/5, or 15 DIVIDE 5, is performed
+in lines 7 through 10, sending first the INTEGER 15, then the identifier
+DIVIDE, which doesn't need a value, so 0 is chosen as the third
+parameter on line 8.  Finally, line 10, with 0 as the second parameter
+in "Parse(pParser, 0, 0);" signals the end of the input for this
+expression.  (Please note that in "example4.y", the grammar will handle
+this with a NEWLINE, and "Parse(pParser,0,...);" will only be called at
+the very end of the syntax file.)
+
+<p>
+
+"main_part" is appended to "example1.c". You may want to reference the
+Makefile with the downloadable example, which has this step:
+
+<p>
+
+<pre><code>
+    $ cat main_part &gt;&gt; example1.c
+</code></pre>
+
+<p>
+
+Next, just compile example1.c, and it's good to go.
+
+<p>
+
+<pre><code>
+    $ g++ -o ex1 example1.c
+</code></pre>
+
+<p>
+
+Now execute "ex1",  and we'll see that the result of 15/5 is, of course,
+3.  And 50+125 is equal to 175, and 50*125+125 is indeed equal to
+(50*125)+125= 6375.  This last result verifies that TIMES has higher
+precedence than PLUS.
+
+<p>
+
+<pre><code>
+    $ ./ex1
+    Result=3
+    Result=175
+    Result=6375
+</code></pre>
+
+<p>
+
+Now for a closer look at the syntax file (example1.y).  Why does TIMES
+have higher precedence than PLUS?  Line 3 and line 4 determine the
+precedence of the operators PLUS, MINUS, DIVIDE, and TIMES.
+
+<p>
+
+<pre><code>
+    3  %left PLUS MINUS.
+    4  %left DIVIDE TIMES.
+</code></pre>
+
+<p>
+
+Lines at the top have a lower operator precedence.  This is very
+important to note.  PLUS and MINUS have less operator precedence than
+DIVIDE and TIMES because PLUS and MINUS are on line 3, whereas DIVIDE
+and TIMES are on line 4.  If, for example, exponentiation (EXP) were
+added, since EXP has even higher operator precedence than TIMES and
+DIVIDE, it would be added below line 4.
+
+<p>
+
+What if you wanted real numbers in the input, 15.5,5.2 instead of
+integers? How would you do that? It's easy.  These tokens are currently
+integers because of the following line in "example1.y":
+
+<p>
+
+<pre><code>
+    1  %token_type {int}
+</code></pre>
+
+<p>
+
+So to accommodate a double, line 1 would be changed to:
+
+<p>
+<pre><code>
+    %token_type {double}
+</code></pre>
+
+<p>
+
+Moving further down the lines of "example1.y", there is an "include"
+directive on line 6.  The include statement in "example1.y" passes along
+any C statements, which are inserted at the beginning of the parse file
+"example1.c".  Again, the contents are inserted into the beginning of
+"example1.c", which is necessary for declarations and headers.
+
+<p>
+
+<pre><code>
+    ...
+    6  %include {
+    7  #include &lt;iostream&gt;
+    8  #include "example1.h"
+    9  }
+    ...
+</code></pre>
+
+<p>
+
+Note that "example1.h" is generated from "<code>$ ./lemon
+example1.y</code>".  It defines the tokens, or, put another way, assigns
+integer values to the token names starting at 1.  Why start at 1, and
+not 0?  Because 0 is reserved for the Parse function.  Remember, "Parse
+(pParser, 0, 0);", with the second parameter set to zero, signals an end
+to the input.
+
+<p>
+
+example1.h (note, this is a generated file; do not add code to it):
+
+<p>
+
+<pre><code>
+    #define PLUS                            1
+    #define MINUS                           2
+    #define DIVIDE                          3
+    #define TIMES                           4
+    #define INTEGER                         5
+</code></pre>
+
+<h2>Example 2: Creating a custom token type, or structure</h2>
+
+<p>
+
+"example2.y" differs from "example1.y" by defining the token type as
+a structure. Specifically, this token type is defined in the file
+"ex2def.h". Defining our own structure can give us flexibility in the
+semantic action, or the piece of code on the right of the production
+rule. Here is an example:
+
+<p>
+
+<pre><code>
+    expr(A) ::= expr(B) TIMES  expr(C).   { A.value = B.value * C.value;
+    A.n = B.n+1  + C.n+1;
+    }
+</code></pre>
+
+<p>
+
+The token_type in  <a
+href="misc/chirico/example2.y.txt">"example2.y"</a>
+is defined as Token in line 6.
+
+<p>
+<pre><code>
+    6  %token_type {Token}
+</code></pre>
+
+<p>
+
+This structure Token is defined in "ex2def.h" as follows:
+
+<p>
+
+<a href="misc/chirico/ex2def.h.txt">ex2def.h</a>
+
+<p>
+
+<pre><code>
+    struct Token {
+    const char *z;
+    int value;
+    unsigned n;
+    };
+    
+</code></pre>
+
+<p>
+
+Special note: "const char *z" is not used in these examples, but I've
+kept it in this structure, since it's the next logical  step in a
+calculator, assigning an expression to a variable. For instance,
+variable1=2+5, where variable1 would be some value in a symbol table.
+See  <a
+href="http://prdownloads.sourceforge.net/souptonuts/flex_bison.tar.gz?download">this
+reference</a>.
+
+<p>
+
+Again, note the change in the include directive, the addition of
+"ex2def.h", which defines struct Token.
+
+<p>
+
+<a href="misc/chirico/example2.y.txt">example2.y</a>
+
+<p>
+
+<pre><code>
+    1  #include {
+    2  #include &lt;iostream&gt;
+    3  #include "ex2def.h"
+    4  #include "example2.h"
+    5  }
+    
+    6  %token_type {Token}
+    7  %default_type {Token}
+    
+    8  %type expr {Token}
+    9  %type NUM {Token}
+    10
+    11  %left PLUS MINUS.
+    12  %left DIVIDE TIMES.
+    13
+    14
+    15  %syntax_error {
+    16    std::cout &lt;&lt; "Syntax error!" &lt;&lt; std::endl;
+    17  }
+    18
+    19  program ::= expr(A).   {
+    20                          std::cout &lt;&lt; "Result.value=" &lt;&lt; A.value &lt;&lt; std::endl;
+    21                          std::cout &lt;&lt; "Result.n=" &lt;&lt; A.n &lt;&lt; std::endl;
+    
+    22                           }
+    
+    23  expr(A) ::= expr(B) MINUS  expr(C).   { A.value = B.value - C.value;
+    24                                         A.n = B.n+1  + C.n+1;
+    25                                        }
+    
+    
+    26  expr(A) ::= expr(B) PLUS  expr(C).   { A.value = B.value + C.value;
+    27                                         A.n = B.n+1  + C.n+1;
+    28                                        }
+    
+    29  expr(A) ::= expr(B) TIMES  expr(C).   { A.value = B.value * C.value;
+    30                                          A.n = B.n+1  + C.n+1;
+    
+    31                                           }
+    32  expr(A) ::= expr(B) DIVIDE expr(C).  {
+    
+    
+    33           if(C.value != 0){
+    34             A.value = B.value / C.value;
+    35             A.n = B.n+1 + C.n+1;
+    36            }else{
+    37             std::cout &lt;&lt; "divide by zero" &lt;&lt; std::endl;
+    38             }
+    39  }  /* end of DIVIDE */
+    40  expr(A) ::= NUM(B). { A.value = B.value; A.n = B.n+1; }
+</code></pre>
+
+<p>
+
+As you can see below, taking a close look at lines 23 through 25, the
+Token structure A now takes on members  "A.value" and "A.n", with
+".value" taking on the value of the expression and ".n" the number of
+times an assignment is made:
+
+<p>
+
+<pre><code>
+    23  expr(A) ::= expr(B) MINUS  expr(C).   { A.value = B.value - C.value;
+    24                                         A.n = B.n+1  + C.n+1;
+    25                                        }
+</code></pre>
+
+<p>
+
+This is a quick way to see the "shift" and "reduce" dynamically.  A "shift"
+is the number of times a token is pushed on the stack. A "reduce" is the
+number of times an expression rule has been matched. Once it's matched, it
+can be reduced. As you will recall, when <code>lemon</code> is run, three
+files are normally created: *.c, *.h, and *.out. This ".out" file contains
+each step of the grammar, along with the shift and reduce states. If you
+want a simple summary, run lemon with the "-s" option:
+
+<p>
+
+<pre><code>
+    $ ./lemon -s example2.y
+    Parser statistics: 6 terminals, 3 nonterminals, 6 rules
+    11 states, 0 parser table entries, 0 conflicts
+</code></pre>
+
+<p>
+
+
+Again, as in the previous example, "main_part2", the driver, is appended
+to "example2.c":
+
+<p>
+
+<pre><code>
+    $ cat main_part2 &gt;&gt; example2.c
+</code></pre>
+
+<p>
+
+Now "example2.c" can be compiled and executed:
+
+<p>
+
+<pre><code>
+    $ g++ -o ex2  example2.c
+    
+    $ ./ex2
+    Result.value=17
+    Result.n=4
+    Result.value=-9
+    Result.n=4
+    Result.value=78
+    Result.n=10
+</code></pre>
+
+<h2>Example 3: Working with the token destructor</h2>
+
+<p>
+
+One advantage of lemon over bison is the ability to free memory used by
+a non-terminal. You can call the function of your choice.
+"<code>expr</code>" is an example of a non-terminal. When the program is
+done with the non-terminal, the function defined by
+<code>token_destructor</code> is called.
+
+<p>
+
+<a href="misc/chirico/example3.y.txt">example3.y</a>
+
+<p>
+
+<pre><code>
+    1  %include {
+    2  #include &lt;iostream&gt;
+    3  #include "ex3def.h"
+    4  #include "example3.h"
+    
+    
+    5    void token_destructor(Token t)
+    6      {
+    7        std::cout &lt;&lt; "In token_destructor t.value= " &lt;&lt; t.value &lt;&lt; std::endl;
+    8        std::cout &lt;&lt; "In token_destructor t.n= " &lt;&lt; t.n &lt;&lt; std::endl;
+    9      }
+    
+    
+    10  }
+    
+    
+    11  %token_type {Token}
+    12  %default_type {Token}
+    13  %token_destructor { token_destructor($$); }
+    ...
+</code></pre>
+
+<p>
+
+In line 13, <code>token_destructor</code> is  the function
+"<code>token_destructor($$);</code>".  The function
+"<code>token_destructor</code>" is defined in lines 5 through 9.  For
+this simple example, no memory is allocated, so there is no need to call
+<code>free</code>.  Instead, to see what is happening, output will be
+written to std::cout.
+
+<p>
+
+After the program is compiled, it can be executed as follows.  Note that
+I have added line numbers to the output of "ex3" for easy reference.
+
+<p>
+
+<pre><code>
+    $ ./ex3
+    1  t0.value=4  PLUS t1.value=13
+    2  In token_destructor t.value= 4
+    3  In token_destructor t.n= 0
+    4  Result.value=17
+    5  Result.n=4
+    6  parsing complete!
+    ...
+</code></pre>
+
+<p>
+
+After the expression has been reduced, the destructor is called,  but it
+is only called for the token.value=4.  Why?  For an answer we will have
+to take a look at "main_part3".
+
+<p>
+
+<a href="misc/chirico/main_part3.txt">main_part3</a>
+
+<p>
+
+<pre><code>
+    1  int main()
+    2  {
+    3    void* pParser = ParseAlloc (malloc);
+    
+    4    struct Token t0,t1;
+    5    struct Token mToken;
+    
+    6    t0.value=4;
+    7    t0.n=0;
+    
+    8    t1.value=13;
+    9    t1.n=0;
+    
+    10    std::cout &lt;&lt; " t0.value=4  PLUS t1.value=13 " &lt;&lt; std::endl;
+    
+    11    Parse (pParser, NUM, t0);
+    12    Parse (pParser, PLUS, t0);
+    13    Parse (pParser, NUM, t1);
+    14    Parse (pParser, 0, t0);
+    
+    15    std::cout &lt;&lt; " t0.value=4  DIVIDE t1.value=13 " &lt;&lt; std::endl;
+    
+    16    Parse (pParser, NUM, t0);
+    17    Parse (pParser, DIVIDE, t0);
+    18    Parse (pParser, NUM, t1);
+    19    Parse (pParser, 0, t1);
+    ...
+</code></pre>
+
+<p>
+
+Line 14 terminates the grammar with <code>t0</code> as the third
+parameter. That third parameter is passed as "<code>$$</code>" to the
+defined destructor function, "<code>token_destructor(...</code>".  When
+calling "<code>Parse</code>" a second time immediately, it is undefined,
+so you should only call the destructor function once after you're done
+passing tokens to complete an expression.  In other words, you would
+never call "<code>Parse (pParser, 0, t0);</code>", immediately followed
+by another "<code>Parse (pParser, 0, t0);</code>".
+
+<p>
+
+In line 19, <code>token_destructor</code> is called for <code>t1.value=
+13</code>.  If you look at "main_part3", line 19, you'll see that
+<code>Parse</code> is called with <code>t1</code> as the third parameter
+and <code>0</code> and the second parameter.
+
+<p>
+
+Continuation of the output from the program:
+
+<p>
+
+<pre><code>
+    7
+    8
+    9   t1.value=13  PLUS  t0.value=4
+    10   In token_destructor t.value= 13
+    11   In token_destructor t.n= 0
+    12   Result.value=17
+    13   Result.n=4
+    14   parsing complete!
+</code></pre>
+
+<p>
+
+So <code>t0</code> is called at the third parameter position in line 14
+and <code>t1</code> is called in line 19.  This shouldn't be a problem.
+One variable could hold the value of the tokens.  For instance,
+main_part3 could have had <code>Token t0</code> used for both the values
+4 and 14 as follows:
+
+<p>
+
+<pre><code>
+    ...
+    struct Token t0;
+    
+    t0.value=4;
+    t0.n=0;
+    
+    Parse (pParser, NUM, t0);
+    Parse (pParser, PLUS, t0);
+    
+    t0.value=13;
+    t0.n=0;
+    
+    Parse (pParser, NUM, t0);
+    Parse (pParser, 0, t0);
+    ...
+    
+</code></pre>
+
+<h2>Example 4: Ending the grammar with a NEWLINE</h2>
+
+<p>
+
+Notice that in the last three examples, <code>Parse(pParse,0..</code>
+had to be called to signal the end of the input for an expression.  This
+is awkward. Instead, the grammar should dictate when the expression can
+no longer be reduced.
+
+<p>
+
+"example4.y" contains the following lines:
+
+<p>
+
+<a href="misc/chirico/example4.y.txt">example4.y</a>
+
+<p>
+
+<pre><code>
+    1  %include {
+    2  #include &lt;iostream&gt;
+    3  #include "ex4def.h"
+    4  #include "example4.h"
+    
+    ...
+    
+    23
+    24  %syntax_error {
+    25    std::cout &lt;&lt; "Syntax error!" &lt;&lt; std::endl;
+    26  }
+    27
+    28  /*  This is to terminate with a new line */
+    29  main ::= in.
+    30  in ::= .
+    31  in ::= in state NEWLINE.
+    
+    
+    32  state ::= expr(A).   {
+    33                          std::cout &lt;&lt; "Result.value=" &lt;&lt; A.value &lt;&lt; std::end
+    34                          std::cout &lt;&lt; "Result.n=" &lt;&lt; A.n &lt;&lt; std::endl;
+    
+    
+    35                           }
+    
+    
+    
+    36  expr(A) ::= expr(B) MINUS  expr(C).   { A.value = B.value - C.value;
+    37                                         A.n = B.n+1  + C.n+1;
+    38                                        }
+    
+    ...
+</code></pre>
+
+<p>
+
+Note lines 29 through 35.  "<code>main</code>" and "<code>in</code>"
+must be defined (lines 29-31).  If you're a Bison user, you could get
+away without having to define the non-terminal main, but lemon currently
+requires it.
+
+<p>
+
+With this change made to the grammar in "example4.y", "main_part4" can
+now terminate each expression by passing the token NEWLINE.
+
+<p>
+
+Here is a section of main_part4:
+
+<p>
+
+<a href="misc/chirico/main_part4.txt">main_part4</a>
+
+<p>
+
+<pre><code>
+    1  int main()
+    2  {
+    3    void* pParser = ParseAlloc (malloc);
+    
+    4    struct Token t0,t1;
+    5    struct Token mToken;
+    
+    6    t0.value=4;
+    7    t0.n=0;
+    
+    8    t1.value=13;
+    9    t1.n=0;
+    
+    10    std::cout &lt;&lt; std::endl &lt;&lt;" t0.value=4  PLUS t1.value=13 " &lt;&lt; std::endl &lt;&lt; std::endl;
+    
+    11    Parse (pParser, NUM, t0);
+    12    Parse (pParser, PLUS, t0);
+    13    Parse (pParser, NUM, t1);
+    14    Parse (pParser, NEWLINE, t1);
+    
+    
+    15    std::cout &lt;&lt; std::endl &lt;&lt;" t0.value=4  TIMES t1.value=13 " &lt;&lt; std::endl &lt;&lt; std::endl;
+</code></pre>
+
+<p>
+
+Note that line 14 is passing the token NEWLINE and checking
+"example4.h".  NEWLINE in this case is defined as an integer, 6.
+
+<p>
+
+So, looking at the output of "ex4", with line numbers added for
+clarification, we get the following:
+
+<p>
+
+<pre><code>
+    $ ./ex4
+    
+    1  t0.value=4  PLUS t1.value=13
+    2
+    3  In token_destructor t.value= 4
+    4  In token_destructor t.n= 0
+    5  Result.value=17
+    6  Result.n=4
+    7
+    8   t0.value=4  TIMES t1.value=13
+    9
+    10  In token_destructor t.value= 4
+    11  In token_destructor t.n= 0
+    12  Result.value=52
+    13  Result.n=4
+    14  parsing complete!
+</code></pre>
+
+<p>
+
+We get the result on line 5, and there was no need to call <code>Parse
+  (pParser, 0, t0);</code>. Instead, <code>Parse( pParse, NEWLINE,
+t0)</code> worked.
+
+<h2>Example 5: Using flex for the tokenizer</h2>
+
+<p>
+
+The next example takes input directly from the terminal, and flex will
+create a scanner for finding the appropriate tokens.
+
+<p>
+
+First, a quick look at the flex program "lexer.l", again with line
+numbers added for clarification:
+
+<p>
+
+<a href="misc/chirico/lexer.l.txt">lexer.l</a>
+
+<p>
+
+<pre><code>
+    1  %{
+    2  #include "lexglobal.h"
+    3  #include "example5.h"
+    4  #include &lt;string.h&gt;
+    5  #include &lt;math.h&gt;
+    
+    6  int line = 1, col = 1;
+    
+    7  %}
+    8  %%
+    
+    9  [0-9]+|[0-9]*\.[0-9]+    {                      col += (int) strlen(yytext);
+    10                                                  yylval.dval = atof(yytext);
+    11                                                  return NUM; }
+    12  [ \t]   { col += (int) strlen(yytext); }               /* ignore but count white space */
+    13  [A-Za-z][A-Za-z0-9]*                           { /* ignore but needed for variables */
+    
+    14                                                  return 0;
+    15                                                 }
+    
+    16  "+"           {  return PLUS; }
+    17  "-"           {  return MINUS; }
+    18  "*"           {  return TIMES; }
+    19  "/"           {  return DIVIDE; }
+    
+    20  \n      { col = 0; ++line; return NEWLINE; }
+    
+    21  .       { col += (int) strlen(yytext); return yytext[0]; }
+    22  %%
+    23  /**
+    24   * reset the line and column count
+    25   *
+    26   *
+    27   */
+    28  void reset_lexer(void)
+    29  {
+    
+    30    line = 1;
+    31    col  = 1;
+    
+    32  }
+    
+    33  /**
+    34   * yyerror() is invoked when the lexer or the parser encounter
+    35   * an error. The error message is passed via *s
+    36   *
+    37   *
+    38   */
+    39  void yyerror(char *s)
+    40  {
+    41    printf("error: %s at line: %d col: %d\n",s,line,col);
+    
+    42  }
+    
+    43  int yywrap(void)
+    44  {
+    45    return 1;
+    46  }
+    
+</code></pre>
+
+<p>
+
+The format for flex is basically a rule on the left side followed by C
+code to execute on the right side.  Take line 9,
+"<code>[0-9]+|[0-9]*\.[0-9]+</code>", which will match any of 3, .3,
+0.3, and 23.4 and will return NUM.  What's the value of NUM?  It's taken
+from line 3, which includes the file "example5.h", generated from
+the lemon parser.  On Line 10, <code>yylval.dval</code> is assigned the
+value of "<code>yytext</code>" after it's converted to a float.  The
+structure of yylval is defined in "lexglobal.h" on line 2.
+
+<p>
+
+"lexglobal.h" with line numbers added:
+
+<p>
+
+<a href="misc/chirico/lexglobal.h.txt">lexglobal.h</a>
+
+<p>
+
+<pre><code>
+    1  #ifndef YYSTYPE
+    2  typedef union {
+    3    double    dval;
+    4    struct symtab *symp;
+    5  } yystype;
+    6  # define YYSTYPE yystype
+    7  # define YYSTYPE_IS_TRIVIAL 1
+    8  #endif
+    
+    9  /* extern YYSTYPE yylval; */
+    10  YYSTYPE yylval;
+    
+</code></pre>
+
+<p>
+
+<code>yystype</code> is the union of <code>dval</code> and
+<code>symtab</code>.  Again, <code>symtab</code> is not used in these
+examples, but should you move to a calculator with variables that can be
+assigned, you'd use this.  See Reference 3 for a full calculator example
+with flex and bison.
+
+<p>
+
+Again looking at lines 9 through 11 in  <a
+href="misc/chirico/lexer.l.txt">lexer.l</a>;
+
+<p>
+
+<pre><code>
+    ...
+    9  [0-9]+|[0-9]*\.[0-9]+    {                      col += (int) strlen(yytext);
+    10                                                  yylval.dval = atof(yytext);
+    11                                                  return NUM; }
+    ...
+</code></pre>
+
+<p>
+
+Both the type of token, NUM, and its value must be passed along. We need
+to know it's a number, but we also need to know the value of the number.
+
+<p>
+
+Unlike what we need with PLUS, MINUS, TIME, and DIVIDE, we only need to
+know the particular identifier has been found.  Therefore, in lexer.l,
+lines 16 through 19 only return the token value.
+
+<p>
+
+<pre><code>
+    16  "+"           {  return PLUS; }
+    17  "-"           {  return MINUS; }
+    18  "*"           {  return TIMES; }
+    19  "/"           {  return DIVIDE; }
+    
+    20  \n      { col = 0; ++line; return NEWLINE; }
+    
+    21  .       { col += (int) strlen(yytext); return yytext[0]; }
+    22  %%
+</code></pre>
+
+<p>
+
+Line 20 will match on a NEWLINE.  Although not used, line numbers keep
+track of the variable "<code>line</code>" and <code>col</code> is used
+to track the number of columns.  This is a good idea; it is helpful when
+debugging.
+
+<p>
+
+The driver, main_part5, contains a lot more code.  The low level read
+statement is used on stdin.  This could easily be changed to accept
+input coming in on a socket descriptor, so if you had a Web scraping
+program that scans input from a TCP socket, the socket descriptor would
+replace "<code>fileno(stdin)</code>" on line 33.
+
+<p>
+
+<a href="misc/chirico/main_part5.txt">main_part5</a>
+
+<p>
+
+<pre><code>
+    
+    1  #include &lt;stdio.h&gt;
+    2  #include &lt;unistd.h&gt;
+    3  #include &lt;sys/types.h&gt;
+    4  #include &lt;sys/stat.h&gt;
+    5  #include &lt;fcntl.h&gt;
+    6  #include &lt;stdlib.h&gt;
+    
+    7  #define BUFS 1024
+    
+    8  /**
+    9   * We have to declare these here - they're not  in any header files
+    10   * we can include.  yyparse() is declared with an empty argument list
+    11   * so that it is compatible with the generated C code from bison.
+    12   *
+    13   */
+    
+    14  extern FILE *yyin;
+    15  typedef struct yy_buffer_state *YY_BUFFER_STATE;
+    
+    16  extern "C" {
+    17    int             yylex( void );
+    18    YY_BUFFER_STATE yy_scan_string( const char * );
+    19    void            yy_delete_buffer( YY_BUFFER_STATE );
+    20  }
+    
+    21  int main(int argc,char** argv)
+    22  {
+    23    int n;
+    24    int yv;
+    25    char buf[BUFS+1];
+    26    void* pParser = ParseAlloc (malloc);
+    
+    27    struct Token t0,t1;
+    28    struct Token mToken;
+    
+    29    t0.n=0;
+    30    t0.value=0;
+    
+    31    std::cout &lt;&lt; "Enter an expression like 3+5 &lt;return&gt;" &lt;&lt; std::endl;
+    32    std::cout &lt;&lt; "  Terminate with ^D" &lt;&lt; std::endl;
+    
+    33    while ( ( n=read(fileno(stdin), buf, BUFS )) &gt;  0)
+    34      {
+    35        buf[n]='\0';
+    36        yy_scan_string(buf);
+    37        // on EOF yylex will return 0
+    38        while( (yv=yylex()) != 0)
+    39          {
+    40            std::cout &lt;&lt; " yylex() " &lt;&lt; yv &lt;&lt; " yylval.dval " &lt;&lt; yylval.dval &lt;&lt; std::endl;
+    41            t0.value=yylval.dval;
+    42            Parse (pParser, yv, t0);
+    43          }
+    
+    44      }
+    
+    45    Parse (pParser, 0, t0);
+    46    ParseFree(pParser, free );
+    
+    47  }
+</code></pre>
+
+<p>
+
+Line 16, '<code>extern "C"</code>', is necessary because "lexer.l" was
+run through flex to create C code, as opposed to C++ code:
+
+<p>
+
+<pre><code>
+    $ flex lexer.l
+</code></pre>
+
+<p>
+
+See the flex manual, Reference 7.  Yes, "<code>flex++</code>" will
+output C++ code.  However, for complex scanning, C code may be faster.
+"main_part5", which is compiled as a C++ program, makes the transition
+smoothly.
+
+<p>
+
+The parser should always terminate input with 0 in the second parameter
+to  "<code>Parse(pParser,0,..</code>".  When there is no more input
+coming into flex, it <i>will</i> return a zero, so the
+<code>while</code> loop below on line 38 terminates with a zero.  Then
+the <code>read</code> statement, line 33, looks for more input.  This is
+something you would want to do when reading from a socket, since it may
+have been delayed.
+
+<p>
+
+But if the initial read (line 33 for the first time) isn't successful,
+flex has no chance of returning a zero.  Therefore, line 45 has a zero
+as the second parameter.
+
+<p>
+
+<pre><code>
+    ...
+    33    while ( ( n=read(fileno(stdin), buf, BUFS )) &gt;  0)
+    
+    ...
+    38        while( (yv=yylex()) != 0)
+    39          {
+    40            std::cout &lt;&lt; " yylex() " &lt;&lt; yv &lt;&lt; " yylval.dval " &lt;&lt; yylval.dval &lt;&lt; std::endl;
+    41            t0.value=yylval.dval;
+    42            Parse (pParser, yv, t0);
+    43          }
+    ...
+    45    Parse (pParser, 0, t0);
+    46    ParseFree(pParser, free );
+</code></pre>
+
+<h2>Summary</h2>
+
+<p>
+
+lemon is fast, completely in the public domain, well tested in SQLite,
+and thread safe.  Parser generators can help developers write reusable
+code for complex tasks in a fraction of the time they would need for
+writing the complete program from scratch. The syntax file, the file
+that holds the grammar, can be modified to suit multiple needs.
+
+<p>
+
+Although I have had no problems with lemon.c, there are a few compiler
+warnings regarding signed and unsigned integers when compiling it with
+the -Wall -W flags:
+
+<p>
+
+<pre><code>
+    [chirico@third-fl-71 lemon_examples]$ gcc -Wall -W -O2 -s -pipe lemon.c
+    lemon.c: In function `resolve_conflict':
+    lemon.c:973: warning: unused parameter `errsym'
+    lemon.c: In function `main':
+    lemon.c:1342: warning: unused parameter `argc'
+    lemon.c: At top level:
+    lemon.c:2308: warning: return type defaults to `int'
+    lemon.c: In function `preprocess_input':
+    lemon.c:2334: warning: comparison between signed and unsigned
+    lemon.c:2352: warning: control reaches end of non-void function
+    lemon.c:2311: warning: `start' might be used uninitialized in this function
+    lemon.c:2313: warning: `start_lineno' might be used uninitialized in this function
+    lemon.c: In function `Parse':
+    lemon.c:2393: warning: comparison between signed and unsigned
+    lemon.c: In function `tplt_open':
+    lemon.c:2904: warning: implicit declaration of function `access'
+    lemon.c: In function `append_str':
+    lemon.c:3019: warning: comparison between signed and unsigned
+    lemon.c:3011: warning: unused variable `i'
+    lemon.c: In function `translate_code':
+    lemon.c:3109: warning: control reaches end of non-void function
+</code></pre>
+
+<p>
+
+This can be an inconvenience when adding the parse.c file to existing
+code.  A fix is on the way.  Since I expect the changes to be cleaned up
+soon, this version of lemon.c is the same version that you'd get from
+the author's site, which will make it easier to apply the patch.
+
+<p>
+
+There are times when a parser like lemon or bison may be a little too
+much.  These are powerful tools.  An interesting alternative, if you're
+a C++ programmer and you only need to do inline parsing, is the spirit
+library.  See Reference 9.
+
+<h2>Examples for this article</h2>
+
+<p>
+
+
+The complete source for these examples, including the parser itself, can
+be downloaded <a
+href="http://prdownloads.sourceforge.net/souptonuts/lemon_examples.tar.gz?download">here</a>.
+
+<h2>References</h2>
+
+<ol>
+  <li><a
+  href="http://souptonuts.sourceforge.net/code/desktop_calc.cc.txt">An
+  example desktop calculator from scratch</a>
+  <li><a
+  href="http://prdownloads.sourceforge.net/souptonuts/flex_bison.tar.gz?download">An
+  example of a flex and bison parser</a>
+  <li><a href="http://www.hwaci.com/sw/lemon/">The home of the lemon parser generator</a>
+  <li><a href="http://www.sqlite.org/">The home of SQLite</a>
+  <li><a href="http://www.parsifalsoft.com/gloss.html">A glossary of parser terms</a>
+  <li><a href="http://www.parsifalsoft.com/isdp.html">A good introduction
+  to parsers</a>
+  <li><a href="http://www.gnu.org/software/flex/manual/">The GNU flex manual</a>
+  <li><a href="http://www.gnu.org/software/bison/manual/">The GNU bison manual</a> 
+  <li><a href="http://spirit.sourceforge.net/">The spirit parser</a> 
+  <li><a href="http://www.iunknown.com/000123.html">Getting a C++ Bison
+  parser to use a C Flex lexer</a>
+  <li><a href="http://www.linux.com/howtos/Lex-YACC-HOWTO.shtml">The Lex-YACC-HOWTO</a>
+</ol>
+
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<p>
+
+<img align="left" alt="[BIO]" src="../gx/authors/chirico.jpg" class="bio">
+
+<em>
+
+Mike Chirico, a father of triplets (all girls) lives outside of
+Philadelphia, PA, USA. He has worked with Linux since 1996, has a Masters
+in Computer Science and Mathematics from Villanova University, and has
+worked in computer-related jobs from Wall Street to the University of
+Pennsylvania. His hero is Paul Erdos, a brilliant number theorist who was
+known for his open collaboration with others.
+<br> Mike's notes page is <a
+href="http://souptonuts.sourceforge.net/chirico/index.php">souptonuts</a>.
+
+
+</em>
+<br clear="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2004, Mike Chirico. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 106 of Linux Gazette, September 2004
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="brown.html" >&lt;-- prev</A> | <A HREF="murray.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">September 2004 (#106)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/2003/sit3-shine.7-2.gif" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

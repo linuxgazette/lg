@@ -1,0 +1,342 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Bash Shell and Beyond Applied LG #110</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="oregan1.html" >&lt;-- prev</A> | <A HREF="seymour.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Bash Shell and Beyond Applied</h1>
+<p id="by"><b>By <A HREF="../authors/park.html">William Park</A></b></p>
+
+<p>
+
+
+<!-- dsrich 28 Dec 2004 - title: header changed to prevent two articles
+with the same title appearing in the same issue. -->
+
+<h2>Deleting Spam on a POP3 Server</h2>
+
+<!-- dsrich 28 Dec 2004 - split the first paragraph and added hrefs and
+information needed for comprehension and to make the examples work. -->
+<p>This article will illustrate the use of my extended 'case' and
+'read' Bash shell builtins (See my other articles
+in issues <a href="../108/park.html">108</a>, <a href=
+"../109/park.html">109</a> and <a href="park.html">110</a>) to
+delete Spam on my ISP's POP3 mail server before it gets downloaded
+into my local mail system. The example scripts use these extended
+functions, so they require that you have my shell extensions
+installed.</p>
+
+<p>On average, I get 1 MB of spam per hour on my Yahoo account. The
+most troublesome of these, both in size and number, are Microsoft
+<em>Swen</em> and <em>Netsky</em> worms. Fortunately, they are easy
+to identify, and can be deleted right on the POP3 server.</p>
+
+<ol>
+<li>
+<p>Swen worms are usually 150kB in size and use all lowercase
+letters (with optional '-' prefix) as the MIME boundary pattern,
+ie.</p>
+
+<pre>
+    boundary="-*[a-z]+"
+</pre>
+</li>
+
+<li>
+<p>Netsky worms are about 42kB in size and use 3 different patterns
+for MIME boundary pattern, namely</p>
+
+<pre>
+    boundary="----=_NextPart_000_0016----=_NextPart_000_0016"
+    boundary="----=_NextPart_000_001B_01C0CA80.6B015D10"
+    boundary="----=_NextPart_000_001B_01C0CA81.7B015D10"
+</pre>
+</li>
+</ol>
+
+<h3>Telnet to POP3 server</h3>
+
+<p>In order to understand the shell script, you should first log in
+to your POP3 server using Telnet, because a shell script only automates
+what you type on the command line. So, let's do that:</p>
+
+<pre>
+    telnet pop.your.isp 110
+    user username
+    pass password
+</pre>
+will connect to remote POP3 server (port 110), and log in using
+your 'username' and 'password'.
+
+<pre>
+    stat
+    top 1 10
+</pre>
+Here, <tt>stat</tt> returns the number of messages and total size, and
+<tt>top 1 10</tt> prints the header of the 1st email plus the top 10 lines
+of the body. For our purpose, we are only interested in the header,
+specifically the 'boundary' parameter; so, <tt>top 1 0</tt> is what
+we need for our script. Note that a single '.' (dot) on a line by itself signals the
+end of output.
+
+<pre>
+    dele 1
+    quit
+</pre>
+<tt>dele 1</tt> marks the 1st message to be deleted, and
+<tt>quit</tt> ends the POP3 session upon which the server removes
+all messages marked for deletion.
+
+<h3>Shell script</h3>
+
+<ul>
+<li>
+<pre>
+read3 ()                # Usage: read3
+{
+    read -r -u3 -D              # read from fd=3
+}
+
+send3 ()                # Usage: send3 [cmd...]
+{
+    echo -D "$*" 1&gt;&amp;3            # write to fd=3
+    read3
+    echo "$* --&gt; $REPLY"
+    [[ $REPLY == +OK* ]]  ||  exit 1
+}
+</pre>
+For this to work, you have to read (<tt>read -D</tt>) and send (<tt>echo
+-D</tt>) DOS lines, since the POP3 protocol specification (RFC1939)
+requires CRLF (\r\n) line termination. The POP3 protocol is extremely
+simple, in that there are only 2 possible responses from the remote
+server:
+
+<ul>
+<li>+OK (with optional text), if there is no error</li>
+
+<li>-ERR (with optional text), if there was an error</li>
+</ul></li>
+
+<li>
+<pre>
+check ()                # Usage: check server username password
+{
+    local ok n size i
+
+    exec 3&lt;&gt;/dev/tcp/$1/pop3  ||  exit 1
+    read3
+    send3 user $2
+    send3 pass $3
+    send3 stat                  # +OK 11 1504321
+    read ok n size &lt;&lt;&lt; "$REPLY"        
+    for ((i = 1; i &lt;= n; i++)); do
+        send3 top $i 0
+        case `until read3; [ "$REPLY" = . ]; do echo "${REPLY#.}"; done` in
+	     'boundary="-*[a-z]+"' ))
+	       echo swen.0 ;;
+	     'boundary="(----=_NextPart_000_0016){2}"' ))
+	       echo netsky.1 ;;
+	     'boundary="----=_NextPart_000_001B_01C0CA8(0\.6|1\.7)B015D10"'
+	     ))
+	       echo netsky.2 ;;
+        esac then
+            send3 dele $i
+        fi
+    done
+    send3 quit
+}
+</pre>
+This is the main program loop. It logs in and checks for the above
+boundary patterns using regex(7). If there is match, then it deletes
+that message from the POP3 server. The type of spam is also printed to
+stdout. You'll notice that the exit condition of the extended 'case'
+statement is used here.</li>
+</ul>
+
+<h3>Usage</h3>
+
+<p>You can source the 3 functions and run</p>
+
+<pre>
+    check pop.your.isp username password
+</pre>
+from the command line or in a script. However, if you use Fetchmail to
+download emails (like I do), then you already have servers,
+usernames, and passwords in <tt>~/.fetchmailrc</tt>. You can
+extract these data using <tt>fetchmail --configdump</tt> directly:
+
+<pre>
+    (
+    fetchmail --configdump
+    cat &lt;&lt; EOF
+    for server in fetchmailrc['servers']:
+        if server['protocol'] == 'POP3':
+            for user in server['users']:
+                print server['pollname'], user['remote'], user['password']
+    EOF
+    ) | python | while read server user pass; do
+        # use (...) to prevent 'exit' terminating entire script
+        check "$server" "$user" "$pass"
+    done
+</pre>
+
+<!-- dsrich 28 Dec 2004 - This next link is a short shell script (1-2K)
+stored on the author's web server. We moved the last one of these on to
+LG's server, but his address was geocities - I don't know this ISP. -->
+<p>The entire script is available from <a href=
+"misc/park/popcheck.bash.txt">popcheck.bash</a>, and
+should be run just before Fetchmail,</p>
+
+<pre>
+    popcheck.bash &amp;&amp; fetchmail
+</pre>
+usually from crontab.
+
+<h3>Summary</h3>
+Although the script deals with Microsoft Swen/Netsky worms, you can
+add your own patterns. For example,
+
+<pre>
+     'boundary="=+[0-9]+=+"' ))
+       echo TAG.spam ;;
+     '(Subject|From): =\?[A-Za-z0-9_-]+\?' ))
+       echo non.English ;;
+     'charset="(ks_c_5601-1987|euc-kr|big5|gb2312|iso-2022-jp|shift-jis)"'
+     ))
+       echo APIC.charset ;;
+     '&amp;lt;(5[89]|6[01]|20[23]|21[0189]|22[012])(\.[0-9]{1,3}){3}&amp;gt;'
+     ))
+       echo APIC.IP ;;
+     'Content-Type: text/html' ))
+       echo HTML.header ;;
+</pre>
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/2002/note.png" class="bio">
+
+<!-- 
+If the author has sent his pic, save it to the right directory
+and enable the line below.
+
+<img align="left" alt="[BIO]" src="../gx/authors/pic.jpg" class="bio">
+
+-->
+
+<em>
+
+I learned Unix using the original Bourne shell.  And, after my
+journey through language wilderness, I have come full-circle
+back to shell.  Recently, I've been patching features into Bash,
+giving other scripting languages a run for their money.
+
+Slackware has been my primary distribution since the beginning,
+because I can type.  In my toolbox, I have Vim, Bash, Mutt, Tin,
+TeX/LaTeX, Python, Awk, Sed.  Even my shell command line is in
+Vi-mode.
+
+</em>
+<br clear="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2005, William Park. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 110 of Linux Gazette, January 2005
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="oregan1.html" >&lt;-- prev</A> | <A HREF="seymour.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">January 2005 (#110)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

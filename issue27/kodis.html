@@ -1,0 +1,157 @@
+<!--startcut ==========================================================-->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML>
+<HEAD>
+<title>Autologin with mingetty LG #27</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#A000A0"
+ALINK="#FF0000">
+<!--endcut ============================================================-->
+
+<H4>
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H2>Autologin with mingetty</H2>
+<H4>By <a href="mailto:kodis@kodis.jagunet.com">John Kodis</a></H4>
+</center>
+<P> <HR> <P>  
+
+In Issue 26 of the Linux Gazette, Todd Blake,
+tbb@enterprise.aacc.cc.md.us, wrote in to ask:
+<blockquote> <I> 
+   "I like most people am the only person to use my linux system at
+    home.  What I'd like to do is when my system is done booting to
+    have me automatically login as my main user account (not as root
+    though) on one virtual console (the first) and leave all other
+    consoles and virtual consoles alone, so that someone telneting in
+    will get a login prompt like normal, just that I won't.  I'd still
+    like the other VC's have logins for others to login and other
+    reasons.  I've tried just putting /bin/sh in /etc/inittab and that
+    didn't work, and I'm stumped.  Does anyone have any ideas on
+    this?"
+</I> </blockquote> 
+I was in the same situation.  I saw this question come up regularly in
+various newsgroups, but never with a satisfactory solution being
+proposed.  Recently I came up with a solution that does just what
+Mr. Blake requested.  I did this by making a few changes to Florian
+LaRoche's mingetty program, which is used issue the login prompt on
+virtual consoles in most Linux distributions.  These changes allow a
+user to be automatically logged onto the console terminal as soon as
+the system boots.  I got the idea for this patch after reading about a
+similar feature provided on SGI's Irix operating system.
+<P> 
+Here's the description of the autologin feature that I've added to the
+mingetty.8 man page:
+<blockquote> 
+<B>--autologin username</B> 
+          Log  the  specified user onto the console (normally
+          /dev/tty1) when the system is first booted  without
+          prompting for a username or password.
+</blockquote> <P> <blockquote> 
+          When  the  autologin  option  is supplied, mingetty
+          will check that the  controlling  terminal  is  the
+          console  (normally  /dev/tty1),  that  a reasonable
+          username has been supplied, and that  this  is  the
+          first   autologin  request  since  the  system  has
+          booted.  If all of these conditions have been  met,
+          a request for an unauthenticated login is passed to
+          the login program.  Otherwise, a normal interactive
+          login is performed.
+</blockquote> <P> <blockquote> 
+          The login program may deny the request for an unau-
+          thenticated login.  Typically this will happen when
+          the  user  is  root,  has a UID of 0, or whenever a
+          normal interactive login would be denied due to the
+          access   restrictions  specified  in  the  nologin,
+          usertty, or securetty files.
+</blockquote> <P> <blockquote> 
+          Only a single  autologin  request  will  be  issued
+          after  a  system  boot.   If  the  automated  login
+          request  is  denied,  or  if  the  user  logs  out,
+          mingetty  will revert to performing normal interac-
+          tive logins for all subsequent login requests.
+</blockquote> <P> 
+I've placed unified diffs against the mingetty-0.9.4 version of
+mingetty.c and mingetty.8 on my web page at
+http://www5.jagunet.com/~kodis/.  The patched version of mingetty logs
+me in on the first virtual console when my computer first boots, while
+leaving all the normal Unix security measures in effect for all but
+this one specific console login.
+<P> 
+To use this patch, you'll have to first obtain the sources for the
+mingetty program, preferably with any patches used in your Linux
+distribution.  After applying the patch file from my web page, you
+will have to rebuild the mingetty program, and install it and the
+patched mingetty.8 man page in the appropriate directories after
+saving the original versions.  
+<P> 
+The inittab entry for the first VC will then have to be modified to
+put the autologin feature into effect.  In my /etc/inittab file, this
+line now reads:
+<PRE> 
+    1:12345:respawn:/sbin/mingetty --noclear --autologin kodis tty1
+</PRE> 
+Rebooting after making these changes will insure that init has spawned
+the new version of mingetty, and if all is well, will automatically
+log you on to the console.
+<P> 
+Since I normally use X whenever I'm logged in at the console, I've
+added the following few lines of code to my .zlogin and .bash_profile
+scripts.  This code queries "Start X [Yn]? " when initially logged in
+from the first virtual console, and waits 10 seconds for a response.
+Entering Y or allowing the timeout to occur results in X being
+started.  On exiting X, a similar timed query asking "Log out [Yn]? "
+is issued, giving the option of logging out or being dropped into a
+text console.
+<PRE>
+case `tty` in 
+    /dev/tty[1])
+        echo -n "Start X [Yn]? "
+        expect \
+	    -c 'stty raw' \
+	    -c 'set timeout 10' \
+	    -c 'expect -nocase n {exit 1} -re . {exit 0}'
+        if [ $? = 0 ] ; then
+	    startx
+            echo -n "Log out [Yn]? "
+            expect \
+	        -c 'stty raw' \
+	        -c 'set timeout 10' \
+	        -c 'expect -nocase n {exit 1} -re . {exit 0}'
+	    if [ $? = 0 ] ; then
+		logout
+	    fi
+        fi
+	echo
+    ;;
+esac
+</PRE> 
+These few changes combine to make getting logged on and running X on a
+Linux box as easy as turning the power on.  Here's hoping that this
+proves useful for Mr. Blake and any of your other readers who find
+themselves in this situation.
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<center><H5>Copyright &copy; 1998, John Kodis <BR> 
+Published in Issue 27 of <i>Linux Gazette</i>, April 1998</H5></center>
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<A HREF="./index.html"><IMG ALIGN=BOTTOM SRC="../gx/indexnew.gif" 
+ALT="[ TABLE OF CONTENTS ]"></A>
+<A HREF="../index.html"><IMG ALIGN=BOTTOM SRC="../gx/homenew.gif"
+ALT="[ FRONT PAGE ]"></A>
+<A HREF="./lg_answer27.html"><IMG SRC="../gx/back2.gif"
+ALT=" Back "></A>
+<A HREF="./little.html"><IMG SRC="../gx/fwd.gif" ALT=" Next "></A>
+<P> <hr> <P> 
+<!--startcut ==========================================================-->
+</BODY>
+</HTML>
+<!--endcut ============================================================-->

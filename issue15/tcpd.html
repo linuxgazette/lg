@@ -1,0 +1,323 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML>
+<HEAD>
+<title> Tricks with tcpd issue 15</title>
+</HEAD>
+<BODY >
+
+<H4>
+&quot;Linux Gazette...<I>making Linux just a little more fun!</I>&quot;
+</H4>
+
+<P> <P> 
+<!--===================================================================-->
+
+<center>
+<h1> What You Can Do with tcpd </h1>
+<H4>By Kelly Spoon,
+<a href="mailto:mars@loeffel.txdirect.net">mars@loeffel.txdirect.net</a></H4>
+</center>
+<P> <P>  
+If you have read my article on security, then you know that <i>tcpd</i>
+can be used to keep people from getting on your machine, and, thusly, 
+it makes a nice first line defense against Bad Guys.  You also know that
+there is an extra option you can put in the <i>/etc/hosts.allow</i> and
+<i>/etc/hosts.deny</i> files that the man pages refer to as the
+"shell_command".
+<p>
+So....are you wondering what all you can do with the "shell_command" option?
+<p>
+Me too.  According to the <b>hosts_access</b> man(5) page, you can use it
+to finger the person who is trying to get to your services.  However, the
+feature that I think is pretty neat is that this gives you the ability to
+set up personalized banners for whenever someone tries to connect to your
+machine.
+<p>
+Here's the catch, though.  In order to enable this option, you're going to 
+need to recompile and turn this sucker on yourself.  The binaries that your
+favorite Linux distribution installed on your machine probably weren't set
+up to take advantage of this neat little feature.  (At least, they weren't
+on mine)
+<p>
+<center>
+<h2> Getting and installing tcpd </h2>
+<hr>
+</center>
+<p>
+The first thing you need to do is get a hold of is the source for <i>tcpd</i>.
+<a href="ftp://ftp.funet.fi/pub/Linux/PEOPLE/Linus/net-source/base/tcp_wrappers_7.4.tar.gz">
+Here</a> is where it's been hidden.
+<p>
+Those of you with keen eyes will note that the name of the file we have
+downloaded is <i>tcp_wrappers*.tar.gz</i> and not <i>tcpd*.tar.gz</i>.  Don't
+sweat it, this really is the package you want.
+<p>
+<kbd>tar -zxvf tcp_wrappers*.tar.gz</kbd> will unpack everything for you into
+the <i>tcp_wrappers_7.4</i> directory.  It doesn't really matter where you do
+this, since after we have compiled and installed the binaries, we can get rid
+of this directory.
+<p>
+Go in there as root.  Normally, all we have to do is type <kbd>make</kbd>, 
+and Linux will automagically compile the program for us.  However, we have
+to pass some extra options to the make with this program.
+<p>
+<ul>
+ <li><kbd>REAL_DAEMON_DIR=/usr/sbin/real-daemon-dir</kbd><p>
+     tells <i>tcpd</i> where to look for the *real* daemons to use when
+     you try to use the "easy" tcpd method.  More on that after we get the
+     sucker installed.<p></li>
+ <li><kbd>STYLE=-DPROCESS_OPTIONS</kbd><p>
+     This is the whole reason we're recompiling <i>tcpd</i> in the first place.
+     This option enables <i>tcpd</i> to use the "shell_command" feature, 
+     which in turn lets use do the banners.<p></li>
+ <li><kbd>linux</kbd><p>
+     This just tells the compiler to use all the options that will produce
+     a working binary for Linux.<p></li>
+</ul>
+<p>
+Unfortunately, the Makefile for <i>tcpd</i> doesn't have an install option,
+so you have to put things in place yourself.  Here's a quick list of where
+things should go after you've compiled:
+<p>
+<pre>
+Bin File			Location on Your Machine
+--------			-----------------------
+safe_finger			/usr/sbin/real-daemon-dir/safe_finger
+tcpd				/usr/sbin/tcpd
+tcpdchk				/usr/sbin/real-daemon-dir/tcpd-chk
+tcpdmatch			/usr/sbin/real-daemon-dir/tcpdmatch
+try-from			/usr/sbin/real-daemon-dir/try-from
+*.3				/usr/man/man3/*.3
+*.5				/usr/man/man5/*.5
+*.8				/usr/man/man8/*.8
+</pre>
+<p>
+As always, make sure you back up your *old* files before installing the new
+ones.
+<p>
+<center>
+<hr>
+<h2>The Fun Part -- Banners and Other Stuff</h2>
+<hr>
+</center>
+<p>
+Now that we have our new tcpd in place, it's time to get the frame work
+in place for our banners.  You can do this in any directory on your machine,
+but, in keeping with my own warped view of where things belong, I suggest
+creating a dir called <i>/etc/banners</i> and using that for our homebase.
+And since I get to be the author, that's the dir I'm going to refer to.
+<p>
+Once we've got <i>/etc/banners created</i>, we're going to need to do this from
+the <i>tcp_wrappers_7.4</i> dir: <p>
+<kbd>cp Banners.Makefile /etc/banners/Makefile</kbd>
+<p>
+And now that the hall is rented and the orchestra engaged, it is time to
+dance. (ObNiftyStarTrekQuoteThatI'veBeenDyingToUse)
+<p>
+<h4>Creating your banners</h4>
+<p>
+In order to make a banner, all you have to do is go into <i>/etc/banners</i>,
+and create a file called <i>prototype</i>.  Put anything you want in here.
+It's your banner.  Since this would be a good place for an example, here's
+what I put for my banner whenever someone is denied access to my machine:
+<p>
+<pre>
+^[[44m*****************************************************************
+                    This is a ^[[m^[[44;01mprivate^[[m^[[44m machine
+*******************************************************************^[[m
+
+          If you wish to access this machine, please send email to 
+            ^[[01root@loeffel.txdirect.net^[[m
+</pre>
+<p>
+This prints out a nice looking little banner with the first 3 lines in blue,
+and the word "private" and root's email address set in bold.  Looks pretty
+official.
+<p>
+Once you have created your <i>prototype</i>, then all you need to do is run
+a <i>make</i> in the <i>/etc/banners</i> directory.  This will then produce
+4 files (or more, depending on whether you've hacked the Makefile).
+<p>
+They are <i>in.telnetd</i>, <i>in.ftpd</i>, <i>in.rlogind</i>, and <i>nul</i>.
+What you need to do next is create another dir, and move these files into
+it.  Since the above example is for the connections that get refused, I
+put these in <i>/etc/banners/general-reject</i>.  The last thing to do is
+to move the <i>in.*</i> and <i>nul</i> into the new directory.  It's also
+a good idea to stick your <i>prototype</i> in there in case you want to change
+the banner later on.
+<p>
+<h4>Making <i>tcpd</i> use the banners</h4>
+<p>
+This is the last step.  I promise.
+<p>
+You need to edit your <i>/etc/hosts.allow</i> or <i>/etc/hosts.deny</i> files
+so that <i>tcpd</i> knows it should throw up a banner whenever someone tries
+to connect.  Basically, my /etc/hosts.deny looks like this:
+<p>
+<pre>
+# /etc/hosts.deny for linux.home.net
+
+ALL:	ALL except .home.net:	banners /etc/banners/general-reject
+</pre>
+<p>
+And that's it.  You can now put up customized banners that will be shown
+based upon the hostname of the person who tries to connect to your machine.
+Finally, you can take advantage of the "shell_command" option listed in
+<b>man 5 hosts_access</b>.  To see what else you can do with this, check
+out <b>man 5 hosts_options</b>.
+<p>
+And, if you're scratching your head wondering what's going on, keep reading.
+<p>
+<center>
+<hr>
+<h2>Behind the Scenes</h2>
+<hr>
+</center>
+<p>
+<h4>How <i>tcpd</i> Works</H4>
+<p>
+As you know, <i>tcpd</i> hangs around on your system and waits for something
+to wake it up.  When that happens, it looks at <i>/etc/hosts.deny</i> and
+<i>/etc/hosts.allow</i> to see if the person who is trying to connect matches
+any of the patterns you have listed in these files.  If it finds a match, 
+then it either lets the connection go through, or it closes the socket.
+If it finds a match with a "shell_command" in it, then it will execute that
+command.
+<p>
+The <i>banners</i> option tells <i>tcpd</i> that it needs to send back a
+text message to the client that's trying to connect.  When it sees
+<i>banners</i> in the <i>allow</i> or <i>deny</i> file, it goes into the
+directory that you listed (<i>/etc/banners/general-reject</i> in my example),
+and tries to find a file with the same name as the service that the client
+requested.  If it finds a file, the contents of the file get pumped back
+down to the client, and then <i>tcpd</i> either closes the connection or
+lets it go through.  It it doesn't find a file, then <i>tcpd</i> doesn't
+send anything back.
+<p>
+In plain English, if someone tries to telnet in (which would invoke
+<i>in.telnetd</i>) and you have a banners options listed for their entry
+in one of the <i>hosts.*</i> files, then <i>tcpd</i> looks for a file called
+<i>/etc/banners/general-reject/in.telnetd</i>.  If it finds it, it displays
+the file, if not, ah well.
+<p>
+This is important to remember when setting up a banner for your ftp service.
+The <i>Banners.Makefile</i> will create a banner file called <i>in.ftpd</i>.
+Since most Linux distributions use the Washington University FTP server, 
+the service name is actually <i>wu.ftpd</i>.  Therefore, if you intend for
+your banner to also be shown to people trying to ftp to your machine, you
+either need to change the <i>/etc/banners/general-reject/in.ftpd</i> to
+<i>wu.ftpd</i>, or you need to change the name of the service.
+<p>
+<h4>The 2 Ways to Use <i>tcpd</i></h4>
+<p>
+You generally have 2 choices on how <i>tcpd</i> protects your services:  
+Let <i>inetd</i> handle it, or do a substitution. In my humble opinion,
+it's best to let <i>inetd</i> handle it.
+<p>
+As you may know, <i>inetd</i> is the "super server".  It basically monitors
+a bunch of ports, and whenever it detects someone trying to use one of them, 
+it starts up the service you have listed in <i>inetd.conf</i>.  This is handy
+because you don't run what you don't need, and thusly, unused daemons aren't
+sucking up all your system resources.
+<p>
+<i>inetd</i> can be configured to launch <i>tcpd</i> before it starts up
+the service.  In fact, if you take a look in <i>/etc/inetd.conf</i>, you'll
+see that it already does for many of your services.  I'll pull one out
+so you don't have to flip over to a virutal console:
+<p>
+<pre>
+Service	Socket  Proto   Flags   User     Server name     Arguments
+-------	------	-----	-----	----	-----------	---------
+telnet  stream  tcp     nowait  root    /usr/sbin/tcpd  /usr/sbin/in.telnetd
+</pre>
+<p>
+The "Service" entry is just the name of the connection from the file
+<i>/etc/services</i>.  This tells <i>inetd</i> what port to listen on.
+<p>
+The other entries that we're concerned about is the "Server Name" and
+"Arguments".  "Server Name", as you can see, points to our good friend
+<i>tcpd</i>.  Whenever <i>inetd</i> gets a request for the "Service", it
+starts up <i>tcpd</i> with the path to the actual service passed as an
+"Argument".  This lets <i>tcpd</i> know what program to run if it exits
+and the client has permission to use the service.
+<p>
+See.  It's pretty easy.
+<p>
+Your other option is to substitute tcpd for the service directly, and 
+not even bother with <i>inetd</i>.  To do this, you just move the daemon
+you want to protect to <i>/usr/sbin/real-daemon-dir</i>, and then either
+copy <i>tcpd</i> over to where the service used to be, or put in a symbolic
+link.
+<p>
+For example, let's say I want to use <i>tcpd</i> on
+<i>/usr/sbin/in.telnetd</i>.  I would simply give the following commands:
+<p>
+<pre>
+mv /usr/sbin/in.telnetd /usr/sbin/real-daemon-dir/in.telnetd
+ln -s /usr/sbin/tcp /usr/sbin/in.telnetd
+</pre>
+<p>
+This method is even eaiser than <i>inetd</i>, but I prefer not to have 30
+million sym links laying around my system.
+<p>
+<h4>One Last Thing to Keep in Mind</h4>
+<p>
+Quoting directly from <i>tcpd</i>'s man page:
+<p>
+<pre>
+       The  tcpd  program  can  be  set  up  to  monitor incoming
+       requests for telnet, finger, ftp, exec, rsh, rlogin, tftp,
+       talk,  comsat  and  other  services that have a one-to-one
+       mapping onto executable files.
+</pre>
+<p>
+Check out that "...services that have a one-to-one mapping onto executable
+files" part.
+<p>
+What that means is that <i>tcpd</i> is designed to be used by services that
+spawn 1 daemon for 1 client.  In other words, <i>tcpd</i> won't work for
+stuff like <i>ircd</i> or Samba.  Luckily, these programs usually give you
+the option to deny access to certain hosts, which accomplishes the same
+thing as what <i>tcpd</i> does. 
+<p>
+<center>
+<hr>
+<h2>And In Closing...</h2>
+<hr>
+</center>
+<p>
+For the answer to any questions you have that I didn't address, please check
+the README file that comes with <i>tcp_wrapper</i>.  It does an excellent
+job of explaining what's going on, and how to take advantage of some other
+features (although some of it is ambiguous about exact locations of where
+config files should live due to the fact that the author created
+<i>tcp_wrappers</i> to work on a lot of different machines).  Also peruse the
+<i>Makefile</i> sometime and see if there's anything else you want to turn on
+once you've got a good idea of how this all works.
+<p>
+And last but not least, the author of <i>tcp_wrappers</i> has given us a
+very useful tool <b>free of charge</b>.  If you like it and use it, please
+take the time to send him a postcard (snail mail addy at the bottom of the
+README)....he's earned it.
+<p>
+<hr>
+Mail to:<a href="mailto:mars@loeffel.txdirect.net"><i>mars@loeffel.txdirect.net
+</i></a>
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<center><H5>Copyright &copy; 1997, Kelly Spoon <BR> 
+Published in Issue 15 of the Linux Gazette, March 1997</H5></center>
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<A HREF="./index.html"><IMG ALIGN=BOTTOM SRC="../gx/indexnew.gif" 
+ALT="[ TABLE OF CONTENTS ]"></A>
+<A HREF="../index.html"><IMG ALIGN=BOTTOM SRC="../gx/homenew.gif"
+ALT="[ FRONT PAGE ]"></A>
+<A HREF="./usenix.html"><IMG SRC="../gx/back2.gif"
+ALT=" Back "></A>
+<A HREF="./lg_backpage15.html"><IMG SRC="../gx/fwd.gif" ALT=" Next "></A>
+<P> <hr> <P> 
+</BODY>
+</HTML>

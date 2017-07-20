@@ -1,0 +1,326 @@
+<!--startcut ==========================================================-->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML>
+<HEAD>
+<title>Finding Evidence of Your Cracker LG #36</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#A000A0"
+ALINK="#FF0000">
+<!--endcut ============================================================-->
+
+<H4>
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H1><font color="maroon">Through the Looking Glass: Finding Evidence of Your Cracker</font></H1>
+<H4>By <a href="mailto:ckuethe@math.ualberta.ca">Chris Kuethe</a></H4>
+</center>
+<P> <HR> <P>  
+
+You've subscribed to Bugtraq and The Happy Hacker list, bought 
+yourself a copy of The Happy Hacker, and read The Cuckoo's Egg a 
+few times. It's been a very merry Christmas, with the arrival of a cable 
+modem and a load of cash for you, so you run out and go shopping to 
+start your own hacker lab. A week later, you notice that one of your 
+machines is being an especially slow slug and you've got no disk 
+space. Guess what - you got cracked, and now it's time to clean up the 
+mess. The only way to be sure you get it right is to restore from a 
+clean backup - usually install media and canonical source - but let's 
+see what the "h4x0r" left for us to study.
+<P>
+In late October of this year, we experienced a rash of attacks on some 
+workstations here at the University of Alberta's Department of 
+Mathematical Sciences. Many of our faculty machines run RedHat 5.1 
+(there's a good platform to learn how to try to secure...) since it's 
+cheap and easy to install. Workstations are often dual-boot with 
+Windows 95, but we'll be phasing that out as we get Citrix WinFrame 
+installed. This paper is an analysis of the compromise of one 
+professor's machine.
+<P>
+One fine day I was informed that we'd just had another break-in, and 
+it was time for me to show my bosses some magic. But like a skilled 
+cardshark who's forced to use an unmarked deck, my advantage of 
+being at the console had been tainted. Our cracker had used a decent 
+rootkit and almost covered her tracks.
+<P>
+In general, a rootkit is a collection of utilities a cracker will install in 
+order to keep her root access. Things like versions of ps, ls, passwd, 
+sh, and other fairly essential utilities will be replaced with versions 
+containing back doors. In this way, the cracker can control how much 
+evidence she leaves behind. Ls gets replaced so that the cracker's files 
+don't show up, and ps is done so that her processes are not displayed 
+either. Commonly a cracker will leave a sniffer and a backdoor hidden 
+somwhere on your machine. Packet sniffers - programs that record 
+network traffic which can be configured to filter for login names and 
+passwords - are not part of a rootkit per se, but they are nearly as 
+loved by hackers as a buggered copy of ls. What wouldn't want to try 
+intercept other legitimate user passwords?
+<P>
+In nearly all cases, you can trust the copy of ls on the cracked box to 
+lie like a rug. Don't bet on finding any suspicious files with it, and  
+don't trust the filesizes or dates it reports; there's a reason why a 
+rootkit binary is generally bigger than the real one, but we'll get there 
+in a moment. In order to find anything interesting, you'll have to use 
+find. Find is a clever version of 'ls -RalF <w> | grep <x> | grep <y> | 
+... | grep <z> '. It has a powerful matching syntax to allow precise 
+specification of where to look and what to look for. I wasn't being 
+picky - anything whose name began with a dot was worth looking at. 
+The command: find / -name ".*" -ls
+<P>
+Sandwiched in the middle of a ton of useless temporary files and the 
+usual '.thingrc' files (settings like MS-DOS's .ini) we found 
+'/etc/rc.d/init.d/...'. Yes, with 3 dots. One dot by itself isn't suspicious, 
+nor are two. Play around with DOS for about two seconds and you'll 
+see why: '.' means "this directory" and '..' means "one directory up." 
+They exist in every directory and are necessary for the proper 
+operation of the file system. But '...' ? That has no special reason to 
+exist.
+<P>
+Well, it was getting late, and I was fried after a day of class and my 
+contacts were drying up, so I listed /etc/rc.d/init.d/ to check for this 
+object. Nada. Just the usual SysV / RH5.1 init files. To see who was 
+lying, changed my directory into /tmp/foo, the echoed the current date 
+into a file called '...' and tried ls on it. '...' was not found. I'd found 
+the first rootkit binary: a copy of ls written to not show the name '...' . 
+I will admit that find is another target to be compromised; in this case 
+it was still clean and gave me some useful information.
+<P>
+Now that we knew that '...' was not part of a canonical distribution, I 
+moved into to it and had a look. There were only two files; linsniffer 
+and tcp.log. I viewed tcp.log with more and made a list of the staff 
+who would get some unhappy news. Ps didn't show the sniffer 
+running, but ps should not be trusted in this case, so I had to check 
+another way.
+<P>
+We were running in tcsh, an enhanced C-syntax shell which supports 
+asychronous (background) job execution. I typed './linsniffer &' 
+which told tcsh to run the program called linsniffer in this directory, 
+and background it. Tcsh said that was job #1, with process ID 2640. 
+Time for another ps - and no linsniffer. Well, that wasn't too 
+shocking. Either ps was hacked or linsniffer changed its name to 
+something else. The kicker: 'ps 2640' reported that there were no 
+processes available. Good enough. Ps got cracked. This was the 
+second rootkit binary. Kill the currently running sniffer.
+<P>
+Now we check the obvious: /etc/passwd. There were no strange 
+entries and all the logins worked. That is, the passwords were 
+unchanged. In fact the only wierd thing was that the file had been 
+modified earlier in the day. An invocation of last showed us that 
+'bomb' had logged in for a short time around 235am. That time would 
+prove to be significant. Ain't nobody here but us chickens, and none 
+of us is called bomb...
+<P>
+I went and got my crack-detection disk - a locked floppy with binaries 
+I trust - and mounted the RedHat CD. I used my clean ls and found 
+that the real ls was about 28K, while the rootkit one was over 130K! 
+Would anyone like to explain to me what all those extra bytes are 
+supposed to be? The 'file' program has our answer: ELF 32-bit LSB 
+executable, Intel 80386, version 1, dynamically linked, not stripped. 
+Aha! So when she compiled it, our scriptkiddie forgot to strip the file. 
+That means that gcc left all its debugging info in the file. Indeed, 
+stripping the program brings it down to 36K, which is about 
+reasonable for the extra functionality (hiding certain files) that was 
+added.
+<P>
+Remember how I mentioned that the increased filesize is important? 
+This is where we find out why. First, new "features" have been added. 
+Second, the binaries have verbose symbol tables, to aid debugging 
+without having to include full debug code. And third, many 
+scriptkiddies like to compile things with debugging enabled, thinking 
+that it'll give them more debug-mode backdoors. Certainly our 'kiddie 
+was naive enough to think so. Her copy of ls had a full symbol table, 
+and source and was compiled from /home/users/c/chlorine/fileutils-
+3.13/ls.c - which is useful info. We can fetch canonical distributions 
+and compare those against what's installed to get another clue into 
+what she may have damaged.
+<P>
+I naively headed for the log files, which were, of course, nearly as 
+pure as the driven snow. In fact the only evidence of a crack they held 
+was a four day gap. Still, I did find out something useful: this box 
+seemed to have TCP wrappers installed. OK, those must have failed 
+somehow since she got in to our system. On RH51, the TCP wrappers 
+live in /usr/sbin/in.* so what's this in.sockd doing in /sbin? Being 
+Naughty, that's what. I munged in.sockd through strings, and found 
+some very interesting strings indeed. I quote: You are being logged , 
+FUCK OFF , /bin/sh , Password: , backon . I doubt that this is part of 
+an official RedHat release.
+<P>
+I quickly checked the other TCP wrappers, and found that RedHat's 
+in.rshd is 11K, and the one on the HD was 200K. OK, 2 bogus 
+wrappers. It seems that, looking at the file dates, this cracked wrapper 
+came out the day after RH51 was released. Spooky, huh?
+<P>
+I noticed that these binaries, though dynamicically linked, used libc5, 
+not libc6 which we have. Sure, libc5 exists, but nothing, and I mean 
+nothing at all uses it. Pure background compatiblity code. After 
+checking the other suspect binaries, they too used libc5. Thats where 
+strings and grep (or a pager) gets used.
+<P>
+Now I'm getting bored of looking by hand, so lets narrow our search a 
+little using find. Try everything in October of this year... I doubt our 
+cracker was the patient sort - look at her mistakes so far - so she 
+probably didn't get on before the beginning of the month. I don't 
+claim to be a master of the find syntax, so I did this:
+<PRE>
+find / -xdev -ls | grep "Oct" | grep -v "19[89][0-7]" > octfiles.txt
+</PRE>
+In english: start from the root, and don't check on other drives, print 
+out all the file names. Pass this through a grep which filters everything 
+except for "Oct" and then another grep to filter out years that I don't 
+care about. Sure, the 80's produced some good music (Depeche 
+Mode) and good code (UN*X / BSD) but this is not the time to study 
+history.
+<P>
+One of the files reported by the find was /sbin/in.sockd. Interestingly 
+enough, ps said that there was one unnamed process with a low (76) 
+process id owned by uid=0, gid=26904. That group is unknown on 
+campus here - whose is it? And how did this file get run so early so as 
+to get that low a PID? In.sockd has that uid/gid pair... funky. It has to 
+get called from the init scripts since this process appears on startup, 
+with a consistently low PID. Grepping the rc.sysinit file for in.sockd, 
+the last 2 lines of the file are this:
+<PRE>
+#Start Socket Deamon
+exec in.sockd
+</PRE>
+Yeah, sure... That's not part of the normal install. And Deamon is 
+spelled wrong. Should a spellchecker be included as an crack-
+detector? Well, RedHat isn't famous for poor docs and tons of typos, 
+but it is possible to add words to a dictionary. So our cracker tried to 
+install a backdoor and tried to disguise it by stuffing it in with some 
+related programs. This adds credibility to my theory that our cracker 
+has so far confined her skills to net searches for premade exploits.
+<P>
+The second daemon that was contaminated was rshd. About 10 times 
+as big as the standard copy, it can't be up to anything but trouble. 
+What does rsh mean here? RemoteSHell or RootShell? Your guess is 
+as good as mine.
+<P>
+So far what we've found are compromised versions of ls, ps, rshd, 
+in.sockd, and the party's just beginning. I suggest that once you're 
+finished reading this, you do a web search for rootkit and see how 
+many you can scrounge up and defeat. You have to know what to look 
+for in order to be able to remove it.
+<P>
+While the log files had been all but wiped clean, the console still had 
+some errors printed on it, quite a few after 0235h. One of these was a 
+refusal to serve root access to / via nfs at 0246h. That coincided 
+perfectly with the last access time to the NFS manpage. So our 
+scriptkiddie found something neat, and she tried to mount this 
+computer via NFS, but she didn't set it up properly. All crackers, I'd 
+say, make mistakes. If they did everything perfectly we'd never notice 
+them and there would be no problems. But it's the problems that arise 
+from their flaws that cause us any amount of grief. So read your 
+manuals. The more thorougly you know your system, the more likely 
+you are to notice abnormalities.
+<P>
+One of the useful things (for stopping a cracker) about NFS is that if 
+the server goes down, all the NFS clients with directories still 
+mounted will hang. You'll have to 120-cycle the machine to get it 
+back. Hmmm. This presents an interesting tool opportunity: write a 
+script to detect an NFS hack, and if a remote machine gets in, ifconfig 
+that interface off. Granted, that presents a possible denial-of-service if 
+authorized users get cut off. But it's useful if you don't want your 
+workstation getting compromised.
+<P>
+At this point I gave up. I learned what I'd set out to do - how to find 
+the crap left behind by a cracker. Since the owner of this system had 
+all her files on (removed) removable media there was no danger of 
+them being in any way compromised. The ~janedoe directory was 
+mounted off a Jaz disk which she took home at night, so I just dropped 
+the CD into her drive and reinstalled. This is why you always keep 
+user files on a separate partition, why you always keep backups and 
+why it's a good plan to write down where to get the sources for things 
+you downloaded, if you can't keep the original archives.
+<P>
+Now that we've accumulated enough evidence and we're merely 
+spirited sluggers pulverizing an equine cadaver, it's time to consider 
+the appropriate response. Similar to Meinel's you-can-get-punched 
+and you-can-go-to-jail warnings in The Happy Hacker, I would 
+suggest that a vicious retaliatory hack is not appropriate. In Canada, 
+the RCMP does actually have their collective head out of the sand. I 
+am not a lawyer, so don't do anything based on these words except 
+find a lawyer of your own. With that out of the way, suffice it to say 
+that we're big on property protection here. Aside from finding a 
+lawyer of your own, my advice here is for you to call the national 
+police, whoever they are. People like the RCMP, FBI, BKA, MI-5 and 
+KGB probably don't mind a friendly phone call, especially if you're 
+calling to see how you can become a better law-abiding citizen. 
+Chances are, you'll get some really good tips, or at least some handy 
+references. And of course you'll know someone who'll help you 
+prosecute.
+<P>
+My communication with RCMP's Commercial Crimes unit (that 
+includes theft of computing and/or network services) can be 
+summarized as follows: E-mail has no expectation of privacy. You 
+wish email was a secret, but wake up and realize that it's riskier than a 
+postcard. As systems administrator, you can do anything you want 
+with your computer - since it's your responsibility either because you 
+own it or because you are its appointed custodian - so long as you 
+warn the users first. So I can monitor each and every byte all of my 
+users send or receive, since they've been warned verbally, 
+electronically and in writing, of my intent to do so. My browse of the 
+FBI's website shows similar things. But that was only browsing. 
+Don't run afoul of provincial or state laws regulating the interception 
+of electronic communication either.
+<P>
+NOTE:
+	While I have attempted to make this reconstruction of events
+ 	as accurate as possible, there's always a chance I might have
+ 	misread a log entry, or have misinterpreted something. Further,
+ 	this article is solely my opinion, and should not be read as
+ 	the official position of my employer.
+<P>
+Appendix A: Programs you want in a crack-detection kit  
+<ul>
+<li>find, ps, ls, cp, rm, mv
+<li>gdb, nm, strings, file, strip
+<li>(GNU)tar, gzip, grep
+<li>less / more
+<li>vi / pico
+<li>tcsh / bash / csh / sh
+<LI>mount
+</ul>
+	For security reasons these should all be statically linked.
+<P>
+<B>Appendix B: References</B> 
+WinFrame:<BR> 
+http://www.citrix.com/
+<P>
+RedHat 5.1:<BR> 
+http://www.redhat.com/<BR> 
+http://www.rootshell.com/
+http://www.netspace.org/lsv-archive/bugtraq.html
+<P>
+About the filesystem:<BR> 
+McKusik, M.K., Joy, W.N., Leffler, S.J., Fabry, R.S.,
+"A Fast File System for UNIX" Unix System Manager's Manual,
+Computer Systems Reseach Group, Berkeley. SMM-14 April 1986
+<P>
+LEA and Computer Crime:<BR> 
+http://www.rcmp-grc.gc.ca/html/cpu-cri.htm <BR> 
+http://www.fbi.gov/programs/compcrim.htm<BR> 
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<center><H5>Copyright &copy; 1999, Chris Kuethe <BR> 
+Published in Issue 36 of <i>Linux Gazette</i>, January 1999</H5></center>
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<A HREF="./index.html"><IMG ALIGN=BOTTOM SRC="../gx/indexnew.gif" 
+ALT="[ TABLE OF CONTENTS ]"></A>
+<A HREF="../index.html"><IMG ALIGN=BOTTOM SRC="../gx/homenew.gif"
+ALT="[ FRONT PAGE ]"></A>
+<A HREF="./bennetjan.html"><IMG SRC="../gx/back2.gif"
+ALT=" Back "></A>
+<A HREF="./lussier.html"><IMG SRC="../gx/fwd.gif" ALT=" Next "></A>
+<P> <hr> <P> 
+<!--startcut ==========================================================-->
+</BODY>
+</HTML>
+<!--endcut ============================================================-->

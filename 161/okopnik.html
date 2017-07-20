@@ -1,0 +1,455 @@
+<!DOCTYPE html
+	PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+	 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="utf-8" xml:lang="utf-8">
+<head>
+<title>Bash configuration under Ubuntu LG #161</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link rel="stylesheet" href="../lg.css" type="text/css" media="screen, projection"  />
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<!-- link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" / -->
+<link rel="shortcut icon" href="../favicon.ico" />
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+</head>
+<body>
+
+<a href="../">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+<div id="navigation">
+<table summary="masthead" width="100%">
+<tr>
+<td align="center" colspan="3" style="font-size: 10px; font-weight: bold">
+<a href="../index.html">Home</a>
+<a href="http://linuxgazette.net">Main Site</a>
+<a href="../faq/index.html">FAQ</a>
+
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/mailman/listinfo/">Mailing Lists</a>
+<a href="../jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+<hr width="99%" style="border: 1px inset #000033">
+</td>
+</tr>
+<tr>
+<td width="40%" align="left" style="font-size: 10px; font-weight: bold">
+The Free International Online Linux Monthly
+</td>
+<td width="20%" align="center" style="font-size: 10px; font-weight: bold">
+ISSN: 1934-371X
+</td>
+<td width="40%" align="right" style="font-size: 10px; font-weight: bold">
+Main site: <a href="http://linuxgazette.net">http://linuxgazette.net</a> 
+</td>
+</table>
+</div>
+
+
+<div id="breadcrumbs1">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">April 2009 (#161)</a> &gt; 
+Article
+
+</div>
+
+<div class="articlecontent1">
+<div class="content">
+
+<div id="previousnexttop">
+<A HREF="laycock.html" >&lt;-- prev</A> | <A HREF="prestia.html" >next --&gt;</A>
+</div>
+
+<h1>Bash configuration under Ubuntu</h1>
+<p id="by"><b>By <a href="../authors/okopnik.html">Ben Okopnik</a></b></p>
+
+
+<p>
+[ From a moldering fragment of ancient writings discovered among the
+dustbunnies in an abandoned computer room ]<br>
+<blockquote><em> "...And when Ubuntu first came into the land, there was much rejoicing
+at the nice interface, the ever-reliable "dpkg" package system, the
+user-friendly community, and the rest - and all was good. But lo, there came
+the darker days of further discovery: those who had, for ages untold, set
+up their environment variables and other configuration bits in their
+~/.bash_profile suddenly discovered that this was no longer processed.
+Furthermore, they found that seeking advice in the wonderful Ubuntu user
+forums availed them not. And there arose a cry in those latter days of
+'Dude - WHAT HAPPENED TO MY RESOURCE FILES?'" </em></blockquote><br>
+With luck, this article will answer that question - and maybe even tell you
+what you can do about it.
+</p>
+
+<h3>The Way Things Were, and The Way They Are</h3>
+
+<p> Once upon a time, life with Bash under X was easy and predictable: when
+you booted your system, the final runlevel either A) handed you a login
+console, which started your login shell and read all its init files, at
+which point you could start X, or B) ran a graphical display manager that
+would start X, fire off a login shell (which read its init files), and hand
+control over to your ~/.xinitrc or ~/.xsession, where you could run up
+whatever X configuration, programs, and desktop manager you wanted. Lots of
+flexibility, plenty of choices - although that latter could be somewhat
+confusing to Linux newcomers - and all was well.
+</p>
+
+<p>
+Ubuntu, however, did something different: the runlevel passes control to
+the GNOME display manager (GDM), which runs your desktop manager (GNOME)
+and... that's pretty much it. Sure, it's easier for newcomers - but there's
+no such thing as control over the shell behavior anymore; in fact, there's
+no login shell, which means that the per-user configuration files are no
+longer sourced at login time. There's also no standard way to fire up any X
+startup-time configuration. What to do?
+</p>
+
+<p>
+When I switched to Ubuntu, I found the situation unpleasant but dealt with
+it in various ways (mostly hacks involving becoming root and messing about
+with Deep GDM Magick - not something I'd recommend for a new user, since
+it's a good way to quickly make your system unbootable). Recently, though,
+I decided to see if it could be fixed within the limits of what the average
+user could do.
+</p>
+
+<h3>Following the Wily X Beast</h3>
+
+<p>
+First, I traced the execution of the X startup scripts in /etc/X11 and
+/etc/gdm; this mostly involved chasing the path through the Xsession file,
+which sets up variables and loads the external files, then hands control
+off to the display manager defined in /etc/X11/default-display-manager
+(gdm).  GDM, in turn, runs its own version of Xsession (/etc/gdm/Xsession)
+which goes back and reads a series of scripts in /etc/X11/Xsession.d/, and
+so on.  In the process, I noticed that one of the resources read by
+/etc/gdm/Xsession was a file called "$HOME/.xprofile". Bingo - a
+user-controllable resource! There was one catch, however: since the shebang
+line at the top of /etc/gdm/Xsession consisted of "#!/bin/sh", this meant
+that .xprofile would be read by that shell - not by Bash - which meant that
+I had to avoid any "Bashisms" (i.e., structures or commands specific to
+bash as contrasted against ones executable by a plain Bourne shell.) The
+positive side to this was that Bash would inherit any of the variables set
+by the Bourne shell (I guess some kids <em>do</em> listen to their
+parents...) Overall, this didn't look like much of a hardship: it just
+required a little extra caution. Previously, I would have just edited the
+shebang in /etc/gdm/Xsession - but I was determined to do this from the
+non-root perspective, so that option was out.
+</p>
+
+<p>
+Since the default shell under Ubuntu is Bash, I knew that every invocation
+of the shell would read the ~/.bashrc file. The traditional use of the two
+bash resource files has always been to place the "run once" stuff like
+PATH, functions, "mesg n", etc. in ~/.bash_profile, and "run for every
+shell" stuff like aliases in ~/.bashrc. The latter was to be kept as small
+and simple as possible, since it was run for <em>every</em> shell
+invocation. Given this new system, though, that would have to change a bit:
+</p>
+
+<ol>
+<li> I decided to leave my ~/.bash_profile alone. As a result of Ubuntu's
+hackery, it's not being sourced now, but that doesn't mean that it won't be
+at some point in the future - and if I move to some other distro, it's
+still as valid as it always was.
+
+<li> ~/.xprofile would now take over - more or less - the function of
+~/.bash_profile, but would have to follow Bourne syntax. This means that
+functions can no longer be exported (as Bourne does not support the "export
+-f" convention), but must be moved into ~/.bashrc. Furthermore, since all of
+it is being read <strong>before</strong> a console is spawned, any
+tty-specific functions (e.g., "mesg") also need to be moved there. I also
+made sure not to include the lines from ~/.bash_profile that sourced
+~/.bashrc; that would be sourced every time I spawned a shell, but was not
+wanted when X was sourcing ~/.xprofile.
+
+<li> ~/.bashrc would now carry a bit more of a load: all the functions would
+now be defined there (meaning they don't have to be exported any longer
+- every shell gets the whole set as it starts up), and all the console
+configuration would be there as well. The alias definitions, which were in
+there previously, would stay just as they were.
+</ol>
+
+<p>
+In essence, what I ended up doing is combining ~/.bash_profile and
+~/.bashrc and splitting them back out into ~/.xprofile and ~/.bashrc,
+according to the new "rules" that I set up above.
+</p>
+
+<h3>The Details</h3>
+<p>
+Be aware that you'll be "judged harshly" if you make a mistake: any error
+in ~/.xprofile will crash your /etc/gdm/Xsession and cause GDM to show you
+an error message - something like <em>"Your session lasted for less than 10
+seconds. Failed to start the X server (your graphical interface).  It is
+likely that it is not set up correctly. [...]"</em> If this happens, go to
+'Options/Select session' in GDM and choose 'failsafe', check out your
+~/.xsession_errors to find out why it crashed and fix that problem, then
+try again.
+</p>
+
+<p>
+Just below, I'll give (somewhat reduced) examples of my ~/.bash_profile,
+~/.bashrc, and ~/.xprofile. The important thing to note is what got moved
+out of the former and where it went, or if it went anywhere at all. I'll
+highlight the ~/.xprofile lines in blue and the ~/.bashrc lines in green;
+anything in bold black got left out because it was no longer applicable.
+</p>
+ 
+<h4>~/.bash_profile</h4>
+<pre class="code">
+<strong style="color: black"># ~/.bash_profile: executed by bash during startup.
+
+if [ -f ~/.bashrc ]; then
+  . ~/.bashrc
+fi</strong>
+<strong style="color: green">
+eval $(lesspipe)
+stty stop ''
+mesg n</strong>
+
+# Note: these lines would normally need to be revised for Bourne syntax,
+# since the original Bourne shell did not accept exporting and declaration
+# in one statement; however, '/bin/sh' in Debian/Ubuntu does accept it, so
+# it's not a concern.
+
+<strong style="color: blue">export EDITOR=/usr/bin/vi
+export ENV=~/.shrc
+export LESSCHARSET=utf-8
+export LIBGL_DRIVERS_PATH=/usr/lib/dri
+export LYNX_CFG=${HOME}/.lynxrc
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:/usr/games:/usr/local/games:/var/svn/linuxgazette.net/bin
+export PERLDOC="-otext"
+export PI=`perl -we 'printf "%.48f\n", atan2(0,-1)'`
+export RSYNC_RSH=/usr/bin/ssh
+export SVN_SSH=/usr/bin/ssh
+export WWW_HOME=file://${HOME}/lynx_bookmarks.html
+export XTIDE_DEFAULT_LOCATION='St. Augustine, city dock, Florida'
+
+# Sites
+export LG="linuxgazette.net"
+export NHC="www.nhc.noaa.gov"
+export WWW="okopnik.com"</strong>
+
+<strong style="color: black">TTY=`/usr/bin/tty 2>/dev/null`
+[ ${TTY:5:3} == "tty" ] && {		     # If not a console, bail!
+	color=(foo blue green magenta)       # tty's start at 1, arrays at 0...
+	setterm -foreground ${color[${TTY#*y}]} -store
+}</strong>
+</pre>
+
+<h4>~/.xprofile</h4>
+<pre class="code">
+# ~/.xprofile: executed by X during startup (modified version of
+# .bash_profile, must be executable under /bin/sh)
+
+export EDITOR=/usr/bin/vi
+export LESSCHARSET=utf-8
+export LIBGL_DRIVERS_PATH=/usr/lib/dri
+export LYNX_CFG=${HOME}/.lynxrc
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:/usr/games:/usr/local/games:/var/svn/linuxgazette.net/bin
+export PERLDOC="-otext"
+export PI=`perl -we 'printf "%.48f\n", atan2(0,-1)'`
+export RSYNC_RSH=/usr/bin/ssh
+export SVN_SSH=/usr/bin/ssh
+export WWW_HOME=file://${HOME}/lynx_bookmarks.html
+
+# Sites
+export LG="linuxgazette.net"
+export NHC="www.nhc.noaa.gov"
+export WWW="okopnik.com"
+</pre>
+
+<h4>~/.bashrc</h4>
+<pre class="code">
+# ~/.bashrc: executed by bash(1) for non-login shells.
+# see /usr/share/doc/bash/examples/startup-files for examples
+
+# If running interactively, then:
+if [ "$PS1" ]; then
+	mesg n
+	eval $(lesspipe)
+	# Load aliases initially; part of the 'realias' hack
+	source ~/.aliases
+	# Set up the LG build vars
+	source $HOME/.lgrc
+	# Update LINES and COLUMNS
+	shopt -s checkwinsize
+	# Set the xterm title
+	case $TERM in
+		 gnome|nxterm|xterm*|rxvt*)
+				 PROMPT_COMMAND='echo -ne "\033]0;$USER@`hostname`: ${PWD}\007"' ;;
+	esac
+fi
+
+####### Temp proxy settings ################
+[ -f ~/ENABLE_PROXY ] &amp;&amp; {
+	export HTTP_PROXY=`cat ~/ENABLE_PROXY`
+	export http_proxy=$HTTP_PROXY
+	export FTP_PROXY=$HTTP_PROXY
+	export ftp_proxy=$HTTP_PROXY
+	export no_proxy=localhost
+	export NO_PROXY=localhost
+
+    # Automate w3m proxying
+	export W3M_OPTIONS='-o use_proxy=1 -o http_proxy='$HTTP_PROXY' -o ftp_proxy='$FTP_PROXY' -o no_proxy=localhost'
+	alias w3m="$W3M_OPTIONS "
+}
+####### Temp proxy settings ################
+
+############ Functions #####################
+calc() { perl -wle'print eval join "", @ARGV' $@; }
+cdlg() { cd $LG_ARTICLES/`sed -n 's/currentIssue.*= *//;T;p' $LG_LIBPYTHON/lgconfig.py`; }
+h() { history|grep "^ *[0-9]* *$1"; }
+searchmail() { less -P "'n' to see the next match, 'q' to quit"  -p "$1" ~/Mail/Sent_mail; }
+shake() { zless -p "$1" $HOME/Books/Other/The\ Complete\ Shakespeare.gz; }
+ip() { ifconfig "${1:-eth0}"|sed -n '2s/.* inet addr:\([0-9.]*\) .*/\1/p'; }
+pod() { cd /usr/share/perl/`perl -e'printf "%vd", $^V'`/pod; egrep "$1" *|less; }
+export -f calc cdlg h searchmail shake ip pod
+############ Functions #####################
+</pre>
+
+
+<h3>Wrap-up</h3>
+<p>
+In practice, the only concern that I had - i.e., that each shell invocation
+would now load more slowly due to a larger ~/.bashrc - did not prove to be
+a problem; testing it with 'time bash -c exit' showed a load+exit time of
+0.004 seconds. For the moment, I'm willing to consider this problem solved
+to my satisfaction.
+</p>
+
+
+<br clear="all" />
+
+<script type='text/javascript'>
+digg_url = 'http://linuxgazette.net/161/okopnik.html';
+digg_title = 'Bash configuration under Ubuntu';
+digg_bodytext = '<p> [ From a moldering fragment of ancient writings discovered among the dustbunnies in an abandoned computer room ]<br> <blockquote><em> "...And when Ubuntu first came into the land, there was much rejoicing at the nice interface, the ever-reliable "dpkg" package system, the user-friendly community, and the rest - and all was good. But lo, there came the darker days of further discovery: those who had, for ages untold, set up their environment variables and other configuration bits in their ~/.bash_profile suddenly discovered that this was no longer processed. Furthermore, they found that seeking advice in the wonderful Ubuntu user forums availed them not. And there arose a cry in those latter days of \'Dude - WHAT HAPPENED TO MY RESOURCE FILES?\'" </em></blockquote><br> With luck, this article will answer that question - and maybe even tell you what you can do about it. </p> ';
+digg_topic = 'linux_unix';
+</script>
+<script src="http://digg.com/tools/diggthis.js" type="text/javascript"></script>
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:161/okopnik.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<!-- *** BEGIN bio *** -->
+<hr>
+<p>
+<img alt="picture" src="../gx/authors/okopnik.jpg" align="left"  hspace="10" vspace="10" class="bio">
+</p>
+
+<p>
+Ben is the Editor-in-Chief for Linux Gazette and a member of The Answer Gang.
+</p>
+
+<p>
+<em>
+Ben was born in Moscow, Russia in 1962. He became interested in electricity
+at the tender age of six, promptly demonstrated it by sticking a fork into
+a socket and starting a fire, and has been falling down technological
+mineshafts ever since. He has been working with computers since the Elder
+Days, when they had to be built by soldering parts onto printed circuit
+boards and programs had to fit into 4k of memory (the recurring nightmares
+have almost faded, actually.)
+</p>
+
+<p>
+His subsequent experiences include creating software in more than two dozen
+languages, network and database maintenance during the approach of a
+hurricane, writing articles for publications ranging from sailing magazines
+to technological journals, and teaching on a variety of topics ranging from
+Soviet weaponry and IBM hardware repair to Solaris and Linux
+administration, engineering, and programming. He also has the distinction
+of setting up the first Linux-based public access network in St. Georges,
+Bermuda as well as one of the first large-scale Linux-based mail servers in
+St. Thomas, USVI.
+</p>
+
+<p>
+After a seven-year Atlantic/Caribbean cruise under sail and passages up and
+down the East coast of the US, he is currently anchored in northern
+Florida. His consulting business presents him with a variety of challenges
+such as teaching professional advancement courses for Sun Microsystems and
+providing Open Source solutions for local companies.
+</p>
+
+<p>
+His current set of hobbies includes flying, yoga, martial arts,
+motorcycles, writing, Roman history, and <strike>mangling</strike> playing
+with his Ubuntu-based home network, in which he is ably assisted by his <a
+href="tanaka-okopnik.html">wife</a> and <a href="okopnik1.html">son</a>;
+his Palm Pilot is crammed full of alarms, many of which contain exclamation
+points.
+</p>
+
+<p>
+He has been working with Linux since 1997, and credits it with his complete
+loss of interest in waging nuclear warfare on parts of the Pacific Northwest.
+</p>
+</em>
+
+<br CLEAR="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2009, Ben Okopnik. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication License</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 161 of Linux Gazette, April 2009
+</p>
+
+</div>
+
+<div id="previousnextbottom">
+<A HREF="laycock.html" >&lt;-- prev</A> | <A HREF="prestia.html" >next --&gt;</A>
+</div>
+
+</div>
+</div>
+
+<script src="http://www.google-analytics.com/urchin.js"
+type="text/javascript">
+</script>
+<script type="text/javascript">
+_uacct = "UA-1204316-1";
+urchinTracker();
+</script>
+
+
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+</body>
+</html>
+

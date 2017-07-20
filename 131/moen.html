@@ -1,0 +1,533 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>On Qmail, Forged Mail, and SPF Records LG #131</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+<a href="/">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="howell1.html" >&lt;-- prev</A> | <A HREF="okopnik.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>On Qmail, Forged Mail, and SPF Records</h1>
+<p id="by"><b>By <A HREF="../authors/moen.html">Rick Moen</A></b></p>
+
+<p>
+Here's an object lesson in how <em>not</em> to do e-mail, with the role of 
+global village idiot played by Prof. Daniel J. Bernstein's (DJB's) 
+popular proprietary SMTP server package, qmail.
+</p>
+
+
+<h3>I. Qmail Follies</h3>
+
+<p>
+The trail starts with a virus-infected MS-Wind0ws box in Ireland on an
+Eircom dynamic IP, which evidently has been energetically pumping out
+copies of the MyDoom worm and sending them everywhere its tiny little
+mind can think of, via Eircom's "smarthost" MTA boxes.
+</p>
+
+<p>
+In one case, the forged malware mail was sent out addressed to TAG, 
+with a claimed sender address of "MAILER-DAEMON@lists.linuxgazette.net", 
+i.e., my own MTA's mail-housekeeping mailbox.  The Eircom host duly 
+accepted this forgery and attempted delivery to my machine
+(in its guise as lists.linuxgazette.net) -- which said very emphatically
+"No" in its "550 Unsolicited spam" permanent-reject message.
+</p>
+
+<p>
+Eircom tossed this result around its network, and eventually a different
+Eircom host's "qmail-send" process was thus left holding the bag, and
+had to decide whom to notify.  It decided to lob my MTA's reject notice
+across the Internet to the forged claimed sender,
+"MAILER-DAEMON@lists.linuxgazette.net", wrapped up inside an e-mail from
+the null sender ("&lt;&gt;").
+</p>
+
+<p>
+I can't really complain about the latter phase of this process, in
+fairness:  Eircom's second MTA had no clue about the message's real
+provenance, and had only forged header data to act on.  In that context,
+it did the right thing.
+</p>
+
+<p>
+The actual problem was at the <em>first</em> qmail instance, when that
+program's qmail-smtpd module accepted the forgery in the first place.  
+qmail-smtpd is a deliberately stupid program capable only of accepting
+all incoming port-25 SMTP traffic without prejudice, handing the
+received bytes over to the qmail-queue module for instantiation on-disk,
+making an entry in a logfile, and closing the connection.
+</p>  
+
+<p>
+DJB's admirers call this deliberate stupidity a feature, pointing out
+that qmail's sparsity and modularity make it easier to deal with public
+data safely.<a name="1_back"></a><a href="#1">[1]</a>  This is true, but
+it comes at an excessive cost, namely the qmail-smtpd module's
+designed-in helplessness to detect and reject forged and otherwise
+aberrant mail: all incoming mail gets accepted and the connection
+closed before its header or contents can even be looked over at all.
+This is in stark contrast to its main open-source competitors, Postfix,
+Exim, and sendmail -- all of which can intelligently inspect incoming
+mail <em>before</em> saying yes or no to delivery.
+</p>
+
+
+<h3>II. Forgeries</h3>
+
+<p>
+qmail is thus distinctively guilty of one of this decade's leading
+technological sins: generation of "backscatter spam" -- unwanted mail
+sent to innocent parties whose sending addresses were forged in bulk
+e-mail sent out by spammers and/or malware.  It's important to stress
+that this is a <em>design</em> deficiency, one that's not curable without
+redesigning and rewriting qmail's qmail-smtpd module (at minimum).
+(And, if you're going to go to all that trouble, it's smarter to 
+just switch to a good <em>open-source</em> MTA such as Postfix, instead.)
+</p>
+
+<p>
+As I think I've mentioned before, mailing lists (as the leading modern
+example of mail forwarders) are ground zero in the Internet's junkmail
+wars, being frequently caught between spam/malware senders trying to
+pump out junk and vigilant mail admins trying to reject it.  The MyDoom
+malware e-mail concerned here was a case in point, having been
+deliberately crafted to implicate "MAILER_DAEMON@lists.linuxgazette.net"
+as an apparent sender -- a ploy called "Joe Job" mail after its first
+known target, Joe Doll of joes.com (Joe's Cyberpost), against whom a
+Chicago-area spammer launched a pernicious and clever "revenge spam"
+attack on January 2, 1997, trying to punish Doll for the commendable
+act of throwing the spammer off his free hosting service.<a
+name="2_back"></a><a href="#2">[2]</a>
+</p>
+
+<p>
+If Eircom had used a less deliberately stupid MTA, it <em>could</em> 
+in theory have taken steps to determine that
+"194-125-179-235.as1.mgr.mullingar.eircom.net" (one of Eircom's <em>own</em>
+dynamic-IP addresses!) was an extremely doubtful source host for
+"linuxgazette.net" mail.  However, there are also things <em>we</em> can do to
+help such efforts:
+</p>
+
+
+<h3>III. SPF</h3>
+
+<p>
+We at Linux Gazette really need to get around to limiting the
+<em>potential</em> for abuse by adding SPF (Sender Policy Framework)
+<a name="3_back"></a><a href="#3">[3]</a> records to
+the linuxgazette.net DNS for domain "linuxgazette.net" and subdomain
+"lists.linuxgazette.net" -- records that specify for all other mail
+systems <em>which</em> specific MTA hosts are solely authorised to originate
+SMTP mail from our mail-handling hostnames (aka authorised to be our MX
+or mail exchanger hosts).  Basically, an SPF record is a reverse-MX
+record, in the same way that a PTR (reverse DNS) record is the mirrored
+half of a forward-lookup "A" record -- which, if checked during mail 
+delivery, permits rejecting forgeries.
+</p>
+
+<p>
+To my knowledge, <em>only</em> kayos's host and mine legitimately handle our
+outbound mail.<a name="4_back"></a><a href="#4">[4]</a>  Thus, a
+suitable pair of SPF records would be as follows -- with each record
+comprising a hostname, an SPF version number, and a list of "mechanisms"
+(suggestions on what to do with mail from specified sets of hosts):
+</p>
+
+<pre class="code">
+linuxgazette.net. IN TXT "v=spf1 a mx a:lists.linuxgazette.net -all"
+lists.linuxgazette.net. IN TXT "v=spf1 a mx -all"
+</pre>
+
+<p>
+Parsing the first one by parts:
+</p>
+
+<pre>
+  linuxgazette.net.  #Identifies domain this is for.
+
+  IN TXT  #INternet-style record of type TXT = freeform text, that being 
+          #where SPF records are stored for lack of a dedicated SPF
+          #reference record type assigned by the IANA, so far.  
+          #(A dedicated record type has been applied for.)
+
+  v=spf1  #Implementing SPF protocol version 1.
+
+  a       #Honour as valid any "linuxgazette.net" mail arriving from our "A"
+          #record host, which happens to be genetikayos.com, IP 64.246.26.120.
+
+  mx      #Honour as valid "linuxgazette.net" mail arriving from any other 
+          #host listed as type "MX" for that domain.  There aren't any, 
+          #but this will allow for future ones.
+
+  a:lists.linuxgazette.net  #Accept as valid "linuxgazette.net" mail 
+          #from my host, too (just in case it's ever necessary for
+          #my host to handle some).
+  
+  -all    #"all" is a catchall mechanism that matches if none of the foregoing
+          #keywords do.  Modifier "-", here, advises receiving MTAs that they 
+          #should hardfail all matching mail ostensibly from the 
+          #"linuxgazette.net" domain, i.e., reject any such mail received from 
+          #any SMTP host not enumerated above.
+</pre>  
+
+<p>
+(The second SPF line, published for subdomain/host lists.linuxgazette.net, 
+should be pretty easy to parse, being slightly simpler but generally similar.)
+</p>
+
+<p>
+There are two alternatives to "-all":  The wishy-washy "?all" (neutral 
+recommendation) is what, for example, aol.com and google.com publish,
+and means "We're sort of <em>considering</em> SPF deployment, but for now are
+saying nothing definitive about which hosts should be considered valid
+mail exchangers."
+</p>
+
+<pre>
+  $ dig -t TXT aol.com +short
+  "v=spf1 ip4:152.163.225.0/24 ip4:205.188.139.0/24 ip4:205.188.144.0/24
+  ip4:205.188.156.0/23 ip4:205.188.159.0/24 ip4:64.12.136.0/23
+  ip4:64.12.138.0/24 ptr:mx.aol.com ?all"
+  "spf2.0/pra ip4:152.163.225.0/24 ip4:205.188.139.0/24
+  ip4:205.188.144.0/24 ip4:205.188.156.0/23 ip4:205.188.159.0/24
+  ip4:64.12.136.0/23 ip4:64.12.138.0/24 ptr:mx.aol.com ?all"
+  $
+</pre>
+
+<pre>
+  $ dig -t TXT google.com +short
+  "v=spf1 ptr ?all"
+  $
+</pre>
+
+<p>
+The slightly more confident "~all" (softfail recommendation) implies
+"We're in transition to SPF, so please consider <em>doubting</em> the
+authenticity of mail from mail exchangers other than the ones we're
+listing here" -- but we advise against rejecting it out of hand."  
+sendmail.com is using that model:
+</p>
+
+<pre>
+  $ dig -t TXT sendmail.com +short
+  "v=spf1 ip4:209.246.26.40 ip4:209.246.26.45 ip4:63.211.143.38
+  ip4:209.246.26.36 ip4:209.246.26.12 ip4:209.246.26.24 ip:209.246.26.25
+  ip4:209.246.26.10 ~all"
+  $
+</pre>
+
+<p>
+The fully unequivocal "-all" (hardfail recommendation) catchall (which I
+recommend) means "Please consider this list of allowed hosts truly
+definitive; we'd <em>prefer</em> that you summarily reject all mail purporting
+to be ours but arriving from anywhere we don't list here."  The District
+of Columbia-area tux.org LUG collective publishes that sort of record,
+for example:
+</p>
+
+<pre>
+  $ dig -t TXT tux.org +short
+  "v=spf1 mx ptr -all"
+  $
+</pre>
+
+<p>
+Assuming I hear no serious objections, I'll be asking kayos to add the
+hardfail-type lines specified above to our domain records, going
+forward.
+</p>
+
+<p class="editorial">[ Objections? What objections? If I had a complaint,
+it would be something like "why didn't <em>I</em> think of this a year ago?"
+Thanks for taking care of it, Rick! -- Ben ]</p>
+
+<pre class="code">
+----- Forwarded message from MAILER-DAEMON@eircom.net -----
+
+Return-path: &lt;&gt;
+Envelope-to: MAILER-DAEMON@lists.linuxgazette.net
+Delivery-date: Tue, 29 Aug 2006 09:20:25 -0700
+Received: from mail00.svc.cra.dublin.eircom.net ([159.134.118.16]:21343)
+	 by linuxmafia.com with smtp   (Exim 4.61 #1 (EximConfig 2.0))
+	 id 1GI6Hw-0005DL-Oa   
+	for &lt;MAILER-DAEMON@lists.linuxgazette.net&gt;; Tue, 29 Aug 2006 09:20:24 -0700
+Received: (qmail 42778 messnum 6402494 invoked for bounce); 29 Aug 2006 16:18:01 -0000
+Date: 29 Aug 2006 16:18:01 -0000
+From: MAILER-DAEMON@eircom.net
+To: MAILER-DAEMON@lists.linuxgazette.net
+MIME-Version: 1.0
+X-EximConfig: v2.0 on linuxmafia.com (http://www.jcdigita.com/eximconfig)
+X-SA-Exim-Connect-IP: 159.134.118.16
+X-SA-Exim-Mail-From: 
+X-Spam-Checker-Version: SpamAssassin 3.1.1 (2006-03-10) on linuxmafia.com
+X-Spam-Level: 
+X-Spam-Status: No, score=-1.6 required=4.0 tests=BAYES_00,NO_REAL_NAME 
+	autolearn=no version=3.1.1
+Content-Type: multipart/mixed; boundary="1156868198eircom.net6401928"
+Subject: failure notice
+X-SA-Exim-Version: 4.2.1 (built Mon, 27 Mar 2006 13:42:28 +0200)
+X-SA-Exim-Scanned: Yes (on linuxmafia.com)
+
+Hi. This is the qmail-send program at eircom.net.
+I'm afraid I wasn't able to deliver your message to the following addresses.
+This is a permanent error; I've given up. Sorry it didn't work out.
+
+&lt;tag@lists.linuxgazette.net&gt;:
+198.144.195.186 failed after I sent the message.
+Remote host said: 550 Unsolicited spam:  score=6.7 required=4.0 trigger=4.2  -  Sorry, your message has been rejected by our filtering software due to achieving a high spam score.  We apologise if you have sent a legitimate message and it has been blocked.  If this is the case, please re-send adding verified- to the beginning of the E-mail address of each recipient.  If you do this, your message will get through successfully, e.g:  verified-fred.bloggs@domain.tld
+
+--- Enclosed is a copy of the message.
+
+Return-Path: MAILER-DAEMON@lists.linuxgazette.net
+Received: (qmail 30458 messnum 6401928 invoked from network[194.125.179.235/194-125-179-235.as1.mgr.mullingar.eircom.net]); 29 Aug 2006 16:15:59 -0000
+Received: from 194-125-179-235.as1.mgr.mullingar.eircom.net (HELO lists.linuxgazette.net) (194.125.179.235)
+  by mail00.svc.cra.dublin.eircom.net (qp 30458) with SMTP; 29 Aug 2006 16:15:59 -0000
+From: MAILER-DAEMON &lt;MAILER-DAEMON@lists.linuxgazette.net&gt;
+To: tag@lists.linuxgazette.net
+Subject: Delivery failed
+Date: Tue, 29 Aug 2006 17:13:14 +0100
+MIME-Version: 1.0
+Content-Type: multipart/mixed;
+	boundary="----=_NextPart_000_0009_B34925E4.84D3BAB0"
+X-Priority: 3
+X-MSMail-Priority: Normal
+X-Mailer: Microsoft Outlook Express 6.00.2600.0000
+X-MIMEOLE: Produced By Microsoft MimeOLE V6.00.2600.0000
+
+Dear user tag@lists.linuxgazette.net,
+
+We have found that your email account was used to send a huge amount of junk e-mail during the recent week.
+Obviously, your computer had been infected by a recent virus and now runs a hidden proxy server.
+
+We recommend that you follow our instruction in order to keep your computer safe.
+
+Have a nice day,
+The lists.linuxgazette.net team.
+
+
+<strong>[RM note:  The MyDoom worm binary was file-attached at this point.]</strong>
+
+----- End forwarded message -----
+</pre>
+
+<hr>
+
+<p>
+<a name="1"></a><a href="#1_back">[1]</a> See "The Security Architecture of qmail",
+<a href="http://hillside.net/plop/2004/papers/mhafiz1/PLoP2004_mhafiz1_0.pdf">http://hillside.net/plop/2004/papers/mhafiz1/PLoP2004_mhafiz1_0.pdf</a>
+</p>
+
+<p>
+<a name="2"></a><a href="#2_back">[2]</a> For more, see the Joe Job entries in my Linuxmafia.com
+Knowledgebase, at <a href="http://linuxmafia.com/kb/Mail/">http://linuxmafia.com/kb/Mail/</a>. I was among the many 
+anti-spam activists on the Usenet news.admin.net-abuse-email newsgroup
+whom the spammer attempted to lure into revenge-attacking Joe Doll,
+through flamebait mail sent to me directly, forged so as to fool me
+into thinking Doll had sent it.
+</p>
+
+<p>
+<a name="3"></a><a href="#3_back">[3]</a> SPF is an oft-misunderstood
+technical mechanism, very easy to add to one's published DNS records 
+and with a bit more difficulty to SMTP servers, that makes it possible
+for mail servers to determine at the moment of receipt if a piece of
+mail's claimed sender is forged. The idea is for you as a domain
+owner to declare (in special SPF reference records in your DNS) which
+specific IPs/hostnames are the sole authorised sources of mail from your
+domain.  Thereafter, any system receiving mail claimed to be from your
+domain has the means to verify that assertion, checking the "envelope
+From" and Return-Path headers' domain against your published SPF record.
+</p>
+
+<p>
+If you care about your, your domain's, and its users' reputations, then 
+<em>you should add</em> an SPF record to your DNS.  It's that simple --
+and it's something you can easily do once, and never have to revisit
+unless you move, add, or retire SMTP servers.
+</p>   
+
+<p>
+Objections to SPF divide generally into "It doesn't achieve [additional 
+desired goal foo]" and "It might interfere with my favourite way of 
+relaying mail through multiple SMTP servers" categories (see whitepaper, 
+below) -- all of which miss the point that publishing an SPF record is
+<em>absolutely</em> in the interest of any domain owner. If you haven't
+created one yet, what are you waiting for?
+</p>
+
+<p>
+Details at:<br> 
+<a href="http://www.openspf.org/whitepaper.pdf">http://www.openspf.org/whitepaper.pdf</a><br>
+<a href="http://www.securityfocus.com/infocus/1763">http://www.securityfocus.com/infocus/1763</a><br>
+<a href="http://new.openspf.org/SPF_Record_Syntax">http://new.openspf.org/SPF_Record_Syntax</a><br>
+<a href="http://new.openspf.org/svn/project/specs/rfc4408.html">http://new.openspf.org/svn/project/specs/rfc4408.html</a><br>
+Note also the "SPF Setup Wizard" CGI at <a href="http://www.openspf.org/">http://www.openspf.org/</a>, that 
+you can use to write prototype SPF records for domains.
+</p>
+
+<p>
+How best, if at all, to implement the MTA (SMTP server) end of SPF,
+i.e., the checking of SPF records at the time of receiving mail, is 
+a separate discussion, another point commonly missed in discussions of
+this subject. You as the sysadmin of an MTA always have within your
+sole control whether your server will act at all on SPF information, and
+whether it should follow particular SPF records' recommendations or not.
+SPF is just published information: you can ignore it, implement it, 
+do the exact opposite of its suggestions, or anything else you can dream
+of. SPF does not break mailing lists (because they rewrite the 
+"envelope From" and Return-Path headers) -- and there do exist ways to
+implement other forms of mail-forwarding that don't trigger
+unauthorised-MX suspicions. (Publishing SPF records isn't useful if, for
+some strange reason, you cannot determine what SMTP hosts are supposed
+to be legitimate senders of your outgoing mail -- but then, I'd say you
+have bigger problems.)
+</p>
+
+<p>
+<a name="4"></a><a href="#4_back">[4]</a> Hosting of Linux Gazette's 
+Web pages, svn archive, and main administrative e-mailboxes is kindly 
+donated by T.R. "kayos" Fullhart on his genetikayos.com server,
+masquerading as "linuxgazette.net".  All of the magazine's mailing
+lists, however, are hosted separately at my linuxmafia.com server,
+masquerading as "lists.linuxgazette.net".  
+</p>
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:131/moen.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<!-- *** BEGIN bio *** -->
+<hr>
+<P>
+<img ALIGN="LEFT" ALT="Bio picture" SRC="../gx/2002/tagbio/moen.jpg" WIDTH="202" HEIGHT="184" class="bio">
+<em>
+Rick has run freely-redistributable Unixen since 1992, having been roped
+in by first 386BSD, then Linux.  Having found that either one 
+<a href="http://linuxmafia.com/cabal/os-suck.html">sucked less</a>, he blew
+away his last non-Unix box (OS/2 Warp) in 1996.  He specialises in clue
+acquisition and delivery (documentation &amp; training), system
+administration, security, WAN/LAN design and administration, and
+support.  He helped plan the LINC Expo (which evolved into the first
+LinuxWorld Conference and Expo, in San Jose), Windows Refund Day, and
+several other rabble-rousing Linux community events in the San Francisco
+Bay Area.  He's written and edited for IDG/LinuxWorld, SSC, and the
+USENIX Association; and spoken at LinuxWorld Conference and Expo and
+numerous user groups.
+
+<P> His first computer was his dad's slide rule, followed by visitor access
+to a card-walloping IBM mainframe at Stanford (1969).  A glutton for
+punishment, he then moved on (during high school, 1970s) to early HP
+timeshared systems, People's Computer Company's PDP8s, and various
+of those they'll-never-fly-Orville microcomputers at the storied
+Homebrew Computer Club -- then more Big Blue computing horrors at
+college alleviated by bits of primeval BSD during UC Berkeley summer
+sessions, and so on.  He's thus better qualified than most, to know just
+how much better off we are now.
+
+<P> When not playing Silicon Valley dot-com roulette, he enjoys
+long-distance bicycling, helping run science fiction conventions, and
+concentrating on becoming an uncarved block.
+</em>
+<br CLEAR="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2006, Rick Moen. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 131 of Linux Gazette, October 2006
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="howell1.html" >&lt;-- prev</A> | <A HREF="okopnik.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/mailman/listinfo/">Mailing Lists</a>
+<a href="..//jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">October 2006 (#131)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

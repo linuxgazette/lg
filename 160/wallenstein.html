@@ -1,0 +1,565 @@
+<!DOCTYPE html
+	PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+	 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="utf-8" xml:lang="utf-8">
+<head>
+<title>Development Builds Layered on Top of a Stable System by Means of Unionfs LG #160</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link rel="stylesheet" href="../lg.css" type="text/css" media="screen, projection"  />
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<!-- link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" / -->
+<link rel="shortcut icon" href="../favicon.ico" />
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+</head>
+<body>
+
+<a href="../">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+<div id="navigation">
+<table summary="masthead" width="100%">
+<tr>
+<td align="center" colspan="3" style="font-size: 10px; font-weight: bold">
+<a href="../index.html">Home</a>
+<a href="http://linuxgazette.net">Main Site</a>
+<a href="../faq/index.html">FAQ</a>
+
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/mailman/listinfo/">Mailing Lists</a>
+<a href="../jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+<hr width="99%" style="border: 1px inset #000033">
+</td>
+</tr>
+<tr>
+<td width="40%" align="left" style="font-size: 10px; font-weight: bold">
+The Free International Online Linux Monthly
+</td>
+<td width="20%" align="center" style="font-size: 10px; font-weight: bold">
+ISSN: 1934-371X
+</td>
+<td width="40%" align="right" style="font-size: 10px; font-weight: bold">
+Main site: <a href="http://linuxgazette.net">http://linuxgazette.net</a> 
+</td>
+</table>
+</div>
+
+
+<div id="breadcrumbs1">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">March 2009 (#160)</a> &gt; 
+Article
+
+</div>
+
+<div class="articlecontent1">
+<div class="content">
+
+<div id="previousnexttop">
+<A HREF="tanaka-okopnik.html" >&lt;-- prev</A> | <A HREF="xkcd.html" >next --&gt;</A>
+</div>
+
+<h1>Development Builds Layered on Top of a Stable System by Means of Unionfs</h1>
+<p id="by"><b>By <a href="../authors/wallenstein.html">Dirk Wallenstein</a></b></p>
+
+<h3>Intro</h3>
+<p>
+    Unionfs is a filesystem type by which you can merge multiple directories into one mountpoint. 
+    The source directories (branches) are stacked onto each other with filesystem entries 
+    in the top layer hiding/overriding entries in the layers below. In this article I'd like 
+    to show you how to set up a layered <code>/usr</code> directory, which
+    allows you to push and pop a development directory onto/from your distribution's 
+    <code>/usr</code> directory. That way you don't ever modify your stable system, and can still 
+    test your work in a real context. Further I'll show you how to put boot options into place, to 
+    choose between the stable system and the development system at bootup. 
+    That way you can replace core system applications that are started by init.
+</p>
+
+<h3>Disclaimer</h3>
+<p>
+    The steps shown here will deeply interfere with your system's filesystem hierarchy and boot process. 
+    You might render your system unusable or even lose all your data. 
+    I cannot be held responsible for that. Reader beware; back up your system to a safe location.
+</p>
+
+<h3>Getting unionfs support</h3>
+<p>
+    Alas, no filesystem unification implementation has made it into the vanilla kernels, 
+    and so you have to patch and compile a custom kernel to get the support.
+    If you haven't done that before, there is a distribution specific kernel compilation series 
+    on <a href="http://www.howtoforge.com">howtoforge.com</a>.
+    They run under the title <em>"How To Compile A Kernel - The XXX Way"</em> where XXX is Fedora, Ubuntu, etc.
+</p>
+
+<p>
+    You can get the patches for unionfs and further documentation at the 
+    <a href="http://www.filesystems.org/project-unionfs.html">unionfs project</a>.
+    Once you have applied the patch, there is very focused documentation below 
+    <code>/linux/Documentation/filesystems/unionfs/</code>. I think <code>concepts.txt</code> 
+    and <code>usage.txt</code> in particular give you all the information 
+    you need to understand and operate a unionfs, and they aren't too long. 
+    You'll need to activate unionfs support by checking <code>"File systems -&gt; 
+    Layered filesystems -&gt; Union file system" (UNION_FS)</code> and 
+    optionally <code>"Unionfs extended attribute" (UNION_FS_XATTR)</code> 
+    next to it, in the kernel configuration. Now, compile and install the new kernel.
+</p>
+
+<h3>A New Filesystem Structure</h3>
+<p>
+    Unionfs hides everything below the mountpoint (like every other filesystem type), so we have to move 
+    the stable branch (the <code>/usr</code> dir of the distribution) to another directory, and hide away this fact, by 
+    using a bind mount back onto /usr. As you can guess, this will rumble a bit (i.e., you might miss some 
+    commands on the way), and is thus best applied from a live distribution of your choice.
+    In this example I'll use the following branches:
+</p>
+
+<pre>
+        /usr                    # the mountpoint for your unionfs
+        /usr_stable             # your distro's stable branch (formerly known as /usr)
+        /mnt/devel/usr          # your development branch
+</pre>
+        
+
+<p>
+    So, let's assume you are running a live distro and your normal root filesystem is mounted on <code>/mnt/hda1</code>.
+</p>
+
+<p>
+    1. Rename the stable branch:
+</p>
+<pre class="code">
+            $ mv /mnt/hda1/usr /mnt/hda1/usr_stable
+</pre>
+<p>
+2. Create the mountpoint. You can create fallback links within the mountpoint in case either of the 
+       unionfs or the bind mount fails, and a sentinel file which you can check for existence in scripts:
+</p>
+<pre class="code">
+            $ mkdir /mnt/hda1/usr
+            $ cd /mnt/hda1/usr
+            $ ln -sn -t . ../usr_stable/*
+            $ touch YOU_SHOULD_NEVER_SEE_THIS_FILE
+</pre>
+<p>
+3. Then create a bind mount for the stable system.
+</p> 
+<pre class="code">
+            $ echo "/usr_stable  /usr none  bind" &gt;&gt; /mnt/hda1/etc/fstab
+</pre>
+<p>
+Now you should be able to boot into your stable system, and everything should be like before.
+</p>
+
+
+<h3>Boot Script:</h3>
+<p>
+    The next step is to create a script that checks for a chosen identification string on the kernel command line, 
+    and if given, releases the bind mount again and puts the union mount into its place. A call to this script must be inserted into
+    the boot process right after the corresponding init scripts have processed <code>/etc/fstab</code> and mounted 
+    all the given filesystems. Where and how to insert this script varies among the 
+    different distributions; if you don't know, you'll have to consult the
+    documentation of your distribution for this. To find the corresponding scripts,
+    you can grep for <code>'mount'</code> or <code>'fstab'</code> in the
+	<code>/etc/init.d/</code> scripts.
+<pre class="code">
+            $ grep -Hw -e mount -e fstab /etc/init.d/*
+</pre>
+    Good candidates are localmount, bootmisc or similar. Look for the <code>'-a'</code> flag to mount.
+    In case of Gentoo the right place to insert the call is here (in this
+    example the script is called <code>unionmount-usr</code>):
+<pre class="code">
+    --- /etc/init.d/localmount.orgy 2009-02-15 10:26:22.000000000 +0100
+    +++ /etc/init.d/localmount      2009-02-15 10:33:02.000000000 +0100
+    @@ -23,6 +23,9 @@ start()
+            mount -at "${types}"
+            eend $? "Some local filesystem failed to mount"
+
+    +       # conditionally mount development branch through unionfs
+    +       /etc/init.d/unionmount-usr
+    +
+            # Always return 0 - some local mounts may not be critical for boot
+            return 0
+     }
+</pre>
+
+<p>
+    Note that for the approach given here to work (unmounting the default bind mount), you can't have 
+    another bind mount on /usr_stable (or indirectly on <code>/usr</code>) unless you unmount and remount them too.
+</p>
+
+<p>
+    Now, the script - this is just a very basic version to illustrate the necessary steps. You might, for 
+    example, remount the bind mount if the union mount fails. In general, I like
+    to have consistency checker script at the end of the boot process, where
+    you can check for different vital things that you don't want to miss.
+    Besides checking iptables rules and such, you could also check the
+    sentinel file for existence there.
+</p>
+
+<pre class="code">
+    #!/bin/bash
+    # check the kernel command line (/proc/cmdline) for the id-String and if given release the bind mount on /usr.
+    # and put the union mount in its place.
+    UNION_WANTED_FLAG="UniteWithDevel"      # this is what would be given on the kernel cmdline
+    MOUNTPOINT="/usr"
+    STABLE_BRANCH="/usr_stable"
+    DEVEL_BRANCH="/mnt/devel/usr"
+    ERROR_LOG_FILE="/var/log/develUnionFailed.log"
+
+    errorOut() {
+        MSG="ERROR ${0} $(date) : ${@}"
+        echo "${MSG}" &gt;&amp;2
+        echo "${MSG}" &gt;&gt; "${ERROR_LOG_FILE}" 
+        exit 88
+    }
+
+    wantUnionMount() {
+        grep "${UNION_WANTED_FLAG}" /proc/cmdline &amp;&gt;/dev/null
+    }
+
+    wantUnionMount &amp;&amp; {
+        echo "trying to unite..."
+        umount "${MOUNTPOINT}" || errorOut "umounting failed"
+        mount -t unionfs -o "dirs=${DEVEL_BRANCH}=rw:${STABLE_BRANCH}=rw" none ${MOUNTPOINT} || errorOut "mounting unionfs failed"
+    }
+</pre>
+
+<h3>Final Step </h3>
+<p>
+    Now the final step is to create a boot menu entry which contains the
+    <code>${UNION_WANTED_FLAG}</code> from above. You can put any string on the kernel command line (well, 
+    maybe any byte value, I guess all ascii-chars, but at least all ascii-alphanum chars)
+    and if the kernel doesn't know it, it seems to be silently ignored but
+    still appears in <code>'/proc/cmdline'</code> (and in <code>`dmesg | grep 'Kernel command line'</code>)
+    So, in the case of the example above, just create a boot menu entry with <code>"UniteWithDevel"</code> on the
+    kernel command line and you can boot right into your development work, giving
+    you the possibility to replace core system applications and daemons that get started
+    by the init process (e.g.: ntp, iptables, sysklogd, etc). E.g:
+<pre class="code">
+        kernel /boot/unionkern-2.6.27.10/unionkern-2.6.27.10 root=/dev/hdc9 vga=0x31B UniteWithDevel 
+</pre>
+
+
+
+<h3>Some Unionfs notes:</h3>
+<ul>
+    <li>
+          Symlinks start a new lookup. If a symlink on a bottom layer links to a
+          file that is hidden by another layer, the topmost file is looked up.
+    </li>
+    <li>
+        <p>
+          You are not allowed to have a read-only branch as the topmost layer of a
+          read-write-unification. Bummer! That prevents you from operating a
+          stable-branch below a read-only devel branch, like you normally would without
+          the devel branch (e.g. with the distro's package management system). This would only be accomplished by a
+          policy that would deviate from normal mount policies, I guess. (You wouldn't be able to write 
+          some of the files, even as root.)
+        </p>
+
+        <p>
+          Two approaches came to my mind:
+        </p>
+            <ol>
+                <li>
+                    Make a read-only union and thus prevent any writes. To manage the
+                    stable-usr branch, put the bind mount back into place, or remove the
+                    devel branch and remount the unionfs as read-write (see below).
+                </li>
+                <li>
+                    Put a blank read-write branch on top of the read-only devel branch
+                    and capture all writes in this branch. Then use a shutdown script to
+                    move possibly written files to the stable branch.
+                    This affects only newly created files (or previously deleted and
+                    recreated files). 
+                </li>
+            </ol>
+
+    </li>
+    <li>
+        <p>
+              If you get some error while mounting with <code>-t unionfs</code> (like wrong fs
+              type), grep dmesg for the real cause, like:
+        </p>
+
+        <pre class="code">
+                $ dmesg | grep unionfs
+        </pre>
+    </li>
+    <li>
+          If you remount unionfs, and in particular add or remove filesystems, you
+          obviously can't trust the 'mount' output concerning that mountpoint anymore.
+		 (Maybe that should be considered a bug?)
+    </li>
+    <li>
+          If you are sure none of the apps on the devel branch are currently
+          running, you can probably safely switch in different branches as
+          the development branch, thus switching arbitrary versions of an app in and out, while the system is running.
+          There are unionfs mount options that add and delete a branch from the union. E.g., you can remove the 
+          devel branch and remount it as read-write, then remount
+          read-only with another devel branch at the highest level in the stack: 
+        <pre class="code">
+          mount -t unionfs -o remount,rw,del=${DEVEL_BRANCH}          none ${MOUNTPOINT}
+          mount -t unionfs -o remount,ro,add=${ANOTHER_DEVEL_BRANCH}  none ${MOUNTPOINT}
+        </pre>
+          See <code>linux/Documentation/filesystems/unionfs/usage.txt</code> for more.
+    </li>
+</ul>
+
+
+<h3>Union Mount</h3>
+<p>
+      There's also an alternative implementation called union mount. For that, see 
+      <a href="http://lwn.net/Articles/312641/">"Unifying filesystems with union mounts"</a>.
+      As far as I know, the corresponding patches are not yet considered stable at this time.
+      Unionfs seems like it will never be supported, but the union mount patches will be. 
+      See <a href="http://lwn.net/Articles/265248/">"Unionfs and related patches pre-merge review"</a>.
+      Nevertheless, unionfs is widely used (see 
+      <a href="http://www.filesystems.org/project-unionfs.html">here</a>) and 
+      I didn't have any problems with it (using xserver and xlib). So until 
+      the union mount patches go mainline, unionfs seems to be a good opportunity.
+      Obviously union mount would make fs-entries below the mountpoint
+      accessible which would eventually obviate some of the steps above,
+      making a test run much easier (e.g., you wouldn't have to move
+      <code>/usr</code>.)
+</p>
+
+<p>
+      I have used the term union mount at different places in this text and
+      scripts, because it seems to describe what happens. That does not relate
+      to the implementation that goes by that name. Everything except
+      this paragraph is based on unionfs and <em>not</em> "union mount".
+</p>
+
+<h3>Populate</h3>
+<p>
+    If you have a binary (i.e., pre-compiled) distribution, there are certainly a lot of points to
+    consider. Depending on how much "core" your application wants,
+    you have to build the application with the right flags in case other apps make use of those features 
+    (<code>--enable-this</code>, <code>--enable-that</code> and friends, in case it is based on autotools.) And of course, 
+    you have to use the same paths that the installed package uses, to hide all the files in the stable branch.
+    Actually you would probably only need to hide entry points for other
+    applications, like binaries, headers, libs and such. If there are single
+    differences, you can try to hide them by using symlinks at the topmost layer.
+</p>
+
+<p>
+    So, with binary distributions, it is not that easy - but it is very easy with Gentoo, as Gentoo is
+    about building apps from source in the first place. For example: to make
+    little modifications to the xserver and try it out, it would only require something similar to this:
+<pre class="code">
+        $ ebuild /usr/portage/x11-base/xorg-server/xorg-server-1.5.3-r2.ebuild compile
+            #... now modify the sources like so:
+            $ cd /var/tmp/portage/x11-base/xorg-server-1.5.3-r2/work/xorg-server-1.5.3
+            $ sed -i "s/\"(II)\"/\"(I am Bob and I almost completely rewrote the xserver)\"/g" os/log.c
+            #... and restart the build process
+            $ make
+        $ ebuild /usr/portage/x11-base/xorg-server/xorg-server-1.5.3-r2.ebuild install
+        $ cp -a /var/tmp/portage/x11-base/xorg-server-1.5.3-r2/image/usr/* /mnt/devel/usr/
+</pre>
+<p>
+    The result would be exactly the same xserver like the one that is in the stable branch
+    (if it was of version 1.5.3-r2) but it would show condign respect to your
+    accomplishments in the servers logfile. 
+</p>
+
+<p>
+    Another more useful example: As a non-native English speaker, I sometimes miss words
+    from English movies. I like using <em>"kaffeine"</em> to watch movies, but the smallest step to
+    skip backward is 20 seconds, which is far too long in response to "Come again?" 
+    So, with the steps from the previous example adapted to kaffeine and a bit of source-code 
+    browsing resulted in the following patch, which allows rewinding by 5 secs:
+</p>
+
+<pre class="code">
+    --- kaffeine/src/player-parts/xine-part/xine_part.cpp.orgy      2008-11-10 19:24:18.000000000 +0100
+    +++ kaffeine/src/player-parts/xine-part/xine_part.cpp   2008-11-10 19:24:23.000000000 +0100
+    @@ -511,7 +511,7 @@ void XinePart::slotPosPlusSmall()
+
+     void XinePart::slotPosMinusSmall()
+     {
+    -       slotJumpIncrement( -20 );
+    +       slotJumpIncrement( -5 );
+     }
+
+     void XinePart::slotPosPlusMedium()
+</pre>
+<p>
+    The point is that you can easily modify sources and test the results
+    without ever messing up your stable branch. 
+</p>
+
+<p>
+    <em><strong>Your fully functional stable system is just one reboot away.</strong></em>
+</p>
+
+<p>
+    As a side note: You can, of course, also use this mechanism to try out
+    different versions of an application. Just put a read-write mounted blank branch 
+    on top of your read-only mounted stable-branch, and use your distribution's
+    package management system to install another, possibly unstable, version
+    of that application. If, in the course of that, you want to manage different top level branches,
+    you might also consider using "<code>/mnt/devel/usr</code>" as a symlink,
+    and let the <code>unionmount-usr</code> script above resolve that symlink
+    to the branch you really want, by adding a line like:
+<pre class="code">
+    DEVEL_BRANCH=$(readlink -f "${DEVEL_BRANCH}") 
+</pre>
+<p>
+    That way you can choose which branch is mounted at bootup by simply
+    redirecting the symlink.
+</p>
+
+    
+<h3>Sources</h3>
+<p>
+    Now, you've probably guessed that I'm quite satisfied with Gentoo - once it's combined
+    with a unification filesystem. Once you have set up and
+    configured a Gentoo system, and know how to use portage (Gentoo's package manager), 
+    updating applications is a no-brainer most of the time. 
+    (Big kudos to all the Gentoo developers who make this possible.) 
+</p>
+
+<p>
+    If you are interested, you can also get an initial binary
+    distribution from Gentoo and then still use the source-based package
+    manager afterwards on top of the binary packages. See 
+    <a href="http://www.gentoo.org/">Gentoo Linux</a> and 
+    <a href="http://en.wikipedia.org/wiki/Gentoo_Linux">wikipedia:Gentoo</a>.
+</p>
+
+<p>
+    Then there is Sabayon which is based on Gentoo and also includes a binary package manager 
+    but only supports x86 and x86-64 architectures. See 
+    <a href="http://www.sabayonlinux.org/">Sabayon Linux</a> and 
+    <a href="http://en.wikipedia.org/wiki/Sabayon_Linux">wikipedia:sabayon</a>.
+</p>
+
+<h3>Can it get any better?</h3>
+<p>
+    Initially I wanted to share my musings about whether it would be possible to bring
+    the demonstrated "Populate" approach to binary distribution as a
+    distro-independent application. When I wrote the last paragraph I took
+    the opportunity to finally have a more thorough look at Sabayon Linux.
+    The impression I got is that you can have a more-or-less semi-annually updated binary base
+    system while still having the opportunity to use all the versatility that
+    Gentoo offers (trying the latest features of bleeding edge apps,
+    always have the newest versions of exposed and endangered apps, and of course easily modifying
+    selected apps). So, if you don't want to go "all source" you can still try
+    Sabayon Linux as a compromise.
+</p>
+
+<p>
+    If you have any interest in browsing, modifying, and testing open source
+    programs, I strongly recommend giving Gentoo or Sabayon a try, getting accustomed to
+    the Gentoo build system, and optionally trying a unified /usr-directory.
+</p>
+
+<p>
+    Again, I am very pleased to have the opportunity to develop and test a program 
+    while having a stable system just a reboot away. This makes development
+    very pleasant. 
+</p>
+
+<p>
+    And all the difficulties about dependencies and different build systems 
+    are covered by portage. This makes tweaking selected apps very convenient. 
+</p>
+
+
+<br clear="all" />
+
+<script type='text/javascript'>
+digg_url = 'http://linuxgazette.net/160/wallenstein.html';
+digg_title = 'Development Builds Layered on Top of a Stable System by Means of Unionfs';
+digg_bodytext = '<p>     Unionfs is a filesystem type by which you can merge multiple directories into one mountpoint.      The source directories (branches) are stacked onto each other with filesystem entries      in the top layer hiding/overriding entries in the layers below. In this article I\'d like      to show you how to set up a layered <code>/usr</code> directory, which     allows you to push and pop a development directory onto/from your distribution\'s      <code>/usr</code> directory. That way you don\'t ever modify your stable system, and can still      test your work in a real context. Further I\'ll show you how to put boot options into place, to      choose between the stable system and the development system at bootup.      That way you can replace core system applications that are started by init. </p> ';
+digg_topic = 'linux_unix';
+</script>
+<script src="http://digg.com/tools/diggthis.js" type="text/javascript"></script>
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:160/wallenstein.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/2002/note.png" class="bio">
+</p>
+
+<em>
+<p>
+I`m a Linux user since 2003 and and after I did my first Linux steps
+ with SuSE, I very soon chose source-based distributions (LFS and later
+ Gentoo) as they offer a convenient way to see and alter any bit of the
+ system that`s actually running.
+</p>
+
+
+
+</em>
+
+<br clear="all">
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2009, Dirk Wallenstein. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication License</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 160 of Linux Gazette, March 2009
+</p>
+
+</div>
+
+<div id="previousnextbottom">
+<A HREF="tanaka-okopnik.html" >&lt;-- prev</A> | <A HREF="xkcd.html" >next --&gt;</A>
+</div>
+
+</div>
+</div>
+
+<script src="http://www.google-analytics.com/urchin.js"
+type="text/javascript">
+</script>
+<script type="text/javascript">
+_uacct = "UA-1204316-1";
+urchinTracker();
+</script>
+
+
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+</body>
+</html>
+

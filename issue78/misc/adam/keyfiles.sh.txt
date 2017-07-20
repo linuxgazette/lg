@@ -1,0 +1,130 @@
+#!/bin/bash
+#################################################
+#Keyfiles - tar/gzip configuration files        #
+#Version:   Version 1.0 (first draft)           #
+#Ackn:      based on an idea from Dave Turnbull #
+#Authour:   Thomas Adam				#
+#Date:      Monday 28 May 2001, 16:05pm BST     #
+#Website:   www.squidproxyapps.org.uk           #
+#Contact:   thomas@squidproxyapps.org.uk        #
+#################################################
+
+#Comments herein are for the benefit of Dave T.
+
+#Declare Variables
+configfile="/etc/keyfiles.conf"
+tmpdir="/tmp"
+wrkdir="/var/log/keyfiles"
+tarfile=keyfiles-$(date +%d%m%Y).tgz
+method=$1           #options passed to "keyfiles"
+submethod=$2        #options supplied along with "$1"
+quiet=0       	    #Turns on verbosity (default)
+
+cmd=`basename $0`   #strip path from filename.
+optfiles="Usage: $cmd [--default (--quiet)] [--listconffiles] [--restore (--quiet)] [--editconf] [--delold] [--version]"
+version="keyfiles: Created by Thomas Adam, Version 1.0 (Tuesday 5 June 2001, 23:42)"
+
+#handle error checking...
+if [ ! -e $configfile ]; then
+  for beepthatbell in 1 2 3 4 5; do
+    echo -en "\x07"
+    mail -s "[Keyfiles]: $configfile not found" $USER
+  done
+fi
+
+#Make sure we have a working directory
+[ ! -d $wrkdir ] && mkdir $wrkdir
+
+#Parse options sent via command-line
+if [ -z $method ]; then
+  echo $optfiles
+  exit 0
+fi
+
+#Check command line syntax
+check_syntax ()
+{
+  case $method in
+    --default)
+    cmd_default
+    ;;
+    --listconffiles)
+    cmd_listconffiles
+    ;;
+    --restore)
+    shift 1
+    cmd_restore
+    ;;
+    --editconf)
+    exec $EDITOR $configfile
+    exit 0
+    ;;
+    --delold)
+    cd $wrkdir && rm -f ./*.old > /dev/null
+    exit 0
+    ;;
+    --version)
+    echo $version
+    exit 0
+    ;;
+    --*|-*|*)
+    echo $optfiles
+    exit 0
+    ;;
+  esac
+}
+
+#Now the work begins.....
+#declare function to use "--default" settings
+cmd_default ()
+{
+
+  #tar/gz all files contained within $configfile
+  
+  if [ $submethod ]; then
+    tar -cZPpsf $tmp/$tarfile $(cat $configfile) &>/dev/null 2>&1
+  else
+    tar -vcZPpsf $tmp/$tarfile $(cat $configfile)
+  fi
+  
+  #If the contents of the directory is empty......
+  if test $(ls -1 $wrkdir | grep -c -) = "0"; then
+    mv $tmp/$tarfile $wrkdir
+    exit 0
+  fi
+  
+  for i in $(ls $wrkdir/*.tgz); do
+    mv $i $i.old
+  done
+ 
+  mv $tmp/$tarfile $wrkdir 
+}
+
+#List files contained within $configfile
+cmd_listconffiles ()
+{
+  sort -o $configfile $configfile
+  cat $configfile 
+  exit 0
+}
+
+#Restore files......
+cmd_restore ()
+{
+  cp $wrkdir/keyfiles*.tgz /
+  cd /
+  
+  #Check for quiet flag :-)
+  if [ $submethod ]; then
+    tar vzxfmp keyfiles*.tgz &>/dev/null 2>&1
+    rm -f /keyfiles*.tgz
+    exit 0
+  else
+    tar vzxfmp keyfiles*.tgz
+    rm -f /keyfiles*.tgz
+    exit 0
+  fi
+}
+
+#call the main function
+check_syntax

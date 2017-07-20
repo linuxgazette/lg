@@ -1,0 +1,613 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Virtual Filesystem: Building A Linux Filesystem From An Ordinary File LG #109</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="lg_bytes.html" >&lt;-- prev</A> | <A HREF="chirico1.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Virtual Filesystem: Building A Linux Filesystem From An Ordinary File</h1>
+<p id="by"><b>By <A HREF="../authors/chirico.html">Mike Chirico</A></b></p>
+
+<p>
+<p>Copyright (c) 2004 (GPU Free Documentation License)<br>
+Latest Update: <a href=
+"http://prdownloads.sourceforge.net/souptonuts/README_Virtual_FS.html?download">
+http://prdownloads.sourceforge.net/souptonuts/README_Virtual_FS.html?download</a><br>
+
+Date: Sun Sep 19 01:08:31 EDT 2004</p>
+
+<p>Under Linux, you can create a regular file, format it as an ext2, ext3,
+or reiser filesystem, and then mount it just like a physical drive. It's
+then possible to read and write files to this newly-mounted device. You
+can also copy the complete filesystem, since it is just a file, to another
+computer. If security is an issue, read on. This article will show you how
+to encrypt the filesystem and mount it with ACL (Access Control Lists),
+which gives you control of rights beyond the traditional read (r), write
+(w), and execute (x) permissions for the three user groups "file", "owner",
+and "other".</p>
+
+<p>This is an excellent way to investigate different filesystems
+without having to reformat a physical drive, which means you avoid
+the hassle of moving all your data. This method is quick -- very
+quick compared to preparing a physical device. What is truly great
+about this technique is that you can explore different filesystems
+such as reiserfs, ext3, or ext2 without having to purchase an
+additional physical drive. Since the same file can be mounted on
+more than one mount point, you can also investigate sync rates.</p>
+
+<p>Creating a filesystem in this manner allows you to set a hard
+limit on the amount of space used, which, of course, will be equal
+to the file size. This can be an advantage if you need to move this
+information to other servers. Since the contents cannot grow beyond
+the file, you can easily keep track of how much space is being
+used.</p>
+
+<p>First, you want to create a 20MB file by executing the following
+command:</p>
+
+<pre class="code">
+      $ dd if=/dev/zero of=disk-image count=40960
+      40960+0 records in
+      40960+0 records out
+</pre>
+
+<p>A count of 40960 created a 20 MB file because, by default, dd uses a
+block size of 512 bytes. That makes the size: 40960*512=20971520.</p>
+
+<pre class="code">
+      $ ls -l disk-image
+      -rw-rw-r--    1 chirico  chirico  20971520 Sep  3 14:24 disk-image
+</pre>
+
+<p>Next, to format this as an ext3 filesystem, you just execute the
+following command:</p>
+
+<pre class="code">
+      $ /sbin/mkfs -t ext3 -q disk-image
+      mke2fs 1.32 (09-Nov-2002)
+      disk-image is not a block special device.
+      Proceed anyway? (y,n) y
+</pre>
+
+<p>You are asked whether to proceed because this is a file, and not
+a block device. That is OK. We will mount this as a loopback device
+so that this file will simulate a block device.</p>
+
+<p>Next, you need to create a directory that will serve as a mount
+point for the loopback device.</p>
+
+<pre class="code">
+      $ mkdir fs
+</pre>
+
+<p>You are now one step away from the last step. You just want to
+find out what the next available loopback device number is.
+Normally, loopback devices start at zero (/dev/loop0) and work
+their way up (/dev/loop1, /dev/loop2, ... /dev/loopn). An easy way
+for you to find out what loopback devices are being used is to look
+into /proc/mounts, since the mount command may not give you what
+you need.</p>
+
+<pre class="code">
+      $ cat /proc/mounts
+
+      rootfs / rootfs rw 0 0
+      /dev/root / ext3 rw 0 0
+      /proc /proc proc rw,nodiratime 0 0
+      none /sys sysfs rw 0 0
+      /dev/sda1 /boot ext3 rw 0 0
+      none /dev/pts devpts rw 0 0
+      /proc/bus/usb /proc/bus/usb usbdevfs rw 0 0
+      none /dev/shm tmpfs rw 0 0
+</pre>
+
+<p>On my computer, I have no loopback devices mounted, so I'm OK to
+start with zero. You must do the next command as root, or with an
+account that has superuser privileges.</p>
+
+<pre class="code">
+      # mount -o loop=/dev/loop0 disk-image fs
+</pre>
+
+<p>That's it. You just mounted the file as a device. Now take a
+look at /proc/mounts, you will see this is using /dev/loop0.</p>
+
+<pre class="code">
+      $ cat /proc/mounts
+
+      rootfs / rootfs rw 0 0
+      /dev/root / ext3 rw 0 0
+      /proc /proc proc rw,nodiratime 0 0
+      none /sys sysfs rw 0 0
+      /dev/sda1 /boot ext3 rw 0 0
+      none /dev/pts devpts rw 0 0
+      /proc/bus/usb /proc/bus/usb usbdevfs rw 0 0
+      none /dev/shm tmpfs rw 0 0
+      /dev/loop0 /home/chirico/junk/fs ext3 rw 0 0
+</pre>
+
+<p>You can now create new files, write to them, read them, and do
+everything you normally would do on a disk drive. First, I'll give
+access to the chirico account.</p>
+
+<pre class="code">
+      # chown -R chirico.chirico /home/chirico/junk/fs
+</pre>
+
+<p>Now, under the chirico account, it is possible to create
+files.</p>
+
+<pre class="code">
+      $ cd /home/chirico/fs
+      $ mkdir one two three
+      $ ls -l
+
+      total 15
+      drwx------    2 chirico  chirico     12288 Sep  3 14:28 lost+found
+      drwxrwxr-x    2 chirico  chirico      1024 Sep  3 14:34 one
+      drwxrwxr-x    2 chirico  chirico      1024 Sep  3 14:34 three
+      drwxrwxr-x    2 chirico  chirico      1024 Sep  3 14:34 two
+
+      $ df -h
+
+      Filesystem            Size  Used Avail Use% Mounted on
+      /dev/sda2              17G   11G  4.6G  71% /
+      /dev/sda1              99M   83M   11M  89% /boot
+      none                   62M     0   62M   0% /dev/shm
+      /home/chirico/junk/disk-image
+                             20M  1.1M   18M   6% /home/chirico/junk/fs
+</pre>
+
+<p>If you need to unmount the filesystem, as root, just issue the
+umount command. If you need to free the loopback device, execute
+the losetup command with the -d option. You can execute both
+commands as follows:</p>
+
+<pre class="code">
+      # umount /home/chirico/junk/fs
+      # losetup -d /dev/loop0
+</pre>
+
+<h2>Using RWX -- The Old Way To Collaborate</h2>
+
+<p>Before we get started with ACL, how would you set up rights on
+the filesystem so that users could create and save documents that
+others could modify? For instance, let's say that users chirico and
+sporkey are collaborating on a project together.</p>
+
+<p>Well, you have to add everyone to the same group. You would
+execute commands like these:.</p>
+
+<pre class="code">
+      # groupadd sharefs
+      # chown -R root.sharefs /home/chirico/junk/fs
+      # chmod 2775 /home/chirico/junk/fs
+      # usermod -G sharefs sporkey
+      # usermod -G sharefs chirico
+</pre>
+
+<p>Note that if these changes do not take effect for your users
+(for example, if they were logged in when you executed the
+commands), they'll have to log out and log in again or execute the
+"<code>$ newgrp sharefs</code>" command. No big deal, right? Well,
+keep reading, and see how ACL avoids this step.</p>
+
+<p>More importantly, even though the <b>old way</b> worked for you,
+at some point, new users may need to be added to the project. What
+if some of these users only need a subset of the rights? For
+instance, you have developers, testers, managers, and a few special
+people. There are limits to what the 'rwx'-type rights can do. ACL
+solves a lot of these problems.</p>
+
+<h2>ACL, Reiserfs, and AES Encryption: The 2.6 Kernel</h2>
+
+<p>For the next steps, I will assume that you are running Red Hat
+Fedora Core 2. If not, reference the 2.6 kernel upgrade section
+below. Four things will be covered in this section:</p>
+
+<ul>
+<li>Create A File With Random Data</li>
+
+<li>Set Up An AES Encrypted Loopback Device With Password</li>
+
+<li>Build A Reiser Filesystem On The Loopback Device</li>
+
+<li>Mount With ACL Capabilities</li>
+</ul>
+
+<p>Your installation of Fedora Core 2, by default, will be
+configured for loop, cryptoloop, and aes, but it is highly unlikely
+that you will have all of these modules loaded. So, execute the
+following commands to load these modules (you will need to do this
+as root):</p>
+
+<pre class="code">
+      # modprobe loop
+      # modprobe cryptoloop
+      # modprobe aes
+</pre>
+
+<p>Next, create a directory to store the files. The Reiser
+filesystem will require more space than the ext3 filesystem.</p>
+
+<pre class="code">
+      # mkdir /home/diskimg
+      # cd /home/diskimg
+</pre>
+
+<p>Instead of creating the file zeroed out, like you did with the
+ext3 filesystem, this one is going to contain random bits, which
+may add a little extra security.</p>
+
+<pre class="code">
+      # dd if=/dev/urandom of=disk-aes count=102400
+</pre>
+
+<p>We need to encrypt the loop device, so you need to use losetup.
+You will be prompted for a password, which you will need to
+remember when you mount the device.</p>
+
+<pre class="code">
+      # losetup -e aes /dev/loop1 ./disk-aes
+        Password:
+</pre>
+
+<p>This step is new also. Instead of formatting the file directly,
+you will format the loop device. The file stays encrypted. Again,
+you will be prompted to continue, so just enter "y".</p>
+
+<pre class="code">
+      # mkfs -t reiserfs /dev/loop1
+
+      mkfs.reiserfs 3.6.13 (2003 www.namesys.com)                                                
+                                                                                           
+      A pair of credits:                                                                   
+      Elena Gryaznova performed testing and benchmarking.                                  
+                                                                                           
+      The  Defense  Advanced  Research  Projects Agency (DARPA, www.darpa.mil) is the      
+      primary sponsor of Reiser4.  DARPA  does  not  endorse  this project; it merely      
+      sponsors it.                                                                         
+                                                                                           
+                                                                                           
+      Guessing about desired format.. Kernel 2.6.8-1.521 is running.                       
+      Format 3.6 with standard journal                                                     
+      Count of blocks on the device: 12800                                                 
+      Number of blocks consumed by mkreiserfs formatting process: 8212                     
+      Blocksize: 4096                                                                      
+      Hash function used to sort names: "r5"                                               
+      Journal Size 8193 blocks (first block 18)                                            
+      Journal Max transaction length 1024                                                  
+      inode generation number: 0                                                           
+      UUID: 435e3495-5e2e-489d-bf55-1b5f9a44b670                                           
+      ATTENTION: YOU SHOULD REBOOT AFTER FDISK!                                            
+              ALL DATA WILL BE LOST ON '/dev/loop1'!                                       
+
+      Continue (y/n):y                                                                     
+      Initializing journal - 0%....20%....40%....60%....80%....100%                        
+      Syncing..ok                                                                          
+                                                                                           
+      Tell your friends to use a kernel based on 2.4.18 or later, and especially not a     
+      kernel based on 2.4.9, when you use reiserFS. Have fun.                              
+                                                                                           
+      ReiserFS is successfully created on /dev/loop1.                                      
+</pre>
+
+<p>Create the mount point /fs, and mount this device. Note that you
+will be entering the acl option as well. Plus, you will prompted
+for a password.</p>
+
+<pre class="code">
+      # mkdir /fs
+      # mount -o loop,encryption=aes,acl ./disk-aes /fs
+        Password:
+</pre>
+
+<p>Ok, now take a look at the mount command. It should show up as
+the Reiser filesystem, encrypted, using ACL. Note that it says
+loop2; it mounted it on /dev/loop2, which is one above what losetup
+specified, /dev/loop1.</p>
+
+<pre class="code">
+      $ mount
+      /home/diskimg/disk-aes on /fs type reiserfs (rw,loop=/dev/loop2,encryption=aes,acl)
+</pre>
+
+<h2>Exploring ACL</h2>
+
+<p>With ACL (Access Control Lists), you have finer control over
+access permissions. With the rwx permission scheme, you cannot
+easily change rights without creating new groups to handle the
+users. With ACL, you can set user permissions without creating a
+group, and individual users can add or remove access.</p>
+
+<p>These rights are set with the <code>setfacl</code> command. The
+command below will give the users donkey, chirico, and bozo2 access
+to this new filesystem that we mounted. Again, I'm assuming that
+you are using Fedora Core 2, or some distribution that is set up
+for ACL.</p>
+
+<pre class="code">
+# setfacl -R -m d:u:donkey:rwx,d:u:chirico:rwx,d:u:bozo2:rwx /fs
+</pre>
+
+<p>Next, create a few directories as one of the users. The example
+below was done as the user chirico.</p>
+
+<pre class="code">
+      $ mkdir /fs/one
+      $ touch /fs/one/stuff
+      $ ls -l /fs/one/stuff
+      -rw-rw----+ 1 chirico chirico 0 Sep  3 17:48 /fs/one/stuff
+</pre>
+
+<p>Notice the plus sign in the last line. It tells us a little
+about who has access. So, as user chirico, the getfacl command can
+be executed:</p>
+
+<pre class="code">
+      $ getfacl /fs/one/stuff                                    
+
+      getfacl: Removing leading '/' from absolute path names     
+      # file: fs/one/stuff                                       
+      # owner: chirico                                           
+      # group: chirico                                           
+      user::rw-                                                  
+      user:chirico:rwx                #effective:rw-             
+      user:donkey:rwx                 #effective:rw-             
+      user:bozo2:rwx                  #effective:rw-             
+      group::r-x                      #effective:r--             
+      mask::rw-                                                  
+      other::---                                                 
+</pre>
+
+<p>We now see that donkey, chirico, and bozo2 have effective rights
+on this file. Chirico has enough rights to remove bozo2.</p>
+
+<pre class="code">
+      $ setfacl -x u:bozo2 /fs/one/stuff
+      $ getfacl /fs/one/stuff
+      getfacl: Removing leading '/' from absolute path names
+      # file: fs/one/stuff
+      # owner: chirico
+      # group: chirico
+      user::rw-
+      user:chirico:rwx
+      user:donkey:rwx
+      group::r-x
+      mask::rwx
+      other::---
+</pre>
+
+<p>This is just scratching the surface of what can be done with
+ACL. For more information, see some of the references below.</p>
+
+<h2>2.6 Kernel Upgrade</h2>
+
+<p><a href=
+"http://prdownloads.sourceforge.net/souptonuts/README_26.txt?download">
+This article</a> will get you started with the 2.6 kernel if you
+are currently running Red Hat 8 or 9. You may want to take a look
+at it to see what is involved. If you decide to upgrade, you will
+need to configure your kernel for the following:</p>
+
+<pre class="code">
+      CONFIG_BLK_DEV_LOOP
+      CONFIG_BLK_DEV_CRYPTOLOOP
+      CONFIG_CRYPTO_AES_586
+</pre>
+
+<p>This is done in the .config file, and you can download my config
+file <a href=
+"http://prdownloads.sourceforge.net/souptonuts/configs-0.4.tar.gz?download">
+here</a>. Just look for
+kernel-2.6.8.1-i686-chirico-reiserfsacl.config in the tar.gz.</p>
+
+<p>In addition to upgrading the kernel, you will need the latest
+version of <a href=
+"ftp://ftp.kernel.org/pub/linux/utils/util-linux/">the Linux
+utilities</a>. Currently, there is no need to patch this version.
+In the past, there was a patch, but this version worked fine for
+me.</p>
+
+<p>You will also need <a href=
+"ftp://ftp.namesys.com/pub/reiserfsprogs/reiserfsprogs-3.6.18.tar.gz">
+the Reiser tools</a>.</p>
+
+<h2>References</h2>
+
+<dl>
+<dt><a href=
+"http://prdownloads.sourceforge.net/souptonuts/How_to_Linux_and_Open_Source.txt?download">
+Linux Tips and Tricks</a></dt>
+
+<dd>Check out tips 12, 22, and 91, on how to use ssh with rsync.
+You can create a virtual filesystem on a server, then copy it to
+your laptop. As you work on the laptop, sync your changes using
+rsync.</dd>
+
+<dt><a href="http://www.linux-mag.com/2003-09/acls_01.html">Linux
+Magazine's article on ACL</a></dt>
+
+<dd>This article goes into more depth on adding and removing
+users.</dd>
+
+<dt><a href=
+"http://www.suse.de/%7Eagruen/acl/chapter/fs_acl-en.pdf">Access
+Control Lists in Linux</a></dt>
+
+<dd>A PDF from Andreas Gr&uuml;nbacher.</dd>
+
+<dt><a href=
+"http://www.advancedlinuxprogramming.com/alp-folder">Advanced Linux
+Programming</a></dt>
+
+<dd>by Mark Mitchell, Jeffrey Oldham, and Alex Samuel, of
+CodeSourcery LLC, published by New Riders Publishing, ISBN
+0-7357-1043-0, First Edition, June 2001. This book is free and you
+can view it online. <a href=
+"http://www.advancedlinuxprogramming.com/alp-folder/alp-ch06-mastering-linux.pdf">
+Chapter 6</a> describes loopback devices.</dd>
+
+<dt><a href="http://www.flyn.org/docs/ehd.pdf">Implementing
+Encrypted Home Directories</a></dt>
+
+<dd>W. Michael Petullo, July 23, 2003.</dd>
+
+<dt><a href=
+"http://www.tldp.org/HOWTO/Loopback-Encrypted-Filesystem-HOWTO.html">
+The Loopback Encrypted Filesystem HOWTO</a></dt>
+
+<dd>By Ryan T. Rhea.</dd>
+</dl>
+
+<h3>Other Articles by Mike Chirico</h3>
+
+<dl>
+<dt><a href="http://linuxgazette.net/106/chirico.html">Lemon Parser
+Generator Tutorial</a></dt>
+
+<dd>This is a yacc alternative that is compact and thread safe. It
+is used in the <a href=
+"http://freshmeat.net/projects/sqlite/">sqlite</a> project.</dd>
+
+<dt><a href="http://www.advogato.org/article/794.html">Recommended
+Reading</a></dt>
+
+<dd>Read what others suggest. I started with a list of my own, and
+will add suggestions from other developers, readers, and
+opinionated people.</dd>
+
+<dt><a href=
+"http://prdownloads.sourceforge.net/souptonuts/README_mysql.txt?download">
+README_mysql.txt</a></dt>
+
+<dd>Tips on MySQL.</dd>
+
+<dt><a href=
+"http://prdownloads.sourceforge.net/souptonuts/README_COMCAST_EMAIL.txt?download">
+README_COMCAST_EMAIL.txt</a></dt>
+
+<dd>Tips on using Comcast Email with a home Linux box.</dd>
+</dl>
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<p>
+
+<img align="left" alt="[BIO]" src="../gx/authors/chirico.jpg" class="bio">
+
+<em>
+
+Mike Chirico, a father of triplets (all girls) lives outside of
+Philadelphia, PA, USA. He has worked with Linux since 1996, has a Masters
+in Computer Science and Mathematics from Villanova University, and has
+worked in computer-related jobs from Wall Street to the University of
+Pennsylvania. His hero is Paul Erdos, a brilliant number theorist who was
+known for his open collaboration with others.
+<br> Mike's notes page is <a
+href="http://souptonuts.sourceforge.net/chirico/index.php">souptonuts</a>.
+
+
+</em>
+<br clear="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2004, Mike Chirico. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 109 of Linux Gazette, December 2004
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="lg_bytes.html" >&lt;-- prev</A> | <A HREF="chirico1.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">December 2004 (#109)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/2003/sit3-shine.7-2.gif" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

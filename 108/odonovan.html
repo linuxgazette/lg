@@ -1,0 +1,492 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Advanced Features of netfilter/iptables LG #108</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="nielsen.html" >&lt;-- prev</A> | <A HREF="okopnik.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Advanced Features of netfilter/iptables</h1>
+<p id="by"><b>By <A HREF="../authors/odonovan.html">Barry O'Donovan</A></b></p>
+
+<p>
+<h3>Introduction</h3>
+It is commonly known that netfilter/iptables is the firewall of the
+Linux operating system. What is not commonly known is that iptables
+has many hidden gems that can allow you do things with your
+firewall that you might never have even imagined. In this article I
+am going to introduce many of these features with some practical
+uses. If you are not <em>au fait</em> with the basics of iptables
+then you should read my previous article in the Gazette, "<a href=
+"../103/odonovan.html">Firewalling with netfilter/iptables</a>".
+<p>The following features are discussed:</p>
+<ol>
+<li>Specifying multiple ports in one rule</li>
+<li>Load balancing</li>
+<li>Restricting the number of connections</li>
+<li>Maintaining a list of recent connections to match against</li>
+<li>Matching against a string in a packet's data payload</li>
+<li>Time-based rules</li>
+<li>Setting transfer quotas</li>
+<li>Packet matching based on TTL values</li>
+</ol>
+<p>All of the features discussed in this article are extensions to
+the packet matching modules of iptables. I used only two of these
+extensions in the previous article: the <code>--state</code> module
+which allowed us to filter packets based on whether they were
+<code>NEW</code>, <code>ESTABLISHED</code>, <code>RELATED</code> or
+<code>INVALID</code> connections; and the <code>multiport</code>
+extension, of which I will go into more detail on in this
+article.</p>
+<p>Some of the modules introduced in this article (marked with an
+asterisk) have not made their way into the default Linux kernel yet
+but a netfilter utility called "patch-o-matic" can be used to add
+them to your own kernel and this will be discussed at the end of
+the article.</p>
+<h3>1. Specifying Multiple Ports with <code>multiport</code></h3>
+The <code>multiport</code> module allows one to specify a number of
+different ports in one rule. This allows for fewer rules and easier
+maintenance of iptables configuration files. For example, if we
+wanted to allow global access to the SMTP, HTTP, HTTPS and SSH
+ports on our server we would normally use something like the
+following:
+<pre class="code">
+-A INPUT -i eth0 -p tcp -m state --state NEW --dport ssh   -j ACCEPT
+-A INPUT -i eth0 -p tcp -m state --state NEW --dport smtp  -j ACCEPT
+-A INPUT -i eth0 -p tcp -m state --state NEW --dport http  -j ACCEPT
+-A INPUT -i eth0 -p tcp -m state --state NEW --dport https -j ACCEPT
+</pre>
+Using the <code>multiport</code> matching module, we can now write:
+<pre class="code">
+-A INPUT -i eth0 -p tcp -m state --state NEW -m multiport --dports ssh,smtp,http,https -j ACCEPT
+</pre>
+It must be used in conjunction with either <code>-p tcp</code> or
+<code>-p udp</code> and only up to 15 ports may be specified. The
+supported options are:
+<blockquote>
+<dl>
+<dt><code>--sports port[,port,port...]</code></dt>
+<dd>matches source port(s)</dd>
+<dt><code>--dports port[,port,port...]</code></dt>
+<dd>matches destination port(s)</dd>
+<dt><code>--ports port[,port,port...]</code></dt>
+<dd>matches both source and destination port(s)</dd>
+</dl>
+</blockquote>
+<p><code>mport</code><sup>*</sup> is another similar extension that
+also allows you to specify port ranges, e.g. <code>--dport
+22,80,6000:6100</code>.</p>
+<h3>2. Load Balancing with <code>random</code><sup>*</sup> or
+<code>nth</code><sup>*</sup></h3>
+Both the <code>random</code> and <code>nth</code> extensions can be
+used for load balancing. If, for example, you wished to balance
+incoming web traffic between four mirrored web servers then you
+could add either of the following rule sets to your
+<code>nat</code> table:
+<pre class="code">
+-A PREROUTING -i eth0 -p tcp --dport 80 -m state --state NEW -m nth --counter 0 --every 4 --packet 0 \
+    -j DNAT --to-destination 192.168.0.5:80
+-A PREROUTING -i eth0 -p tcp --dport 80 -m state --state NEW -m nth --counter 0 --every 4 --packet 1 \
+    -j DNAT --to-destination 192.168.0.6:80
+-A PREROUTING -i eth0 -p tcp --dport 80 -m state --state NEW -m nth --counter 0 --every 4 --packet 2 \
+    -j DNAT --to-destination 192.168.0.7:80
+-A PREROUTING -i eth0 -p tcp --dport 80 -m state --state NEW -m nth --counter 0 --every 4 --packet 3 \
+    -j DNAT --to-destination 192.168.0.8:80
+</pre>
+or:
+<pre class="code">
+-A PREROUTING -i eth0 -p tcp --dport 80 -m state --state NEW -m random --average 25 \
+    -j DNAT --to-destination 192.168.0.5:80
+-A PREROUTING -i eth0 -p tcp --dport 80 -m state --state NEW -m random --average 25 \
+    -j DNAT --to-destination 192.168.0.6:80
+-A PREROUTING -i eth0 -p tcp --dport 80 -m state --state NEW -m random --average 25 \
+    -j DNAT --to-destination 192.168.0.7:80
+-A PREROUTING -i eth0 -p tcp --dport 80 -m state --state NEW \
+    -j DNAT --to-destination 192.168.0.8:80
+</pre>
+The <code>nth</code> matching extension allows you to match the nth
+packet received by the rule. There are up to 16 (0...15) counters
+for matching the nth packets. The above four (<code>nth</code>)
+rules use counter 0 to count every 4th packet. Once the 4th packet
+is received, the counter is reset to zero. The first rule matches
+the 1st packet (<code>--packet 0</code>) of every four counted, the
+second rule matches the 2nd packet (<code>--packet 0</code>), and
+so on.
+<p>The <code>random</code> matching extension allows you to match
+packets based on a given probability. The first rule from the set
+of <code>random</code> rules above matches 25% (<code>--average
+25</code>) of the TCP connections to port 80 and redirects these to
+the first mirrored web server. Of the 75% of connections not
+matching on the first rule, 25% will match the second and a further
+25% will match the third. The remaining 25% will be caught by the
+fourth rule.</p>
+<p>Another use of the <code>random</code> extension would be to
+simulate a faulty network connection to evaluate the performance of
+networking hardware/software, etc.</p>
+<h3>3. Restricting the Number of Connections with
+<code>limit</code> and <code>iplimit</code><sup>*</sup></h3>
+The <code>limit</code> matching extension can be used to limit the
+number of times a rule matches in a given time period while the
+<code>iplimit</code> extension can restrict the number of parallel
+TCP connections from a particular host or network. These extensions
+can be used for a variety of purposes:
+<ul>
+<li>to protect against DOS (denial of service) attacks such as
+preventing a flood of HTTP requests to your web server while
+ensuring all your customers have unlimited access;</li>
+<li>to prevent a brute-force attack to guess passwords;</li>
+<li>to limit Internet usage by staff during working hours;</li>
+<li>and many many more.</li>
+</ul>
+Let's take the case where we want to limit the Internet usage of
+our employees during working hours. We could use a rule like:
+<pre class="code">
+-A FORWARD -m state --state NEW -p tcp -m multiport --dport http,https -o eth0 -i eth1 \
+    -m limit --limit 50/hour --limit-burst 5 -j ACCEPT
+</pre>
+This rule assumes that we are acting as a proxy server where the
+external connection is via <code>eth0</code> and <code>eth1</code>
+connects to our office network. The rule limits all of our internal
+computers to only 50 new HTTP or HTTPS connections per hour and the
+use of <code>--limit-burst</code> prevents any one employee from
+using up all 50 in one go. Packets can be matched
+<code>/day</code>, <code>/hour</code>, <code>/minute</code> or
+<code>/sec</code>.
+<p>The <code>--limit-burst</code> parameter can be quite confusing
+at first. In the above example, it will ensure that if all
+employees are trying to access the Internet throughout the hour
+then only 5 connections are made every 5 minutes. If 30 minutes
+pass with no connections and then there is a sudden rush for the
+remaining 30 minutes, only 5 connections will be permitted every
+2.5 minutes. I once heard it explained as follows:</p>
+<blockquote><em>For every</em> <code>limit</code> <em>rule, there's
+a "bucket" containing "tokens". Whenever the rule matches, a token
+is removed and when the token count reaches zero, the rule doesn't
+match anymore.</em>
+<p><code>--limit</code> <em>is the bucket refill rate.</em><br>
+<code>--limit-burst</code> <em>is the bucket size (number of tokens
+that it can hold).</em></p>
+</blockquote>
+<p>The <code>iplimit</code> extension allows us to restrict the
+number of parallel TCP connections from a particular host or
+network. If, for example, we wanted to limit the number of HTTP
+connections made by any single IP address to 5 we could use:</p>
+<pre class="code">
+-A INPUT -p tcp -m state --state NEW --dport http -m iplimit --iplimit-above 5 -j DROP
+</pre>
+<h3>4. Maintaining a List of <code>recent</code> Connections to
+Match Against</h3>
+By using the <code>recent</code> extension one can dynamically
+create a list of IP addresses that match a rule and then match
+against these IPs in different ways later. One possible use would
+be to create a "temporary" bad-guy list by detecting possible port
+scans and to then <code>DROP</code> all other connections from the
+same source for a given period of time
+<p>Port 139 is one of the most dangerous ports for Microsoft
+Windows&reg; users as it is through this port that the Windows file
+and print sharing service runs. This also makes this port one of
+the first scanned by many port scanners or potential hackers and a
+target for many of the worms around today. We can use the
+<code>recent</code> matching extension to temporarily block any IP
+from connecting with our machine that scans this port as
+follows:</p>
+<pre class="code">
+-A FORWARD -m recent --name portscan --rcheck --seconds 300 -j DROP
+-A FORWARD -p tcp -i eth0 --dport 139 -m recent --name portscan --set -j DROP
+</pre>
+Now anyone trying to connect to port 139 on our firewall will have
+all of their packets dropped until 300 seconds has passed. The
+supported options include:
+<blockquote>
+<dl>
+<dt><code>--name name</code></dt>
+<dd>The name of the list to store the IP in or check it against. If
+no name is given then <code>DEFAULT</code> will be used</dd>
+<dt><code>--set</code></dt>
+<dd>This will add the source address of the packet to the list. If
+the source address is already in the list, this will update the
+existing entry.</dd>
+<dt><code>--rcheck</code></dt>
+<dd>This will check if the source address of the packet is
+currently in the list.</dd>
+<dt><code>--update</code></dt>
+<dd>This will check if the source address of the packet is
+currently in the list. If it is then that entry will be updated and
+the rule will return true.</dd>
+<dt><code>--remove</code></dt>
+<dd>This will check if the source address of the packet is
+currently in the list and if so that address will be removed from
+the list and the rule will return true.</dd>
+<dt><code>--seconds seconds</code></dt>
+<dd>This option must be used in conjunction with one of
+<code>--rcheck</code> or <code>--update</code>. When used, this
+will narrow the match to only happen when the address is in the
+list and was seen within the last given number of seconds.</dd>
+<dt><code>--hitcount hits</code></dt>
+<dd>This option must be used in conjunction with one of
+<code>--rcheck</code> or <code>--update</code>. When used, this
+will narrow the match to only happen when the address is in the
+list and packets had been received greater than or equal to the
+given value. This option may be used along with `seconds' to create
+an even narrower match requiring a certain number of hits within a
+specific time frame.</dd>
+</dl>
+</blockquote>
+<h3>5. Matching Against a <code>string</code><sup>*</sup> in a
+Packet's Data Payload</h3>
+The <code>string</code> extension allows one to match a string
+anywhere in a packet's data payload. Although this extension does
+have many valid uses, I would strongly advise caution. Let's say,
+for example, that our Linux firewall is protecting an internal
+network with some computers running Microsoft Windows&reg; and we
+would like to block all executable files. We might try something
+like:
+<pre class="code">
+-A FORWARD -m string --string '.com' -j DROP
+-A FORWARD -m string --string '.exe' -j DROP
+</pre>
+This has a number of problems:
+<ul>
+<li>if the '<code>.com</code>' or '<code>.exe</code>' is split
+across two packets it will not be matched</li>
+<li>if any packet being transmitted contains either of the stings
+it will be dropped; this includes any packets from a web page
+containing those strings, from an e-mail transmission, etc</li>
+</ul>
+<h3>6. Time-based Rules with <code>time</code><sup>*</sup></h3>
+We can match rules based on the time of day and the day of the week
+using the <code>time</code> module. This could be used to limit
+staff web usage to lunch-times, to take each of a set of mirrored
+web servers out of action for automated backups or system
+maintenance, etc. The following example allows web access during
+lunch hour:
+<pre class="code">
+-A FORWARD -p tcp -m multiport --dport http,https -o eth0 -i eth1 \
+    -m time --timestart 12:30 --timestop 13:30 --days Mon,Tue,Wed,Thu,Fri -j ACCEPT
+</pre>
+Clearly the start and stop times are 24-hour with the format
+<code>HH:MM</code>. The day is a comma-separated list that is case
+sensitive and made up of <code>Mon</code>, <code>Tue</code>,
+<code>Wed</code>, <code>Thu</code>, <code>Fri</code>,
+<code>Sat</code> and/or <code>Sun</code>.
+<h3>7. Setting transfer quotas with
+<code>quota</code><sup>*</sup></h3>
+Setting transfer quotas can be very useful in many situations. As
+an example, a lot of broadband users will have download quotas set
+for them by their ISP and many may charge extra for every megabyte
+transferred in excess of this quota. You can use iptables to
+monitor your usage and cut you off when you reach your quota (say
+2GB) with a rule similar to the following:
+<pre class="code">
+-A INPUT -p tcp -m quota --quota 2147483648 -j ACCEPT
+-A INPUT -j DROP
+</pre>
+You can then view your usage with the following command:<br>
+<code>$ iptables -v -L</code>
+<p>You would also need to reset the quota every month manually (by
+restarting iptables) or with a cron job. Clearly your computer
+would need to be 'always-on' for this example to be of any use, but
+there are also any other situations where the <code>quota</code>
+extension would be useful.</p>
+<h3>8. Packet Matching Based on TTL Values</h3>
+The TTL (Time-To-Live) value of a packet is an 8-bit number that is
+decremented by one each time the packet is processed by an
+intermediate host between its source and destination. The default
+value is operating system dependant and usually ranges from 32 to
+128. Its purpose includes ensuring that no packet stays in the
+network for an unreasonable length of time, gets stuck in an
+endless loop because of bad routing tables, etc. Once the TTL value
+of a packet reaches 0 it is discarded and a message is sent to its
+source which can decide whether or not to resend it.
+<p>As an interesting aside: this is actually how the
+<code>traceroute</code> command works. It sends a packet to the
+destination with a TTL of 1 first and gets a reply from the first
+intermediate host. It then sends a packet with a TTL of 2 and
+receives a reply from the second intermediate host and so on until
+it reaches its destination.</p>
+<p>The usefulness of packet matching based on TTL value depends on
+your imagination. One possible use is to identify
+"man-in-the-middle" attacks. If you regularly connect from home to
+work you could monitor your TTL values and establish a reasonable
+maximum value at the receiving end. You can the use this to deny
+any packets that arrive with a higher TTL value as it may indicate
+a possible "man-in-the-middle" attack; someone intercepting your
+packets, reading/storing them and resending them onto the
+destination. There are of course "man-in-the-middle" methods that
+wouldn't alter the TTL value but, as always, security is never
+absolute, only incremental. TTL matching could also be used for
+network debugging or to find hosts with bad default TTL values.</p>
+<p>As a simple example, let's reject all packets from a specific IP
+with a TTL of less than 40:</p>
+<pre class="code">
+-A INPUT -s 1.2.3.4 -m ttl --ttl-lt 40 -j REJECT
+</pre>
+You can also check for TTL values that are less than
+(<code>--ttl-gt</code>) or equal to (<code>--ttl-eq</code>) a
+particular value.
+<h3>Patching Your Kernel with Patch-O-Matic (POM)</h3>
+Some of the newer features introduced in this article are not
+considered stable enough by the netfilter development team for
+inclusion in the current Linux kernel. To use these you will need
+to patch your kernel using a utility called patch-o-matic. This is
+not for the faint of heart and I am not going to provide
+step-by-step instructions here. I will simply cover patch-o-matic
+and provide references to more information.
+<p>Patch-o-matic can be downloaded from the netfilter homepage,
+<a href="http://www.netfilter.org/">http://www.netfilter.org/</a>.
+You will also need the source code for your kernel (if you are
+using a kernel supplied with your distribution, install the
+<code>kernel-source</code> package or install a new kernel by
+downloading the latest kernel source code from <a href=
+"http://www.kernel.org/">http://www.kernel.org/</a>) and the source
+code for iptables which you can also download from the netfilter
+homepage. Once you have these, unpack them and execute the
+<code>runme</code> script from patch-o-matic as follows:<br>
+<code>$ KERNEL_DIR=&lt;path to the kernel source code&gt;
+IPTABLES_DIR=&lt;path to the iptables source code&gt; ./runme
+extra</code></p>
+<p>The script describes each new extension and asks whether or not
+to patch the kernel for it. Once that is finished you will need to
+recompile the kernel, the netfilter kernel modules and the iptables
+binaries. This is outside the scope of this article but you will
+find useful information on the following sites:</p>
+<ul>
+<li><a href=
+"http://www.netfilter.org/documentation/HOWTO/netfilter-extensions-HOWTO.html">
+Netfilter Extensions HOWTO</a></li>
+<li><a href=
+"http://www.digitalhermit.com/linux/Kernel-Build-HOWTO.html">Kernel
+Rebuild Guide</a><br>
+(<em>this was part of the <a href="http://www.tldp.org/">The Linux
+Documentation Project</a> but was removed for review - this is the
+latest version from that review process but it is still in
+development</em>)</li>
+</ul>
+
+
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<p>
+<! -- REPLACE THE FOLLOWING WITH AUTHOR'S ~200x200 PIC. -->
+<img align="left" alt="[BIO]" src="../gx/authors/odonovan.jpg" class="bio">
+<em>
+
+<! -- BIO GOES HERE -->
+
+Barry O'Donovan graduated from the National University of Ireland, Galway
+with a B.Sc. (Hons) in computer science and mathematics. He is currently
+completing a Ph.D. in computer science with the <a
+href="http://www.ihl.ucd.ie/">Information Hiding Laboratory</a>, University
+College Dublin, Ireland in the area of audio watermarking.
+
+<p> Barry has been using Linux since 1997 and his current flavor of choice
+is Fedora Core. He is a member of the <a href="http://www.linux.ie/">Irish
+Linux Users Group</a>. Whenever he's not doing his Ph.D. he can usually be
+found supporting his finances by doing some work for <a 
+href="http://www.openhosting.ie/" title="An Irish based web hosting and web 
+design company">Open Hosting</a>, in the pub with friends or running in the local 
+park.
+</em>
+<br clear="all">
+<!-- *** END bio *** -->
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2004, Barry O'Donovan. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 108 of Linux Gazette, November 2004
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="nielsen.html" >&lt;-- prev</A> | <A HREF="okopnik.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">November 2004 (#108)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/2003/sit3-shine.7-2.gif" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

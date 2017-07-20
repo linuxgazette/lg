@@ -1,0 +1,280 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>Viewing Faxes on the Web LG #85</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="mahoney.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../lg_faq.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="okopnik.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+
+<!--endcut ============================================================-->
+
+<TABLE BORDER><TR><TD WIDTH="200">
+<A HREF="http://www.linuxgazette.net/">
+<IMG ALT="LINUX GAZETTE" SRC="../gx/2002/lglogo_200x41.png" 
+	WIDTH="200" HEIGHT="41" border="0"></A> 
+<BR CLEAR="all">
+<SMALL>...<I>making Linux just a little more fun!</I></SMALL>
+</TD><TD WIDTH="380">
+
+
+<CENTER>
+<BIG><BIG><STRONG><FONT COLOR="maroon">Viewing Faxes on the Web</FONT></STRONG></BIG></BIG>
+<BR>
+<STRONG>By <A HREF="../authors/nielsen.html">Mark Nielsen</A></STRONG>
+</CENTER>
+
+</TD></TR>
+</TABLE>
+<P>
+
+<!-- END header -->
+
+
+
+<ol>
+<li>
+<a href="#Introduction">Introduction</a></li>
+<li><a href="#config">Setting up Apache 2.0</a></li>
+<li><a href="#s">Suggestions for you</a></li>
+<li><a href="#conclusion">Conclusion</a></li>
+<li><a href="#REF">References</a></li>
+</ol>
+
+<h3>
+<a NAME="Introduction"></a>Introduction</h3>
+The purpose of this article is to describe a simple Perl script I use
+to manage faxes on my fax server over the web. The method I use is very
+crude and is only used by myself and one other person in the company
+ I work for, 
+but it works for me. With very little effort, it would be very easy to 
+setup professional scripts to handle faxes from small to very large
+corporations. I also believe it would be very easy to setup a web interface
+for other fax systems (if they don't already have it). Personally, I would
+much rather send and receive faxes over a webpage because then I can access
+the system (and the faxes) from anywhere in the world. 
+<p>
+For my setup, I was using efax, which is not that easy to get along with.
+For any sane person, I recommend
+<a href="http://www.hylafax.org/">HylaFax</a> or some other alternative
+(mgetty has some hope). 
+<p>
+Please read my other efax article at
+<a href="http://linuxfocus.org/English/July2002/article249.shtml">Linux
+Focus</a>. 
+
+<h3>
+<a NAME="config"></a>Configuring Apache 2.0</h3>
+First, look at how I 
+<a href="misc/nielsen/Compile_Apache_Fax.bat.txt">compiled</a> and then 
+<a href="misc/nielsen/Apache.config.txt">
+configured</a> Apache 2.0. This is just one installation I did, out of many. 
+No, Php is not running on my webserver even though the config file says I am.
+<p>
+I have a directory, /usr/local/apache2/htdocs/fax, where I put in my
+Perl script and .htaccess files. 
+<p>
+Underneath this directory, I have these directories:
+<ul>
+<li>home -- my faxes go here</li>
+<li>ab -- where other Audioboomerang faxes go.</li>
+<li>source -- where we have the original faxes at.</li>
+<li>display -- the list of faxes yet to be viewed/archived.</li>
+<li>archives -- where the ps and pdf files are archived.</li>
+</ul>
+
+I put a .htaccess in these directories to limit access by people. An example
+.htaccess is
+<pre>
+AuthName Test
+AuthType Basic
+AuthUserFile /usr/local/apache2/passwords/Passwords
+
+order deny,allow
+require user mark ted
+</pre>
+<p>
+You can change/add passwords with htpasswd. 
+<p>
+Next, the last thing is to create a perl script. 
+Here is my very crude Perl script. If I ever do anything else with it, 
+I will convert it to a Python script first as Python is the next wave
+for programming (I hope). Python, Zope, Apache, Linux, and PostgreSQL 
+are the top choices for my programming environment. Save it as "fax.pl"
+and perform a "chmod 755 fax.pl" after saving it. 
+<p>
+You can <a href="misc/nielsen/fax.pl.txt">download</a> it or just view it below.
+<pre>
+#!/usr/bin/perl
+
+use CGI;
+
+print "Content-type: text/html\n\n\n";
+
+my $Home = "/usr/local/apache2/htdocs/fax";
+my $Source = "$Home/source";
+my $Archives = "$Home/archives";
+my $AB_Archives = "$Home/ab";
+my $Display = "$Home/display";
+my $Home_Archives = "$Home/home";
+
+`mkdir -p $Source`;
+`mkdir -p $Archives`;
+`mkdir -p $Display`;
+`rsync -av /var/spool/fax/incoming/fax* $Source`;
+`mkdir -p $AB_Archives`;
+
+#------------------------------------
+my @Files = &lt;$Source/fax*&gt;;
+foreach my $File (@Files) 
+  {
+#  print "$File\n";
+  my (@Temp) = split(/\//, $File);
+  my $File_Name = pop @Temp;
+  if (!(-e "$Archives/$File_Name\.pdf"))
+    {
+    print "&lt;br&gt;Processing new fax: $File\n";
+    my $Command = "tiff2ps $File &gt; $Archives/$File_Name\.ps";
+#    print "$Command\n"; 
+    `$Command`;
+    my $Command = "/usr/bin/ps2pdf $Archives/$File_Name\.ps $Archives/$File_Name\.pdf";
+#    print "$Command\n";
+    `$Command`;
+    `cp $Archives/$File_Name\.pdf $Display/$File_Name\.pdf`;
+
+    }
+  }
+
+#---------------------------------------
+my $query = new CGI;
+my $Action = $query-&gt;param('action');
+my $File = $query-&gt;param('file');
+$File =~ s/[^a-zA-Z0-9\_\.]//g;
+
+if (!(-e "$Display/$File")) {}
+elsif ($Action eq "archive") 
+  {
+  print "&lt;br&gt;Archiving $File\n";
+  `rm -f $Display/$File`;
+  }
+elsif ($Action eq "archive2")
+  {
+  print "&lt;br&gt;Archiving $File\n";
+  `cp $Display/$File $AB_Archives/`;
+  `rm -f $Display/$File`;
+  }
+elsif ($Action eq "archive_home")
+  {
+  print "&lt;br&gt;Archiving $File\n";
+  `cp $Display/$File $Home_Archives/`;
+  `rm -f $Display/$File`;
+  }
+
+
+print qq(&lt;hr&gt;&lt;a href="archives/"&gt;Archives&lt;/a&gt; -- might be password protected.
+&lt;br&gt;&lt;a href="home/"&gt;Home Archives&lt;/a&gt; -- might be password protected.
+&lt;br&gt;&lt;a href="ab/"&gt;Audioboomerang Archives&lt;/a&gt;\n);
+
+my $Table_Entries = "";
+my @Files = &lt;$Display/fax*&gt;;
+foreach my $File (sort @Files)
+  {
+  my (@Temp) = split(/\//, $File);
+  my $File_Name = pop @Temp;
+  my $Link = "&lt;a href='display/$File_Name'&gt;$File_Name&lt;/a&gt;";
+  my $Delete = "&lt;a href='fax.pl?action=archive&amp;file=$File_Name'&gt;archive file&lt;/a&gt;";
+  my $AB ="&lt;a href='fax.pl?action=archive2&amp;file=$File_Name'&gt;archive to AB&lt;/a&gt;";
+  my $Home ="&lt;a href='fax.pl?action=archive_home&amp;file=$File_Name'&gt;archive for Home&lt;/a&gt;";
+
+  $Table_Entries .= qq(&lt;tr&gt;&lt;td&gt;$Link&lt;/td&gt;&lt;td&gt;$Delete&lt;/td&gt;&lt;td&gt;$Home&lt;/td&gt;&lt;td&gt;$AB&lt;/td&gt;&lt;/tr&gt;\n);
+  }
+
+print "&lt;table border=1&gt;&lt;tr&gt;&lt;th&gt;View Fax&lt;/th&gt;&lt;th&gt;Archive the Fax&lt;/th&gt;
+&lt;th&gt;Archive to AudioBoomerang&lt;/th&gt;&lt;/tr&gt;\n";
+print $Table_Entries;
+print "&lt;/table&gt;\n";
+
+if (@Files &lt; 1) {print "&lt;h1&gt; No faxes or they are all archived.&lt;/h1&gt;\n";}
+
+
+
+
+
+
+</pre>
+
+<h3>
+<a NAME="s"></a>Suggestions for you.</h3>
+<ol>
+<li> I normally write in Python 2.2 these days, as this should be rewritten
+in. I just happened to use Perl because I was testing mod_perl and 
+Apache 2.0. </li>
+<li>Write a Python script to let people upload PostScript, images, or other
+file formats that Linux can convert to tiff to send out as faxes. In addition,
+the Python script should receive the telephone number, cover letter, etc.
+to make the system flexible.</li>
+<li> Create a Python/TK or <a href="http://wxpython.org/">wxPython</a>
+script which acts as a client program to send and recieve faxes from your 
+Apache 2.0 server. The trick here is that people might have to create
+a postscript file first to upload faxes or better yet, figure out some way
+to directly print to the Python Script. </li>
+<li>When you have a multiple page fax, have the Perl/Python
+ script on the webserver detect and order
+the pages and merge them into one ps file with psmerge or other tool.
+</li>
+<li>Faxes can be pretty sensitive so use the secure service in Apache 2.0
+for viewing or sending your faxes.</li>
+</ol>
+
+<h3>
+<a NAME="conclusion"></a>Conclusion</h3>
+I think it is pretty cool, and my boss thinks it is pretty cool. 
+I am going to switch to a different fax service because efax is hard to deal 
+with when sending faxes. My next goal is to make it so I can send faxes
+through a webpage. I will have to set it up so that you first print your
+document to a postscript file and then upload it (or upload a graphic image
+or something else that Linux can convert usign a standard tool). 
+<p>
+I am not sure what other fax setups utilize the web, but from my perspective,
+I always want to have access to my faxes over the web or to send a fax
+over the web. 
+
+<h3>
+<a NAME="REF"></a>References</h3>
+
+<ol>
+<li>
+If this article
+changes, it will be available here
+<a href="http://www.tcu-inc.com/Articles/31/nielsen.html">
+http://www.tcu-inc.com/Articles/31/nielsen.html</a></li>
+</ol>
+
+
+
+
+
+
+<!-- *** BEGIN copyright *** -->
+<hr>
+<CENTER><SMALL><STRONG>
+Copyright &copy; 2002, Mark Nielsen.
+Copying license <A HREF="../copying.html">http://www.linuxgazette.net/copying.html</A><BR> 
+Published in Issue 85 of <i>Linux Gazette</i>, December 2002
+</STRONG></SMALL></CENTER>
+<!-- *** END copyright *** -->
+<HR>
+
+<!--startcut ==========================================================-->
+<CENTER>
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="mahoney.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../lg_faq.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="okopnik.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+</CENTER>
+</BODY></HTML>
+<!--endcut ============================================================-->

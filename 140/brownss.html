@@ -1,0 +1,714 @@
+<!DOCTYPE html
+	PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+	 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="utf-8" xml:lang="utf-8">
+<head>
+<title>A Router With Just One Ethernet Port LG #140</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link rel="stylesheet" href="../lg.css" type="text/css" media="screen, projection"  />
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+<link rel="shortcut icon" href="../favicon.ico" />
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+</head>
+<body>
+
+<a href="../">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+<div id="navigation">
+<table summary="masthead" width="100%">
+<tr>
+<td align="center" colspan="3" style="font-size: 10px; font-weight: bold">
+<a href="../index.html">Home</a>
+<a href="http://linuxgazette.net">Main Site</a>
+<a href="../faq/index.html">FAQ</a>
+
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/mailman/listinfo/">Mailing Lists</a>
+<a href="../jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+<hr width="99%" style="border: 1px inset #000033">
+</td>
+</tr>
+<tr>
+<td width="40%" align="left" style="font-size: 10px; font-weight: bold">
+The Free International Online Linux Monthly
+</td>
+<td width="20%" align="center" style="font-size: 10px; font-weight: bold">
+ISSN: 1934-371X
+</td>
+<td width="40%" align="right" style="font-size: 10px; font-weight: bold">
+Main site: <a href="http://linuxgazette.net">http://linuxgazette.net</a> 
+</td>
+</table>
+</div>
+
+
+<div id="breadcrumbs1">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">July 2007 (#140)</a> &gt; 
+Article
+
+</div>
+
+<div class="articlecontent1">
+<div class="content">
+
+<div id="previousnexttop">
+<A HREF="lg_bytes.html" >&lt;-- prev</A> | <A HREF="colello.html" >next --&gt;</A>
+</div>
+
+<h1>A Router With Just One Ethernet Port</h1>
+<p id="by"><b>By <a href="../authors/brownss.html">Silas Brown</a></b></p>
+
+<p>If you want to connect multiple computers to
+a cable modem then you normally need a router
+with at least two network ports.  One port talks
+to the cable modem, and the other port(s) talk
+to the rest of the network.  The connections are
+multiplexed so that the cable modem sees only
+one machine, and the router can also act as a
+firewall.</p>
+
+<p>Sometimes it's not feasible to obtain a
+machine with two Ethernet ports.  This might be
+the case for example if you are working on a
+temporary and/or test setup and don't have the
+time or the resources to order extra hardware.
+My motivation for writing this article was Kapil
+Hari Paranjape's article "Debian on a Slug" in
+LG #138, in which he needed to use either two
+separate networks (Ethernet and wi-fi) or a
+network with an existing firewall/router in
+order to set up the NSLU2 (the "slug"), and I
+wanted to see if it's possible to do without
+that extra hardware.  Especially if the slug is
+going to <em>be</em> a router/firewall, it seems
+a little excessive to require another one before
+you can set it up.</p>
+
+<p>In this article I present some notes on how I
+constructed a router and firewall using just one
+Ethernet port on a Linux machine.  It wasn't
+stable enough for long-term use, but it was
+adequate for temporary situations that call for
+sharing a cable modem between two or three
+machines.</p>
+
+<h3>Why One Ethernet Port Can Be Enough</h3>
+
+<p>A cable modem is basically a network bridge,
+repeating selected packets from your network to
+the provider's network and vice versa.  It is
+usually a transparent learning bridge conforming
+to the IEEE 802.1d standard; it "learns" a
+number of your Ethernet addresses, and the ISP
+usually limits this number to one.  If it sees
+additional Ethernet addresses then it will
+simply ignore them.  That is why you usually
+need to switch the modem off and on again when
+moving it from one machine to another.</p>
+
+<p>If the modem is going to ignore any machine
+except the first one it sees, then there is
+nothing in principle to stop that first machine
+from acting as a router for other machines
+<em>even on the same Ethernet segment</em>.
+For example, consider the following setup:</p>
+
+<pre class="code">
+            4-port Unswitched Ethernet Hub
+         port 1   port 2     port 3    port 4
+           |        |          |         |
+         Modem   Machine A  Machine B  Machine C
+</pre>
+
+<p>The hub simply repeats any traffic it
+receives, because it's unswitched.  (In fact
+it's possible to make do with some simple wire
+connections; more on this later.)  Therefore,
+the modem sees all traffic from all machines,
+and conversely all machines see the traffic from
+the modem.  However, the modem will refuse to
+communicate with anything except the first
+machine it sees.  Suppose that this is Machine
+A.  If Machine B wants to send to the outside
+world, it first sends to Machine A (and the
+modem ignores this), then Machine A repeats it
+(and the modem takes it).  Then the reply is
+addressed by the modem to Machine A (which
+Machine B will ignore unless its Ethernet
+interface is set to promiscuous mode) and
+Machine A can repeat it for Machine B.  Note
+that no machine needs more than one ethernet
+port.</p>
+
+<p>This approach is inefficient because
+everything has to be repeated twice on the same
+wire.  Even though Ethernet is generally much
+faster than broadband, the repetitions can still
+reduce the speed because they always congest
+every transmission.  In spite of this, the setup
+can still run at a reasonable speed, especially
+if your adapters are all 100Mbps or more.</p>
+
+<h3>Using A Simple Unpowered Hub</h3>
+
+<p>If you have a powered hub or switch then you
+can skip to the next section.</p>
+
+<p>Some cheap devices called "ethernet
+splitters" are essentially passive hubs.  Care
+should be taken though because sometimes other
+things are also sold as "ethernet splitters",
+such as devices to use the spare wires in an
+Ethernet cable for another connection, and
+that's <em>not</em> useful in this setting.  If
+you do find (or even make) a simple unpowered
+passive hub or "ethernet splitter", you have to
+think about certain characteristics of Ethernet
+that can make this more complex than using a
+powered hub.</p>
+
+<p>10-base-T wiring has different wires for
+transmit and receive.  If several computers are
+connected using a hub, then what <em>should</em>
+happen is, if any computer sends data on its
+"transmit" line, then this data will be placed
+on the "receive" lines of all the other
+computers (or perhaps not all of them if it is a
+switched hub).</p>
+
+<p>Some simple "ethernet splitters" merely
+connect all the "transmit" lines together and
+all the "receive" lines together, so none of the
+machines can actually exchange data unless one
+of them crosses its connection (receives on the
+shared "transmit" line and transmits on the
+shared "receive" line).  Cable modems do
+normally cross their connections, so those
+"ethernet splitters" are intended to allow all
+the machines to communicate with the modem
+although not with each other.  This is not very
+useful in the one-port router setup.</p>
+
+<p>It would be more useful if all machines could
+communicate with <em>the router</em> rather than
+with the modem.  This can be arranged by
+connecting the router to the hub with a
+cross-over cable (or cross-over adaptor), and
+using normal straight-through cable everywhere
+else.  That way the router's "transmit" is
+connected to the "receive" of all the other
+machines and vice versa.  It might be necessary
+to use a second cross-over cable to connect the
+modem to the hub, in order to cancel out the
+modem's own crossing-over (or, equivalently,
+everything <em>except</em> the router and the
+modem), but most modern cable modems will
+automatically adapt anyway; just make sure the
+router is the first machine to boot up.</p>
+
+<p>Further problems can be caused by the
+polarity auto-detection that's done by Ethernet
+devices with auto-MDIX ports, and unfortunately
+there's no way to turn that off other than to
+use old hardware that doesn't have such
+auto-detection.  (Many Ethernet cards have
+commands to turn off auto-negotiation of
+<em>speed</em> and <em>duplex</em>, but not
+<em>polarity</em>.)  There should be no problems
+when connecting the first two devices to the hub
+(i.e. the router and the modem), but when the
+third device is added, if that third device has
+an auto-MDIX port then it may or may not guess
+the correct polarity depending on which device
+it sees first (remember they are opposites).
+You might have to repeatedly disconnect and
+reconnect the new device until it sees the
+router, and if that new device is an NSLU2 which
+you are trying to connect to a desktop router
+during the initial setup stage then you'll have
+to reboot it on every attempt.</p>
+
+<p>To save the hassle of repeated connections
+(and possibly reboots) of the new device, you
+could try the following: After connecting only
+the router and the modem to the hub and
+verifying that the router can reach the outside
+world (i.e. the modem has learned its MAC
+address), disconnect the modem from the hub (but
+without powering it off) and connect only the
+new device to the hub.  Wait until you can ping
+the new device, and then reconnect the modem
+(you may have to reconnect the modem more than
+once before it will work).  This allows the
+device to negotiate polarity in a less confusing
+environment, while still allowing the modem to
+see the router first.</p>
+
+<p>You may <strong>have</strong> to follow this
+proceduce if the router <em>itself</em> has an
+auto-MDIX port and the new device does
+<em>not</em>, because it's then possible that
+the router and the modem will have negotiated a
+polarity that won't work with the new device no
+matter how many times it's re-connected, so the
+only option is to disconnect the modem while the
+router detects the polarity of the new device.</p>
+
+<p>If the new device <em>does</em> have
+auto-MDIX then in some cases it may help to make
+sure that the network is as quiet as possible
+when connecting it.  This is because return
+traffic from the modem is likely to increase the
+probability of the new device guessing the wrong
+polarity.</p>
+
+<p>Finally, you may experience problems with the
+cables themselves.  If the hub has no power then
+it can't amplify the signal, so if the cables
+are somewhat too long, or if there are cables
+that are connected at the hub but not connected
+to anything at the other end (or the device they
+are connected to is switched off), then this can
+harm the signal too much and the network will
+stop working, so try to use shorter cables and
+don't put any cable on the hub until it's
+active.  Also, beware of fiddly connectors: it
+took me many hours to track down a fault that
+was caused by one of the Ethernet plugs working
+intermittently because I had damaged it while
+connecting things.</p>
+
+<h3>Linux Commands For One-port Routing</h3>
+
+<p>Linux lets you run multiple IP addresses on
+the same interface, using "aliases".  This is
+useful if you want the router to appear with a
+private 192.168 address for the local network,
+but with whatever address it is assigned for the
+ISP.  After the router has DHCP-negotiated with
+the ISP using <tt>dhclient</tt> or equivalent,
+you can do this:</p>
+
+<pre>
+ifconfig eth0:1 192.168.1.1 netmask 255.255.0.0
+</pre>
+
+<p>replacing eth0 with whatever other interface
+you are using if necessary.  The :1 can also be
+:2, :3 etc to add more IP addresses; you can
+have up to 256 different IP addresses on the
+same interface if you want.</p>
+
+<p>Note: This article assumes that your upstream
+DHCP server does <em>not</em> give you an IP
+address that is within the 192.168 subnet.  If
+it does (which may be the case if your outgoing
+connection is shared privately) then you could
+replace 192.168 with 172.16 throughout this
+article, because 172.16 is also reserved for
+private use.  You may have difficulty performing
+initial set-up of an NSLU2 if you cannot control
+192.168 however.</p>
+
+<p>Once you have a local-network IP, you can
+then you can switch on NAT connection
+forwarding:</p>
+
+<pre class="code">
+modprobe iptable_nat
+iptables -t nat -A POSTROUTING -j MASQUERADE
+iptables -P FORWARD ACCEPT
+echo 1 &gt; /proc/sys/net/ipv4/ip_forward
+</pre>
+
+<p>It may also help to allow the local 192.168
+network to access any services running on the
+router, if its firewall does not already allow
+this:</p>
+
+<pre>
+iptables -A INPUT -d 192.168.1.1 -j ACCEPT
+</pre>
+
+<p>You may also wish to run a DHCP server for
+the local network, to save having to manually
+configure your other machines' IP addresses.
+This usually means installing a package like
+<tt>dhcp</tt> and putting something like the
+following into <tt>/etc/dhcpd.conf</tt>:</p>
+
+<pre class="code">
+subnet 192.168.0.0 netmask 255.255.0.0 {
+  range 192.168.1.100 192.168.1.199;
+  option routers 192.168.1.1;
+  option domain-name-servers 192.168.1.1;
+}
+</pre>
+
+<p>and then run or restart <tt>dhcpd</tt>.  When
+putting all this in the system startup scripts,
+check that the above commands run before
+<tt>dhcpd</tt> (in a default Debian installation
+it suffices to put them at the end of the
+<tt>start)</tt> section of
+<tt>/etc/init.d/networking</tt>).</p>
+
+<p>It may also help to ensure that
+<tt>dhclient</tt> waits to be assigned an
+address by an <em>outside</em> DHCP server,
+<em>not</em> by the DHCP server running on the
+same machine (which may respond first,
+especially if the outside server goes down for a
+while).  To do this, put</p>
+
+<pre>
+reject 192.168.1.1;
+</pre>
+
+<p>into <tt>dhclient.conf</tt> (usually in the
+<tt>/etc/dhcp3</tt> directory).  This is not
+necessary if you are setting up a one-off router
+manually and do not need it to work at system
+startup, because in that case the DHCP client
+will likely have obtained an outside address
+before you can type the commands.</p>
+
+<p>Note that the above <tt>option
+domain-name-servers</tt> in <tt>dhcpd.conf</tt>
+will work only if the router is running a DNS
+cache such as <tt>pdnsd</tt> (available as a
+Debian package); if you don't want to run that
+extra server then you'll have to arrange for the
+upstream DNS server to be copied into
+<tt>dhcpd.conf</tt>.</p>
+
+<h3>Security Considerations</h3>
+
+<p>The above commands are reasonably secure by
+default.  While it is relatively easy for
+someone on the outside Internet to send a packet
+to your router with a fake 192.168 source IP,
+they will not normally be able to set the
+<em>destination</em> to anything other than your
+router's public IP address, which means they
+will not be able to access any private servers
+that are open only on your router's 192.168
+address (that's why the above <tt>INPUT</tt>
+rule uses <tt>-d</tt> to specify the
+<em>destination</em> IP address as being
+192.168.1.1, rather than simply constraining the
+source IP).  Also because of the natural
+constraint on the destination IP, they will not
+be able to access any of your computers other
+than the router (even if you have a hub that
+allows everything to see the modem traffic), nor
+will they be able to get your router to help
+forward their packets either to your network or
+to elsewhere.</p>
+
+<p>However, there are some circumstances in
+which it <em>is</em> possible for an attacker to
+deliver packets into your network with a
+destination IP address other than that of your
+public IP.  This can happen if the attacker
+takes over your ISP's equipment, or if your
+ISP's equipment allows source routing, or if the
+attacker breaks into the connection
+on <em>your</em> side of the ISP.  If you wish, you
+can take extra steps to protect your private
+network from this kind of attack.</p>
+
+<p>Such steps involve both protecting the router
+itself, and ensuring that it is not possible to
+place packets on the network that bypass the
+router.</p>
+
+<p>The router itself can be protected by adding
+MAC-address rules so that it accepts packets
+only from the known MAC addresses of your
+network adapters and does not accept
+inappropriate packets from the modem.  See the
+<tt>iptables(8)</tt> man page for details.  Note
+that cable modems' MAC addresses have been known
+to change at power-cycling, so it's better to
+make a list of all your <em>other</em> MAC
+addresses.  In order to get past this test, an
+attacker would either have to get packets onto
+your network by some means other than via the
+cable modem, or else break into the modem itself
+or (in some cases) the ISP's head node.</p>
+
+<p>You <em>could</em> get the other machines on
+your network to also recognise unwanted packets
+by MAC address, but you may have some machines
+that cannot run firewalls, and if they can see
+the traffic from the cable modem before it gets
+to the router then you could have a problem if
+an attacker can fake destination IP addresses.
+The best workaround to this is probably to use a
+simple "ethernet splitter" hub (see the above
+section) which physically prevents traffic from
+bypassing the router even though the router has
+only one port.</p>
+
+<h3>Routing Packets Between The Private Machines</h3>
+
+<p>If the private network is such that all the
+machines can see the router but they cannot see
+each other, then, if you need them to be able to
+communicate with each other, you need to arrange
+for this to go through the router even though
+they're on the same subnet.  This is not too
+difficult if you can manipulate their route
+tables by hand, but it's slightly more difficult
+with DHCP (and note that most DHCP client
+implementations don't support all the extra
+options).  You could simply set up
+port-forwarding rules on the router and have the
+other machines explicitly connect to the router
+rather than to each other (more on
+port-forwarding below).  A more transparent
+solution (but more complex to set up) is to
+arrange for the router to listen on many
+different IP addresses, each on a very small
+subnet (with a very narrow network mask) and to
+allow only one DHCP-allocable address on each
+of these subnets.  At any rate, expect the
+network speed to be less than what it would be
+if you had a proper switch, because everything
+is being repeated.</p>
+
+<h3>Port Forwarding</h3>
+
+<p>One final thing you may wish to do is to
+forward ports, both to make allowances for
+running public servers such as a Web server, and
+to facilitate communication between the machines
+on the private network if they can't see each
+other (see previous section).</p>
+
+<p>If the server is run on the router itself
+then this is simply a matter of ensuring the
+router's firewall allows incoming connections on
+that port, if it does not already do so.  (When
+specifying that the server is for the private
+network only, remember that restricting the
+<em>destination</em> to 192.168.1.1 is more
+secure than restricting the <em>source</em> for
+the reasons discussed in the security section
+above.)</p>
+
+<p>The general way to do port forwarding with
+iptables (which is more lightweight than setting
+up some process to listen on the port and
+forward connections) is this:</p>
+
+<pre>
+iptables -t nat -A PREROUTING -p tcp -d $PUBLIC_ADDRESS --dport $PUBLIC_PORT -j DNAT --to $REAL_ADDRESS:$REAL_PORT
+iptables -t nat -A POSTROUTING -p tcp -s $REAL_ADDRESS --sport $REAL_PORT -j SNAT --to $PUBLIC_ADDRESS:$PUBLIC_PORT
+</pre>
+
+<p>where <tt>PUBLIC_ADDRESS</tt> and
+<tt>PUBLIC_PORT</tt> are set to the public IP
+address of the router and the port you want the
+server to appear on, and <tt>REAL_ADDRESS</tt>
+and <tt>REAL_PORT</tt> are where the server is
+actually running on the local network.  Note
+that this method can <strong>only</strong> make
+the server visible on <strong>one</strong>
+interface: <strong>either</strong> the router's
+public IP address, <strong>or</strong> the
+private 192.168.1.1 address, or localhost if you
+use <tt>OUTPUT</tt> instead of
+<tt>PREROUTING</tt>, but not more than one of
+these at the same time.  If you require more
+than one interface to forward to the same server
+then you'll have to set up a process to listen
+and forward connections, such as by connecting
+<tt>inetd</tt> to <tt>nc</tt>, or even by using
+<tt>ssh</tt>, which is rather overkill for a
+private network but it's probably the least
+difficult way to set up forwarding).</p>
+
+<p>If you do use iptables to forward ports for
+the <em>public</em> interface then you need to
+set <tt>PUBLIC_ADDRESS</tt> to the IP that your
+ISP gives you.  You will likely find that your
+distribution's <tt>/etc/dhcp3/</tt> has a
+<tt>dhclient-exit-hooks</tt> script or
+<tt>dhclient-exit-hooks.d</tt> directory (see
+man dhclient-script) in which you can place
+commands such as:</p>
+
+<pre class="code">
+if [ $reason = BOUND -o $reason = RENEW -o $reason = REBIND -o $reason = REBOOT ]; then
+
+  # new IP will be placed in $new_ip_address
+  # may need to flush the tables (e.g. changed IP)
+  iptables -t nat -F PREROUTING
+  iptables -t nat -F POSTROUTING
+
+  # ... then add the rules here, using $new_ip_address
+
+  # and finally re-add the masquerade rule
+  # (because it would have been deleted by the above flush)
+  iptables -t nat -A POSTROUTING -j MASQUERADE
+
+fi
+</pre>
+
+<p>You may also need to take some care when
+setting <tt>REAL_ADDRESS</tt> to make sure that
+it is always the same, either by configuring
+that machine manually (without DHCP) or by
+noting its MAC address and giving that a
+<tt>fixed-address</tt> in <tt>dhcpd.conf</tt>
+(see man page for details).</p>
+
+<p>If you use the voice-over-IP application
+"Skype", it can sound better if you open a port
+for it in this way and thus avoid the need for
+your connections to be relayed.  For best
+results open UDP as well as TCP (i.e. repeat the
+above forwarding setup twice, once as-is and
+once substituting <tt>-p udp</tt> for <tt>-p
+tcp</tt> in both commands), and tell Skype about
+the port in Tools/Options/Advanced, but don't
+tell Skype until <em>after</em> the port is
+open, because Skype may not save the setting if
+it does not appear to work at the time.  If you
+use Skype from more than one machine then you
+can give each one a different public port.</p>
+
+<h3>Concluding Remarks</h3>
+
+<p>The above discussion of routing commands is
+probably more in-depth than you need for a
+temporary setup, but it is included because you
+might find that your setup is actually stable
+and you don't need a multi-port router after
+all.  If you <em>do</em> need a multi-port
+router then you can use your one-port router
+settings as a reference when configuring the
+multi-port version.</p>
+
+<p>In my trials with the NSLU2, a desktop, a
+laptop and a cable modem on a simple "Ethernet
+splitter" unpowered hub, when the NSLU2 was
+fully set up as a slug and was itself acting as
+the one-port router, it often lost connectivity,
+sometimes to the point of having to be rebooted
+(not just disconnected and reconnected from the
+network), if it processed large amounts of
+traffic for too long ("too long" being anything
+from seconds to minutes).  Extreme throttling of
+the traffic and packet sizes did help to avoid
+this, but it made the connection worse than
+dial-up.  However, when the desktop PC was
+acting as the one-port router on the same
+network, that problem did not occur.  As is so
+often the case, "Your Mileage May Vary".  But it
+may at least be useful to know that, if you're
+in a desperate situation, you <em>can</em> rig
+up a router/firewall on a machine with only one
+Ethernet port.</p>
+
+<script type="text/javascript">
+digg_url = 'http://linuxgazette.net/140/brownss.html';
+digg_title = 'A Router With Just One Ethernet Port';
+digg_bodytext = 'In this article I present some notes on how I constructed a router and firewall using just one Ethernet port on a Linux machine. It was not stable enough for long-term use, but it was adequate for temporary situations that call for sharing a cable modem between two or three machines';
+digg_topic = 'linux_unix';
+</script>
+<script src="http://digg.com/tools/diggthis.js" type="text/javascript"></script> 
+
+
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:140/brownss.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/authors/brownss.jpg" class="bio">
+</p>
+
+<em>
+<p>
+Silas Brown is a legally blind computer scientist based in Cambridge UK.
+ He has been using heavily-customised versions of Debian Linux since
+ 1999.
+</p>
+
+
+
+</em>
+
+<br clear="all">
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2007, Silas Brown. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication License</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 140 of Linux Gazette, July 2007
+</p>
+
+</div>
+
+<div id="previousnextbottom">
+<A HREF="lg_bytes.html" >&lt;-- prev</A> | <A HREF="colello.html" >next --&gt;</A>
+</div>
+
+</div>
+</div>
+
+<script src="http://www.google-analytics.com/urchin.js"
+type="text/javascript">
+</script>
+<script type="text/javascript">
+_uacct = "UA-1204316-1";
+urchinTracker();
+</script>
+
+
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+</body>
+</html>
+

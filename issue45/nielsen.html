@@ -1,0 +1,350 @@
+<!--startcut ==========================================================-->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML>
+<HEAD>
+<title>Striping and Mirroring RAID under RedHat 6.0 LG #45</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!--endcut ============================================================-->
+
+<H4>
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<CENTER>
+<H1><font color="maroon">Striping and Mirroring RAID under RedHat 6.0</font></H1>
+<H4>By <a href="mailto:dude@linux.com">Mark Nielsen</a></H4>
+</CENTER>
+<P> <HR> <P>  
+
+
+<h2>Index:</h2>
+
+<ol>
+<li> <a href="#Resources"> Resources</a>
+<li><a href="#Intro"> Introduction to RAID</a>
+<li><a href="#Strip"> Setting up a RAID Strip </a>
+<li><a href="#Mirror"> Setting up a RAID Mirror </a>
+<li><a href="#5"> RAID 5 with a spare device </a>
+<li><a href="#Comments"> Comments</a>
+</ol>
+
+Future updates for this article will be located at
+<a href="http://www.tcu-inc.com/mark/articles/Raid.html">
+http://www.tcu-inc.com/mark/articles/Raid.html</a>.
+
+<hr>
+<a name="Resources"></a>
+<h2>Resources</h2>
+<ol>
+<li> <a href="http://ostenfeld.dk/~jakob/Software-RAID.HOWTO/">
+http://ostenfeld.dk/~jakob/Software-RAID.HOWTO/</a>
+<li> /usr/doc/raidtools-0.90
+</ol>
+
+These links are hardware specific which go beyond the scope of this article.
+
+<ol>
+<li> Here is a DPT HOWTO,  
+<a href="http://www.ram.org/computing/linux/dpt_raid.html">
+ http://www.ram.org/computing/linux/dpt_raid.html</a>
+</ol>
+
+<hr>
+<a name="Intro"></a>
+<h2>Introduction to RAID</h2>
+It is assumed that you will read the 
+<a href="http://ostenfeld.dk/~jakob/Software-RAID.HOWTO/">
+The Software-RAID HOWTO</a> by jakob@ostenfeld.dk. Apparently, he comes
+from Danmark (not Denmark), which is, of course, the best country in the world
+where a lot of smart people are located. Anyways, he does such a good job
+at his HOWTO, this article is probably not necessary. I only started
+this because the documentation
+used to suck really bad, which doesn't appear to be the case anymore. 
+Also, this setup is specific for RedHat 6.0, but it should work
+with any distribution. When am I going to switch to Debian for good?
+Soon I hope. 
+<p>
+What is RAID? Well, it basically gives you the power to do some funky 
+stuff with multiple hard drives. It lets you combine hard drives, split
+data amongst several hard drives, and do other things. It can increase
+the speed to write and read your data to your hard drives and it can make
+backup copies of your hard drives so that if one hard drive crashes, you
+can most likely retrieve all your data.    
+Read more about the 
+<a href="http://ostenfeld.dk/~jakob/Software-RAID.HOWTO/Software-RAID.HOWTO-2.html#ss2.3">
+RAID Levels</a> 
+
+from 
+<a href="http://ostenfeld.dk/~jakob/Software-RAID.HOWTO/Software-RAID.HOWTO-2.html#ss2.3">
+The Software-RAID HOWTO
+</a> right now to get a better idea about the different types of 
+Software RAID. 
+<p>
+Also, you will need to setup several small partitions for this example. 
+I suggest having 1 gig of diskspace free for an extended partition, and then
+to make 100 meg logical partitions out of the extended partition. Also, PLEASE
+PLEASE PLEASE only test raiding on a hard drive you don't care about. If you
+screw it up, it is your fault, even if my documentation is incorrect. 
+
+<hr>
+<a name="Strip"></a>
+<h2>Strip RAID</h2>
+I am ONLY going to show you how to setup a strip for DATA only. This means,
+I won't be striping the main operating system. There can be problems
+trying to strip an entire system, and so, I won't do it here. 
+
+<p>
+There are basically 4 steps to setup a Strip RAID on your Linux system. 
+striping puts data on two or more hard drives (actually partitions) where
+half the data is on one hard drive and the other half on the other. This
+increases your speed since you use BOTH the hard drives at the same time to
+get each half of the data. Again, please read more about this in the 
+HOWTO. 
+<p>
+First, we need to configure /dev/md0, then we need to initialize the 
+partitions, and then we need to configure /etc/rc.d/rc.local to activate
+the raid, and then we need to configure /etc/rc.d/rc.local to mount the
+stripped device to a directory. 
+
+<p><b> The Steps</b>
+
+Well, I am going to do a trick. Instead of actually using two hard drives, 
+I am going to assume that most of the low-end users don't have two hard 
+drives. Hence, I will use two partitions on the same hard drive. Make
+an extended partition with two logical partitions, /dev/hda5 and /dev/hda6, 
+which should be the same size. striping two partitions on the same hard drive
+is almost pointless, and even on the same IDE controller it is almost
+pointless. Still, this is just an EXERCISE. 
+  
+<ol> 
+<li> Configure /etc/raidtab with this text 
+<pre>
+raiddev /dev/md0
+          raid-level      0
+          nr-raid-disks   2
+          nr-spare-disks  0
+          chunk-size     4
+          persistent-superblock 1  
+          device          /dev/hda5
+          raid-disk       0
+          device          /dev/hda6
+          raid-disk       1
+</pre>
+
+<li> Format the partitions with the command
+<pre>
+mkraid /dev/md0
+</pre>
+
+If you have problems with using the "mkraid" command, it will tell you how
+to get around any problems. Then issue this command
+<pre>
+mkfs -t ext2 /dev/md0
+</pre>
+Also, check out the status of your raid by looking at the "/proc/mdstat"
+file/.
+<pre>
+cat /proc/mdstat
+</pre>
+
+<li> Execute this command which will add a line to /etc/rc.d/rc.local 
+<pre>
+echo "raidstart /dev/md0" >> /etc/rc.d/rc.local
+</pre>
+
+<li> Execute this command once. It will make you the directory for
+the RAID device and add a command to /etc/rc.d/rc.local.
+<pre>
+mkdir /RAID
+echo "mount /dev/md0 /RAID" >> /etc/rc.d/rc.local 
+</pre>
+
+<li> If you don't want to reboot your computer, and you want to activate
+the raid now, 
+<pre>
+raidstart /dev/md0
+mount /dev/md0 /RAID
+</pre>
+Also, check out the status of the mounted directory by issuing the single
+command
+<pre>
+df
+</pre>
+
+</ol>
+
+<hr>
+<a name="Mirror"></a>
+<h2>Mirror RAID</h2>
+
+Like the example for striping, I will use two partitions on the same
+hard drive and I will only mirror partitions that are used for data. 
+<p> 
+
+<p>
+First, we need to configure /dev/md0, then we need to initialize the
+partitions, and then we need to configure /etc/rc.d/rc.local to activate
+the raid, and then we need to configure /etc/rc.d/rc.local to mount the
+mirrored device to a directory.
+
+<ol>
+<li> Configure /etc/raidtab with this text
+<pre>
+raiddev /dev/md0
+          raid-level      1
+          nr-raid-disks   2
+          nr-spare-disks  0
+          chunk-size     4
+          persistent-superblock 1
+          device          /dev/hda5
+          raid-disk       0
+          device          /dev/hda6
+          raid-disk       1
+</pre>
+
+<li> Format the partitions with the command
+<pre>
+mkraid /dev/md0
+</pre>
+
+If you have problems with using the "mkraid" command, it will tell you how
+to get around any problems. Then issue this command
+<pre>
+mkfs -t ext2 /dev/md0
+</pre>
+Also, check out the status of your raid by looking at the "/proc/mdstat" 
+file/. 
+<pre> 
+cat /proc/mdstat
+</pre> 
+
+<li> Execute this command which will add a line to /etc/rc.d/rc.local
+<pre>
+echo "raidstart /dev/md0" >> /etc/rc.d/rc.local
+</pre>
+
+<li> Execute this command once. It will make you the directory for
+the RAID device and add a command to /etc/rc.d/rc.local.
+<pre>
+mkdir /RAID
+echo "mount /dev/md0 /RAID" >> /etc/rc.d/rc.local
+</pre>
+
+<li> If you don't want to reboot your computer, and you want to activate
+the raid now, 
+<pre>
+raidstart /dev/md0
+mount /dev/md0 /RAID
+</pre>
+
+Also, check out the status of the mounted directory by issuing the single
+command
+<pre>
+df
+</pre>
+
+
+</ol>
+
+<hr>
+<a name="5"></a>
+<h2>RAID 5 with a spare partition</h2>
+
+Okay, RAID 5 with a spare device is a  VERY cool thing to do. Again, we will
+just be using one hard drive. Generally, for experimenting, I would just
+use 100 meg logical partitions. If you have a 1 gig extended partition, you
+can have 10 logical partitions for goofing around with.   
+<p>
+Use the same steps for the Mirror or Strip, just change the config file to
+this.  
+
+<pre>
+raiddev /dev/md0
+        raid-level      5
+        nr-raid-disks   7
+        nr-spare-disks  1
+        persistent-superblock 1
+        parity-algorithm        left-symmetric
+        chunk-size      32
+        device          /dev/hda5
+        raid-disk       0
+        device          /dev/hda6
+        raid-disk       1
+        device          /dev/hda7
+        raid-disk       2
+        device          /dev/hda8
+        raid-disk       3
+        device          /dev/hda9
+        raid-disk       4
+        device          /dev/hda10
+        raid-disk       5
+        device          /dev/hda11
+        raid-disk       6
+   ### Also, let us have a spare device  
+        device         /dev/hda12
+        spare-disk     0
+</pre>
+
+<hr>
+<a name="Comments"></a>
+<h2>Comments</h2>
+
+Mount the raid device in /etc/rc.d/rc.local and don't bother putting it
+into /etc/fstab. If you want to put it into /etc/fstab, go ahead and try. 
+It probably won't work, but sometimes people just like to see it for 
+themselves (like I do). I like the power to shoot myself in the foot. It
+makes the surgery interesting. 
+<p>
+
+Well, it is pretty freaking cool. The documentation used to really 
+suck rocks, but that howto has been updated, the tools seem easier to use, 
+and with these few examples, and amateur who knows how to use Linux can
+probably setup a raid device. Hopefully this will reduce the overall cost
+of RAID servers. 
+<p>
+If you really want to do Software raiding 
+correctly, get an U2W SCSI controller, like
+an Adaptec controller or other good brands, DPT, Mylex, etc. For cheap
+raids where you are just mirroring and don't care about speed, IDE
+hard drives are okay. If you want to go one step beyond software raid and
+to get into hardware raid, then several companies support hardware raid
+for Linux. 
+
+<hr>
+<i>
+<a href="mailto:mark@tcu-inc.com">Mark</a>
+ works as a receptionist (shorts and tee-shirt)
+at 
+<a href="http://www.tcu-inc.com"> The Computer Underground</a> 
+and as a professional (suit and tie) consultant at 
+<a href="http://www.800linux.com">
+800linux.com</a>. In his spare time, he does volunteer stuff, like writing
+these documents to help stop entities which thrive on the
+ignorant. I wonder which company is like that? 
+Edited using emacs and ispell.  
+</i>
+   
+<!--===================================================================-->
+<P> <hr> <P> 
+<center><H5>Copyright &copy; 1999, Mark Nielsen <BR> 
+Published in Issue 45 of <i>Linux Gazette</i>, September 1999</H5></center>
+
+<!--===================================================================-->
+<!--startcut ==========================================================-->
+<P> <hr> <P> 
+<A HREF="index.html"><IMG ALIGN=BOTTOM SRC="../gx/indexnew.gif" 
+ALT="[ TABLE OF CONTENTS ]"></A>
+<A HREF="../index.html"><IMG ALIGN=BOTTOM SRC="../gx/homenew.gif"
+ALT="[ FRONT PAGE ]"></A>
+<A HREF="gibbs/Linux_java.html"><IMG SRC="../gx/back2.gif"
+ALT=" Back "></A>
+<A HREF="orr.html"><IMG SRC="../gx/fwd.gif" ALT=" Next "></A>
+<P> <hr> <P> 
+</BODY>
+</HTML>
+<!--endcut ============================================================-->

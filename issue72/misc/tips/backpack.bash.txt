@@ -1,0 +1,191 @@
+
+#!/bin/bash
+
+dev=floppy
+dir=~/.backpack
+name=`hostname -s`
+
+# Anything outside of the standard syntax (i.e., two characters) resets the
+# parameters to NULL, which will invoke "-h".
+[ ${#1} -gt 2 ] && { set --; }
+
+# Note that this is not a "while" loop: "getopts" only sees one option.
+getopts "achu" opt
+
+case $opt
+in
+	c)	[ ! -d $dir ] && { mkdir $dir; >$dir/permlist; >$dir/templist; }
+
+	clear
+	cat <<- !
+	The format of these file lists is one file or directory per line,
+	like this:
+
+	/home/joe/netscape/bookmarks.html
+	/var/mail
+	/usr/share/dict/words
+
+	The files in the permanent list will be archived every time; the
+	temporary list will be cleared between runs.
+
+	Would you like to edit the permanent file list? [yN]
+	!
+
+	read choice
+	[ "$choice" == "y" ] && {
+		cp $dir/permlist $dir/permlist.tmp
+		$EDITOR $dir/permlist.tmp
+		err=""
+		for f in `cat $dir/permlist.tmp`
+		do
+			[ -e $f ] || err=$f
+		done
+		clear
+
+		[ "$err" != "" ] && {
+			rm $dir/permlist.tmp
+			echo "ERROR: $err does not exist; the permanent list was NOT updated."
+			echo
+			exit
+		} || {
+			mv $dir/permlist.tmp $dir/permlist
+			echo
+			echo "The permanent file list has been updated."
+			echo
+		}
+	}
+
+	echo "Would you like to edit the temporary file list? [yN]"
+	read choice
+	[ "$choice" == "y" ] && {
+		cp $dir/templist $dir/templist.tmp
+		$EDITOR $dir/templist.tmp
+		err=""
+		for f in `cat $dir/templist.tmp`
+		do
+		[ -e $f ] || err=$f
+		done
+		clear
+
+		[ "$err" != "" ] && {
+			rm $dir/templist.tmp
+			echo
+			echo "ERROR: $err does not exist; the temporary list was NOT updated."
+			echo
+			exit
+		} || {
+			mv $dir/templist.tmp $dir/templist
+			echo
+			echo "The temporary file list has been updated."
+			echo
+		}
+	}
+	;;
+
+	a)	[ -f "$dir/permlist" -a -f "$dir/templist" ] || {
+		echo "You must first create the file lists."
+		exit
+	}
+
+	# Read both file lists and create the archive
+	tar -cvzf $dir/bp$name.tgz `cat $dir/permlist $dir/templist`
+	[ $? -gt 0 ] && { echo 'Error in archive creation! Aborting.'; exit; }
+
+	# Add up the file sizes
+	size=$(ls -l $dir/permlist $dir/templist $dir/bp$name.tgz $0 |awk '{ t+=$5 } END { print t }')
+	[ $size -gt "1474560" ] && {
+	cat <<- !
+
+	Warning: The archive you created is $size bytes long; that's bigger
+	than the standard (1.44MB) floppy. Make sure it'll fit on your disk.
+
+	Press 'Enter' to continue or 'Ctrl-C' to abort.
+
+	!
+	read
+	}
+
+	while [ $dev == ${dev%/*} ]
+	do
+		cat <<- !
+
+		Please enter the complete path to the directory where
+		the floppy will be mounted, like
+
+		/mnt/floppy
+
+		NOTE: Make sure your floppy has enough space for all the files;
+		a formatted blank disk is best of all.
+
+		!
+		read dev
+	done
+
+	[ `mount|grep -c $dev` -eq 0 ] && mount $dev
+
+	[ $? -eq 0 ] || { echo 'OOPS! Mount problem!'; exit; }
+
+	rm -f $dev/bp*tgz
+	cp $0 $dir/bp$name.tgz $dir/permlist $dir/templist $dev
+
+	[ $? -eq 0 ] && {
+	echo -e "\nYour BackPack floppy has been created in $dev.\n"
+	> $dir/templist
+	} || {
+		cat <<- !
+
+		ERROR: BackPack ran into a problem; something failed
+		while copying the archive to $dev. Possible causes
+		might be things like a full or a damaged floppy. Please
+		correct whatever is wrong and try again.
+
+		!
+	}
+
+	sync
+	umount $dev
+	;;
+
+	u)  [ -d $dir ] || mkdir $dir
+
+	while [ $dev == ${dev%/*} ]
+	do
+		cat <<- !
+
+		Please enter the complete path to the directory where
+		the BackPack floppy is mounted, i.e.
+
+		/mnt/floppy
+
+		!
+		read dev
+	done
+
+	[ `mount|grep -c $dev` -eq 0 ] && mount $dev
+
+	[ $? -eq 0 ] || { echo 'OOPS! Mount problem!'; exit; }
+
+	echo "Creating a backup archive of the local files in $dir/bp$name.old.tgz..."
+	tar cz --ignore-failed-read -f $dir/bp$name.old.tgz `cat $dev/permlist $dev/templist` > /dev/null 2>&1
+	echo "Replacing local files with BackPack versions..."
+	tar xz -C / -f $dev/bp*tgz
+
+	sync
+	umount $dev
+	;;
+
+	h|*)  cat <<- !
+
+	*BackPack* by Ben Okopnik 6/2001
+
+	backpack -[cauh]
+
+		-c	Create or edit the file list[s]
+		-a	Archive the files in the selection list[s]
+		-u	Unpack the archive (interactive prompts)
+		-h	Help - display this usage message
+
+	!
+	;;
+esac
+

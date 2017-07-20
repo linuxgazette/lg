@@ -1,0 +1,412 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Writing Your Own Shell LG #111</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="pramode.html" >&lt;-- prev</A> | <A HREF="seymour.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Writing Your Own Shell</h1>
+<p id="by"><b>By <A HREF="../authors/ramankutty.html">Hiran Ramankutty</A></b></p>
+
+<p>
+<h3>Introduction</h3>
+
+<p> This is not another programming language tutorial. Surprise! A few days
+ago, I was trying to explain one of my friends about the implementation of
+the 'ls' command, though I had never thought of going beyond the fact that
+'ls' simply lists all files and directories.  But my friend happened to
+make me think about everything that happens from typing 'ls' to the point
+when we see the output of the 'ls' command. As a result, I came up with the
+idea of putting the stuff into some piece of code that will work similarly.
+Finally, I ended up in trying to write my own shell which allows my program
+to run in a way similar to the Linux shell.  </p>
+
+<h3>Shells</h3>
+<p>
+On system boot up, one can see the login screen. We log in to the system using our 
+user name, followed by our password. The login name is looked up in the 
+system password file (usually /etc/passwd). If the login name is found, the password is 
+verified. The encrypted password for a user can be seen in the file <i>/etc/shadow</i>, 
+immediately preceded by the user name and a colon. Once the password is verified,
+we are logged into the system.
+</p>
+
+<p>
+Once we log in, we can see the command shell where we usually enter our commands to 
+execute. The <b>shell</b>, as described by Richard Stevens in his book 
+<b>Advanced Programming in the Unix Environment</b>, is a command-line interpreter 
+that reads user input and execute commands.</p>
+
+<p>
+This was the entry point for me. One program (our shell) executing another program 
+(what the user types at the prompt). I knew that execve and its family of functions 
+could do this, but never thought about its practical use. 
+</p>
+
+<h3>A note on execve()</h3>
+<p>
+Briefly, <b>execve</b> and its family of functions helps to initiate new programs.
+The family consists of the functions:
+</p>
+<ul>
+<li>execl
+<li>execv
+<li>execle
+<li>execve
+<li>execlp
+<li>execvp
+</ul>
+
+<pre>
+int execve(const char *filename, char *const argv[], char *const envp[]);
+</pre>
+
+<p>is the prototype as given in the man page for <i>execve</i>. The <i>filename</i> 
+is the complete path of the executable, <i>argv</i> and <i>envp</i> are the  
+array of strings containing argument variables and environment variables respectively.
+
+<p>
+In fact, the actual system call is sys_execve (for execve function) and other functions
+in this family are just C wrapper functions around <i>execve</i>. Now, let us 
+write a small program using execve. 
+See listing below:
+</p>
+
+<a href="misc/ramankutty/listing1.c.txt">listing1.c</a>
+
+<p>
+Compiling and running the a.out for the above program gives the output of <b>/bin/ls</b> 
+command. Now try this. Put a printf statement soon after the <i>execve</i> call and 
+run the code. 
+</p>
+
+<p>
+I will not go in to the details of wrappers of execve. There are good books, one 
+of which I have already mentioned (from Richard Stevens), which explains the execve family 
+in detail.
+</p>
+
+<h3>Some basics</h3>
+
+<p> Before we start writing our shell, we shall look at the sequence of
+events that occur, from the point when user types something at the shell to
+the point when he sees the output of the command that he typed. One would
+have never guessed that so much processing happens even for listing of
+files.  </p>
+
+<p> When the user hits the 'Enter' key after typing "/bin/ls", the program
+which runs the command (the shell) forks a new process. This process
+invokes the <b>execve</b> system call for running "/bin/ls". The complete
+path, "/bin/ls" is passed as a parameter to <b>execve</b> along with the
+command line argument (argv) and environment variables (envp).  The system
+call handler <b>sys_execve</b> checks for existence of the file. If the
+file exists, then it checks whether it is in the executable file format.
+Guess why? If the file is in executable file format, the execution context
+of the current process is altered.  Finally, when the system call
+<b>sys_execve</b> terminates, "/bin/ls" is executed and the user sees the
+directory listing.  Ooh!</p>
+
+<h3>Let's Start</h3>
+
+<p>
+Had enough of theories? Let us start with some basic features of the command shell. The listing 
+below tries to interpret the 'Enter' key being pressed by the user at the command prompt. 
+</p>
+
+<a href="misc/ramankutty/listing2.c.txt">listing2.c</a>
+
+<p>
+This is simple. Something like the mandatory "hello world" program that a programmer writes 
+while learning a new programming language. Whenever user hits the 'Enter' key, the 
+command shell appears again. On running this code, if user hits Ctrl+D, the program 
+terminates. This is similar to your default shell. When you hit Ctrl+D, you will log out of 
+the system. 
+</p>
+
+<p>
+Let us add another feature to interpret a Ctrl+C input also. It can be done simply by registering 
+the signal handler for SIGINT. And what should the signal handler do? Let us see the code in listing 3.
+</p>
+
+<a href="misc/ramankutty/listing3.c.txt">listing3.c</a>
+
+<p>
+Run the program and hit Ctrl+C. What happens? You will see the command prompt again. Something that
+we see when we hit Ctrl+C in the shell that we use.
+</p>
+
+<cite>Now try this. Remove the statement <b>fflush(stdout)</b> and run the program. For those 
+who cannot predict the output, the hint is <b>fflush</b> forces the execution of underlying write 
+function for the standard output.</cite>
+
+<h3>Command Execution</h3>
+
+<p>
+Let us expand the features of our shell to execute some basic commands. Primarily we will read 
+user inputs, check if such a command exists, and execute it. 
+</p>
+
+<p>
+I am reading the user inputs using getchar(). Every character read is placed in a temporary 
+array. The temporary array will be parsed later to frame the complete command, along with its
+command line options. Reading characters should go on until the user hits the 'Enter' key. 
+This is shown in listing 4.
+</p>
+
+<a href="misc/ramankutty/listing4.c.txt">listing4.c</a>
+
+<p>
+Now we have the string which consists of characters that the user has typed at our command
+prompt. Now we have to parse it, to separate the command and the command options. 
+To make it more clear, let us assume that the user types the command 
+</p>
+<pre>
+gcc -o hello hello.c
+</pre>
+<p>
+We will then have the command line arguments as 
+</p>
+<pre>
+argv[0] = "gcc"
+argv[1] = "-o"
+argv[2] = "hello"
+argv[3] = "hello.c"
+</pre>
+
+<p>
+Instead of using argv, we will create our own data structure (array of strings) to store 
+command line arguments. The listing below defines the function fill_argv. It takes the user input 
+string as a parameter and parses it to fill my_argv data structure. We distinguish the command and 
+the command line options with intermediate blank spaces (' '). 
+</p>
+
+<a href="misc/ramankutty/listing5.c.txt">listing5.c</a>
+
+<p> The user input string is scanned one character at a time. Characters
+between the blanks are copied into my_argv data structure. I have limited
+the number of arguments to 10, an arbitrary decision: we can have more
+that 10.  </p>
+
+<p>
+Finally we will have the whole user input string in my_argv[0] to my_argv[9]. The command will be 
+my_argv[0] and the command options (if any) will be from my_argv[1] to my_argv[k] where k&lt;9. 
+What next?
+</p>
+
+<p> After parsing, we have to find out if the command exists. Calls to
+<i>execve</i> will fail if the command does not exist. Note that the
+command passed should be the complete path. The environment variable
+<b>PATH</b> stores the different paths where the binaries could be present.
+The paths (one or more) are stored in <b>PATH</b> and are separated by a
+colon. These paths has to be searched for the command.  </p>
+
+<cite>The search can be avoided by use of execlp or execvp which I am trying to 
+purposely avoid. <i>execlp</i> and <i>execvp</i> do this search automatically.</cite>
+
+<p>
+The listing below defines a function that checks for the existence of the command. 
+</p>
+
+<a href="misc/ramankutty/listing6.c.txt">listing6.c</a>
+
+<p>
+<i>attach_path</i> function in the listing 6 will be called if its parameter <i>cmd</i> 
+does not have a '/' character. When the command has a '/', it means that the user is specifying 
+a path for the command. So, we have:
+</p>
+
+<pre>
+if(index(cmd, '/') == NULL) {
+	attach_path(cmd);
+	.....
+}
+</pre>
+
+<p>
+The function attach_path uses an array of strings, which is initialized with the paths 
+defined by the environment variable <b>PATH</b>. This initialization is given in 
+the listing below:
+</p>
+
+<a href="misc/ramankutty/listing7.c.txt">listing7.c</a>
+
+<p>
+The above listing shows two functions. The function <i>get_path_string</i> takes the 
+environment variable as a parameter and reads the value for the entry <b>PATH</b>. For 
+example, we have 
+</p>
+
+<pre>
+PATH=/usr/kerberos/bin:/usr/local/bin:/bin:/usr/bin:/usr/X11R6/bin:/home/hiran/bin
+</pre>
+
+<p>
+The the function uses <i>strstr</i> from the standard library to get the pointer to the beginning of
+the complete string. This is used by the function <i>insert_path_str_to_search</i> in listing 7 
+to parse different paths and store them in a variable which is used to determine existence of 
+paths. There are other, more efficient methods for parsing, but for now I could only think of this. 
+</p>
+
+<p>
+After the function <i>attach_path</i> determines the command's existence, it invokes 
+<i>execve</i> for executing the command. Note that <i>attach_path</i> copies the complete 
+path with the command. For example, if the user inputs 'ls', then <i>attach_path</i> modifies 
+it to '/bin/ls'. This string is then passed while calling execve along with the command line 
+arguments (if any) and the environment variables. The listing below shows this:
+</p>
+
+<a href="misc/ramankutty/listing8.c.txt">listing8.c</a>
+
+<p>
+Here, <i>execve</i> is called in the child process, so that the context of the parent process 
+is retained.
+</p>
+
+<h3>Complete Code and Incompleteness</h3>
+<p>
+The listing below is the complete code which I have (inefficiently) written. 
+</p>
+
+<a href="misc/ramankutty/listing9.c.txt">listing9.c</a>
+
+<p>
+Compile and run the code to see <b>[MY_SHELL ]</b>. Try to run some basic commands; it should 
+work. This should also support compiling and running small programs. Do not get surprised 
+if 'cd' does not work. This and several other commands are built-in with the shell. 
+</p>
+
+<cite>You can make this shell the default by editing <i>/etc/passwd</i> or
+using the 'chsh' command.  The next time you login, you will see
+<b>[MY_SHELL ] </b> instead of your previous default shell.  </cite>
+
+<h3>Conclusion</h3>
+
+<p> The primary idea was to make readers familiar with what Linux does when
+it executes a command. The code given here does not support all the
+features that <i>bash</i>, <i>csh</i> and <i>ksh</i> do. Support for 'Tab',
+'Page Up/Down' as seen in <i>bash</i> (but not in <i>ksh</i>) can be
+implemented. Other features like support for shell programming, modifying
+environment variables during runtime, etc. are essential. A thorough look
+at the source code for <i>bash</i> is not an easy task because of the
+various complexities involved, but would help you develop a full featured
+command interpreter. Of course, reading the source code is not the complete
+answer. I am also trying to find other ways, but lack of time does not
+permit me. Have fun and enjoy......  </p>
+
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<P>
+<img ALIGN="LEFT" ALT="[BIO]" SRC="../gx/authors/ramankutty.jpg" width="200" height="200" class="bio">
+<em>
+
+I completed my B. Tech in Computer Science &amp; Engineering from a small town
+called Trichur, in Kerala, God's Own Country in India. Presently I am
+working in Naturesoft Pvt. Ltd, Chennai, India as a Programmer. I spend my
+free time reading books on Linux and exploring the same. Also, I have a
+good appetite for Physics. My motive in life is to go forward, onward and
+upward.
+
+</em>
+<br CLEAR="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2005, Hiran Ramankutty. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 111 of Linux Gazette, February 2005
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="pramode.html" >&lt;-- prev</A> | <A HREF="seymour.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">February 2005 (#111)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

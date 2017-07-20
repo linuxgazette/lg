@@ -1,0 +1,1055 @@
+<!--startcut ==========================================================-->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML>
+<HEAD>
+<title>IPmasquerading with Roadrunner LG #28</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#A000A0"
+ALINK="#FF0000">
+<!--endcut ============================================================-->
+
+<H4>
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<h1><font color="maroon">IPmasquerading with Roadrunner or Second Ethernet
+Card </font></H1>
+<H4>By <a href="mailto:men2@auto.med.ohio-state.edu">Mark Nielsen</a></H4>
+</center>
+<P> <HR> <P>  
+
+This is for Red Hat 5.0 systems. You can probably do a similar thing
+for other linux systems. It is specifically configured for roadrunner in
+Columbus, Ohio. If you live somewhere else, you will have to change 
+anything with "columbus" in the configuration to something else. So far,
+the only thing I see you have change is in /etc/resolv.conf, but I believe
+that gets changed everytime you start rrhdcpcd.  
+<p>
+If you manage to pull this off, you are almost one step away from being
+able to install a real network to the internet. Think about it, the
+only difference between what we are doing here and a real network
+connected
+to the internet is that fact that your local intranet doesn't have real
+valid ip addresses. If you had real valid ip addresses and your gateway
+addressed stayed the same (it changes everytime you log into roadrunner)
+then you would have a real fixed network connected to the internet. 
+Do this, and you can actually say you have real networking experience.
+This involves ethernet, DNS, ip forwarding, ip masquerading, ethernet
+configuration, and a lot of other stuff. Good luck!
+<p>
+I also wish to thank a bunch of people at The Ohio State University for
+their suggestions. I hope I was able to implement them correctly!
+<p>
+<ol>
+<li> <A href="#ref">References</a>
+<li>Install roadrunner first on a windows95
+	computer and get the configuration files. You will need them.
+<li> <a href="#short"> Short way</a>, if you have 2 3com 3c509 cards
+	aet at irq=10, address 300, and irq=11,address=310. If this works,
+	great, but otherwise do all the steps. 
+<li> <a href="#first"> Setup your ethernet cards.</a>
+<li> <A href="#dns">Setup your DNS</a> on the server. 
+    Just use my examples. I have it setup for 9 computers
+     if you need that many. Also, you must have the DNS
+    rpm installed. Here is a 
+<a
+href="ftp://linux.med.ohio-state.edu/cdrom/RedHat/RPMS/caching-nameserver-1.1-4.noarch.rpm"> 
+dns caching server</a> from my cheapbytes Redhat 5.0 cdrom. 
+
+<li> <a href="#client">Setup your clients</a>. 
+<li> <a href="#mas"> Compile kernel
+	</a> for ip masquerading and ethernet card driver.
+<li> <a href="#change"> Change various configuration</a> files. 
+<li> <A href="#hook">Hook up your</a> hub, 
+	gateway computer, and roadrunner. 
+<li><a href="#connect">  Connect your gateway computer</a> to the internet
+with roadrunner.
+<li> <a href="#service"> Setting roadrunner</a> up as a service and
+	making the first ethernet card use rrdhcpcd. 
+<li><a href="#stopstart"> Starting and stopping</a> the roadrunner service
+	and rrdhpcd.
+<li> <a href="#other">Other things</a>. 
+<li><a href="#index"> Index </a> of files. 
+You should not have blank lines at the beginning of the files!
+
+</ol>
+
+<hr> 
+<a name="ref"></a>
+<h2>References </h2>
+<ol>
+<li><a href="ftp://ftp.fammed.ohio-state.edu/pub/rr/">
+RoadRunner Columbus, OH Infosite</a>.  You can get roadrunner stuff
+from here.  
+	<li> <a
+href="http://www.ssc.com/linux/LDP/HOWTO/mini/IP-Masquerade-3.html">
+	HOWTO -- Compiling the Kernel for IP Masquerade Support</a>
+	<li> <a href="http://www.tor.shaw.wave.ca/~ambrose/">
+	Linux IP Masquerade Resource</a>
+	<li><a href="http://www.indyramp.com/masq/"> 
+	Linux IP Masquerading Web Site</a> 
+	<li><a href="http://www.vortech.net/rrlinux/linux.htm"> 
+	RoadRunner </a> help webpage. This is where I got my rrclientd
+	program. 
+	<li><a href="http://www.ssc.com/linux/LDP/HOWTO/DNS-HOWTO.html">
+		DNS</a>. You almost don't need this if you use
+		/etc/hosts file for your linux computers. For Windoze95
+		and other operating systems you will have to. 
+	<li><a
+href="http://www.ssc.com/linux/LDP/HOWTO/Ethernet-HOWTO.html">
+	Ethernet</a>. Howto set up your ethernet cards. 
+	<li> <a
+href="http://www.ssc.com/linux/LDP/HOWTO/Firewall-HOWTO.html">
+	Firewall</a>. If you want to setup your firewall, it is
+	trivial with this setup. 
+	<li> <a
+href="http://www.ssc.com/linux/LDP/HOWTO/NET-3-HOWTO.html">Networking-3</a>.
+	How to do networking in general.  
+	<li> <a
+href="http://www.ssc.com/linux/LDP/HOWTO/BootPrompt-HOWTO.html">
+	Bootprompt</a>. Howto modify what the kernel does at
+	boottime. 
+	<li> <a
+href="http://www.ssc.com/linux/LDP/HOWTO/Kernel-HOWTO.html">
+	Linux kernel </a>
+	<li><a href="http://www.ssc.com/linux/LDP/HOWTO/mini/DHCPcd.html">
+		DHCPcd mini howto</a>. I found this useful in answering
+		some questions. 
+</ol>
+
+<hr>
+<a name="short"></a>
+<h2>Short way </h2>
+THIS SHORT SECTION ONLY WORKS IF YOU MANAGE to get both ethernet cards
+detected with modules. It will probably not work for most people. 
+<p>
+This will probably only work with RedHat 5.0. 
+These steps you must not deviate from. For some reason, the installation
+of redhat detected both ethernet cards properly and also the kernel
+has ip forwarding in the kernel. It just needs to be enabled. Thus, 
+Installing your own network is just a bunch of file copying and a couple
+of commands and you are done. Be sure to install roadrunner with 
+Windows95 first to get a configuration file. 
+<p>
+1. Install both ethernet cards before you install RedHat 5.0
+The two ethernet cards I used were 3com 3c509.
+The first had values of, irq=10, address=300 and the second had
+irq=11, address=310.  
+Also, when you install RedHat 5.0, go ahead and install it for a LAN
+and have it autoprobe the ethernet cards. I cannot figure it out, but
+when I installed redhat after installing these two ethernet cards, it
+gets them both everytime, when before it wouldn't. When it comes close to
+the end of the RedHat 5.0 installation, it will ask to to select which
+services you want started on bootup. I turn off
+sendmail and smb. I do this because it hanged on me at boot time. 
+When you install RedHat 5.0, install everything. I did. You also shouldn't
+have to change /etc/lilo.conf. 
+<p>
+2. You don't need to recompile the kernel. Just add this file to yours.
+<br><a href="#index_lilo"> /etc/rc.d/rc.local</a>
+<br>   Also, add the krb5.ini file in C:\NETMANAG for Windows95 to 
+<br>        /etc/krb5.conf
+<br>   Also, make a file called "/etc/rrpasswd" which only has one line on
+it        which is the password for your roadrunner username. 
+<p>
+3. Execute the commands
+<br>        mkdir /etc/dhcpc
+<br>        unset noglob
+<p>
+4. Copy these files to their exact location
+<br><a href="#index_network">        /etc/sysconfig/network</a>
+<br><a href="#index_eth0">  /etc/sysconfig/network-scripts/ifcfg-eth0</a>
+<br><a href="#index_eth1"> /etc/sysconfig/network-scripts/ifcfg-eth1</a>
+<br><a href="#index_roadrunner">        /etc/rc.d/init.d/roadrunner</a>
+<br><a href="#index_resolv">        /etc/dhcpc/resolv.conf</a>
+<br>
+<br><a href="#index_named">        /etc/named.conf</a>
+<br><a href="#index_0">        /var/named/10.0.0</a>
+<br><a href="#index_mark">        /var/named/mark.local</a>
+<br><a href="#index_nlocal">        /var/named/named.local</a>
+<br>
+<br><a href="#index_hname">        /etc/HOSTNAME</a>
+<br><a href="#index_hosts">        /etc/hosts</a>
+<br>
+<br><a href="#index_login2">        /root/Login2.bat</a>
+<br><a href="#index_email">        /root/email.pl</a>
+<br><a href="#index_cron2">        /root/cron2</a>   
+
+<p>
+5. Downlaod <a href="http://www.vortech.net/rrlinux/linux.htm">
+rrclientd-1.3</a>, untar and ungzip it, and
+ copy all the files in rrclientd-1.3/bin to /sbin. For example, if you
+        are in rrclientd-1.3/bin, execute "cp * /sbin". I had the binaries
+	when I got mine, so hopefully you won't have to compile them.
+	Compiling with the new libraries Red Hat 
+	has had has been tricky at times. 
+<p> You may have to alter the /etc/services file as it says in the
+README file for rrclientd-1.3. 
+<p>
+6.  Execute the commands
+<br>	    mv /etc/resolv.conf /etc/resolv.conf_old	
+<br>        ln -s /etc/dhcpc/resolv.conf /etc/resolv.conf
+<br>        mv /sbin/dhcpcd /sbin/dhcpcd_old
+<br>        mv /usr/sbin/dhcpcd /usr/sbin/dhcpcd_old
+<br>        mv /usr/bin/rdate /usr/bin/rdate_old
+<br>
+<br>        ln -s /sbin/rdate /usr/bin/rdate
+<br>        ln -s /sbin/rrdhcpcd /sbin/dhcpcd
+<br>        ln -s /sbin/rrdhcpcd /usr/sbin/dhcpcd
+<br>	    ln -s /sbin/rrclientd /usr/sbin/rrclientd
+<br>
+<br>	    cp /root/roadrunner /etc/rc.d/init.d  ## adding roadrunner
+service
+<br>        chkconfig --add roadrunner 
+<br>
+<br>        crontab /root/RR/cron2   ### resetting connection in a cron
+job
+<br>
+<br>         ## Making it so we can execute the scripts with cron2
+<br>        chmod 755 /root/Login2.bat /root/email.pl /etc/rc.d/init.d/roadrunner
+<br>
+<br>		### We only want root to see the password!
+<br>        chmod 700 /etc/rrpasswd
+<p>
+7. In /etc/rc.d/init.d/roadrunner, make sure you change the username to
+your username that you got for roadrunner. 
+<p>
+8. Follow the steps in <a href="#hook"> Hook up your hub, gateway
+computer, and roadrunner</a> and if you have clients, follow the
+steps in <a href="#client">Setup your clients </a>.
+<p>
+9. Now we need to attach dhpc to your first ethernet card. Follow
+the instructions on part b of <a href="#partb"> Setting roadrunner up as a
+service</a>.
+<p>
+10. Reboot your computer and you are done!
+<p>
+11. If you have any problems whatsoever, all I can say is, make sure your
+timezone is correct and that your time is not ahead of the current time
+by one second or behind it by more than 5 minutes, and if that doesn't
+help, use the rest of the instructions I have. 
+<p>
+
+
+<hr>
+<a name="first"></a>
+<h2> First ethernet card </h2>
+
+Install your first ethernet card as normal when you install the operating 
+system. Give it a phony ip address you will not use on your network. 
+For some reason, this ethernet card has to be the one connected to the
+outside in order to get everything to work right with xwindows
+forwarding. Now, let me state, I had to do this for only people coming
+in. Going out, you should have no problem with the second ethernet card
+being the one hooked up to roadrunner. However, I could never telnet in 
+from work to my house and get an xwindows program to work when 
+roadrunner was using the second ethernet card.  
+The second ethernet card will be for the intranet. <p>
+
+<p>
+Also, setup your second ethernet card to NOT use the same irq and 
+address of your first ethernet card. Traditionally, I use lower
+irq and address for my first ethernet card compared to the second. Often
+I use a dos computer using a dos program to set the values for the
+ethernet cards. You will probably have to do this as well. 
+<p>
+Don't do anything yet with roadrunner or your rrdhcpcd program yet. 
+Also, don't worry about the network configurations yet, we will take
+care of it later. Also don't worry about the fact Linux probably
+won't see the second ethernet card, we will take care of this later. 
+Just make sure the ethernet cards don't use the same hardware values.
+Also, if your second ethernet card has a lower irq and address than the
+first, the computer might think it is the first, so I believe there
+really is a reason why I make the first ethernet card with the lower
+values. I ain't gonna test if I am wrong. You should just make sure
+at least one ethernet card is detected. 
+<p>
+
+<hr>
+<a name="dns"></a>
+<h3> Setup your DNS server on your server connected to the
+        internet.</h3> If you know what you are doing, you can
+        change the configurations. Because I am silly, I choose
+        the domain "mark.local". If "mark.local" every becomes an
+official
+        domain, then you will have to change every occurance of 
+"mark.local"
+        to something else in the files below. 
+
+<ol>
+        <li> Copy the following files to your server
+        <ol>
+                <li> <a href="#index_named">/etc/named.boot</a>
+                <li> <a href="#index_resolv">
+                        /etc/resolv.conf</a>
+                <li> <a href="#index_mark">
+                        /var/named/mark.local</a>
+                <li> <a href="#index_0">
+                        /var/named/10.0.0</a>
+		<li> <a href="#index_nlocal">/var/named/named.local</a>
+		<li> <a href="#index_hosts"> /etc/hosts</a> is a file
+		I would use, but don't need. Just in case your dns server
+		fails, this is handy for a backup. 
+        </ol>
+
+        <li> Leave /var/named/named.ca and named.local the same
+        <li> Restart named with this command
+                <br> /etc/rc.d/init.d/named restart
+</ol>
+<p>
+There are a couple of things you could change for your own
+personal needs.  In
+/var/named/mark.local, I disabled localhost definition.  
+<p>
+Now at least your clients computers can find each other. I assume you
+know how to setup ip addresses, gateways, and other stuff for your
+clients. I will give some pointers on this anyways. Setup clients
+to use DNS server.
+
+<hr>
+<a name="client"></a> 
+<h3> Setup your client computers</h3>
+In your computer that is acting like the DNS server, I have upto
+eight additional entries in the dns server so that you can have upto
+eight computers using the dns server. I am assuming you know a little
+bit about ethernet cards. Here are the following configurations I
+did for a computer of mine. 
+<ol>
+        <li> ip address = 10.0.0.21
+        <li> name address = c1.mark.local
+        <li> gateway address = 10.0.0.10  
+		<-- second ethernet card on server computer 
+        <li> netmask = 255.255.255.0   
+        <li> As for the file /etc/resolv.conf, 
+                <a href="#index_resolv_client"> use this one</a> 
+                for the clients.
+        <li> I didn't have to fuss with the kernel on the client
+                computers. As far as the clients are concerened, your
+                server is just a normal gateway.  
+        <li> <a href="#index_hosts"> /etc/hosts</a> is a file
+                I would use, but don't need. Just in case your dns server
+                fails, this is handy for a backup.
+
+</ol>
+<p>
+The only thing you should have to change to each additional computer
+is the ip address and the name address. c2.mark.local and 10.0.0.22 would
+be used for the next computer. Get the idea?
+<p>
+Also, if you are using pc or mac clients or other stuff, check out the
+<a
+href="http://www.ssc.com/linux/LDP/HOWTO/mini/IP-Masquerade-3.html#ss3.3"> 
+masquerading mini-howto</a>.
+
+<hr>
+<a name="mas"></a>
+<h3> Setup masquerading on the server</h3>
+<p>
+If you were able to get your module(s) to detect both ethernet cards, 
+then this section doesn't apply. But if you could not get the modules
+to recognize both ethernet cards, which will be the case for most people,
+you MUST COMPILE THE DRIVER of the ethernet card into your
+kernel and also compile in the masquerading bit. I have had problems
+getting modules to work with 2 ethernet cards of the same type. 
+Somehow, when I installed RedHat 5.0 from scratch, it got both of 
+my ethernet cards, but it was probably an unusal case. 
+<p>
+Read the 
+<a
+href="http://www.ssc.com/linux/LDP/HOWTO/mini/IP-Masquerade-3.html#ss3.1">
+ip masquerading HOWTO</a>. Follow its steps
+                on compiling the kernel for masquerading.
+                 NOTE -- VERY DANGEROUS if you screw this up. About,
+                installing the kernel, RedHat did something
+                silly when they configured the /etc/lilo.conf file. 
+                Change this line "image=/boot/vmlinuz-2.0.32" to
+                "image=/boot/vmlinuz" and make sure you run "lilo"
+                at some point before you reboot your computer. Do it
+                now to be safe. 
+<p>
+1. And also, these are the steps I use to compile the kernel, first
+configure it like the howto says
+<br> cd /usr/src/linux
+<br> make config
+<p>
+2. and when that is done, compile it 
+<br> make dep 
+<br> make clean
+<br> make zImage 
+<p>3. and if it worked, compile and install the modules
+<br> make modules
+<br> make modules_install
+<p>
+4. After you created your kernel,
+                do the following steps to install your new kernel.
+<p>
+ cp /usr/src/linux arch/i386/boot/zImage   /boot/vmlinuz_NEW
+<br> rm /boot/vmlinuz
+<bR> ln -s /boot/vmlinuz_NEW /boot/vmlinuz
+<br> lilo
+
+                <p>
+                That should install your kernel if you compiled it. 
+                Here is an example of my 
+                <a href="#index_lilo">/etc/lilo.conf</a> file.
+
+<p> YOUR /etc/lilo.conf WILL NOT BE THE SAME AS MINE. Change <a
+href="#index_lilo">/etc/lilo.conf</a> for your specific needs 
+        and please
+        read about append in the BOOTPROMPT howto before you use it.
+        You will have to modify this file yourself.
+        Add the append statement like I did for two ethernet cards.
+
+<hr>
+<a name="change"></a>
+<h3> Change some configuration files</h3>
+
+Use these files.
+<ol>
+<li> Change <a href="#index_rc.local"> /etc/rc.d/rc.local</a> 
+	which will start the ip masquerading. Actually, ADD THIS
+	to your rc.local file and do not overwite it. 
+<li> Change <a href="#index_network">/etc/sysconfig/network</a> 
+	and remember that these values
+	don't me anything and will get changed once you log into
+	the internet. 
+<li>Change <a href="#index_eth0">
+	/etc/sysconfig/network-scripts/ifcfg-eth0</a> and also
+	change
+	<a href="#index_eth1">
+	/etc/sysconfig/network-scripts/ifcfg-eth0</a>.
+</ol>
+
+<hr>
+<a name="hook"></a>
+<h2>Hook up the network. </h2>
+<ol>
+	<li> Put your gateway server computer between the roadrunner
+		box and the hub. 	
+	<li> Reboot the computer.
+	<li> Hook up all your other computers to the hub.
+	<li> See if you can ping or connect from a client computer
+		to your gateway computer. If so good.
+	<li>See if your internal computers can see each other. You don't
+		need the gateway computer to do this, this is just
+		to check to see if your hub is working. Telnet, ping, 
+		ftp, or others should work. For example, "ping c1"
+		would ping your c1.mark.local computer. If you used
+		/etc/hosts like I told you to, you don't need the 
+		gateway server to resolve the ip address. Or you could
+		just do "ping 10.0.0.21" to do the same thing.    
+
+</ol>
+Specifically, you should hook up the first ethernet card to the roadrunner
+modem thing and the second ethernet card to the hub. 
+<p>
+Now we need to get your gateway computer connected to the internet. 
+
+
+<hr>
+<a name="connect"></a>
+<h2>Connect your gateway to the internet. </h2>
+
+Did you remember to first install roadrunner on a Windows95
+computer to get the configuration files? If so, you better. 
+<p>
+Download the <a href="http://www.vortech.net/rrlinux/linux.htm"> 
+ rrclientd-1.3.tar.gz and  rrdhcpcd-1.02.tar.gz</a> files. 
+You don't need rrdhcpcd-1.02.tar.gz unless you want to compile as
+it has a binary contained in rrclientd-1.3.tar.gz. 
+Here are the briefs instructions on what to do, but read the
+README file that comes with rrclientd-1.3.tar.gz. It tells you
+in better detail what to do next. Use rrdhcpcd instead of dhcpcd. 
+It works better and seems to initiate faster.  
+<ol>
+	<li> Create a /etc/rrpasswd file that contains the password
+		for your account. A "chmod 700 /etc/rrpasswd"
+		command if you only want root to be able to read it. 
+	<li> Link your /etc/resolv.conf file to /etc/dhcpc/resolv.conf
+		with the commands
+		<br>mkdir /etc/dhcpc
+		<br>cp /etc/resolv.conf /etc/dhcpc/resolv.conf
+		<br> rm /etc/resolv.conf
+		<br>ln -s /etc/dhcpc/resolv.conf /etc/resolv.conf
+	<li> Copy a file from your windows95 installation
+		to /etc/krb5.conf
+	<li>Make changes to your /etc/services file as said in the readme
+		file from rrclientd-1.3.tar.gz.
+	<li> Copy the binaries you need for rrclientd into 
+		/sbin, or at least, that is what I did. The rest
+		of this document will assume you put your
+		binaries in /sbin. 
+	<li> Make sure the time on your computer is not ahead of the
+		current time and not behind by more than 5 minutes. 
+		Also, make sure your timezone is correct. 
+	<li> I am going to assume you are using rrdhcpcd. If you don't
+		have a binary of it, you will have to compile it. 
+  		Execute these commands to make sure you have the correct
+		links to use the new programs you copied to /sbin. 
+<br>        mv /sbin/dhcpcd /sbin/dhcpcd_old
+<br>        mv /usr/sbin/dhcpcd /usr/sbin/dhcpcd_old
+<br>        mv /usr/bin/rdate /usr/bin/rdate_old
+<br>
+<br>        ln -s /sbin/rdate /usr/bin/rdate
+<br>        ln -s /sbin/rrdhcpcd /sbin/dhcpcd
+<br>        ln -s /sbin/rrdhcpcd /usr/sbin/dhcpcd
+<br>        ln -s /sbin/rrclientd /usr/sbin/rrclientd
+
+</ol>
+<p>
+Once you have installed rrclientd-1.3.tar.gz properly, 
+use this file <a href="#index_login"> /root/Login.bat</a> to 
+start your login session with "source /root/Login.bat". Remember to
+change USERNAME in the file to whatever username it is that you have. 
+In my script, I stop and start rrdhcpcd, which is unecessary. Once
+rrdhcpcd is started, it tries to renew the ip address every 3 hours. 
+Thus, you should never have to stop rrdhcpcd, but I do it anyways.  
+
+<p>
+
+<hr>
+<a name="service"></a>  
+<h2>Setting roadrunner up as a service. </h2>
+You need to set your ethernet card to use the dhcp protocol and to have
+roadrunner as an activated service in order for it to start when
+your computer is turned on. This worked for me. I read the dhcpcd program
+(and probably rrdhcpcd does the same thing) tries to renew the ip
+address every 3 hours. This is good. This means users don't have to start
+and stop it. 
+
+<p>
+A. First, install roadrunner as a service. 
+<ol>
+	<li> <a href="http://www.vortech.net/rrlinux/rhrrclientd.htm">
+This webpage</a> is the guide I used. 
+	<li> <a href="#index_roadrunner"> /root/roadruner</a> is
+		the file you need. I downloaded this April 7th, 1998. 
+		It looks pretty straightforward, so I doubt it will
+		change. 
+	<li> Change your username in the file like it says to. 
+	<li> Copy it to the /etc/rc.d/init.d directory like
+		<br> cp /root/roadrunner /etc/rc.d/init.d
+	<li> Issue the command
+		<br> chkconfig --list | grep roadrunner
+		<br> and you should see 
+		<br> roadrunner 0:off 1:off 2:off 3:off 4:off 5:off 6:off
+	<li> Activate the service by
+		<br>chkconfig --add roadrunner
+	<li>Issue the command
+                <br> chkconfig --list | grep roadrunner
+                <br> and you should see
+                <br> roadrunner 0:off 1:off 2:on 3:on 4:on 5:on 6:off
+</ol>
+<p>
+<a name="partb"></a>
+B. Now use the control panel. Log in as root and use xwindows. "startx"
+will start xwindows at the prompt if you don't have xdm running. 
+The control-panel should be there. This next step will set the first
+ethernet card to use dhcp which we replaced with rrdhcp (the computer
+doesn't know any better). 
+<p>
+<ol>	
+	<li> Click on the "Network Configuration" icon in the
+		control panel. 
+	<li> Click on "Interfaces". 
+	<li> Click on "eth0"
+	<li> Click on "edit"
+	<li> OPTIONAL: Click on "Allow user to (de)active interface".
+	<li> Choose "dhcp" for Interface configuration protocol.
+	<li> Click somewhere to save the changes. 
+</ol>
+<p>
+Okay, we got rrdhcpcd running by setting the first ethernet card to use 
+the protocl dhcp and we installed the roadrunner service which uses rrclientd.
+<h3> Reboot your computer and see what happens!</h3>
+You should be connected to the internet when your server boots up as
+well as all your clients. 
+If you use a web browser, you might have to set it to use the 
+"proxy-server" on port 8080. Programs like telnet, ssh, nslookup, ftp,
+and ping should work. Actually, ping might work with just rrdhcpcd being
+activated. 
+
+
+<hr>
+<a name="stopstart"></a>  
+<h2>Starting and stopping the roadrunner service and rrdhpcd. </h2>
+Well, to stop everything down and start everything up, you would do
+
+<pre>
+/etc/rc.d/init.d/roadrunner stop
+/etc/rc.d/init.d/network stop
+/etc/rc.d/init.d/network start
+/etc/rc.d/init.d/roadrunner start
+</pre>
+<p>
+But of course, that is a little drastic. Rrdhpcd supposedly tries to
+renew the ip address every 3 hours, so you should never have to start
+and stop it. That is good because it takes a while to initiate and
+stalls the network. 
+<p>
+Why would you want to stop and start the roadrunner service?
+Well, in theory, rrdhpcd should get the same ip address 99% of the time
+if you leave it on all the time. If it doesn't, you are screwed and you
+will have to restart the roadrunner service. Thus, instead of using my
+/root/Login.bat script, just put into the cron for the roadrunner service
+to be stopped and started at specific times. Use the files
+<a href="#index_login2"> /root/Login2.bat</a> and 
+<a href="#index_cron2"> /root/cron2</a> and
+<a href="#index_email"> /root/email.pl</a>. 
+Make sure you do a "chmod 755 /root/Login2.bat /root/email.pl". 
+And also do a "crontab /root/cron2". Oh, uh, if you had other stuff
+cronned as root, I would "add the cron stuff" or otherwise you are
+going to blow away your previous cron jobs. 
+<p>
+Also, a quote from Joshua Jackson when I e-mailed him about what
+problems you might have being logged in all the time. 
+<pre>
+If for some reason you lose your IP address (this SHOULD NOT happen under
+normal circumstances), you Kerberos tickets and GSS auth info would become
+invalid.  If this happens, rrclientd will exit and you will need to log   
+back in.
+
+The only reason that you would lose your IP address would either be a
+hardware/software malfunction at either the client or server end or a
+reset of the dhcp servers at RR.
+
+Joshua Jackson
+</pre>
+
+<hr>
+<a name="other"></a>
+<h2>Other things </h2>
+<b>Use this section at your own risk. </b>
+This stuff I plan to elaborate more on given that some people have
+made good suggestions about them. For updates to this webpage, look
+at <a href="http://linux.med.ohio-state.edu/nielsen/rr.html"> 
+http://linux.med.ohio-state.edu/nielsen/rr.html</a>, but that might even
+change someday. NONE OF THIS STUFF in this section is explained well. 
+Modifications are probably in order at some point. This is just what
+I would do. 
+
+<ol>
+	<li> If you don't setup the roadrunner service and bind rrdhcpcd
+		to the ethernet card but you want to stay connected
+		almost 24 hours a day, 
+you could do something like send yourself
+		e-mail once an hour use a 
+		<a href="#index_email">perl script</a> and
+		and <a href="#index_cron">cron</a> job on your
+		gateway
+		server and issue the
+		command "crontab cron" to get it started. 
+		The /root/cron file uses
+<a href="#index_login"> /root/Login.bat</a> file, so you need it also. 
+		Also
+		the <a href="#index_kill"> /root/Kill.bat</a>
+		file to kill it at 1 a.m. You don't have to, I do.
+		Do a "chmod 755 /root/email.pl /root/Kill.bat
+/root/Login.bat".  Modify the stuff as you see fit. Also, add this to your
+		/etc/rc.d/rc.local file and replace USERNAME with the
+		username you use for roadrunner. This will start the
+		stuff at boot time if you didn't set it up to do so
+		with the roadrunner service and control panel. 
+<pre>
+echo starting rrdhcpcd
+/sbin/rrdhcpcd eth0
+echo sleeping for 5 seconds
+sleep 5
+echo Starting rrclientd
+/sbin/rrclientd  -u USERNAME /etc/rrpasswd dce-server 
+echo finished
+echo sleeping 20 more seconds
+sleep 20
+</pre>  
+	<li> If you are interested in what programs you can use, 
+		telnet, ssh, ftp, ping, nslookup, and xwindows programs
+		seem to work. I have heard other ones do as well.
+		Some of resources in "References" above mention other
+		things like ircs and other stuff.  
+	<li> In /etc/inet.d, I would comment out ftp, telnet, rsh, 
+		pop3, pop2, imap, and gopher for security reasons. 
+		Compile and install <a
+href="http://www.cs.hut.fi/ssh/"> ssh</a>. 
+	<li> If you are interested in fixing /etc/resolv.conf so that it
+		doesn't change, do a "chmod 444 /etc/dhcpc/resolv.conf"
+		after you configure it. I recommend you only add
+information like nameservers and domains, like mine is
+<pre>
+domain columbus.rr.com
+search mark.local columbus.rr.com 
+nameserver 10.0.0.10  ### this is our DNS
+nameserver 204.210.252.18 ### this is the roadrunner dns
+nameserver 128.146.1.7  ### ONLY FOR OSU PEOPLE IN COLUMBUS OHIO!
+</pre>
+
+</ol>
+<hr>
+<a name="index"></a>
+<h2>Index of files</h2>
+<h3> You should not have blank lines at the beginning of the files!</h3>
+<hr>
+<a name="index_named"></a>
+/etc/named.boot for server
+<hr><pre> 
+;
+; a caching only nameserver config
+;
+directory                              /var/named
+cache           .                      named.ca
+primary         0.0.127.in-addr.arpa   named.local
+primary        mark.local        mark.local
+primary          0.0.10.in-addr.arpa   10.0.0
+</pre>
+
+<hr>
+<a name="index_resolv"></a>
+/etc/resolv.conf for server and clients
+<hr><pre>
+domain columbus.rr.com
+search mark.local columbus.rr.com 
+nameserver 10.0.0.10  ### this is our DNS
+nameserver 204.210.252.18 ### this is the roadrunner dns
+nameserver 128.146.1.7  ### ONLY FOR OSU PEOPLE IN COLUMBUS OHIO!
+
+### You can probably use our dns first if you want. Actually, I would.
+</pre><hr>
+
+<hr>
+<a name="index_named_mark"></a>      
+/var/named/mark.local for server
+<hr><pre> 
+mark.local.       IN      SOA  main.mark.local. root.main.mark.local.  (
+                                      1997022700 ; Serial
+                                      28800      ; Refresh
+                                      14400      ; Retry
+                                      3600000    ; Expire
+                                      86400 )    ; Minimum
+mark.local.       IN      NS      main.mark.local.
+;localhost IN       A       127.0.0.1
+main.mark.local.   IN     A       10.0.0.10
+c1.mark.local.     IN      A       10.0.0.21
+c2.mark.local.     IN     A       10.0.0.22
+c3.mark.local.     IN     A       10.0.0.23
+c4.mark.local.     IN     A       10.0.0.24
+c5.mark.local.     IN     A       10.0.0.25
+c6.mark.local.     IN     A       10.0.0.26
+c7.mark.local.     IN     A       10.0.0.27
+c8.mark.local.     IN     A       10.0.0.28
+</pre><hr>
+
+<hr>
+<a name="index_0"></a>      
+/var/named/10.0.0 for server
+<hr><pre> 
+0.0.10.in-addr.arpa. IN   SOA  main.mark.local. root.main.mark.local. (
+                                      1997022700 ; Serial
+                                      28800      ; Refresh
+                                      14400      ; Retry
+                                      3600000    ; Expire
+                                      86400 )    ; Minimum
+              IN      NS      main.mark.local.
+10.0.0.10.in-addr.arpa.       IN      PTR     main.mark.local.
+21.0.0.10.in-addr.arpa.       IN      PTR     c1.mark.local.
+22.0.0.10.in-addr.arpa.       IN      PTR     c2.mark.local.
+23.0.0.10.in-addr.arpa.       IN      PTR     c3.mark.local.
+24.0.0.10.in-addr.arpa.       IN      PTR     c4.mark.local.
+25.0.0.10.in-addr.arpa.       IN      PTR     c5.mark.local.
+26.0.0.10.in-addr.arpa.       IN      PTR     c6.mark.local.
+27.0.0.10.in-addr.arpa.       IN      PTR     c7.mark.local.
+28.0.0.10.in-addr.arpa.       IN      PTR     c8.mark.local.
+</pre><hr>
+
+<hr>
+<a name="index_nlocal"></a>
+/var/named/named.local for server 
+<hr><pre>
+
+
+@       IN      SOA     localhost. root.localhost.  (
+                                      1997022700 ; Serial
+                                      28800      ; Refresh
+                                      14400      ; Retry
+                                      3600000    ; Expire
+                                      86400 )    ; Minimum
+              IN      NS      localhost.
+
+1       IN      PTR     localhost.
+</pre>
+<hr>
+
+<hr>
+<a name="index_hosts"></a>      
+/etc/hosts for server and clients
+<hr><pre> 
+127.0.0.1 localhost     localhost.localdomain
+10.0.0.21 c1.mark.local c1
+10.0.0.10 main.mark.local       main
+10.0.0.22 c2.mark.local c2
+10.0.0.23 c3.mark.local c3
+10.0.0.24 c4.mark.local c4
+10.0.0.25 c5.mark.local c5
+10.0.0.26 c6.mark.local c6
+10.0.0.27 c7.mark.local c7
+10.0.0.28 c8.mark.local c8
+
+</pre><hr>
+
+<hr>
+<a name="index_resolv_client"></a>      
+/etc/resolv.conf for the client computers
+<hr><pre> 
+search mark.local
+nameserver 10.0.0.10
+</pre><hr>
+
+<hr>
+<a name="index_lilo"></a>      
+/etc/lilo.conf
+<hr><pre> 
+boot=/dev/hda
+map=/boot/map
+install=/boot/boot.b
+prompt
+timeout=50
+### WARNING!!! THE APPEND STATEMENT IS FOR MY COMPUTER ONLY!!!!!
+image=/boot/vmlinuz
+        label=linux
+        root=/dev/hda1
+        append="ether10,0x300,eth0 ether=11,0x310,eth1"
+        read-only
+</pre><hr>
+
+<hr>
+<a name="index_rc.local"></a>
+/etc/rc.d/rc.local for server 
+<hr><pre>
+## Add this file to /etc/rc.d/rc.local 
+
+echo "setting up ip masquerde"
+/sbin/depmod -a
+/sbin/modprobe ip_masq_ftp
+/sbin/modprobe ip_masq_raudio
+/sbin/modprobe ip_masq_irc
+
+echo "setting up permissions for 10.0.0.0 domain for mas"
+ipfwadm -F -p deny
+ipfwadm -F -a m -S 10.0.0.0/24 -D 0.0.0.0/0
+</pre><hr>
+
+<hr>
+<a name="index_network"></a>
+/etc/sysconfig/network for server
+<hr><pre>
+NETWORKING=yes
+FORWARD_IPV4=true
+HOSTNAME=main.mark.local
+DOMAINNAME=mark.local
+GATEWAY=
+GATEWAYDEV=eth0
+</pre><hr>
+
+<hr>
+<a name="index_eth0"></a>
+/etc/sysconfig/network-scripts/ifcfg-eth0
+<hr><pre>
+DEVICE=eth0
+IPADDR=10.0.1.10
+NETMASK=255.255.255.0
+NETWORK=10.0.1.0
+BROADCAST=10.0.1.255
+ONBOOT=yes
+</pre><hr>
+
+<hr>
+<a name="index_eth1"></a>
+/etc/sysconfig/network-scripts/ifcfg-eth1
+<hr><pre>
+DEVICE=eth1
+IPADDR=10.0.0.10
+NETMASK=255.255.255.0
+NETWORK=10.0.0.0
+BROADCAST=10.0.0.255
+ONBOOT=yes
+</pre><hr>
+
+<hr>
+<a name="index_login"></a>
+/root/Login.bat
+<hr><pre>
+## This is a drastic solution to stop and start your roadrunner stuff
+## Personally, you should only have to start and stop the roadunner
+## service every once in a while, and you shouldn't mess with the network
+date
+echo killing rrclientd
+/sbin/rrclientd -k
+sleep 5
+echo killing rrdhcpcd
+/sbin/rrdhcpcd -k eth0
+echo sleeping 2 seconds
+sleep 2
+### uncomment the next 5 lines if you wish, you probably don't have to
+##echo stopping and starting the network
+##/etc/rc.d/init.d/network stop
+##echo sleeping 5 seconds
+##sleep 5 
+##/etc/rc.d/init.d/network start
+echo starting rrdhcpcd
+/sbin/rrdhcpcd eth0
+echo sleeping for 5 seconds
+sleep 5
+echo Starting rrclientd
+/sbin/rrclientd  -u USERNAME /etc/rrpasswd dce-server
+echo finished
+echo sleeping 20 more seconds
+sleep 20
+</pre><hr>
+
+<hr>
+<a name="index_roadrunner"></a>
+/root/roadrunner for server 
+<hr><pre>
+#!/bin/sh
+#
+# roadrunner  This shell script takes care of starting and stopping
+#             rrclientd.
+#
+# chkconfig: 2345 11 30
+# description: Logs the system into TWC Road Runner Internet Service
+#
+# Author: Joshua Jackson  jjackson@neo.lrun.com
+#         1/6/98
+#
+# Source function library.
+. /etc/rc.d/init.d/functions
+
+# Source networking configuration.
+. /etc/sysconfig/network
+
+# Check that networking is up.
+[ ${NETWORKING} = "no" ] && exit 0
+
+[ -f /usr/sbin/rrclientd ] || exit 0
+
+RRUSER="Your Username Goes here!"
+
+# See how we were called.
+case "$1" in
+  start)
+        # Start daemons.
+        echo -n "Logging into Road Runner: "
+        daemon rrclientd -u ${RRUSER} /etc/rrpasswd dce-server
+        echo
+        ;;
+  stop)
+        # Stop daemons.
+        echo -n "Logging out of Road Runner "
+        killproc rrclientd
+        echo
+        ;;
+  status)
+        status rrclientd
+        ;;
+  restart)
+        $0 stop
+        $0 start
+        ;;
+  *)
+        echo "Usage: roadrunner start|stop|restart"
+        exit 1
+esac
+
+exit 0
+</pre><hr>
+
+<hr>
+<a name="index_email"></a>
+/root/email.pl for server
+<hr><pre>
+!/usr/bin/perl
+
+$EMAIL = "USERNAME\@somewhere.foo.edu";
+
+open(EMAIL,"| /bin/mail -s RR $EMAIL");
+$date = `date`;
+chop $date;
+
+print EMAIL "DATE AND TIME: $date\n";
+print EMAIL "--------------------------------------------------\n";
+print EMAIL "test\n";
+
+close(EMAIL);
+</pre><hr>
+        
+<hr>
+<a name="index_cron"></a>
+/root/cron for server  
+<hr><pre>
+# Let us restart dhcpd and rrclient 7 a.m., 2 p.m., and 10 p.m.
+# and kill it at 1 a.m.
+# and e-mail once an hour 5 minutes after the hour
+0 7,14,22 * * *     /root/Login.bat  >> /root/Login.log
+0 1 * * *     /root/Kill.bat >> /root/Kill.log
+5 * * * * /root/mail.pl  
+</pre><hr>
+        
+<hr>
+<a name="index_kill"></a>
+/root/Kill.bat for server  
+<hr><pre>
+date
+/sbin/rrclientd -k
+sleep 5
+/sbin/rrdhcpcd -k eth0
+sleep 5
+</pre><hr>
+
+<hr>
+<a name="index_login2"></a>
+/root/Login2.bat
+<hr><pre>
+### We just need to quickly stop and start roadrunner
+/etc/rc.d/init.d/roadrunner stop
+sleep 5
+/etc/rc.d/init.d/roadrunner start
+</pre><hr>
+        
+<hr>
+<a name="index_cron2"></a>
+/root/cron2  
+<hr><pre>
+# Let us restart roadrunner 7 a.m., 2 p.m., and 10 p.m.
+# and e-mail once an hour 5 minutes after the hour
+0 7,14,22 * * *     /root/Login2.bat  >> /root/Login2.log
+5 * * * * /root/mail.pl
+</pre><hr>
+
+<hr>
+<a name="index_hname"></a>
+/etc/HOSTNAME
+<hr><pre>
+main.mark.local
+</pre><hr>
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<center><H5>Copyright &copy; 1998, Mark Nielsen <BR> 
+Published in Issue 28 of <i>Linux Gazette</i>, May 1998</H5></center>
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<A HREF="./index.html"><IMG ALIGN=BOTTOM SRC="../gx/indexnew.gif" 
+ALT="[ TABLE OF CONTENTS ]"></A>
+<A HREF="../index.html"><IMG ALIGN=BOTTOM SRC="../gx/homenew.gif"
+ALT="[ FRONT PAGE ]"></A>
+<A HREF="./journeay.html"><IMG SRC="../gx/back2.gif"
+ALT=" Back "></A>
+<A HREF="./winer.html"><IMG SRC="../gx/fwd.gif" ALT=" Next "></A>
+<P> <hr> <P> 
+<!--startcut ==========================================================-->
+</BODY>
+</HTML>
+<!--endcut ============================================================-->

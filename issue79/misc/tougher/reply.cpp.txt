@@ -1,0 +1,151 @@
+//
+//
+// Copyright 2002 Rob Tougher <robt@robtougher.com>
+//
+// This file is part of xmlrpc.
+//
+// xmlrpc is free software; you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation; either version 2 of the License, or
+// (at your option) any later version.
+//
+// xmlrpc is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with xmlrpc; if not, write to the Free Software
+// Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+//
+//
+
+
+// Implementation of the reply class
+
+
+#include "reply.hpp"
+#include "xmlrpc_exceptions.hpp"
+
+namespace xmlrpc
+{
+  reply::reply ( const std::string value ) : m_value ( value ) {}
+
+  reply::~reply() {}
+
+  //
+  // <reply>
+  //   <return_value></return_value>
+  //   <errors>
+  //      <error></error>
+  //   </errors>
+  // </reply>
+  //
+  std::string reply::get_xml() const
+  {
+
+    xml::node root ( "reply" );
+    xml::node * return_value = root.add_child ( "return_value", m_value );
+    xml::node * errors = root.add_child ( "errors" );
+
+    for ( std::vector<std::string>::const_iterator it = m_errors.begin();
+	  it != m_errors.end();
+	  it++ )
+      {
+	xml::node * error = errors->add_child ( "error", *it );
+      }
+
+    return root.get_xml();
+  }
+
+
+
+  void reply::load_xml ( const std::string s )
+  {
+
+    m_errors.clear();
+    m_value = "";
+
+    xml::node n;
+
+    try
+      {
+	n.load_xml ( s );
+      }
+    catch ( xml::parse_exception& e )
+      {
+	throw reply_exception ( "Could not parse the reply." );
+      }
+
+    if ( n.get_child_count() > 0 )
+      {
+	xml::node * return_value = n.get_child ( 0 );
+
+	if ( return_value &&
+	     return_value->get_name().compare ( "return_value" ) == 0 )
+	  {
+	    xml::node * xmlroot = return_value->get_child ( 0 );
+
+	    if( xmlroot )
+	      {
+		m_value = xmlroot->get_xml();
+	      }
+	    else
+	      {
+		m_value = return_value->get_text();
+	      }
+	  }
+	else
+	  {
+	    throw reply_exception
+	      ( "<return_value> is not the first child node in the reply." );
+
+	  }
+
+	xml::node * errors = n.get_child ( 1 );
+
+	if ( errors )
+	  {
+	    int error_count = errors->get_child_count();
+
+	    for ( int error_index = 0; error_index < error_count; error_index++ )
+	      {
+		xml::node * error = errors->get_child ( error_index );
+
+		if ( error && error->get_name().compare ( "error" ) == 0 )
+		  {
+		    xml::node * xmlroot = error->get_child ( 0 );
+
+		    if ( xmlroot )
+		      {
+			m_errors.push_back ( error->get_xml() );
+		      }
+		    else
+		      {
+			m_errors.push_back ( error->get_text() );
+		      }
+		  }
+	      }
+	  }
+	else
+	  {
+	    throw reply_exception
+	      ( "Reply does not contain an errors collection." );
+	  }
+      }
+  }
+
+
+
+  std::string reply::get_error ( const int index ) const
+  {
+    if ( m_errors.size() > index )
+      {
+	return * ( m_errors.begin() + index );
+      }
+    else
+      {
+	return std::string ( "" );
+      }
+  }
+};

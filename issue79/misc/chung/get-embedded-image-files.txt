@@ -1,0 +1,48 @@
+#!/usr/bin/python
+from string import find
+from sys import argv
+from commands import getstatusoutput
+
+headers = [("GIF8",0,"giftopnm","gif"), ("PNG",1,"pngtopnm","png"),
+           ("JFIF",6,"djpeg","jpg")]
+filepath = "proprietary.file"
+if len(argv)>1: filepath = argv[1]
+
+fh = open(filepath )
+dat = fh.read()
+fh.close()
+
+inum = 0
+for kw,off,conv,ext in headers:
+    x = -1
+    while 1:
+        x = find(dat,kw,x+1)
+        if x<0: break
+        beg = x - off
+        #possible image located -- find end by binary chop
+	s1 = len(dat) - x
+	s0 = 1
+        sz = s1
+	while s0<s1:
+	    (stat,output) = getstatusoutput("tail -c +%d %s | head -c %d | %s >/dev/null" % (beg + 1, filepath, sz, conv))
+	    if stat:
+                #failed -- possibly too small
+                if sz == s1:
+                    #failed -- probably invalid data
+                    print "failed... no image here"
+                    break
+                elif sz == s0:
+                    #we've found the length -- write out image
+                    imgname = "image%03d.%s" % (inum, ext)
+                    print "writing",imgname
+                    fh = open( imgname, "w")
+                    fh.write(dat[beg :beg+s1])
+                    fh.close()
+                    inum = inum + 1
+                    break
+                s0 = sz
+            else:
+                #might be too big -- try smaller
+                s1 = sz
+            sz = int((s0+s1)/2)
+

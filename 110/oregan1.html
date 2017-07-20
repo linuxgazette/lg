@@ -1,0 +1,675 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Building a simple del.icio.us clone LG #110</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="oregan.html" >&lt;-- prev</A> | <A HREF="park1.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Building a simple del.icio.us clone</h1>
+<p id="by"><b>By <A HREF="../authors/oregan.html">Jimmy O'Regan</A></b></p>
+
+<p>
+<p> I recently made the move from Mandrake to Ubuntu, and while I was
+unpacking in my new $HOME (sorry, I couldn't resist), I came across a
+little <a href="http://del.icio.us">del.icio.us</a> clone I wrote in
+PHP to test out the RDF generating script I wrote (well, adapted) to
+go with my <a href="../108/oregan.html">article about outliners</a>.
+
+<p> I decided to use PHP, basically because it's the only language 
+I've used for web programming (aside from a misguided moment in my
+first year in college when I wrote something in Pascal). I decided to
+use SQLite for the database because I didn't feel like installing
+MySQL: PHP's SQLite functions are pretty similar to the MySQL equivalent
+anyway, so it's no big deal. 
+
+<p> Please note that what I am presenting in this article does very 
+little: I needed to test a script, and only cloned the parts I needed to
+do that. I did go a little further, but forgot about it until now. 
+Doing something useful is for a future article!
+
+<p> Because I only needed it to give me simple XML output, I managed
+to get all I needed from a single script. First, I set up a sample
+database:
+
+<pre class="code">
+BEGIN TRANSACTION;
+CREATE TABLE bookmarks (url TEXT, title TEXT, desc TEXT, keywords TEXT,
+date TEXT, id INTEGER PRIMARY KEY);
+INSERT INTO bookmarks VALUES('http://sqlite.org/datatype3.html',
+'Datatypes In SQLite Version 3','','sqlite programming','2004-10-16T20:23:49Z',1);
+INSERT INTO bookmarks VALUES('http://sqlite.org/lang.html',
+'Query Language Understood By SQLite','','sqlite programming','2004-10-16T20:25:36Z',2);
+INSERT INTO bookmarks VALUES('http://www.team-teso.net/releases.php',
+'releases of teso','','computing 404','2003-07-15T22:29:38Z',3);
+INSERT INTO bookmarks VALUES('http://ssshotaru.homestead.com/files/aolertranslator.html',
+'The AOLer Translator','','humour','2003-11-18T00:45:35Z',4);
+INSERT INTO bookmarks VALUES('http://www.onlineconversion.com/unix_time.htm',
+'Online Conversion - Unix time conversion','','misc','2004-10-16T20:43:44Z',5);
+COMMIT;
+</pre>
+
+<p> Then, I wrote a script to give me the output:
+
+<pre class="code">
+&lt;?php echo '&lt;?xml version=&quot;1.0&quot; standalone=&quot;yes&quot; encoding=&quot;UTF-8&quot;?'.'&gt;' ?&gt;
+&lt;!-- http://ie.php.net/manual/en/language.basic-syntax.php#41654 --&gt;
+
+&lt;posts tag=&quot;&quot; user=&quot;&quot;&gt;
+&lt;?php 
+
+if (!extension_loaded(&quot;sqlite&quot;))
+{
+        dl(&quot;sqlite.so&quot;);
+}
+
+if ($db = sqlite_open(&quot;/tmp/bookmarks.sqlite&quot;, 0666, $err))
+{
+        $result = sqlite_query ($db, &quot;SELECT * FROM bookmarks&quot;);
+        while (sqlite_has_more($result))
+        {
+                $post = sqlite_fetch_array ($result);
+		
+		$url = 'href=&quot;'.htmlentities($post['url']).'&quot;';
+		$title = 'description=&quot;'.htmlentities($post['title']).'&quot;';
+                if ($post['desc'] != &quot;&quot;)
+		{
+	                 $desc = 'extended=&quot;'.htmlentities($post['desc']).'&quot;';
+		}
+		else
+		{
+			$desc = &quot;&quot;;
+		}
+		$date = 'time=&quot;'.$post['date'].'&quot;';
+		# Don't know if this is how it's done, but it's close enough
+		$hash = 'hash=&quot;'.md5($url).'&quot;';
+		$tags = 'tag=&quot;'.$post['keywords'].'&quot;';
+
+		print &quot; &lt;post $url $title $desc $hash $tags $date /&gt;&quot;;
+		printf (&quot;\n&quot;);
+       }
+}
+?&gt;		
+&lt;/posts&gt;
+</pre>
+
+<p> Running this with the sample database gave me this output:
+
+<pre>
+&lt;?xml version=&quot;1.0&quot; standalone=&quot;yes&quot; encoding=&quot;UTF-8&quot;?&gt;&lt;!-- http://ie.php.net/manual/en/language.basic-syntax.php#41654 --&gt;
+
+&lt;posts tag=&quot;&quot; user=&quot;&quot;&gt;
+ &lt;post href=&quot;http://sqlite.org/datatype3.html&quot; description=&quot;Datatypes In 
+ SQLite Version 3&quot;  hash=&quot;56faa06a48016408c5042c7e4bfd3c24&quot; tag=&quot;sqlite 
+ programming&quot; time=&quot;2004-10-16T20:23:49Z&quot; /&gt;
+ &lt;post href=&quot;http://sqlite.org/lang.html&quot; description=&quot;Query Language 
+ Understood By SQLite&quot;  hash=&quot;7a7eb0095ca227e7003c4a0f0a4a1fd9&quot; tag=&quot;sqlite 
+ programming&quot; time=&quot;2004-10-16T20:25:36Z&quot; /&gt;
+ &lt;post href=&quot;http://www.team-teso.net/releases.php&quot; description=&quot;releases of 
+ teso&quot;  hash=&quot;bce6a8d5ecb506ff57be063083253e15&quot; tag=&quot;computing 404&quot; 
+ time=&quot;2003-07-15T22:29:38Z&quot; /&gt;
+ &lt;post href=&quot;http://ssshotaru.homestead.com/files/aolertranslator.html&quot; 
+ description=&quot;The AOLer Translator&quot;  hash=&quot;99fbdd9eb3e03624c65b15d06a82388a&quot; 
+ tag=&quot;humour&quot; time=&quot;2003-11-18T00:45:35Z&quot; /&gt;
+ &lt;post href=&quot;http://www.onlineconversion.com/unix_time.htm&quot; 
+ description=&quot;Online Conversion - Unix time conversion&quot;  
+ hash=&quot;f2fd9548118ac815edee17466c58abe1&quot; tag=&quot;misc&quot; 
+ time=&quot;2004-10-16T20:43:44Z&quot; /&gt;
+		
+&lt;/posts&gt;
+</pre>
+
+<p> Which is pretty close to the output given by 
+<tt>http://del.icio.us/api/posts/get?</tt>. 
+
+<p> It did what I wanted, it didn't take long to write, and I had fun doing
+it. So I thought I might try to make it do a bit more.
+
+<p> Next, I decided to tackle the page that returns the list of tags,
+to run <tt>delicious_mind</tt> on it:
+
+<pre class="code">
+&lt;?php echo '&lt;?xml version=&quot;1.0&quot; standalone=&quot;yes&quot; encoding=&quot;UTF-8&quot;?'.'&gt;' ?&gt;
+
+&lt;tags&gt;
+&lt;?php 
+
+//error_reporting(E_ALL);
+//Error reporting? I have no errors! ... erm... not now, at least.
+
+if (!extension_loaded(&quot;sqlite&quot;))
+{
+        dl(&quot;sqlite.so&quot;);
+}
+
+// I really should do something with $err
+if ($db = sqlite_open(&quot;/tmp/bookmarks.sqlite&quot;, 0666, $err))
+{
+	$tags = array();
+	$prevtags = array();
+	
+        $result = sqlite_query ($db, &quot;SELECT keywords FROM bookmarks&quot;);
+        while (sqlite_has_more($result))
+        {
+                $foo = sqlite_fetch_array ($result);
+		$thistag = split(&quot; &quot;, $foo['keywords']);
+		// print_r(array) is worth remembering.
+		$prevtags = array_merge($tags);
+		$tags = array_merge($prevtags, $thistag);
+        }
+	natcasesort($tags);
+	$uniq=array_unique($tags);
+	$count=array_count_values($tags);
+        foreach ($uniq as $tag)
+        {
+		$c = $count[$tag];
+                print &quot;&lt;tag count='$c' tag='$tag' /&gt;&quot;;
+		printf(&quot;\n&quot;);
+        }
+}
+?&gt;		
+&lt;/tags&gt;
+</pre>
+
+<p> According to del.icio.us's <a href="http://del.icio.us/doc/api">API
+documentation</a> the posts URL accepts two parameters: <code>tag</code>
+and <code>date</code>, which allow you to filter the results you receive.
+The next step was to make the first script do that:
+
+<pre class="code">
+&lt;?php 
+echo '&lt;?xml version=&quot;1.0&quot; standalone=&quot;yes&quot; encoding=&quot;UTF-8&quot;?'.'&gt;'; 
+
+if (!extension_loaded(&quot;sqlite&quot;))
+{
+        dl(&quot;sqlite.so&quot;);
+}
+
+if ($_GET['tag'] != &quot;&quot;)
+{
+	$tag = $_GET['tag'];
+}
+
+if ($_GET['dt'] != &quot;&quot;)
+{
+	$dt = $_GET['dt'];
+}
+
+printf (&quot;&lt;posts &quot;);
+if ($dt)
+{
+	printf (&quot;dt='$dt' &quot;);
+	$query = &quot;SELECT * FROM bookmarks where date like '%$dt%'&quot;;
+}
+if ($tag)
+{
+	printf (&quot;tag='$tag'&quot;);
+	$query = &quot;SELECT * FROM bookmarks where keywords like '%$tag%'&quot;;
+	// The problem with this is that it matches too much.
+	// Using my example, if I search for 'sql' I should get nothing,
+	// but instead it matches 'sqlite'
+	// Close enough for my purposes, though I should use the stuff I
+	// have for extracting the tags.
+}
+else
+{
+	printf (&quot;tag=''&quot;);
+}
+printf (&quot; user=''&gt;\n&quot;);
+
+if ($tag &amp;&amp; $dt)
+{
+	$query = &quot;SELECT * FROM bookmarks where date like '%$dt%' and keywords like '%$tag%'&quot;;
+}
+
+if (!$tag &amp;&amp; !$dt)
+{
+	$query = &quot;SELECT * FROM bookmarks&quot;;
+}
+
+if ($debug) echo &quot;&lt;!-- '$query' --&gt;&quot;;
+
+if ($db = sqlite_open(&quot;/tmp/bookmarks.sqlite&quot;, 0666, $err))
+{
+        $result = sqlite_query ($db, $query);
+        while (sqlite_has_more($result))
+        {
+                $post = sqlite_fetch_array ($result);
+		
+		$url = 'href=&quot;'.htmlentities($post['url']).'&quot;';
+		$title = 'description=&quot;'.htmlentities($post['title']).'&quot;';
+                if ($post['desc'] != &quot;&quot;)
+		{
+	                 $desc = 'extended=&quot;'.htmlentities($post['desc']).'&quot;';
+		}
+		else
+		{
+			$desc = &quot;&quot;;
+		}
+		$date = 'time=&quot;'.$post['date'].'&quot;';
+		// Used the wrong variable in the first example
+		$hash = 'hash=&quot;'.md5($post['url']).'&quot;';
+		$tags = 'tag=&quot;'.$post['keywords'].'&quot;';
+
+		print &quot; &lt;post $url $title $desc $hash $tags $date /&gt;&quot;;
+		printf (&quot;\n&quot;);
+       }
+}
+?&gt;		
+&lt;/posts&gt;
+</pre>
+
+<p> As noted in the comments, the tags matched too much: if I specified
+'sql' as the tag to filter for, it would match 'sqlite', if that was the
+last tag in the list. I wrote a simple search script while thinking about
+what I was going to do next:
+
+<pre class="code">
+
+&lt;?php
+
+if (!extension_loaded(&quot;sqlite&quot;))
+{
+        dl(&quot;sqlite.so&quot;);
+}
+
+if (!$_GET['search'])
+{
+	echo &quot;&lt;form method='GET'&gt;&quot;;
+	echo &quot;&lt;input name='search' value='' type='text' size='80'&gt;&quot;;
+	echo &quot;&lt;input type='submit'&gt;&quot;;
+	echo &quot;&lt;/form&gt;&quot;;
+}
+	
+else 
+{
+	$search = $_GET['search'];
+	
+	if ($db = sqlite_open(&quot;/tmp/bookmarks.sqlite&quot;, 0666, $err))
+	{
+		
+		echo &quot;&lt;form method='GET'&gt;&quot;;
+		echo &quot;&lt;input name='search' value='$search' type='text' size='80'&gt;&quot;;
+		echo &quot;&lt;input type='submit'&gt;&quot;;
+		echo &quot;&lt;/form&gt;&quot;;
+		
+		$query = &quot;SELECT * FROM bookmarks WHERE url LIKE '%$search%' OR title LIKE '%$search%'&quot;;
+		$result = sqlite_query ($db, $query);
+		while (sqlite_has_more($result))
+		{
+			$post = sqlite_fetch_array ($result);
+			$url = $post['url'];
+			echo &quot;&lt;p&gt;&lt;a href='$url'&gt;&quot;;
+			echo $post['title'];
+			echo &quot;&lt;/a&gt;&quot;;
+			// keywords, edit
+		}
+	}
+}
+</pre>
+
+<p> In the end I decided to simply pad each tag out with spaces, because it
+was easier that way, leaving me with new versions of the posts and tags 
+scripts:
+
+<p>(<a href="misc/oregan/posts.php.txt">text version</a>)
+<pre class="code">
+&lt;?php 
+echo '&lt;?xml version=&quot;1.0&quot; standalone=&quot;yes&quot; encoding=&quot;UTF-8&quot;?'.'&gt;'; 
+
+if (!extension_loaded(&quot;sqlite&quot;))
+{
+        dl(&quot;sqlite.so&quot;);
+}
+
+if ($_GET['tag'] != &quot;&quot;)
+{
+	$tag = $_GET['tag'];
+}
+
+if ($_GET['dt'] != &quot;&quot;)
+{
+	$dt = $_GET['dt'];
+}
+
+printf (&quot;&lt;posts &quot;);
+if ($dt)
+{
+	printf (&quot;dt='$dt' &quot;);
+	$query = &quot;SELECT * FROM bookmarks where date like '%$dt%'&quot;;
+}
+if ($tag)
+{
+	printf (&quot;tag='$tag'&quot;);
+	$query = &quot;SELECT * FROM bookmarks where keywords like '% $tag %'&quot;;
+}
+else
+{
+	printf (&quot;tag=''&quot;);
+}
+printf (&quot; user=''&gt;\n&quot;);
+
+if ($tag &amp;&amp; $dt)
+{
+	// A simple change, to prevent false positives: pad the keywords
+	// field with spaces :)
+	$query = &quot;SELECT * FROM bookmarks where date like '%$dt%' and keywords like '% $tag %'&quot;;
+}
+
+if (!$tag &amp;&amp; !$dt)
+{
+	$query = &quot;SELECT * FROM bookmarks&quot;;
+}
+
+if ($debug) echo &quot;&lt;!-- '$query' --&gt;&quot;;
+
+if ($db = sqlite_open(&quot;/tmp/bookmarks.sqlite&quot;, 0666, $err))
+{
+        $result = sqlite_query ($db, $query);
+        while (sqlite_has_more($result))
+        {
+                $post = sqlite_fetch_array ($result);
+		
+		$url = 'href=&quot;'.htmlentities($post['url']).'&quot;';
+		$title = 'description=&quot;'.htmlentities($post['title']).'&quot;';
+                if ($post['desc'] != &quot;&quot;)
+		{
+	                 $desc = 'extended=&quot;'.htmlentities($post['desc']).'&quot;';
+		}
+		else
+		{
+			$desc = &quot;&quot;;
+		}
+		$date = 'time=&quot;'.$post['date'].'&quot;';
+		// Used the wrong variable in the first example
+		$hash = 'hash=&quot;'.md5($post['url']).'&quot;';
+		$tags = 'tag=&quot;'.trim($post['keywords']).'&quot;';
+
+		print &quot; &lt;post $url $title $desc $hash $tags $date /&gt;&quot;;
+		printf (&quot;\n&quot;);
+       }
+}
+?&gt;		
+&lt;/posts&gt;
+</pre>
+
+<p> (<a href="misc/oregan/tags.php.txt">text version</a>)
+<pre class="code">
+&lt;?php echo '&lt;?xml version=&quot;1.0&quot; standalone=&quot;yes&quot; encoding=&quot;UTF-8&quot;?'.'&gt;' ?&gt;
+
+&lt;tags&gt;
+&lt;?php 
+
+//error_reporting(E_ALL);
+//Error reporting? I have no errors! ... erm... not now, at least.
+
+if (!extension_loaded(&quot;sqlite&quot;))
+{
+        dl(&quot;sqlite.so&quot;);
+}
+
+// I really should do something with $err
+if ($db = sqlite_open(&quot;/tmp/bookmarks.sqlite&quot;, 0666, $err))
+{
+	$tags = array();
+	$prevtags = array();
+	
+        $result = sqlite_query ($db, &quot;SELECT keywords FROM bookmarks&quot;);
+        while (sqlite_has_more($result))
+        {
+                $foo = sqlite_fetch_array ($result);
+		$thistag = split(&quot; &quot;, $foo['keywords']);
+		// print_r(array) is worth remembering.
+		$prevtags = array_merge($tags);
+		$tags = array_merge($prevtags, $thistag);
+        }
+	natcasesort($tags);
+	$uniq=array_unique($tags);
+	$count=array_count_values($tags);
+        foreach ($uniq as $tag)
+        {
+		if ($tag != '')
+		{
+			$c = $count[$tag];
+                	print &quot;&lt;tag count='$c' tag='&quot;.trim($tag).&quot;' /&gt;&quot;;
+			printf(&quot;\n&quot;);
+		}
+        }
+}
+?&gt;		
+&lt;/tags&gt;
+</pre>
+
+<p> I needed the database changed to work with these scripts, so I added a 
+new script to generate the SQL. I should have written it to add the data to
+the database directly, but never got around to doing that. 
+
+<pre class="code">
+&lt;?
+$url = $_POST['url'];
+$title = $_POST['title'];
+$desc = $_POST['desc'];
+$keywords = $_POST['keywords'];
+$date = date(&quot;Y-m-d\TH:i:s\Z&quot;, $_POST['date']);
+
+
+$f = fopen(&quot;/tmp/bookmarks.sql&quot;, &quot;a&quot;);
+fwrite($f, &quot;
+INSERT INTO bookmarks VALUES ('$url', '$title', '$desc', 
+'$keywords', '$date', NULL);
+&quot;);
+?&gt;
+</pre>
+
+<p> The form to call the script:
+
+<pre>
+&lt;html&gt;
+&lt;head&gt;
+	&lt;title&gt;Post Bookmark&lt;/title&gt;
+&lt;/head&gt;
+&lt;body&gt;
+	
+&lt;form method=&quot;POST&quot; action=&quot;make-sql.php&quot;&gt;
+&lt;table&gt;
+&lt;tr&gt;
+&lt;td&gt;URL:&lt;/td&gt;
+&lt;td&gt;&lt;input type=&quot;text&quot; name=&quot;url&quot; size=&quot;80&quot;&gt;&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;Title:&lt;/td&gt;
+&lt;td&gt;&lt;input type=&quot;text&quot; name=&quot;title&quot; size=&quot;80&quot;&gt;&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;Description&lt;/td&gt;
+&lt;td&gt;&lt;input type=&quot;text&quot; name=&quot;desc&quot; size=&quot;80&quot;&gt;&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;Keywords&lt;/td&gt;
+&lt;td&gt;&lt;input type=&quot;text&quot; name=&quot;keywords&quot; size=&quot;80&quot;&gt;&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;Date&lt;/td&gt;
+&lt;td&gt;&lt;input type=&quot;text&quot; name=&quot;date&quot; size=&quot;80&quot;&gt;&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;input type=&quot;submit&quot; name=&quot;submit&quot; value=&quot;Submit&quot;&gt;&lt;/td&gt;
+&lt;/tr&gt;
+&lt;/table&gt;
+&lt;/form&gt;
+
+&lt;/body&gt;
+&lt;/html&gt;
+</pre>
+
+<p> And the output:
+<pre>
+INSERT INTO bookmarks VALUES ('http://www.mozilla.org/projects/plugins/scripting-plugins.html', 
+'Scripting Plugins with Mozilla', '', ' mozilla javascript ', '2003-08-09T20:58:38Z', NULL);
+INSERT INTO bookmarks VALUES ('http://www.mozilla.org/docs/xul/xulnotes/xulnote_xpconnect.html', 
+'Fun With XBL and XPConnect', '', ' mozilla xbl ', '2003-08-06T04:20:33Z', NULL);
+INSERT INTO bookmarks VALUES ('http://www.mozilla.org/projects/xbl/xbl.html', 
+'XBL (Extensible Binding Language) 1.0', '', ' mozilla xbl ', '2003-08-06T04:20:18Z', NULL);
+INSERT INTO bookmarks VALUES ('http://layeremu.mozdev.org/files/usage.html', 
+'mozdev.org - layeremu: files/usage', '', ' mozilla ', '2003-08-06T00:31:43Z', NULL);
+INSERT INTO bookmarks VALUES 
+('http://www.mozdev.org/source/browse/~checkout~/gnusto/src/gnusto/content/gnusto-lib.js?rev=1.97&amp;content-type=text/plain', 
+'http://www.mozdev.org/source/browse/~checkout~/gnusto/src/gnusto/content/gnusto-lib.js?rev=1.97&amp;content-type=text/plain', 
+'', ' mozilla ', '2003-08-17T03:31:59Z', NULL);
+INSERT INTO bookmarks VALUES ('http://www.mozilla.org/docs/dom/domref/dom_el_ref31.html#1028304', 
+'addEventListener', '', ' mozilla javascript ', '2003-10-12T22:17:33Z', NULL);
+INSERT INTO bookmarks VALUES ('http://www.mozilla.org/docs/dom/domref/dom_el_ref47.html#1028897', 
+'insertBefore', '', ' mozilla javascript ', '2003-10-12T22:17:34Z', NULL);
+INSERT INTO bookmarks VALUES ('http://techpubs.sgi.com/library/tpl/cgi-bin/browse.cgi?coll=0650&amp;db=man&amp;pth=/cat1', 
+'SGI TPL Browse Man Pages (User Commands (1))', '', ' unix manpages ', '2003-07-14T09:48:03Z', NULL);
+INSERT INTO bookmarks VALUES ('http://docsrv.caldera.com/', 
+'SCOhelp', '', ' unix manpages ', '2003-07-14T09:48:03Z', NULL);
+INSERT INTO bookmarks VALUES ('http://docs.hp.com/hpux/os/man%5Fpages.html', 
+'hp-ux reference (manpages)', '', ' unix manpages ', '2003-07-14T09:48:03Z', NULL);
+INSERT INTO bookmarks VALUES ('http://sun.doit.wisc.edu/', 
+'DoIT/POST SUN Home Page', '', ' unix manpages ', '2003-07-14T09:48:03Z', NULL);
+INSERT INTO bookmarks VALUES ('http://publib16.boulder.ibm.com/cgi-bin/ds_form?lang=en_US&amp;viewset=AIX/', 
+'AIX Documentation', '', ' unix manpages ', '2003-07-14T09:48:03Z', NULL);
+INSERT INTO bookmarks VALUES ('http://www.toccionline.com/creations/ctrla/how.html', 
+'CTRL+A Images - Make Your Own', '', ' computing ', '2003-07-19T13:37:06Z', NULL);
+INSERT INTO bookmarks VALUES ('http://www.sco.com/developers/gabi/', 
+'SCO | Developers | GABI', '', ' computing ', '2003-07-17T00:56:32Z', NULL);
+INSERT INTO bookmarks VALUES ('http://openpalm.sourceforge.net/faq.html', 
+'FAQ of the OpenPalm Project', '', ' computing ', '2003-07-14T10:19:25Z', NULL);
+INSERT INTO bookmarks VALUES ('http://www.improvisation.ws/mb/tpcs1.php', 
+'Improv Message Boards - True Porn Clerk Stories', '', ' misc ', '2003-06-10T23:59:11Z', NULL);
+INSERT INTO bookmarks VALUES ('http://singsmart.com/freesingingarticles.html', 
+'Sing Smart, Not Hard with Vocal Coach Yvonne DeBandi', '', ' misc ', '2003-06-09T23:22:34Z', NULL);
+</pre>
+
+<p> Now that I've made my terrible PHP code public, I guess I'll have to
+finish off the job. Coming in part 2:
+
+<ul>
+<li> HTML output! </li>
+<li> Adding bookmarks </li>
+<li> Deleting bookmarks </li>
+<li> Manipulating tags </li>
+<li> More modular code </li>
+<li> A Perl script to take Netscape bookmarks and post them to the real
+del.icio.us </li>
+</ul>
+
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<P>
+<img ALIGN="LEFT" ALT="[BIO]" SRC="../gx/2004/authors/oregan.jpg" class="bio">
+<em>
+<!-- ../110/lg_laundrette.html#nottag.15 :) -->
+Jimmy is a single father of one, who enjoys long walks... Oh, right.
+
+<p> Jimmy has been using computers from the tender age of seven, when his father 
+inherited an Amstrad PCW8256. After a few brief flirtations with an Atari ST
+and numerous versions of DOS and Windows, Jimmy was introduced to Linux in 1998
+and hasn't looked back.
+
+<p> In his spare time, Jimmy likes to play guitar and read: not at the same time, 
+but the picks make handy bookmarks.
+</em>
+<br CLEAR="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2005, Jimmy O'Regan. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 110 of Linux Gazette, January 2005
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="oregan.html" >&lt;-- prev</A> | <A HREF="park1.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">January 2005 (#110)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

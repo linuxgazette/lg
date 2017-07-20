@@ -1,0 +1,270 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>Internet Printing - Another Way LG #65</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<CENTER>
+<A HREF="http://www.linuxgazette.net/">
+<H1><IMG ALT="LINUX GAZETTE" SRC="../gx/lglogo.png" 
+	WIDTH="600" HEIGHT="124" border="0"></H1></A> 
+
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="correa.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../faq/index.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="joshi.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+<P>
+</CENTER>
+
+<!--endcut ============================================================-->
+
+<H4 ALIGN="center">
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H1><font color="maroon">Internet Printing - Another Way</font></H1>
+<H4>By <a href="mailto:grahjenk@au1.ibm.com">Graham Jenkins</a></H4>
+</center>
+<P> <HR> <P>  
+
+<!-- END header -->
+
+
+
+
+<h2>The Problem</h2>
+
+<p>You are doing some work on your home PC, connected to your favorite ISP - and
+you decide you want to print a Word document on the high-speed color printer
+at your office.
+That printer is connected to the corporate LAN, but you can't talk to it
+using LPR or IPP because it is hidden behind the corporate firewall.</p>
+
+<p>You could perform a print-to-file operation, then email the file to somebody
+at your office, and get them to send it to the printer. But there are a few
+steps here - and it gets more complicated if there is a restriction on the
+length of email messages which can be passed through one of the servers
+along the way. You will then have to perform some sort of file-split operation
+and send the individual parts.</p>
+
+<h2>Client Software</h2>
+
+<p>The people who make <a href="http://www.brother.com">Brother</a> printers thought
+of all this, and developed a set of Windows printer drivers. These enable
+users to print directly to a designated email address. The print-job is
+automatically split into parts if necessary, and each part is base64-encoded
+prior to transmission. Users can also nominate an address for email
+confirmation.</p> 
+
+<p>These Windows printer drivers (for Windows 95/98, and for Windows
+NT-4.0/2000) can be downloaded from the Brother website.</p>
+
+<h2>Printer Capabilities</h2>
+
+<p>What the Brother people expect users to do their printing on is, of course,
+a Brother printer - specifically, in this instance, one equipped with a
+network card able to accept, decode and re-assemble mail messages directed
+to it.</p>
+
+<p>But what if you wish to print on a printer from another manufacturer?</p>
+
+<h2>Doing it in Software</h2>
+
+<p>My first stab at this was a Korn-shell program to which appropriate
+incoming mail items were piped via a sendmail alias.  The program used
+'awk' to extract information such as job and part number, then decoded
+each such item into an appropriately named file in a designated directory.</p>
+
+<p>After receiving a part, the program marked it as "complete", then
+set an anti-simultaneity lock and went through a procedure to determine
+if all necessary parts had been received in full. If they had, it
+concatenated them in sequence, piped the result to the nominated printer,
+and deleted them.</p>
+
+<p>It was then that I started thinking: "What if there isn't enough room
+to store all the parts for all the jobs which may currently be arriving?"
+And: "How do the Brother people do it on a network card?"</p>
+
+<h2>Doing it Without Local Storage</h2>
+
+<p>The answer to my second question is: "They use a POP3 server!". The
+components of each job stay on that server until the network card determines
+that all necessary parts are available, at which stage it sucks them down
+and decodes them in sequence, sending the output to the printer mechanism,
+and requests their deletion from the server.</p>
+
+<p>So here's how it can be done on a Linux machine. The program has been
+written in Perl so that the NET::POP3 module can be used for easy access to
+a POP3 server. It has been tested on both NetBSD and Solaris machines, so it
+should work almost anywhere; all you'll have to change are the location of
+the Perl interpreter, the name used for 'awk', and the format of the 'lpr'
+command.
+<A HREF="misc/jenkins/BIPprint.pl.txt">[Text version of this listing.]</A>
+</p>
+
+<pre>
+#!/usr/bin/perl -w
+# @(#) BIPprint.pl      Acquires Brother-Internet-Print files from POP3 server
+#                       and passes them to designated printer(s). Small-memory
+#                       version.  Intended for invocation via inittab entry.
+#                       Graham Jenkins, IBM GSA, Feb. 2001. Rev'd: 17 Mar. 2001.
+
+use strict;
+use File::Basename;
+use Net::POP3;
+use Date::Manip;
+use IO::File;
+my $host="bronzeback.in.telstra.com.au";        # Same host and password for
+my $pass="MySecret";                            # each printer.
+my $limit=30*1024*1024;                         # Maximum bytes per print job.
+my ($printer,$awkprog);
+defined($ARGV[0]) || die "Usage: ", basename($0). " printer1 [ printer2 ..]\n";
+open(LOG,"|/usr/bin/logger -p local7.info -t ".basename($0)); autoflush LOG 1;
+$awkprog="";                            
+while (&lt;DATA&gt;) {$awkprog = $awkprog . $_};      # Build awk program for later,
+while (1) {                                     # then loop forever, processing 
+  sleep 30;                                     # all printers in each pass, and
+  foreach $printer (@ARGV) {process($printer);} # sleeping for 30 seconds
+}                                               # between each pass.
+
+sub process {
+  my ($flag,$i,$j,$k,$l,$m,$allparts,$user,$pop,@field,@part,$count,$top15,
+      $msgdate,$parsdate,$notify,$reply,%slot,$fh);
+  $user = $_[0];
+  $pop = Net::POP3-&gt;new($host);                 # Login to POP3 server and get
+  $count = $pop-&gt;login($user,$pass) ;           # header plus 1st 15 lines
+  $count = -1 if ! defined ($count) ;           # of each message. Use apop
+  for ($i = 1; $i &lt;= $count; $i++ ) {           # instead of login if server
+    $top15=$pop-&gt;top($i,15) ;                   # supports it.
+    if ($top15) {                       
+      $msgdate = ""; $notify="None"; $reply="";
+      for ($j = 0; $j &lt; 99; $j++ ) {
+        if (@$top15[$j]) {                      # Use arrival-date on POP3
+          if($msgdate eq "") {                  # server to ascertain age of
+            (@field) = split(/;/,@$top15[$j]);  # message; if it is stale,
+            if ( defined($field[1])) {          # delete it and loop for next.
+              $parsdate=&amp;ParseDate($field[1]);  # (Search for semi-colon
+              if( $parsdate ) {                 # followed by valid date.)
+                $msgdate="Y";
+                if(&amp;Date_Cmp($parsdate, &amp;DateCalc("today","-3 days") ) lt 0 ) {
+                  print LOG "Stale msg: $user $parsdate\n";
+                  $pop-&gt;delete($i);
+                  goto I;                       # If POP3 server does
+                }                               # automatic message expiration
+              }                                 # this entire section can be
+            }                                   # omitted.
+          }
+          (@field) = split(/=/, @$top15[$j]);
+          if ( defined($field[0]) ) {   
+            if ($field[0] eq "BRO-NOTIFY") {chomp $field[1];$notify=$field[1];}
+            if ($field[0] eq "BRO-REPLY")  {chomp $field[1];$reply =$field[1];}
+            if ( $field[0] eq "BRO-PARTIAL" ) { # Comment above line to
+              ( @part )=split("/", $field[1]);  # prevent mail notification.
+              chomp $part[1];           
+            }
+            if ( $field[0] eq "BRO-UID" ) {     # Determine print-job and part
+              chomp $field[1];                  # thereof contained in message.
+              $slot{$field[1]."=".$part[0]} = $i ;
+              $allparts = "Y";                  # As we see each message, check
+              for ($k=1;$k&lt;=$part[1];$k++) {    # whether we have all parts.
+                $allparts = "N" if ! defined($slot{$field[1]."=".$k}) ; 
+              }
+              if ( $allparts eq "Y" ) {         # Print and delete all parts.
+                print LOG "$field[1] $part[1] =&gt; $user\n";
+                if(($notify ne "None") &amp;&amp; ($reply ne "")) {system 
+                  "echo Print Job Received, $part[1] pcs|Mail -s$user $reply";}
+                $fh=new IO::File "|awk '{$awkprog}' Limit=$limit |lpr -P $user";
+                for ($k = 1;$k&lt;=$part[1];$k++) {
+                  $pop-&gt;get($slot{$field[1]."=".$k},$fh) ;
+                  $pop-&gt;delete($slot{$field[1]."=".$k}) ;
+                }                               # If there is enough filespace,
+                $fh-&gt;close;                     # pipe awk output thru gzip to
+              }                                 # a temporary file, then print
+            }                                   # it and delete all parts; this
+          }                                     # caters for connection failure.
+        }                       
+      }                                         # The awk program here-under
+    }                                           # is used to extract parts from
+I:}                                             # a file containing multiple
+  $pop-&gt;quit() if ($count &gt;= 0);                # parts and feed each of them
+}                                               # through a decoder to stdout.
+__DATA__
+if( Flag == 2 ) {
+    Size=Size+length
+    if(length == 0) { Flag=0; close("mmencode -u 2&gt;/dev/null") }
+    else if(Size&lt;=Limit*4/3) print $0 |"mmencode -u 2&gt;/dev/null" }
+  if( Flag == 1 ) if(length == 0) Flag=2
+  if( Flag == 0 ) if($1 ~ /^Content-Transfer-Enc/) if($NF == "base64") Flag=1
+</pre>
+
+<h2>Program Walk-Through</h2>
+
+<p>The program builds a small 'awk' program for later use; then, for each
+printer declared on it's command line, it accesses a mailbox of the same
+name and examines each message therein. If a message is stale, it is
+deleted. Otherwise the contents of some Brother-specific lines are
+extracted; these indicate
+whether email notification is required, and which part of which job
+is contained in the message.</p>
+
+<p>If, during examination of a message, it is determined that all the parts
+of its corresponding job have been seen in the mailbox, an email
+notification is generated if required, and the parts are
+extracted in sequence and piped via the 'awk' program (which decodes each
+part as it arrives) to an appropriate printer command. Each part is deleted
+as soon as it has been processed in this manner.</p>
+
+<p>Ideally, we should wait
+until success (or other) notification of print submission was obtained
+before performing the email and deletion tasks; however, as noted in the
+listing, this requires some local storage. In a like vein, whilst the
+Brother client software allows selection of email notification for
+several different conditions, we send notification of job submission unless
+"None" has been selected.</p>
+
+<h2>Concluding Remarks</h2>
+
+<p>This program contains a password, so it should be readable only by the user
+who will execute it. No special privileges are required for execution, and your
+entry for it in /etc/inittab should look something like:
+<pre>bi:345:respawn:su - nobody -c "/usr/local/bin/BIPprint.pl lp1 lp2 &gt;/dev/null 2&gt;&amp;1"</pre>
+
+<p>If you have read this far, you are probably saying: "OK, so the program
+doesn't need much local storage - but it sends its output to a print
+spooler!  How bad is that?"  If the size of your spool area is of
+concern, you can use something like 'netcat' or 'hpnpout' to send the job
+directly to a printer port instead of spooling it. Or you may be able to
+pipe your job through an FTP connection to your printer. If you do
+bypass the spooler in this fashion, you should use a separate instance
+of the program for each printer.</p>
+
+<p>It's not rocket science, and there's no user-authentication or
+content-encryption. But it may make your life a little easier. Enjoy!</p>
+
+
+
+<!-- *** BEGIN copyright *** -->
+<P> <hr> <!-- P --> 
+<H5 ALIGN=center>
+
+Copyright &copy; 2001, Graham Jenkins.<BR>
+Copying license <A HREF="../copying.html">http://www.linuxgazette.net/copying.html</A><BR> 
+Published in Issue 65 of <i>Linux Gazette</i>, April 2001</H5>
+<!-- *** END copyright *** -->
+
+<!--startcut ==========================================================-->
+<HR><P>
+<CENTER>
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="correa.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../faq/index.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="joshi.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+</CENTER>
+</BODY></HTML>
+<!--endcut ============================================================-->

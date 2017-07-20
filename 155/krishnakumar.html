@@ -1,0 +1,523 @@
+<!DOCTYPE html
+	PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+	 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="utf-8" xml:lang="utf-8">
+<head>
+<title>HugeTLB - Large Page Support in the Linux Kernel LG #155</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link rel="stylesheet" href="../lg.css" type="text/css" media="screen, projection"  />
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<!-- link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" / -->
+<link rel="shortcut icon" href="../favicon.ico" />
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+</head>
+<body>
+
+<a href="../">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+<div id="navigation">
+<table summary="masthead" width="100%">
+<tr>
+<td align="center" colspan="3" style="font-size: 10px; font-weight: bold">
+<a href="../index.html">Home</a>
+<a href="http://linuxgazette.net">Main Site</a>
+<a href="../faq/index.html">FAQ</a>
+
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/mailman/listinfo/">Mailing Lists</a>
+<a href="../jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+<hr width="99%" style="border: 1px inset #000033">
+</td>
+</tr>
+<tr>
+<td width="40%" align="left" style="font-size: 10px; font-weight: bold">
+The Free International Online Linux Monthly
+</td>
+<td width="20%" align="center" style="font-size: 10px; font-weight: bold">
+ISSN: 1934-371X
+</td>
+<td width="40%" align="right" style="font-size: 10px; font-weight: bold">
+Main site: <a href="http://linuxgazette.net">http://linuxgazette.net</a> 
+</td>
+</table>
+</div>
+
+
+<div id="breadcrumbs1">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">October 2008 (#155)</a> &gt; 
+Article
+
+</div>
+
+<div class="articlecontent1">
+<div class="content">
+
+<div id="previousnexttop">
+<A HREF="dyckoff.html" >&lt;-- prev</A> | <A HREF="moen.html" >next --&gt;</A>
+</div>
+
+<h1>HugeTLB - Large Page Support in the Linux Kernel</h1>
+<p id="by"><b>By <a href="../authors/krishnakumar.html">R. Krishnakumar</a></b></p>
+
+
+<h2>Abstract</h2>
+
+<p>
+    This article is meant to be a primer to the HugeTLB feature of the
+Linux kernel, which enables one to use virtual memory pages of large sizes.
+First, we will go through an introduction of large page support in the
+kernel, then we will see how to enable large pages and how to use large
+pages from the application. Finally, we will look into the internals of the
+large page support in the Linux kernel.  
+</p>
+
+<p>
+  We will be using terms such as "huge pages", "large pages", "HugeTLB",
+etc. interchangeably in this article. This article covers large page
+support for x86 based architecture, although most of it is directly
+applicable to other architectures.
+</p>
+
+<h2>Introduction</h2> 
+
+<p>
+  From a memory management perspective, the entire physical memory is
+divided into "frames" and the virtual memory is divided into "pages". The
+memory management unit performs a translation of virtual memory address to
+physical memory address. The information regarding which virtual memory
+page maps to which physical frame is kept in a data structure called the
+"Page Table". Page table lookups are costly.  In order to avoid performance
+hits due to this lookup, a fast lookup cache called Translation Lookaside
+Buffer(TLB) is maintained by most architectures. This lookup cache contains
+the virtual memory address to physical memory address mapping. So any
+virtual memory address which requires translation to the physical memory
+address is first compared with the translation lookaside buffer for a valid
+mapping. When a valid address translation is not present in the TLB, it is
+called a "TLB miss". If a TLB miss occurs, the memory management unit will
+have to refer to the page tables to get the translation.  This brings
+additional performance costs, hence it is important that we try to reduce
+the TLB misses.
+</p>
+
+<p>
+  On normal configurations of x86 based machines, the page size is 4K, but
+the hardware offers support for pages which are larger in size. For
+example, on x86 32-bit machines (Pentiums and later) there is support for
+2Mb and 4Mb pages. Other architectures such as IA64 support multiple page
+sizes. In the past Linux did not support large pages, but with the advent
+of HugeTLB feature in the Linux kernel, applications can now benefit from
+large pages. By using large pages, the TLB misses are reduced. This is
+because when the page size is large, a single TLB entry can span a larger
+memory area. Applications which have heavy memory demands such as database
+applications, HPC applications, etc. can potentially benefit from this.
+</p>
+
+<h2>Enabling Large Page Support</h2>
+
+<p>
+	Support for large pages can be included into the Linux kernel by
+choosing CONFIG_HUGETLB_PAGE and CONFIG_HUGETLBFS during kernel
+configuration. On a machine which has HugeTLB enabled in the kernel,
+information about the Hugepages can be seen from the /proc/meminfo. The
+following is an example taken from an AMD Semptron laptop, running kernel
+2.6.20.7 with HugeTLB enabled. The information about large pages is
+contained in entries starting with string "Huge".
+</p>
+
+<pre>
+#cat /proc/meminfo | grep Huge
+HugePages_Total:     0
+HugePages_Free:      0
+HugePages_Rsvd:      0
+Hugepagesize:     4096 kB
+</pre>
+
+<p>
+	We have to tell the kernel the number of large pages that needs to be
+reserved for usage. An echo of the number of large pages to be reserved, to
+the nr_hugepages proc sys entry. In the following example, we reserve a
+maximum of 4 large pages:
+</p>
+
+<pre>
+#echo 4 &gt; /proc/sys/vm/nr_hugepages
+</pre>
+
+<p>
+    Now the kernel will have allocated the necessary large pages (depending
+on the availability of memory). We can once again see the /proc/meminfo and
+confirm that the kernel has indeed allocated the large pages.
+</p>
+
+<pre>
+#cat /proc/meminfo | grep Huge
+HugePages_Total:     4
+HugePages_Free:      4
+HugePages_Rsvd:      0
+Hugepagesize:     4096 kB
+</pre>
+
+<p>
+	We can also enable the HugeTLB pages by giving "hugepages=" parameter
+at kernel boot. Also we can use 'sysctl' to set the number of large pages.
+</p>
+
+<h2>How to Use Large Pages?</h2>
+<p>
+    An application can make use of large pages in two ways. One is by using
+a special shared memory region and another is by mmaping files from the
+hugetlb filesystem. Especially if we want to use private HugeTLB mapping,
+then mmaping files from hugetlb technique is recommended. In this article
+we will concentrate on the large page support via shared memory. We will
+see here how we can use an array which is mapped into large pages from an
+application. 
+</p>
+
+<pre class="code">
+#include &lt;stdio.h&gt;
+#include &lt;sys/ipc.h&gt;
+#include &lt;sys/shm.h&gt;
+#include &lt;stdlib.h&gt;
+
+#define MB_1 (1024*1024)
+#define MB_8 (8*MB_1)
+
+char  *a;
+int shmid1;
+
+void init_hugetlb_seg()
+{
+  shmid1 = shmget(2, MB_8, SHM_HUGETLB
+         | IPC_CREAT | SHM_R
+         | SHM_W);
+  if ( shmid1 &lt; 0 ) {
+    perror("shmget");
+    exit(1);
+  }
+  printf("HugeTLB shmid: 0x%x\n", shmid1);
+  a = shmat(shmid1, 0, 0);
+  if (a == (char *)-1) {
+    perror("Shared memory attach failure");
+    shmctl(shmid1, IPC_RMID, NULL);
+    exit(2);
+  }
+}
+
+void wr_to_array()
+{
+  int i;
+  for( i=0 ; i&lt;MB_8 ; i++) {
+    a[i] = 'A';
+  }
+}
+
+void rd_from_array()
+{
+  int i, count = 0;
+  for( i=0 ; i&lt;MB_8 ; i++)
+    if (a[i] == 'A') count++;
+  if (count==i)
+    printf("HugeTLB read success :-)\n");
+  else
+    printf("HugeTLB read failed :-(\n");
+}
+
+int main(int argc, char *argv[])
+{
+  init_hugetlb_seg();
+  printf("HugeTLB memory segment initialized !\n");
+  printf("Press any key to write to memory area\n");
+  getchar();
+  wr_to_array();
+  printf("Press any key to rd from memory area\n");
+  getchar();
+  rd_from_array();
+  shmctl(shmid1, IPC_RMID, NULL);
+  return 0;
+}
+</pre>
+
+<p>
+    The above program is just like any other program which uses shared
+memory. First, we initialize the shared memory segment with an additional
+flag SHM_HUGETLB for getting large page-based shared memory. Then we attach
+the shared memory segment to the program. Following this, we write to the
+shared memory area in the function call 'wr_to_array'. And finally we
+verify whether the data has been written properly by reading back the data
+in the function 'rd_from_array'. 
+</p>
+
+
+<h3>Example program execution - using large pages</h3>
+<p>
+    Now let us compile the program and run it.
+</p>
+
+<pre>
+#cc hugetlb-array.c -o hugetlb-array -Wall
+#./hugetlb-array
+HugeTLB shmid: 0x40000
+HugeTLB memory segment initialized !
+Press any key to write to memory area
+</pre>
+<p>
+     At this point in time if we check the status of the HugeTLB pages in
+the /proc/meminfo, it will show that 2 pages, i.e. 8MB of memory area are
+reserved. All the large pages will still be shown as free, as we have not
+yet started using the memory area.
+</p>
+
+<pre>
+#cat /proc/meminfo | grep Huge
+HugePages_Total:     4
+HugePages_Free:      4
+HugePages_Rsvd:      2
+Hugepagesize:     4096 kB
+</pre>
+
+<p>
+    Press key at the program input, which will result in the writing to the
+allocated HugeTLB memory location. Now the memory segment which was
+allocated will be used.  This will move the 2 large pages to allocated
+state. We can see this in the /proc/meminfo as HugePages_Free shows only 2.
+</p>
+
+<pre>
+#cat /proc/meminfo | grep Huge
+HugePages_Total:     4
+HugePages_Free:      2
+HugePages_Rsvd:      0
+Hugepagesize:     4096 kB
+</pre>
+
+<p>
+    The following message will appear now 
+</p>
+
+<pre>
+Press any key to rd from memory area
+</pre>
+
+<p>
+    Finally when we press a key at the program input, the program will
+check whether the data which was written is indeed present in the HugeTLB
+area. If everything goes fine we will get a hugetlb smiley.
+</p>
+
+<pre>
+HugeTLB read success :-)
+</pre>
+
+<h2>Internals of large page support</h2>
+
+<p>
+    Inside the Linux kernel, large page support is implemented in two
+parts. The first part consists of a global pool of large pages which are
+allocated and kept reserved for providing large pages support to 
+applications. The global pool of large pages is built by allocating
+physically contiguous pages (of large page sizes) using normal kernel memory
+allocation APIs. Second part consists of the kernel itself allocating large
+pages from this pool to applications that request them. 
+</p>
+<p>
+    We will first see the internals of how the large pages are initialized
+and how the global pools are filled up. Then we will see how shared memory can
+be used by application to leverage the large pages and how the physical
+pages actually get allocated by means of page fault. We will not perform a
+line-to-line code walk through; instead we will go through the main parts
+of the code relevant to large pages.
+</p>
+
+<h3>Large Page initialization</h3>
+
+<p>
+    In the Linux kernel source code (in file mm/hugetlb.c) we have the
+function "hugetlb_init" which allocates multiple physically contiguous
+pages of normal page size to form clusters of pages which can be used for
+large page sizes. The number of pages which are allocated like this depends
+on the value of "max_huge_pages" variable. This number can be passed on as
+a kernel command line option by using the 'hugepages' parameter. The large
+page size allocated depends on the macro HUGETLB_PAGE_ORDER which in turn
+depends on HPAGE_SHIFT macro. For example this macro is assigned the value
+22 (when PAE in not enabled) on an x86 based architecture. This means that
+the size of large page allocated will be 4Mb. Note that the large page size
+depends on architecture and corresponding supported page sizes.
+</p>
+
+<p>
+    The pages allocated as mentioned previously are enqueued into
+"hugepage_freelists" for the respective node, where the page is allocated
+from, by the function 'enqueue_huge_page'. Each memory node (in case of
+NUMA) will have one hugepage_freelists. When the large pages are allocated
+dynamically as in the example (by echoing the value to proc) or by other
+dynamic methods, a similar sequence of events occurs, as explained during the
+static allocation of large pages. 
+</p>
+
+<p>
+
+	In order to use a shared memory area, we will have to create it. This,
+as we have seen before, is done by the 'shmget' system call. This system
+call will invoke the kernel function 'sys_shmget' which in turn calls
+'newseg'.  In 'newseg' a check is made to confirm if the user has asked for
+the creation of a HugeTLB shared memory area.  If the user has specified
+the large page flag SHM_HUGETLB, then the file operations corresponding to
+this file structure will be assigned to 'hugetlbfs_file_operations'. The
+large pages gets reserved by the function 'hugetlb_reserve_pages' which
+will increment the reserve pages count - resv_huge_pages which shows up as
+'HugePages_Rsvd'in the proc.  </p> <p> When the system call 'sys_shmat' is
+made, address alignment check and other sanity checks are done by using
+'hugetlb_get_unmapped_area' function.  </p>
+
+<h3>Large page fault and physical page allocation</h3>
+<p>
+  When a page fault occurs, the "vma" which corresponds to the address is
+found. The vma which corresponds to a hugetlb shared memory location will
+have 'vma-&gt; vm_flags' set as 'VM_HUGETLB', and is detected by calling
+'is_vm_hugetlb_page'. When a hugetlb vma is found the 'hugetlb_fault'
+function is called. This procedure sets up large page flag in the page
+directory entry then allocates a huge page based on a copy-on-write logic
+from the global pool of large pages initialized previously. The large page
+size itself is set in the hardware by setting the _PAGE_PSE flag in the
+pgd(the 7th bit, starting from 0th bit, in cases without PAE for x86).
+</p>
+
+<h2>Where to go from here?</h2>
+<p>
+    Detailed documentation with advanced examples can be found in the file
+Documentation/vm/hugetlbpage.txt which comes  with Linux kernel source
+code. 
+</p>
+
+<p>
+	The HugeTLB feature inside the kernel is not application transparent,
+in the sense that we need to explicitly make modifications (i.e. have to
+insert code which uses shared memory or HugeTLB fs) to the application to
+make use of large pages. For folks who are interested in application
+transparent implementations of large page support, an internet search for
+"Transparent superpages" will get you to Web sites containing details of
+such implementations.
+</p>
+
+<h2>Links</h2>
+<ol>
+<li>Improving enterprise database performance on Linux: <a href="http://www.linuxsymposium.org/2003/view_abstract.php?talk=55">http://www.linuxsymposium.org/2003/view_abstract.php?talk=55</a>
+<li>TLB wikipedia entry: <a href="http://en.wikipedia.org/wiki/Translation_Lookaside_Buffer">http://en.wikipedia.org/wiki/Translation_Lookaside_Buffer</a>
+<li>HugeTLB kernel documentation link from kernel source online: <a href="http://lxr.Linux.no/source/Documentation/vm/hugetlbpage.txt">http://lxr.linux.no/source/Documentation/vm/hugetlbpage.txt</a>
+</ol>
+
+
+<h2>Conclusion</h2>
+<p>
+    We have seen how the Linux kernel provides applications with the ability
+to use large pages. We went through methods to enable and use large pages.
+After that we skimmed through the internals of the HugeTLB implementation
+inside the kernel.
+</p>
+
+<h2>Acknowledgements</h2>
+<p>
+    I would like to extend my sincere thanks to Kenneth Chen for giving me
+better insights into HugeTLB code, for answering my questions with patience
+and for the review of an initial draft of this article. I would also like
+to thank Pramode Sir, Badri, Malay, Shijesta and Chitkala for review and
+feedback.
+</p> 
+
+
+<br clear="all" />
+
+<script type='text/javascript'>
+digg_url = 'http://linuxgazette.net/155/krishnakumar.html';
+digg_title = 'HugeTLB - Large Page Support in the Linux Kernel';
+digg_bodytext = '<p>     This article is meant to be a primer to the HugeTLB feature of the Linux kernel, which enables one to use virtual memory pages of large sizes. First, we will go through an introduction of large page support in the kernel, then we will see how to enable large pages and how to use large pages from the application. Finally, we will look into the internals of the large page support in the Linux kernel.   </p> ';
+digg_topic = 'linux_unix';
+</script>
+<script src="http://digg.com/tools/diggthis.js" type="text/javascript"></script>
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:155/krishnakumar.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<!-- *** BEGIN bio *** -->
+<hr>
+<p>
+
+<img align="left" alt="Bio picture" src="../gx/authors/krishnakumar.jpg" class="bio">
+
+<em>
+Krishnakumar loves to play around with the linux kernel source. He
+works for the Scalable Computing &amp; Infrastructure organization of
+Hewlett-Packard. His research interests include High Performance
+Computing(HPC), Parallel Filesystems, Virtualization, and High
+Performance Interconnects. He received a B.Tech in Computer Science
+and Engineering from Govt. Engg. College Thrissur.
+</em>
+<br clear="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2008, R. Krishnakumar. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication License</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 155 of Linux Gazette, October 2008
+</p>
+
+</div>
+
+<div id="previousnextbottom">
+<A HREF="dyckoff.html" >&lt;-- prev</A> | <A HREF="moen.html" >next --&gt;</A>
+</div>
+
+</div>
+</div>
+
+<script src="http://www.google-analytics.com/urchin.js"
+type="text/javascript">
+</script>
+<script type="text/javascript">
+_uacct = "UA-1204316-1";
+urchinTracker();
+</script>
+
+
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+</body>
+</html>
+

@@ -1,0 +1,383 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>The Basics of DNS LG #121</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="howell.html" >&lt;-- prev</A> | <A HREF="orr.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>The Basics of DNS</h1>
+<p id="by"><b>By <A HREF="../authors/moen.html">Rick Moen</A></b></p>
+
+<p>
+<p class="editorial">
+This article is a result of a discussion on the <a
+href="http://linuxgazette.net/tag/ask-the-gang.html">Answer Gang</a> list,
+in which Rick had brought up some interesting and common problems with DNS
+(Domain Name Service). Since DNS is 1) a critical part of the Internet
+infrastructure, 2) one of the most important - and yet very easy - services
+Linux users can provide for each other, and 3) seemingly poorly understood
+and seen as Deep Wizardry by most Linux enthusiasts, I asked Rick to expand
+on the issue. His response follows.<br>
+-- Ben
+</p>
+
+
+<p> Quoting Benjamin A. Okopnik (ben@linuxgazette.net):
+
+<pre>
+&gt; Rick, is there a _simple_ way to do basic DNS service, or is it an "all
+&gt; or nothing" sort of deal?
+</pre>
+
+<p> As a matter of logical categories, I can spot four distinct categories
+of "DNS service": three of the four are dead simple.  The fourth isn't
+too difficult if you can refer to example zonefiles as your model.
+Let's run through them, in turn, from simplest to most complex.
+
+<h3>1. Recursive-resolver nameserver</h3>
+<p> The idea here is that you want to run a local nameserver for its caching
+abilities, but you're not serving up authoritative DNS information of
+your own or for someone else.  You just want local machines to have
+somewhere _local_ to query for name lookups, rather than having all
+queries go across the wire to your ISP or elsewhere -- in order that,
+most of the time, the answer's already in your nameserver's cache
+because some other local machine also made the same query in the recent
+past.
+
+<p> How do you enable it, you ask?  You just turn on your nameserver.
+Conventional DNS daemons (BIND9, MaraDNS, Posadis, PowerDNS, Twisted
+Names, Yaku-NS) <em>default</em> to that sort of service, so you just switch
+them on, and they work.  
+
+<p> It's that simple.
+
+<p> Oh, and on the client side, you'll want to configure your various
+machine to consult that nameserver in the future, via "nameserver"
+entries in their /etc/resolv.conf files (the configuration file for 
+a client machine's "resolver library", the DNS client that on typical
+Linux machines is built into 'glibc').  For client machines that are on
+DHCP, you can automate this configuration via a suitable entry in
+dhcpd.conf. 
+
+<h3>2. Caching forwarder nameserver</h3>
+
+<p> This type of service is only subtly different:  Basically, the
+nameserver daemon is one that lacks the smarts to, by itself, recurse
+through DNS namespace on queries.  Instead, it forwards all queries it
+receives to a full-service nameserver elsewhere, which does the job. 
+Your local (caching forwarder) nameserver merely caches recently
+received answers in case they're needed again, and of course ages the
+cache.  On the plus side, avoiding the very difficult coding problems
+posed by _not_ handling recursive-resolver functionality means the
+daemons can be very small and secure.  Examples include dproxy, Dnsmasq, 
+DNRD, ldapdns, and pdnsd.  pdnsd is particularly popular for really
+small networks and laptops, in particular because it stores its
+information in a disk-based cache that is (therefore) non-volatile.
+
+<p> How do you enable it?  You put the IPs of one or more "upstream"
+full-service nameservers in its configuration file (to tell it where to 
+forward to).  Then, you turn it on, and it does its thing without
+further fuss.
+
+<p> Again, it's that simple.
+
+<p> 
+<h3>3. Secondary authoritative nameserver</h3>
+
+<p> This is the case where your friend Alice Damned
+<em>&lt;alice@mydamnedserver.com&gt;</em> 
+asks you "Will you help me by doing secondary nameservice for
+mydamneddomain.com?"  You respond with, "Yes. My nameserver,
+<em>ns1.example.com</em>, is at IP address 10.0.42.1.  Please add that to your
+allowed-transfer list, add an appropriate NS line to your zonefile, and
+make my IP authoritative -- and we'll be in business."  (Your telling
+Alice that is kind of superfluous, actually, in the sense that those
+things are <em>her</em> problem to figure out and implement, but let's suppose
+you're trying to be helpful.)  She also <em>should</em> have been equally
+helpful by telling you what IP address her primary nameserver lives on.
+If not, you do this, to find out:
+
+<pre>
+$ dig -t soa mydamneddomain.com +short
+</pre>
+
+<p> The global DNS should return with a <em>hosthame</em> plus other
+details (that you can disregard, for this purpose) from Alice's domain's
+Start of Authority (SOA) record, something like:
+
+<pre>
+ns1.mydamneddomain.com. alice.somewhere-else.com. 2005112200 7200 3600 2419200 86400
+</pre>
+
+<p> Which tells you that the primary DNS is claimed to be provided by
+<em>ns1.mydamneddomain.com</em>.  Use the 'host' command to get the
+corresponding IP address.  Let's say 'host' returns IP address 10.0.17.1
+for that hostname.
+
+<p> How do you enable it?  If you already are running a nameserver capable
+of authoritative service (let's say, BIND9), then you need to lavish
+five minutes of your time on a new "stanza" (paragraph) in your
+nameserver's main configuration file, instructing it to (also) do
+secondary nameservice for this domain.  Again, using BIND9 as an
+example, one would add this to '/etc/bind/named.conf' (or wherever you put
+local additions, e.g., '/etc/bind/named.conf.local'):
+
+<pre class="code">
+//For Alice Damned &lt;alice@somewhere-else.com&gt; 212-123-4567 cellular
+zone "mydamneddomain.com" {
+        type slave;
+        allow-query { any; };
+        file "/var/cache/bind/mydamneddomain.com.zone";
+        masters {
+        10.0.17.1;
+        };
+};
+</pre>
+
+<p> Notice the comment line:  You want to have on hand reliable means of 
+contacting Alice in case you need to talk to her about problems with
+her domain -- and ideally means of communication that do not go
+<em>through</em> the domain in question (as "Your domain is offline" mails
+don't work too well when they're blocked by the fact that the domain's
+offline).
+
+<p> In the case of BIND9, you can make your nameserver reload (or load) a
+single zone such as <em>mydamneddomain.com</em> using BIND9's 'rndc'
+(remote name daemon control) administrative utility, as the root user:
+
+<pre>
+# rndc reload mydamneddomain.com
+</pre>
+
+<p> You should, if everything's configured right, now see your local cached
+copy of Alice's primary server's zonefile (her domain's DNS information)
+pop into (per the above) directory /var/cache/bind/, as file
+<em>mydamneddomain.com.zone</em>.  The moment you see that, you're done:  The
+contents and configuration of the zonefile are strictly Alice's problem.
+
+<p> If you <em>don't</em> see a copy of the zonefile appear (that copy operation
+between nameservers being referred to as a "zone transfer"), then either
+you've made some silly error, or Alice's nameserver isn't willing to 
+send yours the zonefile because <em>she</em> made some silly error.  One of you
+will probably find a clue in his or her '/var/log/{daemon.log|messages}'
+file, fix the silly error, reload the zone or restart the nameserver as
+required, apologise, and move on.
+
+<p> The nice thing about setting up secondary DNS is (1) it's pretty much
+a set-up-and-forget affair on your end, and (2) it's the other person's
+(Alice's) job to notice most sorts of problems.  Moreover, it's usually
+be her screw-up.  So, doing secondary is an easy way to help a friend,
+and involves only a tiny amount of one-time work.
+
+<p> 
+4.  Primary (master) authoritative nameservice.
+
+<p> This is the exception, the case where you actually need to know what
+you're doing:  This is where <em>you're</em> Alice.  You have to maintain the 
+zonefile, which then gets propagated to all your secondaries via
+zone-transfer mechanisms.  You have to check on your secondaries from
+time to time, making sure they haven't shot you in the foot by, e.g.,
+forgetting to carry forward that "slave" stanza when they rebuild their
+servers.
+
+<p> How do you enable it?  Here is Alice's BIND9 "stanza" that operates her
+end of the <em>mydamneddomain.com</em> operation:
+
+<pre class="code">
+//For myself
+zone "mydamneddomain.com" {
+        type master;
+        allow-query { any; };
+        file "/etc/bind/mydamneddomain.com.zone";
+        allow-transfer {
+        //Joe Gazettereader &lt;joe@example.com&gt;, 212-765-4321 cellular
+        //ns1.example.com, is:
+        10.0.42.1;
+        };
+};
+</pre>
+
+<p> Again, notice the comment lines, basically notes that Alice keeps for
+her reference in case she wants to reach Joe in a hurry about him
+shooting her domain in the foot. The "allow-transfer" list is the 
+list of IPs that are permitted to transfer (pull down) Alice's zonefile,
+just as the "masters" list in Joe's earlier stanza listed the IPs of 
+machines that Joe's secondary service expects to be able to pull down
+transfers <em>from</em>.
+
+<p> That leaves only the <em>other</em> difficult problem, which is the
+composition and maintenance of Alice's zonefile.  I'm going to wimp out and
+claim it's out of scope for a brief article on simple DNS service, but will
+point out that I publish a set of example BIND9 zonefiles and configuration
+files that many people have used as examples to work from:
+
+<a href="http://linuxmafia.com/pub/linux/network/bind9-examples-linuxmafia.tar.gz">http://linuxmafia.com/pub/linux/network/bind9-examples-linuxmafia.tar.gz</a>
+
+<p> Did I say "the <em>other</em> difficult problem"?  Oops, there are more:
+as publisher of primary (master) authoritative nameservice, you
+need to be concerned not only that your domain's zonefile contents
+are correct, but also that your domain itself is set up correctly, at
+your domain registrar -- including enumerating, there, all of your
+domain's nameservers to make them "authoritative" (i.e., tagged as a
+reliable source of information on the domain's contents, as opposed to
+just caching other nameservers' information if/when it happens to pass
+through).  Getting your domain records wrong can have a variety of ill
+effects, and I can only recommend that (as with the finer points of
+zonefile contents) you ask a knowledgeable person, maybe in your user
+group, to check your work.  Along those same lines, by all means use R.
+Scott Perry's excellent DNS-checking CGI scripts at
+<a href="http://www.dnsreport.com/">http://www.dnsreport.com/</a>, to check (in a single, amazingly useful
+report) both your domain records and your (in-service) zonefiles.
+
+<p> It's important to note that there are many good nameserver daemons,
+other than BIND9 -- which is important for historical reasons, but has the
+annoying problems of being, as I say in my list of all known DNS server
+programs for Linux, "<em>a slow, RAM-grabbing, overfeatured, monolithic daemon
+binary</em>".  That list is in my knowledgebase at "DNS Servers" on <a
+href="http://linuxmafia.com/kb/Network_Other/">http://linuxmafia.com/kb/Network_Other/</a>,
+and contains a number of good choices for particular DNS situations.  My
+page aspires, among other things, to identify which type of the four
+classes of service each package can do. I hope it's useful to people.
+
+<p> A wide variety of special-purpose primary-nameservice configurations are
+possible, such as running a deliberately non-authoritative nameserver
+(not shown in either your domain records or your zonefile) to provide
+master DNS service from a protected machine inaccessible and
+unadvertised to the public -- but details are beyond this brief
+article's scope.
+
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<P>
+<img ALIGN="LEFT" ALT="[BIO]" SRC="../gx/2002/tagbio/moen.jpg" WIDTH="202" HEIGHT="184" class="bio">
+<em>
+Rick has run freely-redistributable Unixen since 1992, having been roped
+in by first 386BSD, then Linux.  Having found that either one 
+<a href="http://linuxmafia.com/cabal/os-suck.html">sucked less</a>, he blew
+away his last non-Unix box (OS/2 Warp) in 1996.  He specialises in clue
+acquisition and delivery (documentation &amp; training), system
+administration, security, WAN/LAN design and administration, and
+support.  He helped plan the LINC Expo (which evolved into the first
+LinuxWorld Conference and Expo, in San Jose), Windows Refund Day, and
+several other rabble-rousing Linux community events in the San Francisco
+Bay Area.  He's written and edited for IDG/LinuxWorld, SSC, and the
+USENIX Association; and spoken at LinuxWorld Conference and Expo and
+numerous user groups.
+
+<P> His first computer was his dad's slide rule, followed by visitor access
+to a card-walloping IBM mainframe at Stanford (1969).  A glutton for
+punishment, he then moved on (during high school, 1970s) to early HP
+timeshared systems, People's Computer Company's PDP8s, and various
+of those they'll-never-fly-Orville microcomputers at the storied
+Homebrew Computer Club -- then more Big Blue computing horrors at
+college alleviated by bits of primeval BSD during UC Berkeley summer
+sessions, and so on.  He's thus better qualified than most, to know just
+how much better off we are now.
+
+<P> When not playing Silicon Valley dot-com roulette, he enjoys
+long-distance bicycling, helping run science fiction conventions, and
+concentrating on becoming an uncarved block.
+</em>
+<br CLEAR="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2005, Rick Moen. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 121 of Linux Gazette, December 2005
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="howell.html" >&lt;-- prev</A> | <A HREF="orr.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">December 2005 (#121)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

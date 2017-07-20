@@ -1,0 +1,814 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Interfacing with the ISA Bus LG #124</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="lg_bytes.html" >&lt;-- prev</A> | <A HREF="orr.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Interfacing with the ISA Bus</h1>
+<p id="by"><b>By <A HREF="../authors/dutta.html">Abhishek Dutta</A></b></p>
+
+<p>
+<p><cite>
+Abstract: The parallel port is a very popular choice for interfacing.
+Although there are 8 data output lines as well as the CONTROL and STATUS
+pins of the parallel port, this is often not sufficient for some complex
+projects, which require more data I/O lines. This project shows how to get
+32 general purpose I/O lines by interfacing with the ISA Bus. Though the
+PCI bus can be a candidate for interfacing experiments, its greater speed
+and feature-rich nature present great complexity in terms of hardware and
+software to beginners. This project can be a stepping stone to those
+thinking of ultimately getting to the PCI Bus for interfacing experiments.
+It can also be useful for those thinking of making a Digital Oscilloscope
+using a PC, A/D and D/A converters, a Microcontroller programmer, etc.
+</cite></p>
+
+<p>First, let's get familiar with the ISA connector:</p>
+
+<h3>Pin Description</h3>
+<img src="misc/dutta/isa_pins.jpg" alt="isa pin description" width="240" height="600" align="right" hspace="20" border="1">
+<p><strong>We have designated as X(n) the side that contains components on
+all standard ISA cards. Similarly, Y(n) is the side that contains the
+solder. It is very important for you to be clear on the above convention:
+you will <em>damage your motherboard</em> if you mistake one for the other.
+</strong></p>
+
+<p>The description for most commonly used pins are given below:</p>
+
+<h3>SIDE X</h3>
+<dl>
+<dt>D0 - D7 (pins X2 to X9)
+<dd>These are the 8 data lines representing the 8-bit data bus.</dl>
+<dl>
+<dt>A0 - A19 (pins X31 to X12)
+<dd>These are the 20 address lines that contain the address bits. This bus can address 1MB (2^20=1048576 bytes)</dl>
+<dl>
+<dt>AEN (pin X11)
+<dd>It is used by the DMA controller to take over to data and  address bus during DMA transfer.</dl>
+
+<h3>Side Y</h3>
+<dl>
+<dt>GND (pins Y1,Y10,Y31)
+<dd>They are connected to ground of computer.</dl>
+<dl>
+<dt>+5V (pin Y3)
+<dd>+5 Volt DC output</dl>
+<dl>
+<dt>-5V (pin Y5)
+<dd>-5 Volt DC output</dl>
+<dl>
+<dt>+12V (pin Y9)
+<dd>+12 Volt DC output</dl>
+<dl>
+<dt>-12V (pin Y7)
+<dd>-12 Volt DC output</dl>
+<dl>
+<dt>MEMW(pin Y11)*
+<dd>The microprocessor makes this line LOW while doing WRITE TO MEMORY.</dl>
+<dl>
+<dt>MEMR (pin Y12)*
+<dd>The microprocessor makes this line LOW while doing READ FROM MEMORY.</dl>
+<dl>
+<dt>IOW (pin Y13)
+<dd>The microprocessor makes this line LOW while doing WRITE TO PORT. (eg: when you write <I>outportb(ADDRESS,BYTE)</I>, this line becomes LOW)</dl>
+<dl>
+<dt>IOR (pin Y14)
+<dd>The microprocessor makes this line LOW while doing READ FROM PORT. (eg: when you write <I>byte = inportb(ADDRESS)</I>, this line becomes LOW)</dl>
+<dl>
+<dt>DACK0 - DACK3 (pins Y19,Y17,Y26,Y15)*
+<dd>The DMA controller signals on these lines to let devices know that that DMA has the control of buses.</dl>
+<dl>
+<dt>DRQ1 - DRQ3 (pins Y18,Y6,Y16)*
+<dd>These pins allows the peripheral boards to request the use of the buses.</dl>
+<dl>
+<dt>T/C (pin Y27)*
+<dd>The DMA controller sets this signal to let the peripheral know that the programmed number of bytes has been sent.</dl>
+<dl>
+<dt>IRQ2 - IRQ7 (pins Y4,Y25,Y24,Y23,Y22,Y21)*
+<dd>Interrupt Signals. The peripheral devices set these signals to request the attention of the microprocessor.</dl>
+<dl>
+<dt>ALE (pin Y28)*
+<dd>Address Latch Enable. This signal is used by the microprocessor to lock the 16 lower address bus in a latch during a memory or port input/output operation.</dl>
+<dl>
+<dt>CLOCK (pin Y20)*
+<dd>The system clock</dl>
+<dl>
+<dt>OSC (pin Y30)*
+<dd>It is a high frequency clock which can be used for the I/O boards.</dl>
+
+<p><i>*&nbsp;these pins will not be used in this project</i></p>
+
+<h3>Getting Four Output lines out of an ISA Bus</h3>
+<IMG SRC="misc/dutta/cir_out.jpg" alt="getting four 8-bit output lines" width="620" height="700" align="right" hspace="20" border="1">
+
+<p>Before going into the details of the full project let's examine the part
+that handles the four 8-bit output lines. The addresses in the range 0x338
+to 0x33B were not in use by any devices for input/output operations in our
+computer.</p>
+
+<p>The three 74LS138 ICs handle the address decoding. We configured the
+circuit to produce a short pulse on the CLOCK line (represented by green
+lines on the schematic) whenever an address in the range 0x338 to 0x33B and
+port output (IOW) is requested.</p>
+
+<p>Whenever the 74LS374 gets a CLOCK pulse it latches in the 8-bit data
+present in the data bus. 74LS245 is a 3-state Octal Bus Transceiver. It
+reduces DC loading by isolating the data bus from external loads.
+</p>
+
+<p class="editorial">[ This is true, at least in theory.
+<strong>Don't</strong> use the output to power your favorite toaster oven,
+and avoid shorting it to Vss or Vcc; anything other than an optocoupler may
+not isolate quite as well as the manufacturer promises, and IC shrapnel is
+difficult to pick out of the ceiling. -- Ben ] </p>
+
+<p>To figure out which I/O port addresses are available for use in this
+project, we examined the contents of <I>ioports</I> in the <I>/proc</I>
+directory of our Linux system:</p>
+
+<pre>
+[root@thelinuxmaniac~]# cat /proc/ioports
+0000-001f: dma1
+0020-0021: pic1
+0040-0043: timer0
+.......................
+.......................
+01f0-01f7: ide0
+0378-037a : parport0
+037b-037f : parport0
+03c0-03df : vga+
+.......................
+.......................
+</pre>
+
+<p>It is clear from the above output that the addresses 0x238-0x23B and
+0x338-0x33B are not being used by any device. This is often the case in
+most computers. However, if this address is occupied by some device, then
+you have to change the wiring of address lines to the three 74LS138 ICs.
+We'll describe the address decoding technique briefly so that you can
+set up available addresses for the I/O device you are trying to build.</p>
+
+<h3>Address Decoding</h3>
+<p>We used the 74LS138 3-to-8 multiplexer for address decoding. Suppose we
+want to assign the addresses 0x338-0x33B for four 8-bit output lines and
+0x238-0x23B for four 8-bit input lines.The binary equivalent of these
+addresses are:</p>
+
+<table summary="Illustration of address decoding" align="left" border="1" cellpadding="4" cellspacing="0">
+<tr>
+	<td>Address</td>
+
+</tr>
+<tr>
+	<td>0x338</td>
+
+	<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>1</td>
+<td>1</td>
+<td>0</td>
+<td>0</td>
+<td>1</td>
+<td>1</td>
+<td>1</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+
+</tr>
+<tr>
+	<td>0x339</td>
+
+	<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>1</td>
+<td>1</td>
+<td>0</td>
+<td>0</td>
+<td>1</td>
+<td>1</td>
+<td>1</td>
+<td>0</td>
+
+	<td>0</td>
+<td>1</td>
+
+</tr>
+<tr>
+	<td>0x33A</td>
+
+	<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>1</td>
+<td>1</td>
+<td>0</td>
+<td>0</td>
+<td>1</td>
+<td>1</td>
+<td>1</td>
+<td>0</td>
+
+	<td>1</td>
+<td>0</td>
+
+</tr>
+<tr>
+	<td>0x33B</td>
+
+	<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>1</td>
+<td>1</td>
+<td>0</td>
+<td>0</td>
+<td>1</td>
+<td>1</td>
+<td>1</td>
+<td>0</td>
+
+	<td>1</td>
+<td>1</td>
+
+</tr>
+<tr>
+	<td>0x238</td>
+
+	<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>1</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>1</td>
+<td>1</td>
+<td>1</td>
+<td>0</td>
+
+	<td>0</td>
+<td>0</td>
+
+</tr>
+<tr>
+	<td>0x239</td>
+
+	<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>1</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>1</td>
+<td>1</td>
+<td>1</td>
+<td>0</td>
+
+	<td>0</td>
+<td>1</td>
+
+</tr>
+<tr>
+	<td>0x23A</td>
+
+	<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>1</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>1</td>
+<td>1</td>
+<td>1</td>
+<td>0</td>
+
+	<td>1</td>
+<td>0</td>
+
+</tr>
+<tr>
+	<td>0x23B</td>
+
+	<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>1</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>1</td>
+<td>1</td>
+<td>1</td>
+<td>0</td>
+
+	<td>1</td>
+<td>1</td>
+
+</tr>
+<tr>
+	<td>Address Lines</td>
+
+	<td>A<sub>15</sub></td>
+<td>A<sub>14</sub></td>
+<td>A<sub>13</sub></td>
+<td>A<sub>12</sub></td>
+<td>A<sub>11</sub></td>
+<td>A<sub>10</sub></td>
+
+	<td>A<sub>9</sub></td>
+<td>A<sub>8</sub></td>
+<td>A<sub>7</sub></td>
+<td>A<sub>6</sub></td>
+<td>A<sub>5</sub></td>
+<td>A<sub>4</sub></td>
+
+	<td>A<sub>3</sub></td>
+<td>A<sub>2</sub></td>
+<td>A<sub>1</sub></td>
+<td>A<sub>0</sub></td>
+
+</tr>
+</table>
+
+<br clear="all" />
+
+<p>The only address lines that change for any of the eight addresses are
+A<sub>8</sub>, A<sub>1</sub>, and A<sub>0</sub> (the whole process of
+connecting wires to 74LS138 IC is like solving a puzzle!) Connect the
+remaining wires to the two 74LS138s so that they produce a low output when
+these lines have the address bits that partially match our addresses. Now,
+connect the above three lines to the third 74LS138. All 8 outputs of
+this IC are used to select the 74LS374 latches corresponding to input and
+output addresses after it is NORed with IOR and IOW; we used the 74LS02 to
+distinguish between memory IO and port IO addressing.</p>
+
+<table summary="Truth Table of 74LS138 IC" align="left" BORDER="1" CELLPADDING="8" cellspacing="0">
+<TR ALIGN="center">
+	<TD COLSPAN="13">74LS138 Truth Table</td>
+
+</tr>
+<tr>
+<td>G1</td>
+<td>G2</td>
+<td>C</td>
+<td>B</td>
+<td>A</td>
+<td>Y0</td>
+<td>Y1</td>
+<td>Y2</td>
+<td>Y3</td>
+<td>Y4</td>
+<td>Y5</td>
+<td>Y6</td>
+<td>Y7</td>
+
+</tr>
+<tr>
+<td>X</td>
+<td>H</td>
+<td>X</td>
+<td>X</td>
+<td>X</td>
+<td>H</td>
+<td>H</td>
+<td>H</td>
+<td>H</td>
+<td>H</td>
+<td>H</td>
+<td>H</td>
+<td>H</td>
+
+</tr>
+<tr>
+<td>L</td>
+<td>X</td>
+<td>X</td>
+<td>X</td>
+<td>X</td>
+<td>H</td>
+<td>H</td>
+<td>H</td>
+<td>H</td>
+<td>H</td>
+<td>H</td>
+<td>H</td>
+<td>H</td>
+
+</tr>
+<tr>
+<td>H</td>
+<td>L</td>
+<td>L</td>
+<td>L</td>
+<td>L</td>
+<td>L</td>
+<td>H</td>
+<td>H</td>
+<td>H</td>
+<td>H</td>
+<td>H</td>
+<td>H</td>
+<td>H</td>
+
+</tr>
+<tr>
+<td>H</td>
+<td>L</td>
+<td>L</td>
+<td>L</td>
+<td>H</td>
+<td>H</td>
+<td>L</td>
+<td>H</td>
+<td>H</td>
+<td>H</td>
+<td>H</td>
+<td>H</td>
+<td>H</td>
+
+</tr>
+<tr>
+<td>H</td>
+<td>L</td>
+<td>L</td>
+<td>H</td>
+<td>L</td>
+<td>H</td>
+<td>H</td>
+<td>L</td>
+<td>H</td>
+<td>H</td>
+<td>H</td>
+<td>H</td>
+<td>H</td>
+
+</tr>
+<tr>
+<td>H</td>
+<td>L</td>
+<td>L</td>
+<td>H</td>
+<td>H</td>
+<td>H</td>
+<td>H</td>
+<td>H</td>
+<td>L</td>
+<td>H</td>
+<td>H</td>
+<td>H</td>
+<td>H</td>
+
+</tr>
+<tr>
+<td>H</td>
+<td>L</td>
+<td>H</td>
+<td>L</td>
+<td>L</td>
+<td>H</td>
+<td>H</td>
+<td>H</td>
+<td>H</td>
+<td>L</td>
+<td>H</td>
+<td>H</td>
+<td>H</td>
+
+</tr>
+<tr>
+<td>H</td>
+<td>L</td>
+<td>H</td>
+<td>L</td>
+<td>H</td>
+<td>H</td>
+<td>H</td>
+<td>H</td>
+<td>H</td>
+<td>H</td>
+<td>L</td>
+<td>H</td>
+<td>H</td>
+</tr>
+<tr>
+<td>H</td>
+<td>L</td>
+<td>H</td>
+<td>H</td>
+<td>L</td>
+<td>H</td>
+<td>H</td>
+<td>H</td>
+<td>H</td>
+<td>H</td>
+<td>H</td>
+<td>L</td>
+<td>H</td>
+
+</tr>
+<tr>
+<td>H</td>
+<td>L</td>
+<td>H</td>
+<td>H</td>
+<td>H</td>
+<td>H</td>
+<td>H</td>
+<td>H</td>
+<td>H</td>
+<td>H</td>
+<td>H</td>
+<td>H</td>
+<td>L</td>
+
+</tr>
+<tr>	
+	<TD COLSPAN="13"><I>Refer to the 74LS138 datasheet for details</I></td>
+
+</tr>
+</table>
+
+<br clear="all" />
+
+<H2>The Real Stuff</H2>
+<p>Now, finally, we are ready to describe the functioning of the complete circuit.</p>
+
+<IMG SRC="misc/dutta/cir_io.jpg" alt="the complete circuit diagram" width="620" height="700" align="center" border="1">
+<br clear="all">
+<h3>Description of the ICs used in this project</h3>
+<dl>
+<dt><a href="http://focus.ti.com/general/docs/lit/getliterature.tsp?genericPartNumber=sn74ls138">74LS138 and 74LS139</a>
+	<dd>Decoders/de-multiplexers; used for address decoding</dl>
+<dl>
+<dt><a href="http://focus.ti.com/general/docs/lit/getliterature.tsp?genericPartNumber=sn74ls245">74LS245</a>
+	<dd>Octal 3-state Buffer/Line Driver/Line Receiver</dl>
+<dl>
+<dt><a href="http://focus.ti.com/general/docs/lit/getliterature.tsp?genericPartNumber=sn74ls374">74LS374</a>
+	<dd>Octal Transparent Latch with 3-state outputs; octal D-type flip-flop with 3-state output</dl>
+<dl>
+<dt><a href="http://focus.ti.com/general/docs/lit/getliterature.tsp?genericPartNumber=sn74ls02">74LS02</a>
+	<dd>Quad 2-input NOR gate</dl>
+
+<p>The three 74LS138 IC are used for address decoding along with the two
+74LS02s (2-input NOR gate.) Whenever a match is found in the address lines,
+the respective output line, Y(x) of the third 74LS138 IC (connected to the
+two 74LS02 IC), goes LOW. These lines along with IOW (and IOR) are
+connected to the NOR gates (74LS02), which produces a HIGH only when the two
+inputs go LOW simultaneously.</p>
+
+<p>Hence, the output is high only when:</p>
+
+<OL>
+	<LI>a match is found in the address lines</LI>
+	<LI>the	IOW or IOR lines go LOW, representing the PORT IO operation.</LI>
+</OL>
+
+<p>Remember, if we do not consider the second case, our device will
+conflict with the memory IO operations in the addresses 0x238-0x23B and
+0x338-0x33B.</p>
+
+<p> We can see in the circuit diagram that the output lines of NOR gates
+are connected to the CLOCK pins of the 74LS374 latch.  So, whenever the
+above two cases match simultaneously, the CLOCK pulse is sent to the
+respective latch and the data that is present on the data bus at that
+moment is latched in.  </p>
+
+<h3>Coding - controlling the I/O lines using C</h3>
+
+<p><a href="misc/dutta/isa.c.txt">isa.c</a> illustrates the some simple
+coding methods to control and test the I/O lines of the device created in
+this project.</p>
+
+<pre class="code">
+if(ioperm(OUTPUT_PORT,LENGTH+1,1))
+{
+	...
+}
+if(ioperm(INPUT_PORT,LENGTH+1,1))
+{
+	...
+}
+
+outb(data,port);
+data = inb(port);
+</pre>
+
+<p>ioperm() gets the permission to access the specified ports from the
+kernel; outb() and inb() functions (defined in sys/io.h) read from and
+write to the specified port.</p>
+
+<h3>Some Debugging Techniques</h3>
+
+<p>It is not easy to get a complex project to work just by reading an
+article like this. At some point you will need to debug your hardware.
+Hopefully, these debugging techniques will help you (as they have helped us
+- a lot!) to find the problem in your work. You will need a multimeter and
+some LEDs. What we learned while debugging is that LEDs are the best way to
+debug hardware of this nature when you don't have sophisticated debugging
+instruments.  Some important techniques we discovered:
+</p>
+
+<img alt="Using simple multimeter for debugging" width="300" height="225" src="misc/dutta/phot0035.jpg">
+<img alt="Using LEDs for debugging" width="300" height="225" src="misc/dutta/phot0020.jpg">
+<img alt="Using simple multimeter for debugging" width="300" height="225" src="misc/dutta/phot0008.jpg">
+
+<dl>
+<dt>Use of Multimeter
+<dd>A multimeter will be very useful to check the zeros and ones coming
+across ICs. Verify that expected output is coming at every IC. ZERO will be
+measured as 0.8V and ONE will be measured as 3.8V (this will vary with
+computer). This can be used if the address decoding does not work, or when
+unexpected data is seen on the output lines. <strong>DO NOT CONNECT THE
+MULTIMETER PROBES DIRECTLY TO DATA BUS OR THE ADDRESS LINES. ALWAYS CONNECT
+IT TO THE OUTPUT OF THE RESPECTIVE ICS!</strong>
+</dl>
+<dl>
+<dt>Use of LEDs
+<dd>LEDs can be very useful to verify the data bits coming from the output
+lines; the lighting up of LED will be visible across latches. To check
+whether the clock pulse is going to the right latch, connect an LED to
+the CLK pin and send data to that port in a continuous loop, like this:
+
+<pre>
+while(1){
+outb(0x80,0x338);
+}
+</pre>
+</dl>
+
+<p>There are lots of other debugging techniques which you will probably
+discover by yourself when you run into problems. Try to ensure that the
+wiring at the connector that goes into the ISA slot is correct. We checked
+every part of the device (every IC, all those jumper wires, etc.) and after
+debugging for about a week we found that IOW and IOR wires were connected
+to the wrong pins in the ISA slot. So, recheck the wiring. Fortunately, we
+did not mistake the 12V pin for a 5V pin! ;)</p>
+
+
+<p>The photo of the device that we constructed is <a href="misc/dutta/phot0021.jpg">here</a>.</p>
+
+
+<p>You can get more details and photos related to this project at <a href="http://www.myjavaserver.com/~thelinuxmaniac/isa">http://www.myjavaserver.com/~thelinuxmaniac/isa</a></p>
+
+
+
+</p>
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:124/dutta.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<!-- *** BEGIN bio *** -->
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/2002/note.png" class="bio">
+
+<!-- 
+If the author has sent his pic, save it to the right directory, delete the
+line above, and uncomment the line below.
+
+<img align="left" alt="[BIO]" src="../gx/authors/pic.jpg" class="bio">
+
+-->
+</p>
+<p>
+<em>
+
+I am studying Computer Engineering at the Institute of Engineering,
+Pulchowk Campus (NEPAL). I love to program in the Linux Environment. I like
+coding in C, C++, Java and <a href="http://www.ioelive.com">Web Site
+Designing</a> (but not always). I like participating in online programming
+contests like that at <a href="http://topcoder.com">topcoder.com</a>. My
+interests keep on changing and I love reading books on programming, murder
+mysteries (Sherlock Holmes, Agatha Christie, ...) and watching movies.
+
+
+</em>
+</p>
+<br clear="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2006, Abhishek Dutta. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 124 of Linux Gazette, March 2006
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="lg_bytes.html" >&lt;-- prev</A> | <A HREF="orr.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">March 2006 (#124)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

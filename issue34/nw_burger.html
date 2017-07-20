@@ -1,0 +1,316 @@
+<!--startcut ==========================================================-->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML>
+<HEAD>
+<title>Printing to a Printer on a Netware Server LG #34</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#A000A0"
+ALINK="#FF0000">
+<!--endcut ============================================================-->
+
+<H4>
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H1><font color="maroon">How to print to a Printer on a Netware server</font></H1>
+<H4>By <a href="mailto:gpf@pikkedil.energie.sun.ac.za">Izak Burger</a></H4>
+</center>
+<P> <HR> <P>  
+
+<h2>Introduction</h2><br>
+To understand the circumstances which led to me writing this little article, 
+I have to explain a few things first.  I am a student at the university of 
+Stellenbosch in South Africa.  We have a lot of Netware Servers on Campus, and 
+most of the printers used by students are connected to one of these servers.
+A while ago I installed Linux for two friends of mine.  They were quite 
+impressed with the performance, and after a while the decision was made to
+install Linux on two of the other computers too.  To make the switch from 
+Windows to Linux as smooth as possible, one of the requirements of the new
+setup was that the Linux PC's should be able to print to the Netware printer
+upstairs, without any aditional steps (Saving as text, converting to 
+postscript, and printing with nprint), in other words, point and click the way
+windows users do it all the time.  This article explains how I did it.
+<p>
+This article assumes that you'll be using only one printer, that is the Netware 
+printer.  Because this procedure includes replacement of the print spooler 
+daemon, I do NOT recommend this procedure for a working installation with one 
+or more printers (unless of course you know what you're doing, but then you
+won't be reading this now would you? :) ).  Also, most of the instructions are
+rather Redhat specific, if you are using another distribution, ask someone to
+translate :)
+<p><hr>
+<h2>How does it work?</h2><br>
+A print spooler is a program that accepts print jobs from computers on the 
+network.  Usually the print jobs are stored on disk until the printer becomes 
+available again.  The print spooler program also places an exclusive lock on 
+the device your printer is connected to, usually /dev/lp1.  This prevents other 
+users or programs from printing while the print spooler is busy.
+<p>
+The print spooler does however do no formatting of its own.  It merely stores
+what ever you sent it in a disk file, then send it to the printer when it
+becomes available.  To have some kind of intelligent formating, filters are
+used.  A print filter will determine the type of data passing through it, and
+peform conversions on it.  This means that it doesn't matter what you send to
+the printer, the printer will always get something printable, usually 
+postscript.
+<p>
+Filters also makes it possible to do a few nice things.  Since a filter is
+actually nothing more than a small program that reads from stdin and writes
+to stdout, we can write filter programs that can do almost anything.  In this
+case, I made it send the job to a Netware server.
+<hr>
+<h2>Requirements</h2>
+<b>You need the latest versions of:</b><br>
+<ul>
+<li><a href="ftp://ftp.astart.com/pub/lprng/lprng/">LPRng</a>
+<li><a href="ftp://ftp.sunsite.unc.edu/pub/linux/system/printing/">Magicfilter</a>
+<li>ncpfs (on your redhat cd or some good linux ftp site)
+</ul>
+<p>
+<b>Note:</b> The location or version numbers of these software may have changed.
+<p>
+<hr>
+<h2>Installation</h2>
+You have to be <b>root</b> to install this.
+<p>
+If you havent already done so, recompile your kernel with ipx support, but
+not full internal net. You may also compile ipx as a module.  See the Kernel-
+HOWTO for more information about this.
+<p>
+Install ncpfs with: rpm -i ncpfs-2.0.11-3.i386.rpm (Your version number may 
+differ)<br>
+You may also need to install ipx-utils.  Rpm will notify you if you haven't
+installed ipx-utils yet.
+<p>
+Execute <b>one</b> of the following, depending on your setup. In my case the 
+first line worked perfectly on all of the systems I have installed this on:<br>
+<ul>
+<li>ipx_interface add -p eth0 etherii
+<li>ipx_configure --auto_interface=on --auto_primary=on
+</ul>
+<p>
+You may also want to read the man pages for these commands.  Since you want 
+to print to a netware server, I assume you have access to it, and should not 
+have a problem obtaining the correct settings here.  You should also put this 
+line in /etc/rc.d/rc.local, so that it gets executed everytime you boot your 
+system.
+<p>
+You have to remove the existing lpd before installing LPRng, this is most 
+easily acomplished with:<p>
+<code>
+	/etc/rc.d/init.d/lpd stop<br>
+	rpm -e printtool<br>
+	rpm -e rhs-printfilters<br>
+	rpm -e lpr<br>
+</code>
+<p>
+Extract the LPRng- and magicfilter tarballs into /usr/local/src (or anywhere
+else you feel comfortable with), they should untar into their own 
+subdirectories.  Now follow the directions given in the README or INSTALL files 
+of both, this usually consists of a ./configure, make, make install.
+<p>
+Create the directory /usr/local/printfilters and copy a suitable filter from
+/usr/local/src/magicfilter-1.2/filters to this directory.  You may need to 
+modify this file slightly to make it work propperly.  In my case i used the 
+psonly600-filter file: on rh5.1 a2ps was invoked with bad parameters; on rh5.0
+a2ps wasn't installed and nowhere to be found on the cdrom, so i had to add this
+to the file:<p>
+<code>
+	default                 pipe    mpage -ba4 -o -1 
+</code>
+<p>
+or install nenscript (from redhat cd) and add this line (this is probably the 
+best option):<p>
+<code>
+	default			pipe	/usr/bin/nenscript -b -p-
+</code>
+<p>
+Also, change these lines:<p>
+<table>
+<tr><td><tt># postscript</tt></td><td></td><td></td></tr>
+<tr><td><tt>0</tt></td><td><tt>%!</tt></td><td><tt>postscript</tt></td></tr>
+<tr><td><tt>0</tt></td><td><tt>\004%!</tt></td><td><tt>postscript</tt></td></tr>
+</table>
+to this:<p>
+<table>
+<tr><td><tt># postscript</tt></td><td></td><td></td></tr>
+<tr><td><tt>0</tt></td><td><tt>%!</tt></td><td><tt>cat</tt></td></tr>
+<tr><td><tt>0</tt></td><td><tt>\004%!</tt></td><td><tt>cat</tt></td></tr>
+</table>
+<p>
+This is because "postscript" caused an extra clean page to be printed after
+every print job.
+<p>
+I also include <a href="nw_psonly1200-filter">this</a> filter.  It was orriginally 
+used to print to a HP laserjet 4000.
+<p>
+Copy <a href="nw_print">nwprint</a>, <a href="nw_filter">filter</a> and 
+<a href="nw_config">.config</a> to /usr/local/printfilters, then edit 
+<a href="nw_filter">filter</a> and replace psonly1200-filter with the filter you 
+intend to use.
+<p>
+Edit the <a href="nw_config">.config</a> file to contain the information relevant 
+to your setup.
+<p>
+Now do:
+<PRE> 
+	chmod 755 filter nwprint
+	chmod 640 .config
+	chown root.daemon .config
+</PRE> 
+<p>
+Install the <a href="nw_lpd">lpd startup script</a> in /etc/rc.d/init.d.  
+remember to do a chmod 755 /etc/rc.d/init.d/lpd.
+<p>
+Now you have to make symlinks to start lpd in the correct runlevels:<p>
+<code>
+	cd /etc/rc.d/rc3.d<br>
+	ln -s ../init.d/lpd s90lpd<br>
+	cd /etc/rc.d/rc5.d<br>
+	ln -s ../init.d/lpd s90lpd<br>
+	cd /etc/rc.d/rc6.d<br>
+	ln -s ../init.d/lpd k08lpd<br>
+	cd /etc/rc.d/rc0.d<br>
+	ln -s ../init.d/lpd k08lpd<br>
+</code>
+<p>
+This should have lpd start up in the runlevels mostly used by Redhat users.
+<p>
+Now we get to modifying a bunch of files in /etc...<br>
+Edit /etc/printcap to look like the following:
+<p>
+<code>
+	lp:\<br>
+       	:sd=/var/spool/lpd/lp:\<br>
+        :mx#0:\<br>
+        :sh:\<br>
+        :if=/usr/local/printfilters/filter:\<br>
+        :af=/var/spool/lpd/lp/acct:\<br>
+        :lp=/dev/null:<br>
+</code>
+<p>
+Edit /etc/lpd.conf and locate the line:<p>
+<code>
+	# Purpose: lock the IO device<br>
+	# lk@<br>
+</code>
+<p>
+Uncomment the "lk@".  This tells lpd NOT to place an exclusive lock onto the
+device, so if any other program tries to use /dev/null while we're printing it 
+will not break.
+<p>
+Edit /etc/lpd.perms and add these lines:<p>
+<code>
+REJECT NOT SERVER<br>
+REJECT SERVICE=R,P,Q,M,C,S NOT REMOTEUSER=yourusername,another,friend<br>
+</code>
+<p>
+This allows only the users in the comma separated list to print from the local
+host.  I dont know what will happen if two users print at exactly the same
+time, but for the most part you will only allow yourself to print anyway.
+<p>
+Finally execute:<p>
+<code>
+	checkpc -f<br>
+	/etc/rc.d/init.d/lpd start<br>
+</code>
+<p>
+Everything should work propperly now.  You should now clean up /usr/local/src.
+Keep the tarballs in a safe place, then do this:<p>
+<code>
+	rm -rf /usr/local/src/magicfilter-1.2<br>
+	rm -rf /usr/local/src/LPRng-3.5.1<br>
+</code>
+<p><hr>
+<h2>Why it took me a week to figure this out...</h2>
+
+I tried to do the same thing with lpd, but for some sinister reason nprint
+could not access any Netware servers if it was invoked by lpd.  If the
+filter was invoked from the commandline, only then could nprint access the 
+server and print the job.  I had a few options: Figure out a way of forcing
+lpd to allow me access, produce a kind of work arround, or use another
+spooler.  Since lpd already have lots of other problems (Read about it, never
+seen them in action), I settled for LPRng.
+<p>
+At first I tried to make the standard Redhat print filter work with LPRng.  This
+did not work very well, because the standard filter use files in 
+/var/spool/lpd/lp while LPRng is rather fussy about the permisions of files in
+this directory.  Moving the files broke everything, and as it was already 3:00
+on a Saturday morning by then, I quickly got magicfilter off sunsite (We have
+a local mirror :) ), compiled the software and built myself a little filter
+script.
+<p>
+Now all I had to do was introduce some kind of password hiding mechanism so
+that users of the system cannot see the Netware username and password.  I
+discovered that the filter was executed as the "daemon" user, therefore
+decided to create a .config file with permisions 640 and ownership root.daemon.
+This file is simply included into nwprint, but while anyone can read nwprint, no
+one can read .config ( except root and daemon of course :) ).
+<p>
+Well this allowed any user with access to the system to print, usually you would
+only want yourself to have access to the printer, so after reading through
+/etc/lpd.perms and part of the documentation, I came up with the two REJECT 
+lines mentioned above.
+<p><hr>
+<h2>A few useful tips</h2>
+
+Or rather, things I discovered while doing this...
+<p>
+1. To test the setup, change the nwprint script to cat all input to a file in
+/tmp.  This is also nice to produce postscript files from applications that do
+not have the capability to save in postscript: Just uncomment the 
+"cat > /tmp/printout.ps" line in the nwprint script.  Of course you'll have
+to comment the nprint line out :)  You can even have this installed as a second
+"Printer", together with your existing printer.
+<p>
+2. To print from pine, you have to setup lpr as default printing command rather
+than the other default thingy it uses.
+<p>
+3. Use the Generic postscript option in StarOffice.  Even if you don't have a
+postscript printer, you should be able to use it as long as ghostscript has
+a driver for your printer.
+<p>
+4. Look in /pub/Linux/system/printing on sunsite.unc.edu for other print 
+filters.  There's plenty of existing solutions for most of the Canon bubble jet
+printers, as well as HP deskjets and some of the Epson printers.
+<p>
+Also read the Printing-HOWTO, it should be installed in /usr/doc/HOWTO but if it
+is not there, locate the RPM on your Redhat 5.0/5.1 CD and install it, having
+the howto's arround is always nice, and is in my oppinion a MUST.
+<hr>
+<h2>DISCLAIMER</h2><hr>
+
+This is the place where I tell you that I am not responsible for any harm that
+may come to you or your computer as a result of following the steps in this
+article.  Blah Blah...
+<p>
+If I did anything stupid or there are better ways to do this please 
+let me know at the e-mail address below, this address should be valid at least 
+until somewhere late in 1999 :)
+<p>
+Izak Burger<br>
+<a href="mailto:gpf@pikkedil.energie.sun.ac.za">gpf@pikkedil.energie.sun.ac.za</a>
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<center><H5>Copyright &copy; 1998, Izak Burger <BR> 
+Published in Issue 34 of <i>Linux Gazette</i>, November 1998</H5></center>
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<A HREF="./index.html"><IMG ALIGN=BOTTOM SRC="../gx/indexnew.gif" 
+ALT="[ TABLE OF CONTENTS ]"></A>
+<A HREF="../index.html"><IMG ALIGN=BOTTOM SRC="../gx/homenew.gif"
+ALT="[ FRONT PAGE ]"></A>
+<A HREF="./gm.html"><IMG SRC="../gx/back2.gif"
+ALT=" Back "></A>
+<A HREF="./field.html"><IMG SRC="../gx/fwd.gif" ALT=" Next "></A>
+<P> <hr> <P> 
+<!--startcut ==========================================================-->
+</BODY>
+</HTML>
+<!--endcut ============================================================-->

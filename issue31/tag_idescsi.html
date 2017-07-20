@@ -1,0 +1,341 @@
+<!--startcut =======================================================  -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<html>
+<head>
+<TITLE>The Answer Guy 31: Lilo not working on SCSI when IDE drives installed </TITLE> 
+</head>
+
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#A000A0"
+ALINK="#FF0000">
+<H4>"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+<P> <hr> <P>
+
+<H1 align="center"><A NAME="answer">
+<img src="../gx/dennis/qbubble.gif" alt="" border="0" align="middle">
+<a href="./index.html">The Answer Guy</a>
+<img src="../gx/dennis/bbubble.gif" alt="" border="0" align="middle">
+</A></H1> <BR>
+<H4 align="center">By James T. Dennis,
+<a href="mailto:tag@lists.linuxgazette.net">tag@lists.linuxgazette.net</a><BR>
+Starshine Technical Services, 
+<A HREF="http://www.starshine.org/">http://www.starshine.org/</A> </H4>
+<p><hr><p>
+<H3><img src="../gx/dennis/qbub.gif" alt="(?)" width="50" height="28"
+	align="left" border="0">Lilo not working on SCSI when IDE drives installed </H3>
+
+<p><strong>From Timm Gleason on Wed, 08 Jul 1998 
+ in the </strong>
+	<a href="news:comp.unix.questions">comp.unix.questions</a>
+	<strong>newsgroup
+
+<br><br>
+We have several <a href="http://www.debian.org/">Debian</a>/Linux 
+workstations around the office that
+contain both SCSI and IDE devices. Now we almost exclusively use
+SCSI hard drives but occasionally we will stick an extra IDE drive
+into a box when more disk space is needed. My problem is this, when
+we recompile a new kernel after a security patch of fix, and then
+run lilo it gives the error `Warning:/dev/sda2 is not the first
+disk`. So then I have to halt the machine, physically remove the IDE
+device, boot with a rescue disk, rerun lilo, halt the machine,
+reinstall the IDE device and reboot. Now while I admit that this
+does work, it can be a real pain to have to do that to every
+workstation we have that has mixed devices installed.
+<br><br>
+
+Thanks
+<br>Timm Gleason
+</strong></p>
+
+<blockquote><img src="../gx/dennis/qbub.gif" alt="(?)" width="50" height="28"
+	align="left" border="0">
+	Normally there is no problem with integrating SCSI and 
+	IDE drives in a system (under Linux).
+<br><br>
+
+	However I think I have a hint as to your problem.  
+	A normal PC BIOS will boot off of the first IDE drive
+	on a system.  It will <em>only</em> look at the MBR (master
+	boot record) on the first hard drive (usually after
+	looking for a boot record on <em>only</em> the first floppy).
+<br><br>
+
+	The normal consequence of this is that you usually have
+	to install your OS on the first hard drive.  IDE drives
+	conform to an interface which is built into the BIOS.  
+	With SCSI there is a BIOS extension on the controller's
+	ROM that allows the system to boot.  
+<br><br>
+
+	BIOS extensions are code that's contained on the ROM's of any
+	expansion card -- so long as it contains a specified header
+	and calling convention.  Part of a normal PC boot process is
+	to scan the reserved address space between A0000 and E0000 (or
+	so -- it might be from B0000 through D0000, I don't have a
+	BIOS reference handy) for this "BIOS extension signature" ---
+	and then to call setup routines an give offsets from any of
+	these signature blocks that it finds.  That is how SCSI
+	controllers and ethernet boot PROMS (and other "bootable"
+	devices) work.
+<br><br>
+
+	The problem is that most SCSI controllers and PC BIOS' will
+	give the IDE drives precedence over any SCSI drives. 
+<br><br>
+
+	One approach would be to let the system have "its" way
+	and let lilo write the MBR to the IDE drive.  So long
+	as your BIOS (with extensions) can <em>see</em> the SCSI drives 
+	it doesn't matter that the lilo boot block refers to another 
+	drive.  
+<br><br>
+
+	An odd and confusing thing about Linux is that the boot
+	block, the kernel, and the root filesystem can all be
+	on different devices.  In fact you don't need a "boot block"
+	at all --- you can use LOADLIN.EXE to start a Linux kernel
+	(I've heard it can be used to load a FreeBSD kernel, too ---
+	but they have their own program for that anyway).  
+<br><br>
+
+	So, if you have a <tt>/etc/lilo.conf</tt> that looks like:
+
+<pre>
+boot=/dev/hda
+read-only
+prompt
+timeout=200
+
+image = /vmlinuz
+root = /dev/sda1
+label = example
+</pre>
+
+	... and you run  <tt>/sbin/lilo</tt> to "compile" this set of 
+	configuration directives into a boot block here's what 
+	it will do:
+    <blockquote>
+
+		Write the boot block to <tt>/dev/hda</tt> 
+    <br><br>
+
+		note: we use the raw device, so it goes to the MBR, 
+		if we use <tt>/dev/hda1</tt>, it goes to the "logical boot 
+		record" or "superblock" of the specified (first) 
+		partition.
+    <br><br>
+
+		The 'read-only' directive is passed to any Linux
+		kernels that you load --- it specifies that the 
+		root filesystem will be initially mounted read-only
+		to allow the fsck to work properly on it.  
+    <br><br>
+
+		The 'prompt' directive is used to control the behavior
+		of the LILO boot program at it's runtime (it forces it
+		to print an interactive prompt to the console during boot)
+		and the 'timeout' directive specifies how long the 
+		prompt will wait before continuing to the default 
+		boot "stanza" (the first, and in this case, only one).
+
+    <br><br>
+		The image directive points <tt>/sbin/lilo</tt> to the location
+		of a kernel image (file).  Note the distinction between
+		/sbin/lilo's "compile time" and the lilo boot code's
+		"run time" (that's why I push this analogy of treating
+		the lilo package as a "boot block compiler" --- it 
+		helps put these distinctions in familiar terms).
+    <br><br>
+
+		This directive causes <tt>/sbin/liloi</tt> to "map" the device
+		number and address of the image file.  That address can
+		be in different formats depending on whether the 
+		"linear" directive is used to inform <tt>/sbin/lilo</tt> that the
+		device is being accessed through "sector translation."
+    <br><br>
+
+		The 'root' directive specifies where the root filesystem
+		for this "stanza" is located.  That is passed to the 
+		kernel unless over-ridden by parameters that are entered
+		interactively at the prompt.
+    <br><br>
+
+		Obviously the 'label' directive allows the user to
+		select different boot stanzas by name at the lilo
+		prompt.  (Not that the "lilo prompt" refers to <em>run-time</em>
+		rather than "compile-time" --- it is the "boot block code"
+		that is doing the prompting and <tt>/sbin/lilo</tt> is utterly
+		uninvolved at that point).
+    </blockquote>
+
+	I've played with a number of configurations of lilo.conf over
+	the years.  I've written boot blocks to floppies, specified
+	image files that were on mounted (non-root) filesystems, 
+	and done other silly things.  Lilo's flexibility can be 
+	very confusing and I've tried many things that didn't work
+	(usually for good reason --- Lilo is constrained by the
+	limitations and conventions employed by your BIOS).
+<br><br>
+
+	If you try this and it doesn't work you might need to 
+	put a tiny partition on that drive.  You can put a
+	very small minix filesystem on that (conceptually you 
+	could put a kernel and no fs in a single track --- 
+	but <tt>/sbin/lilo</tt> doesn't have a way to "find" that).
+<br><br>
+
+	For that matter you can put a Linux kernel file on 
+	<em>any</em> fs that you put on that IDE drive.  If you
+	put a kernel image on an MS-DOS filesystem and 
+	run <tt>/sbin/lilo</tt> <em>while that fs is mounted</em> (it will
+	complain if it cant find the kernel images at 
+	"compile time") you should be fine (until you run a
+	DOS defrag utility!).
+<br><br>
+
+	A wholly different approach is to to lie to your CMOS 
+	setup and tell <em>it</em> that you have no IDE drives 
+	installed.  
+<br><br>
+
+	Linux doesn't rely on your CMOS settings or BIOS to 
+	detect or use IDE drives.  So, once Linux is loaded
+	you should be able to see your IDE drives even if they
+	are not listed in your CMOS configuration.
+<br><br>
+
+	(I'm pretty sure I did that once and I don't remember
+	having to do any tweaking to get it to work.  It might
+	be dependent on your kernel version and compilation
+	options, though).
+<br><br>
+
+	Obviously, you're doing something a little different
+	--- most people who mix IDE and SCSI drives start with
+	the IDE's and always let them be the boot devices.  That's
+	the path of least resistance.  However, you can try
+	the tricks I've described --- let me know if removing
+	the CMOS parameters for the drives works (or if I'm 
+	suffering from delusional memories).
+</blockquote>
+
+<p><hr width="40%"><p>
+<H3><img src="../gx/dennis/qbub.gif" alt="(?)" width="50" height="28"
+	align="left" border="0">Lilo not working on SCSI when IDE drives installed </H3>
+
+<p><strong>From Timm Gleason on Fri, 10 Jul 1998 
+<br>Also posted in Newsgroups:
+	<a href="news:comp.unix.questions">comp.unix.questions</a>
+
+<br><br>
+Thanks for your prompt reply. Many of the things you mentioned we have tried
+at one time or another with limited results. We are suing Asus P2L97
+motherboards which have the ability to set in the BIOS which drive type you
+want it to look at first. We have even removed the IDE drive from the BIOS
+settings. The problem is that since Linux does not rely on BIOS settings for
+IDE drives it always detects them first. And typically we are adding old
+extra IDE drives for expanding storage or the CD-ROM drive in the machine is
+an IDE.
+</strong></p>
+
+<blockquote><img src="../gx/dennis/bbub.gif" alt="(!)" width="50" height="28"
+	align="left" border="0">
+	It's true that Linux doesn't rely on BIOS settings. 
+	However, the lilo boot loader <em>does</em>.  It is the boot loader
+	that is looking in the wrong place.  This is probably a 
+	bug in your BIOS (or still in your configuration of that
+	BIOS, as it sits in the CMOS registers).
+</blockquote>
+
+
+<p><strong><img src="../gx/dennis/qbub.gif" alt="(?)" width="50" height="28"
+	align="left" border="0">
+I have yet to try setting boot=/dev/hda and root=/dev/sda in the lilo.conf.
+I was under the impression (mistakenly I guess) that the MBR and root disks
+had to be on the same partition.
+</strong></p>
+
+<blockquote><img src="../gx/dennis/bbub.gif" alt="(!)" width="50" height="28"
+	align="left" border="0">
+	The fact that this is a very common misconception explains
+	why I take such pains to explain it in so much detail.  
+	I must have gone over this about twenty times in LG and
+	about a hundred in the newsgroups.
+<br><br>
+
+	Also, a nitpick, don't think of them as "root disks" ---
+	think of them as root filesystems.  
+<br><br>
+
+	An MBR consists of a boot record and a partition table. The
+	boot loader points to a kernel (or several) --- or it might
+	point to a secondary boot loader.  The Linux kernel contains a
+	pointer to the default root fs.  The LILO boot loader (from
+	the MBR or from a floppy or any logical boot record) may pass
+	parameters (such as video mode and root fs parameters) to the
+	kernel to over-ride the one that's built-in.  The '<tt>rdev</tt>'
+	command can write a new rootfs string into a kernel (and it
+	can tweak other values like "video mode" --- look at the
+	'<tt>rdev</tt>' man page for details).
+</blockquote>
+
+<p><strong><img src="../gx/dennis/qbub.gif" alt="(?)" width="50" height="28"
+	align="left" border="0">Thanks Again</strong></p>
+
+<blockquote><img src="../gx/dennis/bbub.gif" alt="(!)" width="50" height="28"
+	align="left" border="0">
+	You're welcome.
+</blockquote>
+
+<!--================================================================-->
+<P> <hr> <P>
+<H5 align="center"><a href="http://www.linuxgazette.net/copying.html"
+	>Copyright &copy;</a> 1998, James T. Dennis <BR>
+Published in <I>Linux Gazette</I> Issue 31 August 1998</H5>
+<P> <hr> <P>
+<!--================================================================-->
+<table width="98%"><tr valign="center" align="center">
+<td rowspan="3"><A HREF="../lg_answer31.html"><IMG
+        SRC="../gx/dennis/answernew.gif"
+        ALT="[ Answer Guy Index ]"></A></td>
+  <td><A HREF="tag_backup.html">backup</A></td>
+  <td><A HREF="tag_uidgid.html">uidgid</A></td>
+  <td><A HREF="tag_connect.html">connect</A></td>
+  <td><A HREF="tag_95slow.html">95slow</A></td>
+  <td><A HREF="tag_badblock.html">badblock</A></td>
+  <td><A HREF="tag_trident.html">trident</A></td>
+  <td><A HREF="tag_sound.html">sound</A></td>
+
+</tr><tr valign="center" align="center">
+  <td><A HREF="tag_kernel.html">kernel</A></td>
+  <td><A HREF="tag_solprint.html">solprint</A></td>
+  <td><A HREF="tag_idescsi.html">idescsi</A></td>
+  <td><A HREF="tag_distrib.html">distrib</A></td>
+  <td><A HREF="tag_modem.html">modem</A></td>
+  <td><A HREF="tag_NDS.html">NDS</a></td>
+  <td><A HREF="tag_rpm.html">rpm</A></td>
+
+</tr><tr valign="center" align="center">
+  <td><A HREF="tag_guy.html">guy</A></td>
+  <td><A HREF="tag_maildns.html">maildns</A></td>
+  <td><A HREF="tag_memleak.html">memleak</a></td>
+  <td><A HREF="tag_multihead.html">multihead</A></td>
+  <td><A HREF="tag_cdr.html">cdr</A></td>
+</tr></table>
+<P> <hr> <P>
+<!--================================================================-->
+<A HREF="./index.html"><IMG SRC="../gx/indexnew.gif"
+        ALT="[ Table Of Contents ]"></A>
+<A HREF="../index.html"><IMG SRC="../gx/homenew.gif"
+        ALT="[ Front Page ]"></A>
+<A HREF="lg_bytes31.html"><IMG SRC="../gx/back2.gif"
+        ALT="[ Previous Section ]"></A>
+<A HREF="./searls.html"><IMG SRC="../gx/fwd.gif"
+        ALT="[ Next Section ]"></A>
+<!--startcut =======================================================  -->
+</body>
+</html>
+<!--endcut =========================================================  -->
+
+

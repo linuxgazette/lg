@@ -1,0 +1,292 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>Python Weather Station LG #94</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<!-- *** BEGIN navbar *** -->
+<A HREF="zhuralev.html">&lt;&lt;&nbsp;Prev</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="index.html">TOC</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../index.html">Front Page</A>&nbsp;&nbsp;|&nbsp;&nbsp;Talkback&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../faq/index.html">FAQ</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="anonymous.html">Next&nbsp;&gt;&gt;</A>
+<!-- *** END navbar *** -->
+
+<!--endcut ============================================================-->
+
+<TABLE BORDER><TR><TD WIDTH="200">
+<A HREF="http://www.linuxgazette.net/">
+<IMG ALT="LINUX GAZETTE" SRC="../gx/2002/lglogo_200x41.png" 
+	WIDTH="200" HEIGHT="41" border="0"></A> 
+<BR CLEAR="all">
+<SMALL>...<I>making Linux just a little more fun!</I></SMALL>
+</TD><TD WIDTH="380">
+
+
+<CENTER>
+<BIG><BIG><STRONG><FONT COLOR="maroon">Python Weather Station</FONT></STRONG></BIG></BIG>
+<BR>
+<STRONG>By <A HREF="../authors/hughes.html">Phil Hughes</A></STRONG>
+</CENTER>
+
+</TD></TR>
+</TABLE>
+<P>
+
+<!-- END header -->
+
+
+
+
+This program is a simple interface that allows you to
+build a web page from the Metar data output from
+weather stations around the world.
+I wouldn't call it exciting but it does work.
+<p>
+Rather than try to describe what you will see, go <a
+href="http://pictures.fylz.com/weather.html">here</a>
+and take a look. You should see at least two and
+possibly as many as five weather reports from around
+Costa Rica.
+That is, the program has a list of five weather
+stations to check and displays the information from
+all that report.
+
+<h2>System Structure</h2>
+
+<p>
+The heart of this system is the Pymetar package
+available <a href="http://www.schwarzvogel.de/software-pymetar.shtml">
+here</a>.
+This is a Python program which fetches Metar data
+described <a href="http://www.noaa.gov"> here</a>.
+Pymetar is a command-line tool but it does all the
+dirtywork.
+<p>
+My goal is to make this information available on a
+web page.
+I didn't want to turn this into a huge programming
+project but I want the implementation to make sense.
+The most basic approach would have been to run the
+program as a CGI script for each request. However,
+this was potentially very inefficient because it
+would require the program to grab all the data each
+time a CGI request came in.
+More important, it would mean the user would have to
+wait for all these requests to complete.
+<p>
+I decided the best compromise was to set up a cron
+job to fetch the data and build a weather page.
+Then, each page request would just be displaying a
+static page.
+As the weather data does not change all that often,
+this actually offers pretty much current information.
+
+<h2>Implementation</h2>
+
+<p>
+First, here is the code:
+<pre>
+
+#!/usr/bin/env python
+
+import sys
+import time
+sys.path.insert(0, "/home/fyl/pymetar-0.5")
+import pymetar
+
+def stations(args):
+    for arg in map(lambda x: x.strip(), args):
+        try:
+            weather = pymetar.MetarReport(arg)
+        except IOError, msg:
+            # uncomment the following and remove pass line to see the errors
+            # sys.stderr.write("Problem accessing the weather server: %s\n" % msg)
+            pass
+        else:
+            if weather.valid:
+		print "&lt;h3>"
+                print weather.getStationName()
+                print " ( Lat: %s, Long: %s, Alt: %s m)" % \
+		  weather.getStationPosition()
+		print "&lt;/h3>"
+		print "&lt;table border=\"2\">"
+                print "&lt;tr>&lt;td>Updated&lt;/td>&lt;td> %s&lt;/td>&lt;/tr>" % \
+		  weather.getTime()
+                if weather.getWindDirection() is not None:
+		    print "&lt;tr>&lt;td>Wind direction&lt;/td>&lt;td> %s°&lt;/td>&lt;/tr>" % \
+		      weather.getWindDirection()
+                if weather.getWindSpeed() is not None:
+                    print "&lt;tr>&lt;td>Wind speed&lt;/td>&lt;td> %6.1f m/s&lt;/td>&lt;/tr>" % \
+		      weather.getWindSpeed()
+                if weather.getTemperatureCelsius() is not None:
+                    print "&lt;tr>&lt;td>Temperature&lt;/td>&lt;td> %.1f°C (%.1f°F)&lt;/td>&lt;/tr>" % \
+		      (weather.getTemperatureCelsius(), \
+		      weather.getTemperatureFahrenheit())
+                if weather.getDewPointCelsius() is not None:
+                    print "&lt;tr>&lt;td>Dew point&lt;/td>&lt;td> %.1f°C (%.1f°F)&lt;/td>&lt;/tr>" % \
+		      (weather.getDewPointCelsius(), \
+		      weather.getDewPointFahrenheit())
+                if weather.getHumidity() is not None: 
+                    print "&lt;tr>&lt;td>Humidity&lt;/td>&lt;td> %.0f%%&lt;/td>&lt;/tr>" % \
+		      weather.getHumidity()
+                if weather.getVisibilityKilometers() is not None:
+                    print "&lt;tr>&lt;td>Visibility&lt;/td>&lt;td> %.1f Km&lt;/td>&lt;/tr>" % \
+		      weather.getVisibilityKilometers()
+                if weather.getPressure() is not None:
+                    print "&lt;tr>&lt;td>Pressure&lt;/td>&lt;td> %.0f hPa&lt;/td>&lt;/tr>" % \
+		      weather.getPressure()
+                if weather.getWeather() is not None: 
+			print "&lt;tr>&lt;td>Weather&lt;/td>&lt;td> %s&lt;/td>&lt;/tr>" % \
+			  weather.getWeather()
+                if weather.getSkyConditions() is not None: 
+			print "&lt;tr>&lt;td>Sky conditions&lt;/td>&lt;td> %s&lt;/td>&lt;/tr>" % \
+		          weather.getSkyConditions()
+		print "&lt;/table>"
+            else:
+                print "Either %s is not a valid station ID, " % arg
+		print "the NOAA server is down or parsing is severely broken."
+
+
+print "&lt;html>"
+print "&lt;head>"
+print "&lt;title>Costa Rica weather from PlazaCR.com&lt;/title>"
+print "&lt;/head>"
+print "&lt;body>"
+print "&lt;h1>Costa Rica weather from PlazaCR.com&lt;/h1>"
+print "&lt;p>Latest reports as of %s CST" % time.ctime()
+gm = time.gmtime()
+print "(%d.%02d.%02d %02d%02d UTC)" % (gm[0], gm[1], gm[2], gm[3], gm[4])
+print '&lt;p>&lt;a href="images/costa_rica.gif" target="_blank">Costa Rica map&lt;/a>'
+
+stations(["MROC", "MRLM", "MRCH", "MRLB", "MRPV"])
+
+print "&lt;/body>"
+print "&lt;/html>"
+</pre>
+<p>
+I chose to just import the pymetar.py code in the
+wrapper than generated the HTML page.
+To do this, I added the Pymetar directy to the path
+being searched by Python.
+<p>
+Next I define <b>stations</b>, a function that queries the
+weather stations using the Pymetar code and then
+formats the output into HTML.
+It looks pretty ugly because it is just some long
+print statements building HTML strings with some if
+statements tossed in to see if we actually got the
+data.
+The important point is that you pass it a list of the
+station names and you get the body of the web page
+back.
+<p>
+Finally, the last maybe 15 lines of code just build
+the HTML boilerplace and call stations to produce
+the guts.
+
+<h2>Testing and Installation</h2>
+
+<p>
+Because of the design, testing is very easy.
+There are no web-based dependencies in the design so
+you can just run the program from the command line.
+<p>
+In my case, I called the program wcr, so just typing
+./wcr will run the program and display the HTML on
+standard output.
+If all goes well, run the program again, redirecting
+the output to a file. For example,
+<pre>
+./wcr > /tmp/weather.html
+</pre>
+<p>
+You can now point a web browser at the file and see
+if it renders the page the way you want.
+If not, now is the time to make changes in wcr and
+continue testing.
+<p>
+Once you are happy with the output, upload the code
+to your web server and set up a cron job to run it.
+Normally, crontab -e will allow you to edit your
+crontab entry.
+<p>
+I elected to run the program twice an hour, at 5 and
+35 minutes past.
+The crontab entry must execute the program and write
+the output file to a location the web server can get
+to. I used:
+<pre>
+5,35 * * * * /home/fyl/pymetar-0.5/bin/wcr > /var/www/htdocs/weather.html
+</pre>
+<p>
+The four asterisks tell cron that the 5 and 35 minute
+times apply to every hour of every day.
+The next field is the name of the program to run.
+Finally the redirect operator (>) is followed by
+location where the HTML file is to be stored.
+<p>
+Assuming you set all the permissions right--that is,
+the program can write to the file and the web server
+can read the file, you are all done.
+Just point to this file and you have a weather page.
+
+<h2>Conclusion</h2>
+
+<p>
+For the perfectionist, you probably need a fancier
+soluution.
+Why?
+Well, there will be a point in time when the contents
+of the HTML file will not be valid.
+When cron fires of the job the contents of the output
+file are truncated.
+Then the program runs and builds a new file.
+<p>
+Because of the way the program works this time is
+not just a short execution time of some Python code
+as the program queries the various weather stations
+and has to wait for a response.
+With the five stations I poll, I see elapsed times
+between one and ten seconds.
+If having bad data on the site for a maximum of 10
+seconds every 30 minutes is acceptable to you, all is
+well.
+If not, write the output to a temporary file and then
+move it to the real file when all is done.
+Still not perfect but really close.
+<p>
+Now, for us mortals, we have a quick and dirty
+weather page. Have fun.
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+Phil Hughes is the publisher of <I>Linux Journal</I>, and thereby <I>Linux 
+Gazette</I>. He dreams of permanently tele-commuting from his home on the 
+Pacific coast of the Olympic Peninsula.
+As an employer, he is &quot;Vicious, Evil,
+Mean, & Nasty, but kind of mellow&quot; as a boss should be.
+
+
+<!-- *** END author bio *** -->
+
+
+<!-- *** BEGIN copyright *** -->
+<hr>
+<CENTER><SMALL><STRONG>
+Copyright &copy; 2003, Phil Hughes.
+Copying license <A HREF="../copying.html">http://www.linuxgazette.net/copying.html</A><BR> 
+Published in Issue 94 of <i>Linux Gazette</i>, September 2003
+</STRONG></SMALL></CENTER>
+<!-- *** END copyright *** -->
+<HR>
+
+<!--startcut ==========================================================-->
+<CENTER>
+<!-- *** BEGIN navbar *** -->
+<A HREF="zhuralev.html">&lt;&lt;&nbsp;Prev</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="index.html">TOC</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../index.html">Front Page</A>&nbsp;&nbsp;|&nbsp;&nbsp;Talkback&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../faq/index.html">FAQ</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="anonymous.html">Next&nbsp;&gt;&gt;</A>
+<!-- *** END navbar *** -->
+</CENTER>
+</BODY></HTML>
+<!--endcut ============================================================-->

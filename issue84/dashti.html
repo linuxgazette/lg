@@ -1,0 +1,286 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>Making Your Own Toy Boot Floppy LG #84</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="ecol.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../lg_faq.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="hawk.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+
+<!--endcut ============================================================-->
+
+<TABLE BORDER><TR><TD WIDTH="200">
+<A HREF="http://www.linuxgazette.net/">
+<IMG ALT="LINUX GAZETTE" SRC="../gx/2002/lglogo_200x41.png" 
+	WIDTH="200" HEIGHT="41" border="0"></A> 
+<BR CLEAR="all">
+<SMALL>...<I>making Linux just a little more fun!</I></SMALL>
+</TD><TD WIDTH="380">
+
+
+<CENTER>
+<BIG><BIG><STRONG><FONT COLOR="maroon">Making Your Own Toy Boot Floppy</FONT></STRONG></BIG></BIG>
+<BR>
+<STRONG>By <A HREF="../authors/dashti.html">Muhammad Torabi Dashti</A></STRONG>
+</CENTER>
+
+</TD></TR>
+</TABLE>
+<P>
+
+<!-- END header -->
+
+
+
+
+
+
+<p>I was reading a fascinating article in LinuxGazette#77, 
+<A HREF="../issue77/krishnakumar.html">Writing Your Own Toy OS-Part I</A>
+ by Krishnakumar [1]; where I saw an strange thing, 
+two last bytes of boot sector should be 0x55AA! And as the paper's talk 
+back proves I wasn't the only one to play with this magic number. Any 
+way, I rewrote Krishnakumar's boot sector with nasm [2] (I don't know as86) and 
+removed 0x55AA insertion line from write.c. Guess what happened? My PC 
+booted up! So why Krishnakumar wrote that piece? Or more generally who will 
+read and decide boot sector? The answer was straight, BIOS does! And 
+another interesting fact was that IBM had published its XT BIOS's source 
+code in XT Technical Reference [3]. So lets have a look at it: (I've made 
+some changes to it, so it's not complete and original)
+<PRE>
+;---INT 19H
+BOOT_STRAP:
+;SOME INITITIALIZATIONS
+	MOV CX,3	;RETRY COUNT
+H1:
+	PUSH CX
+	SUB DX,DX
+	SUB AX,AX
+	INT 13H	;INIT FLOPPY
+	JC H2
+	MOV AX,0201H
+	SUB DX,DX
+	MOV ES,DX
+	;PREVIOUSLY BOOT_LOCN WAS DEFINED
+	;ORG 7C00H
+	;BOOT_LOCN LABEL FAR
+	MOV BX, OFFSET BOOT_LOCN
+	MOV CX,1
+	INT 13H	;READ FLOPPY'S SECTOR 0
+H2:
+	POP CX
+	JNC H4
+	CMP AH,80H	;CHECK FOR TIMEOUT
+	JZ H5
+	LOOP H1
+	JMP H5
+H4:
+	JMP BOOT_LOCN
+H5:
+	;TRY FIXED DISK
+	SUB AX,AX
+	SUB DX,DX
+	INT 13H
+	MOV CX,3
+H6:
+	PUSH CX
+	MOV DX,0080H
+	SUB AX,AX
+	INT 13H
+	JC H7
+	MOV AX,0201H
+	SUB BX,BX
+	MOV ES,BX
+	MOV BX,OFFSET BOOT_LOCN
+	MOV DX,80H
+	MOV CX,1
+	INT 13H
+H7:
+	POP CX
+	JC H8
+	MOV AX, WORD PTR BOOT_LOCN+510D
+	CMP AX,0AA55H	;MAGIC NUMBER!
+	JZ H4
+H8:
+	LOOP H6
+	INT 18H	;EVERY THING FAILED!
+</PRE>
+<p>OK! everything got clear. that 0x55AA is checked only if boot sector is 
+loaded from fixed disk, so Krishnakumar used it to ensure compatibility. 
+Also notice that any random bit string in sector 0 of a floppy is considered as boot 
+sector and system runs it!<p>But I use a Windows 2000 besides my Linux and my floppies 
+have always msdos (fat 12) file system so that both OSs can read them. Now 
+setup a simple experiment: format a floppy using Windows (or any DOS based 
+OS) and let the system boot up with your floppy. You'll see a message that 
+indicates it's not a boot floppy and asks you to change it and press 
+any key. This is the case when you format the floppy in Linux and put an 
+msdos file system on it too (mkfs -V -t msdos /dev/fd0, could be the 
+command or if you use KDE its floppy formatter utility can do the same). 
+And things get more strange when you put an ext2 filesystem on the floppy (#mkfs -V -t ext2 /dev/fd0) . Your PC simply passes the floppy and control 
+is transferred to fixed disk boot sector (e.g. LiLo). So what's the 
+difference between these two formats and with our own boot floppy? I changed Krishnakumar's write.c and this <a href="misc/dashti/read.c.txt"> read.c </a> reads boot sector of a floppy and saves it in boot.sec file; also dumps it in a fairly formatted manner.
+If you want you can use Linux's own tools to do the same thing: to write your
+boot sector on the floppy (#dd if=boot.sec of=/dev/fd0 bs=1 count=512) and to
+read floppy's boot sector (#dd if=boot.sec of=/dev/fd0 bs=1 count=512 skip=0).
+<p>Have a look at ext2's boot sector. It's pure zero! but msdos's boot 
+sector contains some commands. Lets disassemble it (I use ndisasm[2]):&nbsp;
+<p>
+1. insert an msdos-formatted floppy.
+<p>2. run "./read"
+<p>3. run "ndisasm boot.sec | more"&nbsp;
+<p>
+4. the first instruction is a jump to 0x3e but code is not aligned 
+correctly.&nbsp;
+<p>
+5. run "ndisasm -s 0x3e boot.sec | more" to see aligned code.&nbsp;
+<p>
+OK, so in this case we have a tiny boot loader, it simply shows a message 
+(the message is OS dependent, and you may change it with any binary editor 
+such as KDE's. For example change boot.sec to display a funny message 
+and then rewrite it using Krishnakumar's write.c on the floppy!) then waits 
+for a key and invokes int 0x19 (BIOS's boot_starp procedure) again. In 
+fact, MS DOS used to store some information (FAT) in the gap between jmp 
+0x3e and 0x3e itself and this fashion is followed by its successors; that's 
+why there is a jump there. You may find some information about MS DOS file 
+system on the net or consult [4]. 
+<p>Up to this point everything is logical, BIOS simply runs what ever it 
+sees on the boot sector, it may be our toy "show A and halt" or an elegant 
+boot sector such as msdos's. But when I disassembled ext2's boot sector, 
+nothing was clear. it's full of zeros that means a lot of silly ADD 
+instructions! why does the BIOS passes it simply and doesn't get stuck there? The answer 
+is that the BIOS changed from XT to AT! and I could find an AT BIOS source 
+on the net (unfortunately it doesn't have reference, but probably IBM AT Technical Reference includes
+this boot_strap's code too.) 
+<PRE>
+;---INT  19H
+BOOT_STRAP_1	PROC 	NEAR
+;SOME INITIALIZATIONS
+;CLEAR @BOOT_LOCN
+	STI
+	MOV	CX,4
+H1:	PUSH	CX
+	KTOV	AH,0
+	INT	13H
+	JC	H2
+	MOV	AX,201H
+	SUB	DX,DX
+	MOV	ES,DX
+	MOV	SX,OFFSET @BOOT_LOCN
+	MOV	CX,1
+	INT	13H
+H2:	POP	CX
+	JNC	H4
+	CMP	AH,80H
+	JZ	H5
+	LOOP	H1
+	JMP	SHORT H5
+H4:	CMP	BYTE PTR @BOOT_LOCN,06H	;TEST#1
+	JB	H10
+	MOV	DI,OFFSET @BOOT_LOCN
+	MOV	CX,8
+	MOV	AX,WORD PTR @BOOT_LOCN
+H4A:	ADD	DI,2
+	CMP	AX,[DI]	;TEST#2
+	LOOPZ	H4A
+	JZ	H10
+H4_A:	JMP	@BOOT_LOCN
+H5:	
+	;SOME INITIALIZATIONS AND PRE TESTS
+	SUB	AX,AX
+	SUB	DX,DX
+	INT	13H
+	MOV	CX,3
+H6:
+	PUSH	CX
+	MOV	DX,0080H
+	MOV	AX,0201H
+	SUB	BX,BX
+	MOV	ES,BX
+	MOV	BX,OFFSET @BOOT_LOCN
+	MOV	CX,1
+	INT	13H
+	POP	CX
+	JC	H8
+	CMP	WORD PTR @BOOT_LOCN+510D,0AA55H ; MAGIC NUMBER!
+	JZ	H4_A
+H8:	PUSH	CX
+	MOV	DX,0080H
+	SUB	AX,AX
+	INT	13H
+	POP	CX
+	JC	H10A
+	LOOP	H6
+H9:	
+	;SOME THING NOT OF OUR INTEREST
+	INT	18H
+H10A:	LOOP	H8
+	JMP	H9
+H10:	;PRINT A MESSAGE
+H11:	jmp H11
+BOOT_STRAP_1	ENDP
+</PRE>
+<p>Two new tests are added to floppy's boot sector:&nbsp;
+<p>
+1. It's first byte should be more than 0x6! it means that the first 
+instruction can't be ADD (OpCode 0 to 5 are for different modes of ADD). 
+Why? it's logical, because no wise programmer would add almost unknown 
+values of the register at the start up. And if it is so (as the ext2 case) 
+a message is shown and PC waits for a reset. puzzle got solved partially!
+In my PC, control is simply passed to fixed disk's boot sector. Of course
+it's better, these days almost every PC has a fixed disk. Perhaps that's a 
+change in BIOS after early AT.&nbsp;
+<p>
+2. It's first 8 words can't be the same. why? I don't know. It seems to be 
+just a decision. you may test it easily, add 16 NOPs (0x90) to 
+Krishnakumar's boot 
+sector, and then it won't boot your PC!<p>Now you may use these tools (read.c and
+write.c) or Linux's own tools (e.g. lovely 'dd' command) for more investigation
+in the structure of boot sectors. As an interesting experiment for anybody who has
+Windows along with their Linux and uses LiLo as their boot loader (so it resides
+on MBR): make a recursive boot menu! Needed steps are as:<p>1. use 'dd' or 'read.c'
+to read MBR: #dd if=/dev/hda of=mbr.sec bs=1 count=512 skip=0<p>2. some how copy
+mbr.sec to your Windows' boot partition (almost always c:\). you may use <a href="http://uranus.it.swin.edu.au/~jn/linux/index.htm">these</a>
+elegant programs by John Newbigin when all your solutions fail.<p>3. edit
+boot.ini and add such a line at its end: c:\mbr.sec = &quot;LiLo Again!&quot;<p>And
+this is how boot process goes on...<h3>References:</h3>
+[1]<a href="http://www.tldp.org/LDP/LG/issue77/krishnakumar.html">http://www.tldp.org/LDP/LG/issue77/krishnakumar.html</a>&nbsp;
+<p>
+[2]<a href="http://nasm.sourceforge.net/">http://nasm.sourceforge.net/</a>&nbsp;</p>
+<p>
+[3]IBM, "IBM Personal Computer XT Technical Reference", Vol.2,1981.&nbsp;</p>
+<p>
+[4]M.A.Mazidi, J.G.Mazidi, "The 80X86 IBM PC & Compatible Computers",Vol.2, 
+Prentice Hall, 1995.</p>
+
+
+
+
+
+
+
+
+
+
+<!-- *** BEGIN copyright *** -->
+<hr>
+<CENTER><SMALL><STRONG>
+Copyright &copy; 2002, Muhammad Torabi Dashti.
+Copying license <A HREF="../copying.html">http://www.linuxgazette.net/copying.html</A><BR> 
+Published in Issue 84 of <i>Linux Gazette</i>, November 2002
+</STRONG></SMALL></CENTER>
+<!-- *** END copyright *** -->
+<HR>
+
+<!--startcut ==========================================================-->
+<CENTER>
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="ecol.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../lg_faq.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="hawk.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+</CENTER>
+</BODY></HTML>
+<!--endcut ============================================================-->

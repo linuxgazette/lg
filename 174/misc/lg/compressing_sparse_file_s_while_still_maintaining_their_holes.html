@@ -1,0 +1,184 @@
+<!DOCTYPE html PUBLIC '-//W3C//DTD XHTML 1.0 Transitional//EN'
+		 'http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd'>
+<html xmlns='http://www.w3.org/1999/xhtml' lang='utf-8' xml:lang='utf-8'>
+<head>
+<title>compressing sparse file(s) while still maintaining their holes</title>
+<meta http-equiv='Content-Type' content='text/html; charset=utf-8' />
+<link rel='stylesheet' type='text/css' href='../../../lg.css' />
+</head>
+<body>
+<a href="../../../"><img alt="Linux Gazette" src="../../../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" /></a><img alt="Tux" src="../../../gx/tux_86x95_indexed.png" id="tux" /><p id="fun">...making Linux just a little more fun!</p><div class='content articlecontent'><a name="top"></a><h3>compressing sparse file(s) while still maintaining their holes</h3>
+<p>
+<b><p>
+Mulyadi Santosa [mulyadi.santosa at gmail.com]
+
+</p>
+</b><br />
+<b>Mon, 29 Mar 2010 21:25:23 +0700</b>
+</p>
+
+<p>
+Due to certain reasons, we might have sparse file and want to compress
+it. However, we want to maintain its sparseness. Can we do it the
+usual way? Let's say we have this file:
+$ dd if=/dev/zero of=./sparse.img bs=1K seek=400 count=0
+0+0 records in
+0+0 records out
+0 bytes (0 B) copied, 2.3956e-05 s, 0.0 kB/s
+</p>
+
+<p>
+$ ls -lsh sparse.img
+4.0K -rw-rw-r-- 1 mulyadi mulyadi 400K 2010-03-29 21:14 sparse.img
+</p>
+
+<p>
+$ gzip sparse.img
+$ ls -lsh sparse.img.gz
+8.0K -rw-rw-r-- 1 mulyadi mulyadi 443 2010-03-29 21:14 sparse.img.gz
+</p>
+
+<p>
+$ gunzip sparse.img.gz
+$ ls -lsh sparse.img
+408K -rw-rw-r-- 1 mulyadi mulyadi 400K 2010-03-29 21:14 sparse.img
+</p>
+
+<p>
+Bad. After decompression, total blocks occupied by the file "grows"
+from 4KiB to 408 KiB.
+</p>
+
+<p>
+The trick is by using tar with -S option:
+$ tar -Sczvf sparse.img.tgz sparse.img
+</p>
+
+<p>
+$ ls -lsh sparse.img.tgz
+8.0K -rw-rw-r-- 1 mulyadi mulyadi 136 2010-03-29 21:18 sparse.img.tgz
+</p>
+
+<p>
+$ tar -xzvf sparse.img.tgz
+$ ls -lsh sparse.img
+4.0K -rw-rw-r-- 1 mulyadi mulyadi 400K 2010-03-29 21:17 sparse.img
+</p>
+
+<p>
+As you can see, the total block size of "sparse.img" are correctly
+restored after decompression.
+</p>
+
+<pre>-- 
+regards,
+</pre>Freelance Linux trainer and consultant
+</p>
+
+<p>
+blog: the-hydra.blogspot.com
+training: mulyaditraining.blogspot.com
+</p>
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_mail.html#mb-compressing_sparse_file_s_while_still_maintaining_their_holes">Back</a><hr width="50%" align="left" /><p><br /></p><p>
+<b><p>
+Ren&eacute; Pfeiffer [lynx at luchs.at]
+
+</p>
+</b><br />
+<b>Mon, 29 Mar 2010 16:54:47 +0200</b>
+</p>
+
+<p>
+On Mar 29, 2010 at 2125 +0700, Mulyadi Santosa appeared and said:
+</p>
+
+<pre>
+&gt; Due to certain reasons, we might have sparse file and want to compress
+&gt; it. However, we want to maintain its sparseness. Can we do it the
+&gt; usual way? [...]
+&gt; 
+&gt; The trick is by using tar with -S option:
+&gt; $ tar -Sczvf sparse.img.tgz sparse.img
+</pre>
+
+<p>
+The same is true for rsync. It has a -S (or --sparse) flag, too. The man
+page says "handle sparse files efficiently", so it might even handle
+sparse file without the option (albeit less efficiently).
+</p>
+
+<p>
+Best,
+Ren?.
+</p>
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_mail.html#mb-compressing_sparse_file_s_while_still_maintaining_their_holes">Back</a><hr width="50%" align="left" /><p><br /></p><p>
+<b><p>
+Ben Okopnik [ben at linuxgazette.net]
+
+</p>
+</b><br />
+<b>Mon, 29 Mar 2010 15:19:12 -0400</b>
+</p>
+
+<p>
+On Mon, Mar 29, 2010 at 09:25:23PM +0700, Mulyadi Santosa wrote:
+</p>
+
+<pre>
+&gt; Due to certain reasons, we might have sparse file and want to compress
+&gt; it. However, we want to maintain its sparseness. Can we do it the
+&gt; usual way?
+</pre>
+
+<p>
+[snip]
+ 
+</p>
+
+<pre>
+&gt; The trick is by using tar with -S option:
+&gt; $ tar -Sczvf sparse.img.tgz sparse.img
+</pre>
+
+<p>
+'tar cvzSpf' is a standard sysadmin mantra for preserving all the file
+metadata, etc. It's nicely effective when chanted in combination with
+'ssh', as in
+</p>
+
+<p>
+<pre class='code'>
+# Replicate local files or dir structure on remote host
+cd /source/dir/here
+tar cvzSpf - *|ssh user at remote_host '(cd /target/dir/there; tar xzSpf -)'
+</pre>
+
+<p>
+Obviously, if you have a really fast network or your send method is
+already set up to use in-flight compression (i.e., 'Compression yes' in
+~/.ssh/config or "ssh -c" on the command line), then the 'z' option will
+just waste cycles and should be omitted. Also, note that you want to use
+'v' only on <strong>one</strong> side of the pipe; otherwise, things will get
+ridiculously noisy.
+</p>
+
+
+<p>
+-- 
+* Ben Okopnik * Editor-in-Chief, Linux Gazette * <a href='http://LinuxGazette.NET'>http://LinuxGazette.NET</a> *
+</p>
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_mail.html#mb-compressing_sparse_file_s_while_still_maintaining_their_holes">Back</a><hr width="50%" align="left" /><p><br /></p></div>
+</body>
+</html>

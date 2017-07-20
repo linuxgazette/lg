@@ -1,0 +1,242 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>USENET groups, email, and ssh tunnels over dial-up connection LG #94</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<!-- *** BEGIN navbar *** -->
+<A HREF="yan-fa.html">&lt;&lt;&nbsp;Prev</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="index.html">TOC</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../index.html">Front Page</A>&nbsp;&nbsp;|&nbsp;&nbsp;Talkback&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../faq/index.html">FAQ</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="hughes.html">Next&nbsp;&gt;&gt;</A>
+<!-- *** END navbar *** -->
+
+<!--endcut ============================================================-->
+
+<TABLE BORDER><TR><TD WIDTH="200">
+<A HREF="http://www.linuxgazette.net/">
+<IMG ALT="LINUX GAZETTE" SRC="../gx/2002/lglogo_200x41.png" 
+	WIDTH="200" HEIGHT="41" border="0"></A> 
+<BR CLEAR="all">
+<SMALL>...<I>making Linux just a little more fun!</I></SMALL>
+</TD><TD WIDTH="380">
+
+
+<CENTER>
+<BIG><BIG><STRONG><FONT COLOR="maroon">USENET groups, email, and ssh tunnels over dial-up connection</FONT></STRONG></BIG></BIG>
+<BR>
+<STRONG>By <A HREF="../authors/zhuralev.html">Nokolay Zhuralev</A></STRONG>
+</CENTER>
+
+</TD></TR>
+</TABLE>
+<P>
+
+<!-- END header -->
+
+
+
+<p>
+When not at work, I have to use a dial-up modem for all my network needs. 
+However, I still want to have all the power and flexibility that Linux 
+provides. More importantly, I want to be able to use the same tools at 
+home that I am used to at work. Namely, slrn for USENET news and fetchmail
+for downloading emails. In this article, I am going to discuss the use of 
+ssh tunnels and compression for efficient and secure delivery of news 
+and mail over a dial-up connection.
+
+<p> 
+As it was <a href="http://linuxgazette.net/issue15/slrnpull.html">
+previously discussed </a>, a combination of slrnpull and 'slrn --spool' 
+can be used to fetch USENET news and read them offline. 
+This is especially useful when there is only one user, 
+and she is stuck with pay-per-hour dial-up connection.
+Let's look more closely into this issue.
+
+<p>
+First, one should avoid working under root as much as possible, 
+and use sudo instead. Use <code>visudo</code> to edit /etc/sudoers and add the following lines  
+at the bottom:
+
+<pre>
+# we want to be specific here
+jane   localhost=/usr/bin/slrnpull -h news.server.com
+</pre>
+
+where jane is the username authorized to run the command
+<code>slrnpull -h news.server.com</code> from localhost.
+
+Whenever Jane needs to fetch the news, she runs sudo:
+ 
+<pre>
+jane@localhost ~$ sudo slrnpull -h news.server.com
+Password:
+jane@localhost ~$ slrn --spool
+</pre>
+
+<p>
+Fetching a large number of articles from a wide
+variety of USENET groups can take quite some time.
+Let us consider a scenario where Jane has ssh access
+to a machine with fast Internet. This could be a machine at 
+work, at school, or even abroad. Assuming that the other machine
+can access news.server.com, and provided that there are no
+other obstacles (for ex. strict firewalling), an ssh tunnel 
+with compression can be used to significantly speed up the news fetching,
+when done over a dial-up connection. A tunnel is established like this:
+
+<pre>
+jane@localhost ~$ ssh -C -N -f -L 8081:news.server.com:119 janedoe@work.some.com
+jane@localhost ~$
+</pre>
+
+Here -C is for compression, -N and -f avoid executing the remote command 
+and send ssh to background, and -L is for local port forwarding.
+Now, the lines in /etc/sudoers need to be adjusted to make use of the
+tunnel:
+
+<pre>
+# we want to be specific here
+#jane   localhost=/usr/bin/slrnpull -h news.server.com
+# notice the use of backslash
+jane   localhost=/usr/bin/slrnpull -h localhost\:8081
+</pre>
+
+<p>
+Jane can now run slrnpull. Instead of trying to connect to 
+news.server.com directly, slrnpull will connect to local port 8081 and
+the traffic will travels through an ssh tunnel between localhost 
+and work.some.com.
+
+<pre>
+jane@localhost ~$ sudo slrnpull -h localhost:8081
+Password:
+jane@localhost ~$ slrn --spool
+</pre>
+
+<p>
+The two machines, i.e. the news server news.server.com and the 
+work.some.com, are on the fast network. The connection between them
+is in clear-text and is not compressed. However, the localhost is
+connected to work.some.com via dial-up. The traffic between the
+later two is encrypted and compressed. The compression is the same
+as the one used by gzip. Compression of the ASCII traffic greatly decreases
+the download times, which is especially useful if one likes to
+subscribe to a lot of USENET groups. The proposed scheme also
+provides some privacy for Jane, since the traffic between her machine
+and work.some.com is encrypted.
+
+<p>
+Finally, to avoid typing long ssh commands to establish a
+tunnel, Jane could have something like this in her .ssh/config file:
+
+<pre>
+Host work
+HostName work.some.com
+LocalForward 8081 news.server.com:119
+IdentityFile /home/janedoe/.ssh/id_dsa
+Protocol 2
+User janedoe
+CompressionLevel 6
+</pre>
+
+Notice that there is only one colon sign in the LocalForward line above.
+Now the tunnel can be established with just:
+
+<pre>
+jane@localhost ~$ ssh -C -N -f work
+</pre>
+
+<p>
+Just don't forget to kill the old ssh tunnel before establishing a new one.
+If in doubt, use <code>netstat -tupan | grep LIS</code> to see what is 
+going on. The exact syntax of the commands may depend on the particular 
+flavor of SSH that you have. The above works for me (RH 9, openssh-3.5p1-1).
+Also check out the article on 
+<a href="http://linuxgazette.net/issue67/nazario2.html"> ssh-agent </a>, 
+which makes dealing with ssh even less painless.
+
+<p>
+In a similar fashion, ssh tunnels can be used in combination with
+fetchmail to retrieve email from the server. Just add a new LocalForward
+entry to the .ssh/config file: 
+
+<pre>
+Host work
+HostName work.some.com
+LocalForward 8081 news.server.com:119
+LocalForward 8082 pop3.some.com:110
+IdentityFile /home/janedoe/.ssh/id_dsa
+Protocol 2
+User janedoe
+CompressionLevel 6
+</pre>
+
+and edit .fetchmailrc accordingly:
+
+<pre>
+poll localhost with proto POP3 port 8082
+user 'Doe0001' there with password "blah" is 'jane' here options fetchall
+</pre>
+
+So, now the command <code> ssh -C -N -f work </code> will establish
+two tunnels, one for the news and one for the pop3 mail.
+Fire the fetchmail to see how it works:
+
+<pre>
+fetchmail -e 50 -m "/usr/sbin/sendmail     -oem     -f     %F     %T"
+</pre>
+
+To learn more about fetchmail and setting up the email system
+check the <a href="http://linuxgazette.net/issue92/okopnik.html">
+recent issue</a> of LG.
+My experience was that, on average, mail and news get downloaded
+at least twice as fast comparing to the conventional methods.
+Over a modem line, that is.
+To summarize, the use of ssh tunnels with compression provides
+both efficiency and security for your everyday communication.
+Use it, love it, and pass the knowledge along ;)
+
+
+
+
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<P>
+<img ALIGN="LEFT" ALT="[BIO]" SRC="../gx/2002/note.png">
+<em>
+Born in Moscow, Russia, in 1976. I have been coding and/or messing 
+     with computers in one way or another since I was 12.
+     I have entered the realm of *nix in 1995, and I never regretted it.
+     Currently, I am a Ph.D. student in the Department of Chemistry at
+     the University of Minnesota, MN.
+</em>
+<br CLEAR="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+
+<!-- *** BEGIN copyright *** -->
+<hr>
+<CENTER><SMALL><STRONG>
+Copyright &copy; 2003, Nokolay Zhuralev.
+Copying license <A HREF="../copying.html">http://www.linuxgazette.net/copying.html</A><BR> 
+Published in Issue 94 of <i>Linux Gazette</i>, September 2003
+</STRONG></SMALL></CENTER>
+<!-- *** END copyright *** -->
+<HR>
+
+<!--startcut ==========================================================-->
+<CENTER>
+<!-- *** BEGIN navbar *** -->
+<A HREF="yan-fa.html">&lt;&lt;&nbsp;Prev</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="index.html">TOC</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../index.html">Front Page</A>&nbsp;&nbsp;|&nbsp;&nbsp;Talkback&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../faq/index.html">FAQ</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="hughes.html">Next&nbsp;&gt;&gt;</A>
+<!-- *** END navbar *** -->
+</CENTER>
+</BODY></HTML>
+<!--endcut ============================================================-->

@@ -1,0 +1,387 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Dissecting the ACPI Button Driver in Kernel 2.6 LG #106</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="pawar.html" >&lt;-- prev</A> | <A HREF="seymour.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Dissecting the ACPI Button Driver in Kernel 2.6</h1>
+<p id="by"><b>By <A HREF="../authors/pramode.html">Pramode C.E.</A></b></p>
+
+<p>
+<p>
+A student came and told me that his Linux system was not shutting
+down automatically when the power button was pressed. It was a 
+problem with ACPI (Advanced Configuration and Power Interface) not 
+being set up properly on his machine.  This was an opportunity to 
+learn a bit about  power management and its implementation under
+Linux. I was not particularly interested in the topic, but reading
+a few files under drivers/acpi convinced me that I could turn this
+into an interesting demonstration of how to go about reading and
+deciphering kernel code.
+
+<h2>Getting started</h2>
+<p>
+Power management is a serious issue in modern systems -
+the Operating System should be able to determine things
+like battery charge level, CPU temperature, etc. and take
+intelligent actions. ACPI  is designed
+with the objective of giving the OS as much flexibility as
+possible in dealing with power management issues. This much
+I was able to understand by doing a quick Google search. 
+When one article mentioned that the complete ACPI spec was
+well over 500 pages, I concluded that this was not my cup
+of tea. I just wanted to know what the OS does to shut down
+and power off my system cleanly when I press the power
+button; no way I am going to read 500 pages of a 
+manual to understand that.
+
+<h2>Some Experiments</h2>
+<p>
+The first thing was to find out whether my kernel 
+had ACPI code compiled into it. A quick
+<pre>
+
+dmesg | grep ACPI
+
+</pre>
+solved the problem - it is. As with all things
+complex (say USB), it's a worthwhile guess that the
+kernel might contain some `core' code to handle all
+the really tough things like communicating with the
+ACPI BIOS and finding out what all `events' had taken
+place (pressing the power switch is one event). The
+code which `reacts' to these events should be much
+simpler and would mostly be written as a module. Keeping
+in mind the basic Unix philosophy of pushing `policy'
+as much towards the user as possible, you will guess
+that this `reaction' would be mostly letting a user level
+process know that something has happened. Now, how does
+a device driver let a user space process know that 
+something has happened? Two of the simplest ways are
+using a proc file entry and using a device file - proc
+file entry being the better bet. Sure enough, looking under
+/proc, I saw a directory called `acpi'. 
+<p>
+The last link in the chain would be a user level program
+which reads some file under /proc/acpi and performs some
+actions based on the event information it gets from the
+kernel - let's say, a program called `acpid'. A `ps ax'
+showed me that such a program was running. Running an
+<pre>
+
+strace -p &lt;pid&gt;
+
+</pre>
+showed the program doing a `select' on two file descriptors
+3 and 4. Killing acpid and running it once again like this:
+<pre>
+
+strace acpid
+
+</pre>
+displayed the following line as part of the output:
+<pre>
+
+open("/proc/acpi/event", O_RDONLY);
+
+</pre>
+So, that's it! Just read from /proc/acpi/event and
+you will know what all power management `events'
+had occurred. I killed acpid and did a
+<pre>
+
+cat /proc/acpi/event
+
+</pre>
+The process expectedly blocked. Pressing the power
+button resulted in the following line getting printed:
+<pre>
+
+button/power PWRF 00000080 00000001
+
+</pre>
+
+The chain is almost complete. How does the core ACPI
+code know that the button has been pressed? The kernel
+can't keep on doing some kind of busy loop - interrupts
+are the only way out. Sure enough, a `cat /proc/interrupts'
+showed:
+<pre>
+
+           CPU0       CPU1       
+  0:   11676819   11663518    IO-APIC-edge  timer
+  1:       8998       7247    IO-APIC-edge  i8042
+  2:          0          0          XT-PIC  cascade
+  8:          1          0    IO-APIC-edge  rtc
+  9:          3          1   IO-APIC-level  acpi
+ 12:         84          0    IO-APIC-edge  i8042
+(other stuff deleted)
+
+</pre>
+Look at IRQ 9 - that's what we are interested in. Pressing
+the button resulted in the interrupt count getting
+incremented. 
+<p>
+Here is the complete chain:
+
+<pre>
+
+              Power Button
+                   |
+                   |
+                 IRQ 9
+                   |
+                   |
+             Core ACPI Code
+                   |
+                   |
+              Button Driver
+                   |
+                   |
+    User Program Reading /proc/acpi/event
+
+</pre> 
+               
+
+<h2>Reading the code</h2>
+<p>
+A quick look under /usr/src/linux-2.6.5/drivers showed
+a directory called `acpi' which has a file called
+`button.c' - surely this must be the `plug-in' driver code which 
+responded to button events. Another file called `event.c'
+has  routines which respond to open/read requests from
+user space.
+<p>
+A `read' request from userspace on the file /proc/acpi/events results 
+in `acpi_system_read_event' getting invoked. This function in turn
+invokes `acpi_bus_receive_event' which blocks if no event has been
+posted by the button driver code. Events are posted by a function called
+`acpi_bus_generate_event' defined in the file bus.c. 
+
+<h2>Understanding button.c</h2>
+<p>
+Getting a `high-level' idea of the working of the button driver code is fairly
+simple. When trying to get a grip on driver code like this, it might 
+be good if you can strip off some lines so that you can better concentrate on
+the essentials. The functions acpi_button_info_seq_show, acpi_button_info_open_fs,
+acpi_button_state_seq_show, acpi_button_state_open_fs, acpi_button_add_fs and
+acpi_button_remove_fs can be safely taken off. A few simple printk's at the
+beginning of the functions which we find interesting will give us some idea
+of the flow of control. Here is the first cut-down version of button.c:
+<p>
+<a href="misc/pramode/button1.c.txt">Listing 1</a>
+<p>
+Here are the things which I noticed when the module was compiled separately
+and loaded into the kernel (2.6.5).
+<ul>
+<li>acpi_button_add was invoked twice at module load time
+<li>Each time the power button was pressed, acpi_button_notify was called once
+<li>acpi_button_remove was called twice at module unload time
+</ul>
+It's once again time to do a bit of guesswork. The acpi_button_init function
+is calling acpi_bus_register_driver with the address of an object of type
+`struct acpi_driver':
+<pre>
+
+static struct acpi_driver acpi_button_driver = {
+	.name =		ACPI_BUTTON_DRIVER_NAME,
+	.class =	ACPI_BUTTON_CLASS,
+	.ids =		"ACPI_FPB,ACPI_FSB,PNP0C0D,PNP0C0C,PNP0C0E",
+	.ops =		{
+				.add =		acpi_button_add,
+				.remove =	acpi_button_remove,
+			},
+};
+
+</pre>
+
+The guess is that acpi_button_add would be talking with the lower level
+`core' code and arranging for some handler functions to be invoked when
+events like  a power or sleep button activation are detected (well - lots
+of vagueness here - the source code talks of a POWER and POWERF button as
+well as a SLEEP and SLEEPF button. Can somebody who knows the code better
+enlighten me as to what POWERF and SLEEPF are for?). As handlers are to
+be invoked for multiple button types, the acpi_bus_register_driver
+function would be examining the .ids field of the structure and parsing the
+names in it one by one, invoking the acpi_button_add function each 
+time it encounters another name (this might be a dumb guess - I haven't really looked into 
+scan.c which implements the acpi_bus_register_driver function. Trouble is,
+I don't understand why `add' is getting called only twice).
+
+<p>
+The next revision of button.c, I keep only one name, ACPI_FPB in the .ids
+field and trim down acpi_button_add/acpi_button_remove to handle the case of only the power
+button. The most important line to look for in this function is the 
+invocation of acpi_install_fixed_event_handler which registers the function
+acpi_button_notify_fixed as a handler to be invoked when the ACPI system
+detects button activity.
+
+<p>
+<a href="misc/pramode/button2.c.txt">Listing 2</a>
+<p>
+
+The handler (acpi_button_notify_fixed) calls acpi_button_notify which in
+turn calls acpi_bus_generate_event. Remember, a read on /proc/acpi/events
+was blocked by acpi_bus_receive_event. The read (and the user level process)
+comes out of the block when acpi_bus_generate_event is invoked!
+
+
+<h2>Adding a char driver interface </h2>
+<p>
+Let's modify the driver so that it uses a different interface for 
+communicating with userland - a simple char driver (well, this is
+a rather stupid idea - but we have to make some change!). The `read'
+method of the driver goes to sleep by calling `interruptible_sleep_on'
+while the acpi_button_notify_fixed function wakes it up. 
+<p>
+<a href="misc/pramode/button3.c.txt">Listing 3</a>
+<p>
+Let's say the driver is allotted a major number of 254. We make a 
+device file:
+<pre>
+
+mknod button c 254 0
+
+</pre>
+and try `cat button'. The reading process goes to sleep. Now, we press
+the power switch and it immediately comes out of the block!
+
+<h2>Winding up</h2>
+<p>
+A simple shell script (lets call it `silly_acpid')
+
+<pre>
+
+#!/bin/sh
+cat /home/pce/button
+poweroff
+
+</pre>
+
+Run this in the background and press the power switch - voila, the
+system gets shut down and powered off automagically!
+
+<h2>Further Reading and References</h2>
+<p>
+The October 2003 issue of <a href="http://www.acmqueue.com">ACM Queue</a>
+ has an introductory article 
+on ACPI meant for newbies; it is a good read. The Linux ACPI
+project has its home page <a href="http://acpi.sourceforge.net">here</a>. The
+source code of the simple `acpi daemon' program can be downloaded
+from <a href="http://acpid.sourceforge.net">here</a>. The module compilation process
+for the 2.6 series kernel is different from that for the 2.4
+series. More information is available under 
+/usr/src/linux/Documentation/kbuild/.
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<P>
+<img ALIGN="LEFT" ALT="[BIO]" SRC="../gx/2002/note.png" class="bio">
+<em>
+I am an instructor working for IC Software in Kerala, India. I would have loved
+becoming an organic chemist, but I do the second best thing possible, which is
+play with Linux and teach programming!
+</em>
+<br CLEAR="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2004, Pramode C.E.. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 106 of Linux Gazette, September 2004
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="pawar.html" >&lt;-- prev</A> | <A HREF="seymour.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">September 2004 (#106)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/2003/sit3-shine.7-2.gif" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

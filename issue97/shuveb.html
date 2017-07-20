@@ -1,0 +1,552 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Let There Be Music LG #97</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="pramode.html" >&lt;-- prev</A> | <A HREF="tougher.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Let There Be Music</h1>
+<p id="by"><b>By <A HREF="../authors/shuveb.html">Shuveb Hussain</A></b></p>
+
+<p>
+<p>
+Linux multimedia has been a field buzzing with activity. Many open minds have now contributed to make Linux a decent multimedia platform. Today many projects exist that make a large number of multimedia activities possible under Linux. If you need a good introduction to various sound utilities under Linux, you should read an excellent previous article on Linux Gazette found <a href="../issue47/ayers.html">here</a>.
+</p>
+<p>
+I wanted to include sound in one of the apps I was writing and began googling the web. I learnt that there are many libraries that make it possible to decode common compressed sound file formats like Ogg Vorbis or MP3. Playing sound on to your speakers is no big deal either. In this article, we'll see how to decode Ogg Vorbis and MP3 files by writing simple programs. This article has been written with beginners in mind, so Linux gurus, sorry for too much explanation of the simple stuff.
+</p>
+
+<h3>
+Programming the Sound Card
+</h3>
+<p>
+Before we actually get into the details of programming the sound card, it would be actually helpful to know how sound data is recorded, stored and played back on our computers.
+</p>
+<h4>
+Sampling
+</h4>
+<p>
+When sound is to be recorded, we ought to choose the quality at which we want to do it. One main criterion that determines sound quality is the sampling rate. Take for example music, it is just frequency that varies over time. If we want to record sound digitally, we note down the frequency of the sound at a fixed rate. This is known as the sampling rate. The higher the sampling rate, the better the quality of the music. For example, CD quality audio has a sampling rate of 44100 per second or 44100 Hz. This technique is used by devices called ADCs or Analogue to Digital Converters and is called Pulse Code Modulation or PCM.
+</p>
+
+<h4>
+Bits and Channels
+</h4>
+<p>
+When sound is sampled, fixed number of bits are used per sample and there are one are more channels. The number of bits at which the data is sampled is known as the resolution of the sampling. The most common form is a 8 bit unsigned byte or 16 bits. Data for different channels is maintained separately. For example, CD audio has two channels, Left and Right (Stereo). If you make a simple calculation, to record CD quality audio at a resolution of 8 bits, for 1 second it would take:
+<p>
+
+<pre>
+		2 x 44100 = 88200 bytes
+
+	(Number of channels x sampling rate)
+</pre>
+<p>
+Now that we have enough information on the theory lets get started with the actual programming. There are actually a few ways to program the sound card. In the early Linux days, when drivers were being written, two separate groups were formed. Open Sound System or OSS was a group that wrote many device drivers and even included binary modules from sound card manufacturers who were reluctant to provide hardware specifications, or provided specs, but not without the driver developer signing an non-disclusure agreement. Since the hardware guys were reluctant to give out specs to individuals, OSS went on to create 4Front Technologies, a company. One more group ALSA, or Advanced Linux Sound Architecture wrote drivers only for those sound cards whose manufacturers were ready to give out specifications. ALSA drivers are now very popular. They have been included in the 2.6-test kernel too.
+</p>
+<p>
+Note that ALSA provides an OSS emulation layer, so if you program for OSS your program might work on systems with OSS or ALSA. In this article, I'll try and explain OSS programming since it's simple and is present in majority of the systems.
+</p>
+<p>
+Remember that under UNIX/Linux, all the device drivers have a file system interface, usually under the /dev directory. Most of the file related sytem calls like open,read,write,lseek,close work on these devices. The device files may be considered hooks in the file system from where the device drivers keep listening for requests. As an example, the file /dev/hda1 is the file that represents the interface for the first partition on the primary master IDE hard disk. If you open it using the open system call, you would be returned a file handle like in all file operations. If you now try and read from it, you would actually read data from the first sector of this partition! Similarly, a forward lseek will move the file pointer forward. To skip a sector, you'd lseek forward the size of a sector. Please don't fiddle around with your hard disk device file, its rather dangerous. Writing rubbish on to the partition will render it unuseable. You'll mostly have direct access to hardware devices only as root.
+</p>
+<p>
+Having said that, lets move on to some code. This code should run as non-root without issues. In case there are problems accessing the device file, su as root and chmod and grant access. Ofcourse you should have a sound card thats known to work under Linux. Save typing by getting the source from <a href=misc/shuveb/oss.c.txt>here</a>. Don't forget to download the <a href=misc/shuveb/demo.pcm>demo.pcm</a> file.
+</p>
+<pre>
+/*
+	oss.c plays a raw PCM 22KHz sample sound on the sound card
+	
+	Important  -  Make sure the demo.pcm file is is the current directory
+	before you attempt to run this program.
+*/
+
+#include &lt; sys/types.h &gt;
+#include &lt; sys/stat.h &gt;
+#include &lt; sys/soundcard.h &gt;
+#include &lt; sys/ioctl.h &gt;
+#include &lt; unistd.h &gt;
+#include &lt; fcntl.h &gt;
+#include &lt; errno.h &gt;
+#include &lt; stdlib.h &gt;
+
+#define SECONDS 5 //playback seconds
+
+int main() 
+{
+	int fd;
+	int handle = -1;
+	int channels = 1;         // 0=mono 1=stereo
+	int format = AFMT_U8;
+	int rate = 22000;
+	unsigned char* data;
+	
+/* Open the file corresponding to the soundcard for writing, DSP stands for Digital Signal Processor */
+	if ( (handle = open("/dev/dsp",O_WRONLY)) == -1 )
+	{
+		perror("open /dev/dsp");
+		return -1;
+	}
+/* Tell the sound card that the sound about to be played is stereo. 0=mono 1=stereo */
+
+	if ( ioctl(handle, SNDCTL_DSP_STEREO,&amp;channels) == -1 )
+	{
+		perror("ioctl stereo");
+		return errno;
+	}
+
+	/* Inform the sound card of the audio format */
+	if ( ioctl(handle, SNDCTL_DSP_SETFMT,&amp;format) == -1 )
+	{
+		perror("ioctl format");
+		return errno;
+	}
+	
+	/* Set the DSP playback rate, sampling rate of the raw PCM audio */
+	if (ioctl(handle, SNDCTL_DSP_SPEED,&amp;rate) == -1 )
+	{
+		perror("ioctl sample rate");
+		return errno;
+	}
+   
+	// rate * 5 seconds * two channels
+	data = malloc(rate*SECONDS*(channels+1));
+	
+	if((fd=open("demo.pcm",O_RDONLY))==-1)
+	{
+		perror("open file");
+		exit(-1);
+	}
+
+	/* read the data contained in the demo file to the allocated memory */
+	read(fd,data,rate*SECONDS*(channels+1));
+	close(fd);
+	
+	/* just write the data to the sound card! This will play it. */
+
+	write(handle, data, rate*SECONDS*(channels+1));
+
+	if (ioctl(handle, SNDCTL_DSP_SYNC) == -1)
+	{
+		perror("ioctl sync");
+		return errno;
+    	}
+
+	free(data); //Be good, clean up.
+	close(handle);
+	printf("\nDone\n");
+	return 0;
+}
+</pre>
+
+<p>
+The program listed above plays a raw PCM, 22 KHz, Stereo data file for 5 seconds. The program does three simple things:
+<br><br>
+a. Opens the sound device<br>
+b. Sets the playback parameters<br>
+c. Writes the data to the device
+
+<p>
+The open()/write()/close() system calls are the same ones used for normal files. To set the device playback parameters, we use the ioctl() (Input/Output Control) system call. The ioctl() system call is used to communicate with I/O devices and set their parameters. It might also be seen as a trick to decrease the number of invidual system calls. Its known as the programmer's swiss army knife. The signature of the ioctl() sytem calls is :<br><br>
+
+	int ioctl(int fd, int command, ...)
+
+</p>	
+<p>
+The first parameter is the file descriptor of the device, the second parameter is the request/command passed to the device and the rest of the parameters are command specific [See man ioctl_list for a list of commands]. Examine this:<br><br>
+
+	ioctl(handle, SNDCTL_DSP_SPEED,&amp;rate)
+
+</p>
+<p>
+This ioctl() call sets the DSP playback rate, the third parameter is the actual rate passed to the device driver.
+</p>
+
+<p>
+There are three main ioctl() calls used in the example program. The first one sets the number of channels to be used for playback, the second one sets PCM format and the third, the rate. Since this is all the device needs to know, we next write the PCM data right on to the device file and the device plays it for us. We then flush the device with the final ioctl() and release the memory allocated for the PCM data. Thats it, we are done.
+</p>
+
+<h4>
+Music storage formats
+</h4>
+<p>
+	Man, just to play 5 seconds of 22KHz sound data in the previous example, 220 KB of raw PCM data was needed.
+<pre>	
+	22,000 x 5 x 2 = 220,000
+	(sample x seconds x channels)
+	
+	So to play 1 minute of CD Quality audio, one would need:
+
+	44,100 x 60 x 2 = 5292000 bytes or roughly 5 MB!
+</pre>
+<p>
+Audio CDs store raw PCM data, but to store music efficiently in computers, and to stream or share it over the Internet, music is compressed to reduce file size and decompressed on the fly during playback. If you can see, the sampling rate is fixed, no matter what the nature of the music being played. Imagine silence being sampled for a few seconds, it would still consume the same amount of space as a loud rock number would for the same given time. Raw audio files don't compress well since there is very little data repetition which is important for good compression. Different audio formats use different techniques to reduce the size of the resulting file. The most common technique is to remove sound that the human ear doesn't care about, or to compress the audio stream depending on the music being played. The most popular format for music lovers is unargueably MP3. Since MP3 is now shrouded in patent issues, Ogg Vorbis is now welcome among members of the open source community. Both formats achieve the same reduction in size and are able to maintain audio quality with minimal loss.
+</p>
+<p>
+Lets see how to play Ogg Vorbis files on our system, since we know how to tell the sound card to play raw audio data. For us to play Ogg Vorbis format files, we first need to decode it or in other words, convert it to raw PCM data. This will be done by libvorbisfile. This library presents decoding at much a higher level than libvorbis, which is quite low level, but allows relatively more fine grained control. Its really simple from here: We provide the library with the input data from a Ogg Vorbis file and the library provides us with the decoded raw PCM format data which we feed right into to sound card. Source available <a href=misc/shuveb/oggplay.c.txt>here</a>
+</p>
+<pre>
+#include &lt; sys/types.h &gt;
+#include &lt; sys/stat.h &gt;
+#include &lt; sys/soundcard.h &gt;
+#include &lt; sys/ioctl.h &gt;
+#include &lt; unistd.h &gt;
+#include &lt; fcntl.h &gt;
+#include &lt; errno.h &gt;
+#include &lt; stdlib.h &gt;
+
+#include "vorbis/codec.h"
+#include "vorbisfile.h"
+
+int setup_dsp(int fd,int rate, int channels);
+
+
+char pcmout[4096]; // 4KB buffer to hold decoded PCM data.
+int dev_fd;
+
+int main(int argc, char **argv)
+{
+	OggVorbis_File vf;
+	int eof=0;
+	int current_section;
+	FILE *infile,*outfile;
+
+	if(argc&lt;2)
+	{
+		printf("supply file arguement\n");
+		exit(0);
+	}
+
+	if ( (dev_fd = open("/dev/dsp",O_WRONLY)) == -1 ) 
+	{
+		perror("open /dev/dsp");
+		return -1;
+	}
+
+	infile=fopen(argv[1],"r");
+	
+	if(infile==NULL)
+	{
+		perror("fopen");
+		exit(-1);
+	}   
+
+	if(ov_open(infile, &amp;vf, NULL, 0) &lt; 0) 
+	{
+		fprintf(stderr,"Input does not appear to be an Ogg bitstream.\n");
+		exit(1);
+	}
+	
+	char **ptr=ov_comment(&amp;vf,-1)-&gt;user_comments;
+	vorbis_info *vi=ov_info(&amp;vf,-1);
+	while(*ptr)
+	{
+		fprintf(stderr,"%s\n",*ptr);
+		++ptr;
+	}
+
+	fprintf(stderr,"\nBitstream is %d channel, %ldHz\n",vi-&gt;channels,vi-&gt;rate);
+	fprintf(stderr,"\nDecoded length: %ld samples\n",(long)ov_pcm_total(&amp;vf,-1));
+	fprintf(stderr,"Encoded by: %s\n\n",ov_comment(&amp;vf,-1)-&gt;vendor);
+  
+	if(setup_dsp(dev_fd,vi-&gt;rate,vi-&gt;channels-1))
+	{
+		printf("dsp setup error.aborting\n");
+		exit(-1);
+	}
+
+	int count=0;
+	
+	while(!eof)
+	{
+		long ret=ov_read(&amp;vf,pcmout,sizeof(pcmout),0,2,1,&amp;current_section);
+		if (ret == 0)
+		{
+			/* EOF */
+			eof=1;
+		}
+		else if (ret &lt; 0)
+		{
+	      		/* error in the stream.  Not a problem, just reporting it in
+			case we (the app) cares.  In this case, we don't. */
+		}
+		else 
+		{
+			printf("Writing %d bytes for the %d time.\n",ret,++count);
+			write(dev_fd,pcmout,ret);
+		}
+	}
+
+	ov_clear(&amp;vf);
+	fclose(infile);
+	
+	if (ioctl(dev_fd, SNDCTL_DSP_SYNC) == -1) 
+	{
+    		perror("ioctl sync");
+		return errno;
+	}
+	close(dev_fd);
+	fprintf(stderr,"Done.\n");
+	return(0);
+}
+
+int setup_dsp(int handle,int rate, int channels)
+{
+	int format;
+
+	if ( ioctl(handle, SNDCTL_DSP_STEREO,&amp;channels) == -1 ) 
+	{
+		perror("ioctl stereo");
+		return errno;
+	}
+	
+	format=AFMT_U8;
+	if ( ioctl(handle, SNDCTL_DSP_SETFMT,&amp;format) == -1 )
+	{
+		perror("ioctl format");
+		return errno;
+	}
+	
+	if ( ioctl(handle, SNDCTL_DSP_SPEED,&amp;rate) == -1 )
+	{
+		perror("ioctl sample rate");
+		return errno;
+	}
+	
+	return 0;
+}
+</pre>
+<br>
+To compile this program use the following command
+
+<pre>
+gcc oggplay.c -oggplay -lvorbisfile -I/path/to/vorbis/header/files -L/path/to/vorbis/lib/files
+</pre>
+
+<p align=justify>
+If the library file or the header files are in the usual locations like /usr/lib and /usr/include, then you can skip the -I and -L command line switches. All major distibutions ship with the vorbisfile lbrary, if your system doesn't seem to have it installed, you can always download it from <a href=http://www.vorbis.com/download_unix.psp>here</a>. You can also visit the Ogg Vorbis site <a href=http://www.xiph.org/ogg/vorbis/>here</a>. You need the development header files if you need to compile the program.
+</p>
+
+<p align=justify>
+The setup_dsp function opens the dsp device, sets the three main parameters, channels, format and rate. You need to remember that these are the three most important parameters to set for audio playback. In the main function, other than the error checking, we have only two main things going on. The Ogg Vorbis file supplied as shell arguement is opened and user comments and information about it is printed. The sampling rate and channel information is extracted from the information structure filled up by the ov_open() library function and passed on to the setup_dsp function. The program then enters a loop where bytes decoded from the Ogg Vorbis file stream and placed into a buffer. This raw PCM data contained in the buffer is then played by writing to the dsp device which has already been setup. This loop continues until end-of-file is reached, finally things are cleaned up and exit happens. That wasn't difficult or was it? Thanks to libvorbisfile, decoding is so easy and straightforward.
+</p>
+
+<p align=justify>
+To decode Ogg Vorbis files, the obvious choice is libvorbisfile, but if you want to decode and play MP3 files, there are a lot of libraries that can do the job. One library thats popular is the <a href=http://www.lokigames.com/development/smpeg.php3>smpeg</a> library which is capable of decoding both video and audio streams. One more library I came across is <a href=http://www.underbit.com/products/mad/>libmad</a>. We'll select smpeg and use its audio decoding capabilities alone. You can further explore its MPEG video decoding capabilities if you are interested. A sample application plaympeg is also provided that demonstrates the useage of the library. For Video playback, smpeg uses <a href=http://libsdl.org>SDL</a>, which is a very simple to use yet a very capable graphics prgramming library. There are many many more libraries around, but smpeg is provided by many Linux distributions and that made me choose it. The popular gtv MPEG video player is a part of the smpeg package.
+</p>
+
+<p align=justify>
+Here is an example program that plays MP3 files. Please note that smpeg library plays the decoded MP3 stream directly on the sound card. We don't get to handle any PCM stuff. Also available <a href=misc/shuveb/playmp3.c.txt>here</a>
+</p>
+
+<pre>
+#include &lt; stdio.h &gt;
+#include &lt; stdlib.h &gt;
+#include &lt; string.h &gt;
+#include &lt; signal.h &gt;
+#include &lt; unistd.h &gt;
+#include &lt; errno.h &gt;
+#include &lt; sys/types.h &gt;
+#include &lt; sys/stat.h &gt;
+#include &lt; sys/ioctl.h &gt;
+#include &lt; sys/time.h &gt;
+
+#include "smpeg.h"
+
+void usage(char *argv0)
+{
+	printf("\n\nHi,\n\n%s <filename>\n\nThis is the normal useage.\n",argv0);
+}
+
+int main(int argc, char *argv[])
+{
+    int volume;
+    SMPEG *mpeg;
+    SMPEG_Info info;
+   
+    volume = 100; //Volume level
+    
+    /* If there were no arguments just print the usage */
+	if (argc == 1) 
+	{
+	        usage(argv[0]);
+	        return(0);
+	}
+
+	mpeg = SMPEG_new(argv[1], &info;, 1);
+
+        if ( SMPEG_error(mpeg) ) 
+	{
+            fprintf(stderr, "%s: %s\n", argv[1], SMPEG_error(mpeg));
+            SMPEG_delete(mpeg);
+        }
+	
+        SMPEG_enableaudio(mpeg, 1);
+        SMPEG_setvolume(mpeg, volume);
+
+        /* Print information about the audio */
+        if ( info.has_audio ) 
+	{
+            printf("%s: MPEG audio stream\n", argv[1]);
+            
+	        if ( info.has_audio ) 
+		    printf("\tAudio %s\n", info.audio_string);
+
+        	if ( info.total_size ) 
+			printf("\tSize: %d\n", info.total_size);
+	        
+		if ( info.total_time )
+			printf("\tTotal time: %f\n", info.total_time);
+
+		/* Play it, and wait for playback to complete */
+		SMPEG_play(mpeg);
+        
+		while(SMPEG_status(mpeg)==SMPEG_PLAYING);
+        	SMPEG_delete(mpeg); //release the struct
+	}
+	return(0);
+}
+</pre>
+
+<p align=justify>
+You need to compile this program after you install smpeg which can be found <a href=http://www.lokigames.com/development/smpeg.php3>here</a>. Please note that smpeg needs SDL to be installed as a pre-requisite. To complie, you need to provide the paths to include files and library files. To make this process easy, the smpeg package provides a simple utility named smpeg-config. Compile the program with the following command:
+</p>
+
+<pre>
+gcc playmp3.c `smpeg-config --cflags --libs` -I/usr/include/SDL
+</pre>
+
+<p>
+Please note that its not the single quote character that encloses the smpeg-config command, its the character thats present along with the tilde (~) character in US layout keyboards, sometimes called a backquote. This character instructs the shell to inject the output of the enclosed command into the actual command line. If you run the smpeg-config command separately, you'll know what I am talking about. Replace the -I/usr/include/SDL command option with -I &lt; your SDL path &gt;. Even though we don't use any of the SDL functions, we need to provide gcc with the SDL header file path because smpeg.h uses it internally. RPM users should install both the smpeg and the smpeg-devel packages for the program to compile.
+</p>
+
+<p>
+The library function SMPEG_new allocates a new internal object, while filling up an SMPEG_info structure which contains information about the MP3 file. In the program this information is printed and playback begins by calling SMPEG_play. Thing is this call returns immediately which is really good when you're dealing with MP3s in an application program because it lets you do other things. Since we have nothing else to do in the program, we wait until the file has finished playing. SMPEG_delete then releases memory previously allocated by the library and we are done.
+</p>
+
+<p>
+I hope this article finds use in some of your programing ventures. I'd like to hear from you folks. Do get in touch for any clarifications or criticism. I can be reached through <a href= mailto:shuveb@shuvebhussain.org>shuveb@shuvebhussain.org</a>.
+</p>
+
+<i>
+<b>Linux Zindabad</b><br>
+(Means long live Linux, in Hindi which is India's primary and national language)
+</i>
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<P>
+<img ALIGN="LEFT" ALT="[BIO]" SRC="../gx/2002/note.png" class="bio">
+<em>
+Shuveb is a pervert by social compulsion sitting in a
+small but historical city in southern India. He thinks
+life is neither a Midsummer Night's Dream nor a
+Tempest, it's simply a Comedy Of Errors, to be lived As
+You Like It. Apart from being a part time philosopher,
+he is a seasoned C programmer who is often in
+confusion about what the * does to a pointer
+variable.... APR Bristol is the company that pays him
+for learning Linux.
+</em>
+<br CLEAR="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2003, Shuveb Hussain. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 97 of Linux Gazette, December 2003
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="pramode.html" >&lt;-- prev</A> | <A HREF="tougher.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">December 2003 (#97)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/2003/sit3-shine.7-2.gif" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

@@ -1,0 +1,129 @@
+diff -cr findutils-4.1/locate/locate.c findutils-4.1-patched/locate/locate.c
+*** findutils-4.1/locate/locate.c	Mon Sep 26 17:06:14 1994
+--- findutils-4.1-patched/locate/locate.c	Wed Jan  7 15:13:42 1998
+***************
+*** 54,59 ****
+--- 54,61 ----
+  #include <time.h>
+  #include <fnmatch.h>
+  #include <getopt.h>
++ #include <dirent.h>
++ #include <unistd.h>
+  
+  #define NDEBUG
+  #include <assert.h>
+***************
+*** 93,98 ****
+--- 95,101 ----
+  char *xmalloc ();
+  char *xrealloc ();
+  void error ();
++ int DO_LS = 0;
+  
+  /* Read in a 16-bit int, high byte first (network byte order).  */
+  
+***************
+*** 165,170 ****
+--- 168,174 ----
+  locate (pathpart, dbfile)
+       char *pathpart, *dbfile;
+  {
++   FILE *q_file;  char q_str[1000];  struct stat q_stat;  int q_includeit;
+    /* The pathname database.  */
+    FILE *fp;
+    /* An input byte.  */
+***************
+*** 309,316 ****
+  		prev_fast_match = true;
+  		if (globflag == false || fnmatch (pathpart, path, 0) == 0)
+  		  {
+! 		    puts (path);
+! 		    ++printed;
+  		  }
+  		break;
+  	      }
+--- 313,350 ----
+  		prev_fast_match = true;
+  		if (globflag == false || fnmatch (pathpart, path, 0) == 0)
+  		  {
+! 	 /* We have a successful hit, decide if it shouldn't be viewed */
+! 	 /* A) Open file to read - if we can, include it	       */
+! 	 /*    Rules out unauthorized and non-existent files           */
+! 	 /* B) If file is unreadable, but owned by user, include it    */
+!          /* C) Root sees all files				       */
+! 		    q_file = NULL;  q_includeit = 0;
+! 		    q_file = fopen(path, "r");
+! 		    if (q_file != NULL)
+! 		    {
+! 		      q_includeit = 1;
+! 		      fclose(q_file);
+! 		    }
+! 		    else
+! 		      if (stat(path, &q_stat) != -1)
+! 		      {
+! 			if (q_stat.st_uid == getuid())
+! 			  q_includeit = 1;
+! 		      }
+! 		    if (getuid() == 0) q_includeit = 1;
+! 
+! 		    if (q_includeit == 1)
+! 		    {
+! 		      if (DO_LS)
+! 		      {
+! 			sprintf(q_str, "/bin/ls -ld '%s'", path);
+! 			q_str[999] = 0;  /* Just in case path is overflowing */
+! 			system(q_str);
+! 		      }
+! 		      else
+! 		        puts (path);
+! 		      ++printed;
+! 		    }
+  		  }
+  		break;
+  	      }
+***************
+*** 342,348 ****
+       int status;
+  {
+    fprintf (stream, "\
+! Usage: %s [-d path] [--database=path] [--version] [--help] pattern...\n",
+  	   program_name);
+    exit (status);
+  }
+--- 376,382 ----
+       int status;
+  {
+    fprintf (stream, "\
+! Usage: %s [-d path] [--database=path] [-l] [--version] [--help] pattern...\n",
+  	   program_name);
+    exit (status);
+  }
+***************
+*** 369,375 ****
+    if (dbpath == NULL)
+      dbpath = LOCATE_DB;
+  
+!   while ((optc = getopt_long (argc, argv, "d:", longopts, (int *) 0)) != -1)
+      switch (optc)
+        {
+        case 'd':
+--- 403,409 ----
+    if (dbpath == NULL)
+      dbpath = LOCATE_DB;
+  
+!   while ((optc = getopt_long (argc, argv, "ld:", longopts, (int *) 0)) != -1)
+      switch (optc)
+        {
+        case 'd':
+***************
+*** 383,388 ****
+--- 417,425 ----
+  	printf ("GNU locate version %s\n", version_string);
+  	exit (0);
+  
++       case 'l':
++ 	DO_LS = 1;
++ 	break;
+        default:
+  	usage (stderr, 1);
+        }

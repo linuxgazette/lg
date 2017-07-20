@@ -1,0 +1,402 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>An Undeletion Experience LG #86</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="lg_bytes.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../lg_faq.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="bint.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+
+<!--endcut ============================================================-->
+
+<TABLE BORDER><TR><TD WIDTH="200">
+<A HREF="http://www.linuxgazette.net/">
+<IMG ALT="LINUX GAZETTE" SRC="../gx/2002/lglogo_200x41.png" 
+	WIDTH="200" HEIGHT="41" border="0"></A> 
+<BR CLEAR="all">
+<SMALL>...<I>making Linux just a little more fun!</I></SMALL>
+</TD><TD WIDTH="380">
+
+
+<CENTER>
+<BIG><BIG><STRONG><FONT COLOR="maroon">An Undeletion Experience</FONT></STRONG></BIG></BIG>
+<BR>
+<STRONG>By <A HREF="../authors/artime.html">C.E.C. Artime</A> and <A HREF="../authors/baro.html">J.A. Baro</A></STRONG>
+</CENTER>
+
+</TD></TR>
+</TABLE>
+<P>
+
+<!-- END header -->
+
+
+
+
+
+
+
+
+
+<EM>We describe an attempt of recovering data unadvertedly deleted on a ext2 
+filesystem.  Aware that the course of events was far from desirable, we are
+committed that our readers will not make the same mistakes  and, in order
+to illustrate the bunch of things that one can learn during  a crisis, we
+detail the whole story.</EM>
+</p>
+
+<h2>Prelude: the disaster spells</h2>
+
+<h3>The arena</h3>
+
+<h4>Hardware</h4>
+
+<p>
+Two boxes, called Fish and Bell.  Fish is a Sun E250. Bell is a Pentium 3
+(450 MHz). They are in the same Ethernet subnetwork.
+</p>
+
+<h4>Software</h4>
+
+<p>
+Bell runs Debian GNU/Linux 3.0r0 after a painless upgrade from 2.2r7. Kernel
+is Linux 2.4.18. 
+</p>
+
+<p>
+Fish also runs a Debian 3.0r0, port Sparc64. A recent upgrade from 2.2r7
+led to a unique problem: XFree does not work for normal users (it does for
+<code>root</code>). Kernel is Linux 2.4.18-SMP. 
+</p>
+
+<p>
+All filesystems are <code>ext2</code>. 
+</p>
+
+<h3>How we buggered it up</h3>
+
+<p>
+On Fish, Xfree works for <code>root</code>, but not for normal
+users. <br /> Rationale: either a problem with permissions or user
+configuration files.  <br /> Solution: let us add a user and copy
+<code>root</code>'s dot-files to its home directory:
+
+<pre>
+root@fish# adduser judas
+Enter new UNIX password:
+Retype new UNIX password:
+root@fish# cp --recursive /root/.[a-zA-Z]* /home/judas
+root@fish# chown --recursive judas:judas /home/judas/.*
+</pre>
+
+<p>
+[Did you spot the difference between regexp arguments for
+<code>cp</code> and <code>chown</code>?]
+</p>
+
+<p>
+After enough trail &amp; error, the X problem is finally solved; it is
+about time to remove the user. <br /> While trying to speed up the
+procedure a bit, thorough study of a terse man page reveals an
+appealing option:
+</p>
+
+<pre>
+root@fish# deluser --remove-all-files judas
+</pre>
+
+<p>
+Cha-ching! Enters disaster!  The unfortunate option makes
+<code>deluser</code> search the entire disk looking for files owned by
+<code>judas</code> and erasing them!
+</p>
+
+<p>
+Contents of <code>/home</code> disappeared. <br /> Two minutes later,
+we unmounted its corresponding device (<code>/dev/sda8</code>).
+</p>
+
+<h2>Back-up</h2> 
+
+<h3>First attempt</h3> 
+
+<p>
+First cares involve taking a copy of the raw bytes inside the doomed
+device.  <br /> There is no room in Fish, so let us make a copy onto
+Bell's hard drive:
+</p>
+
+<pre>
+root@fish# ftp bell
+ftp&gt; put '|dd if=/dev/sda8' fishbackup
+</pre>
+
+<p>
+In fact, this step was not so easy due to a problem with the net:
+transmission of big files is interrupted after a while. The file must
+be split. Partition <code>/dev/sda8</code> is size 10142 MiB. <br />
+Resorting to the <code>factor</code> tool of GNU
+<code>shellutils</code>:
+</p>
+
+<pre>
+root@fish# factor 10142
+10142: 2 11 461
+</pre>
+
+<p>
+This led us to an appropriate size for each chunk of device. 
+</p>
+
+<h3>Secure tunnelling</h3>
+
+<p>
+Instead FTP, we used the OpenSSL suite for the next step. <br />
+First we interchange passwords in order to use batch mode: 
+</p>
+
+<pre>
+root@fish# ssh-keygen 
+artime@bell$ ssh-keygen
+root@fish# scp /root/.ssh/identity.pub artime@bell:/home/artime/.ssh/authorized.keys
+root@fish# scp artime@bell:~/.ssh/identity.pub ~/.ssh/authorized.keys
+</pre>
+
+<p>
+Let us execute this script in Fish: 
+</p>
+
+<pre>
+#!/bin/sh
+for i in $(seq 0 460)
+do
+  dd if=/dev/sda8 bs=$((2*11*1024)) skip=$i of=fula
+  scp --batch fula artime@bell:~/fiback.$i
+done
+</pre>
+
+<p>
+Just join the pieces in Bell: 
+</p>
+
+<pre>
+for i in $(seq 0 460)
+do cat fiback.$i &gt;&gt; fiback.raw
+done
+</pre>
+
+<p>
+Equivalently we could do the same in one step by executing in Fish:
+</p>
+
+<pre>
+#!/bin/sh
+for i in $(seq 0 460)
+do
+  dd if=/dev/sda8 bs=$((2*11*1024)) skip=$i | ssh artime@bell "cat &gt;&gt; fiback.raw"
+done
+</pre>
+
+<h2>Seeking lost data</h2>
+
+<p>
+We can resort to the <a
+ href="http://www.tldp.org/HOWTO/mini/Ext2fs-Undeletion.html">Linux
+ Ext2fs undeletion mini-HOWTO</a>, by Aaron Crane; the <a
+ href="http://www.tldp.org/HOWTO/mini/Ext2fs-Undeletion.html">Ext2fs
+ undeletion of directory structures mini-HOWTO</a>, by Tomas Ericsson;
+ the <a
+ href="http://recover.sourceforge.net/linux/recover">recover</a>
+ program by Tom Pycke; <a href="http://twerner.debian.net">Torsten
+ Werner</a>'s patch for debugfs working on i386.
+</p>
+
+<h3>Lazy attempt</h3>
+
+<p>
+<code>Recover</code> is a tool for recovering individual files. As in
+our case we have suddenly lost hundreds of files, it seems this is not
+the best choice to begin with.  The most direct way is using Werner's
+<code>debugfs</code> patch; we already have a copy of the damaged
+filesystem stored in a i386 box, so we can use the binary found at
+<code>twerner.debian.org</code>:
+</p>
+
+<pre>
+artime@bell$ ./debugfs fishback.raw
+debugfs&gt; restore
+debugfs&gt; quit
+artime@bell$ mkdir mnt
+artime@bell$ mount -t ext2 -o loop fishback.raw mnt
+artime@bell$ ls -l mnt
+</pre>
+
+<p>
+We find no files there! It seems we unmounted <code>/dev/sda8</code> a little
+too late. As T. Werner indicates on his page, his tool can only recover files
+that still <i>have a name</i>.
+</p>
+
+<h3>It pays reading</h3>
+
+<h4>Crane's undeletion howto</h4>
+
+<p>
+This tool we pick in <a href="http://www.tldp.org">The Linux
+Documentation Project</a> taught us how to find the inodes (more or
+less, the locations) of lost files and how to recover them with the
+<code>dump</code> command of <code>debugfs</code>.  We finish with a
+lot of assorted files in the same directory, but they are just a small
+subset of the deleted ones. As mentioned before, a thorough, file by
+file recovery scheme as indicated in this HOWTO is unfeasible in our
+case.
+</p>
+
+<h4>Ericsson's directory undeletion howto</h4>
+
+<p>
+Here we learnt how to tell between deleted files from directories. We
+followed the indications. <br /> The script in section 7 was in need for
+some further adaptation to our version of <code>debugfs</code>
+</p>
+
+<pre>
+#!/bin/sh
+awk '{ print "mi &lt;" $1 "&gt;\n"\
+             "\n\n\n\n\n\n\n"\
+             "0\n"\
+             "1\n"\
+             "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n" }'
+</pre>
+
+<p>
+Anyway, we fail to find the directory names and proceed to section 8. So
+we must look elsewhere. 
+</p>
+
+<h4>Man pages</h4>
+
+<p>
+A last chance was   
+</p>
+
+<pre>
+$ man debugfs
+</pre>
+
+<p>
+where we found the command <code>rdump</code>, unmentioned in the
+howtos.  Applying the following script to the directory inodes located
+in <code>lsdel.out</code> of section 6 of Ext2fs Undeletion of
+Directory Structures mini-HOWTO:
+</p>
+
+<pre>
+#!/bin/sh
+awk '{ print "rdump &lt;" $1 "&gt; folders\n" }'
+</pre>
+
+<p>
+most directories are recovered into the directory <code>folders</code>. 
+But unnamed! So finally we have to individually assign two hundred folders
+to users by looking their contents!  Even after that, we miss some files,
+notably an e-mail box. Let us try a quest by hand: 
+</p>
+
+<pre>
+$ strings fishback.raw | grep -B1 -A99 "To: lisistrata" &gt; lisistrata.mbox
+</pre>
+
+<h2>Epilogue</h2>
+
+<p>
+Further things we would like to outline.
+</p>
+
+<h3>RTFM</h3>
+
+And never use a new option as <code>root</code> for the first time. 
+
+<h3>Magnetic tapes</h3>
+
+Fish has a magnetic tape unit.  GNU <code>mt</code> and <code>tar</code> are
+useful tools for a backup schedule. Aaron Crane's howto includes interesting
+links regarding this issue.  
+
+<h3>Regexps</h3>
+
+<p>
+The use of regular expressions in shell commands is very dangerous, especially
+when dealing with dot-files. Perhaps the superuser <code>root</code> should
+use a shell with limited (rather than "extended") regular expression support.
+We are considering 
+<a href="http://olympus.het.brown.edu/doc/esh/esh.html">esh</a>.
+</p>
+
+<h3>PDA</h3>
+
+<p>
+This article was mostly written with an  <a
+ href="http://www.agendawiki.com">Agenda</a> <a
+ href="http://www.softfield.com">VR3</a>, a rather unique  free software
+PDA, in a beach of Gran Canaria.
+</p>
+
+
+
+
+
+
+
+
+
+
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<P>
+<img ALIGN="LEFT" ALT="[BIO]" SRC="../gx/2002/note.png">
+<em>
+C.E.C. Artime is a GNU fan and a free software advocator since 2000.
+</em>
+<br CLEAR="all">
+<!-- *** END bio *** -->
+
+<P> <!-- *** BEGIN bio *** -->
+<P>
+<img ALIGN="LEFT" ALT="[BIO]" SRC="../gx/2002/note.png">
+<em>
+J.A. Baro is a Linux user and a Perl hacker since 1996.
+</em>
+<br CLEAR="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+
+<!-- *** BEGIN copyright *** -->
+<hr>
+<CENTER><SMALL><STRONG>
+Copyright &copy; 2003, C.E.C. Artime and J.A. Baro.
+Copying license <A HREF="../copying.html">http://www.linuxgazette.net/copying.html</A><BR> 
+Published in Issue 86 of <i>Linux Gazette</i>, January 2003
+</STRONG></SMALL></CENTER>
+<!-- *** END copyright *** -->
+<HR>
+
+<!--startcut ==========================================================-->
+<CENTER>
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="lg_bytes.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../lg_faq.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="bint.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+</CENTER>
+</BODY></HTML>
+<!--endcut ============================================================-->

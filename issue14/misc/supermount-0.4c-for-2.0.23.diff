@@ -1,0 +1,2359 @@
+Index: linux/Documentation/filesystems/supermount.txt
+diff -u linux/Documentation/filesystems/supermount.txt:1.1 linux/Documentation/filesystems/supermount.txt:1.1.6.1
+--- linux/Documentation/filesystems/supermount.txt:1.1	Mon Feb 26 17:55:03 1996
++++ linux/Documentation/filesystems/supermount.txt	Sat Nov  9 20:35:00 1996
+@@ -0,0 +1,179 @@
++Supermount README
++=================
++
++For supermount v0.4c, on linux kernels 2.0.23 or later.
++
++Supermount is a pseudo-filesystem which manages filesystems on
++removable media like floppy disks and CD-ROMs.  It aims to make
++management of removable media as easy as it is under DOS.
++
++With supermount, you can change the disk in the drive whenever you
++want (with the obvious exception that you shouldn't do it when the
++filesystem is actively in use).  You don't need to "cd" out of the
++directory first, and you don't need to tell the kernel what you're
++doing --- supermount will detect the media change automatically.
++
++Supermount will automatically detect whether the media you are
++mounting is read-write or readonly, and if you mount a write-protected
++disk, then the subfs will be mounted as a readonly filesystem.
++
++Supermount detects when you have finished activity on the subfs, and
++will flush all buffers to the disk before completing the operation.
++So, if you copy a file onto a supermounted floppy disk, the data will
++all be written to disk before the "cp" command finishes.  When the
++command does complete, it will be safe to remove the disk.
++
++It is worth while defining what I mean by "activity" here.  The subfs
++is active if there are any processes running which have a handle on a
++non-directory inode on the subfs, or which have a file open on the
++subfs (even if only for reading).  There is one important case which
++does NOT count as activity: if you "cd" to a directory or a
++subdirectory under the supermount mount point, then that reference
++does not make the subfs active, and you can safely remove the disk.
++
++Yes, that's right.  You can "cd /floppy; ls" and get a listing of a
++dos floppy.  Remove the disk, insert a new one, and "ls" will now list
++the new contents.  Remove the disk altogether, and "ls" will give you
++an I/O error.  Put in a new disk, and "ls" starts working again.  It
++is NOT an error to remove a supermounted disk which is acting as the
++current working directory for one or more processes!
++
++
++The Superfilesystem and Subfilesystem concepts
++----------------------------------------------
++
++Normally, when you mount a filesystem, you create a direct connection
++between a mount point in the directory tree and a filesystem on a
++block device.  Supermount adds an extra layer in between; with
++supermount, you explicitly mount the pseudo-filesystem (the
++"superfilesystem") on the mount point, and supermount then
++automatically mounts the real filesystem (the "subfilesystem") on the
++block device when needed.
++
++Running supermount
++------------------
++
++To run supermount, compile and install a kernel with the supermount
++patches and select "Y" to the question
++
++	Dynamic mounting of removable media?
++
++when you run "make config".  You set up a supermount filesystem with
++the normal mount command, using the syntax:
++
++	mount -o <superfs-options>,--,<subfs-options> <dev> <mount-point>
++
++<dev> can be anything you want.  Using supermount, the block device
++you are using is not physically mounted until there is a filesystem
++access to the mount point, so the device specified on the command line
++is ignored.  It is convenient just to specify the mount point as the
++device as well, so that you give the mount point twice on the command
++line.  Doing this reduces the chance that the mount program will
++confuse the mount point with some other mount point defined in
++/etc/fstab.
++
++The way you specify the location of the block device you want to mount
++is by providing the <superfs-options> field, where the following
++options are currently recognised:
++
++* subfs=<filesystem-type>		[default is "msdos"]
++
++	Specify the subfilesystem type.  "msdos" and "iso9660" have
++been tested, but any block-device filesystem should work with one
++important restriction: the filesystem must NOT try to write to the
++device when you unmount it.  This is because supermount doesn't know
++in advance when it will have to unmount the subfs, so it doesn't try
++to do so until it detects that the media has been changed.  By this
++time it is too late to write to the device!
++
++	If you mount supermount as a readonly filesystem ("mount -r"
++or "mount -o ro"), then you won't have this problem.  Otherwise, you
++will not be able to use the ext2fs or minix filesystems with
++supermount.  This will hopefully be addressed in a future release of
++supermount.
++
++* dev=<block-device>			[default is "/dev/fd0"]
++
++	Specify the block device on which the subfs is to be mounted.
++
++* debug
++
++	Enable debugging code in the supermount filesystem, if
++the debug option was enabled at compile time.  By default, debugging
++code is compiled into the kernel but is disabled until a debug mount
++option is seen.
++
++* '--'
++
++	All options after the option string '--' will be passed
++directly to the subfilesystem when it gets mounted.
++
++
++Here is an example of supermount options, taken directly out of my
++current /etc/fstab:
++
++/floppy /floppy	supermount	--,gid=51,conv=binary	0 0
++/cd	/cd	supermount	ro,fs=iso9660,dev=/dev/hdd,--,conv=binary 0 0
++
++This tells supermount to manage a msdos filesystem on /dev/fd0 mounted
++at /floppy (msdos and /dev/fd0 are defaults for supermount), with the
++msdos filesystem getting the options "gid=51,conv=binary".  My cdrom
++on /dev/hdd is similarly mounted on /cd.
++
++
++Caveats and Provisos
++--------------------
++
++There are still some limitations to the current version of
++supermount.  I hope to overcome these shortly in future releases, but
++for now, be aware that:
++
++* You can only specify one filesystem type on the mount command line.
++  Supermount cannot yet autodetect the type of filesystem you supply.
++
++* With the 2.0 kernel, CDROM door locking has been made much more
++  aggressive.  You will probably find that once supermount has mounted
++  your disk, you cannot unmount it again.  Not helpful!
++
++* The only filesystem which is supported read/write with supermount is
++  msdos.  The msdos filesystem has the special characteristic that it
++  never has to access the disk when you unmount it, so supermount can
++  safely defer the unmounting until after the disk is removed.  That
++  doesn't work so well for filesystems such as ext2fs which try to
++  write to the filesystem when it is unmounted.
++
++Problems 2) and 3) are being solved by a development patch to support
++unmount-on-timeout, which will do a full unmount of the media after
++half a second or so of inactivity, releasing the volume for removal.
++Problem 1) has been addressed by a contributed patch which I hope to
++integrate shortly.  As usual, watch this space, and anybody who I've
++got on my list of supermount users will be emailed with further
++developments!
++
++
++Enjoy supermount.  I hope you find it useful --- I certainly find it
++extremely convenient.  Send any comments, bug-fixes or bug-reports,
++suggestions and success stories to sct@dcs.ed.ac.uk.  Flames to
++/dev/null, please!
++
++Cheers,
++ Stephen.
++--
++
++================================================================
++Changes for v0.4c:
++Works against linux-2.0.23.
++Updated documentation.
++Fixed problem with default root inode mode.
++
++Changes for v0.4:
++Performance tuning only.  Read-only operations like "find" should now
++be MUCH faster.
++
++Changes for v0.3:
++Fixed supermount_create bug; now returns a properly attached
++superinode.
++
++Changes for v0.2:
++Improved device invalidation code, so CD-ROMs work now.
++
+Index: linux/fs/Config.in
+diff -u linux/fs/Config.in:1.5 linux/fs/Config.in:1.5.2.1
+--- linux/fs/Config.in:1.5	Wed Nov  6 23:16:50 1996
++++ linux/fs/Config.in	Sat Nov  9 17:26:20 1996
+@@ -6,6 +6,7 @@
+ 
+ bool	 'Quota support' CONFIG_QUOTA
+ bool	 'Mandatory lock support' CONFIG_LOCK_MANDATORY
++bool	 'Supermount removable media support' CONFIG_SUPERMOUNT
+ tristate 'Minix fs support' CONFIG_MINIX_FS
+ tristate 'Extended fs support' CONFIG_EXT_FS
+ tristate 'Second extended fs support' CONFIG_EXT2_FS
+Index: linux/fs/Makefile
+diff -u linux/fs/Makefile:1.4 linux/fs/Makefile:1.4.4.1
+--- linux/fs/Makefile:1.4	Wed May 15 14:12:18 1996
++++ linux/fs/Makefile	Sat Nov  9 17:26:21 1996
+@@ -17,7 +17,7 @@
+ 
+ MOD_LIST_NAME := FS_MODULES
+ ALL_SUB_DIRS = minix ext ext2 fat msdos vfat proc isofs nfs xiafs umsdos \
+-		hpfs sysv smbfs ncpfs ufs affs
++		hpfs sysv smbfs ncpfs ufs affs supermount
+ 
+ ifeq ($(CONFIG_QUOTA),y)
+ O_OBJS += dquot.o
+@@ -139,6 +139,14 @@
+   ifeq ($(CONFIG_HPFS_FS),m)
+   MOD_SUB_DIRS += hpfs
+   endif
++endif
++
++ifeq ($(CONFIG_SUPERMOUNT),y)
++SUB_DIRS += supermount
++#else
++#  ifeq ($(CONFIG_SUPERMOUNT),m)
++#  MOD_SUB_DIRS += supermount
++#  endif
+ endif
+ 
+ ifeq ($(CONFIG_UFS_FS),y)
+Index: linux/fs/devices.c
+diff -u linux/fs/devices.c:1.3 linux/fs/devices.c:1.3.4.1
+--- linux/fs/devices.c:1.3	Wed May 15 14:12:20 1996
++++ linux/fs/devices.c	Sat Nov  9 17:26:22 1996
+@@ -187,15 +187,14 @@
+ }
+ 
+ /*
+- * This routine checks whether a removable media has been changed,
+- * and invalidates all buffer-cache-entries in that case. This
+- * is a relatively slow routine, so we have to try to minimize using
+- * it. Thus it is called only upon a 'mount' or 'open'. This
+- * is the best way of combining speed and utility, I think.
+- * People changing diskettes in the middle of an operation deserve
+- * to loose :-)
+- */
+-int check_disk_change(kdev_t dev)
++ * These routines checks whether a removable media has been changed,
++ * and (for check_disk_change only) invalidate all
++ * buffer-cache-entries in that case. This is a relatively slow
++ * routine, so we have to try to minimize using it. Thus it is called
++ * only upon a 'mount' or 'open'. This is the best way of combining
++ * speed and utility, I think.  People changing diskettes in the
++ * middle of an operation deserve to loose :-) */
++int query_disk_change(kdev_t dev)
+ {
+ 	int i;
+ 	struct file_operations * fops;
+@@ -208,17 +207,37 @@
+ 	if (!fops->check_media_change(dev))
+ 		return 0;
+ 
++	return 1;
++}
++
++int check_disk_change(kdev_t dev)
++{
++	if (!query_disk_change(dev))
++		return 0;
+ 	printk(KERN_DEBUG "VFS: Disk change detected on device %s\n",
+ 		kdevname(dev));
++	invalidate_media(dev);
++	return 1;
++}
++
++void invalidate_media(kdev_t dev) 
++{
++	int i;
++	struct file_operations * fops;
++	
++	i = MAJOR(dev);
++	if (i >= MAX_BLKDEV)
++		return;
++	fops = blkdevs[i].fops;
+ 	for (i=0 ; i<NR_SUPER ; i++)
+ 		if (super_blocks[i].s_dev == dev)
+ 			put_super(super_blocks[i].s_dev);
+ 	invalidate_inodes(dev);
+ 	invalidate_buffers(dev);
+ 
+-	if (fops->revalidate)
++	if (fops && fops->revalidate)
+ 		fops->revalidate(dev);
+-	return 1;
++	return;
+ }
+ 
+ /*
+Index: linux/fs/filesystems.c
+diff -u linux/fs/filesystems.c:1.3 linux/fs/filesystems.c:1.3.4.1
+--- linux/fs/filesystems.c:1.3	Sat Apr 27 17:06:29 1996
++++ linux/fs/filesystems.c	Sat Nov  9 17:26:22 1996
+@@ -9,6 +9,7 @@
+ #include <linux/config.h>
+ #include <linux/fs.h>
+ 
++#include <linux/supermount_fs.h>
+ #include <linux/minix_fs.h>
+ #include <linux/ext_fs.h>
+ #include <linux/ext2_fs.h>
+@@ -39,6 +40,11 @@
+ 	callable = 0;
+ 
+ 	device_setup();
++
++#ifdef CONFIG_SUPERMOUNT
++	register_filesystem(&(struct file_system_type)
++		{supermount_read_super, "supermount", 0, NULL});
++#endif
+ 
+ 	binfmt_setup();
+ 
+Index: linux/fs/inode.c
+diff -u linux/fs/inode.c:1.5 linux/fs/inode.c:1.5.2.1
+--- linux/fs/inode.c:1.5	Wed Nov  6 23:16:52 1996
++++ linux/fs/inode.c	Sat Nov  9 17:26:22 1996
+@@ -219,6 +219,8 @@
+ 		if (inode == mount_root && inode->i_count ==
+ 		    (inode->i_mount != inode ? 1 : 2))
+ 			continue;
++		if (IS_UNBOUND(inode))
++			continue;
+ 		return 0;
+ 	}
+ 	return 1;
+@@ -254,6 +256,9 @@
+ 	inode->i_lock = 1;	
+ 	inode->i_sb->s_op->write_inode(inode);
+ 	unlock_inode(inode);
++	if (inode->i_shadow && inode->i_shadow->i_shadow_op && 
++	    inode->i_shadow->i_shadow_op->write)
++		inode->i_shadow->i_shadow_op->write(inode->i_shadow);
+ }
+ 
+ static inline void read_inode(struct inode * inode)
+@@ -414,15 +419,24 @@
+ 	}
+ }
+ 
++static inline void release_shadow(struct inode * inode) {
++	/* Shadow-release should be atomic. */
++	struct inode * tmp;
++	tmp = inode->i_shadow;
++	inode->i_shadow = 0;
++}
++
+ void iput(struct inode * inode)
+ {
++	struct inode * shadow;
++
+ 	if (!inode)
+ 		return;
+ 	wait_on_inode(inode);
+ 	if (!inode->i_count) {
+ 		printk("VFS: iput: trying to free free inode\n");
+ 		printk("VFS: device %s, inode %lu, mode=0%07o\n",
+-			kdevname(inode->i_rdev), inode->i_ino, inode->i_mode);
++			kdevname(inode->i_dev), inode->i_ino, inode->i_mode);
+ 		return;
+ 	}
+ 	if (inode->i_pipe)
+@@ -441,9 +455,22 @@
+ 	}
+ 
+ 	if (inode->i_sb && inode->i_sb->s_op && inode->i_sb->s_op->put_inode) {
++		shadow = inode->i_shadow;
+ 		inode->i_sb->s_op->put_inode(inode);
+-		if (!inode->i_nlink)
++		if (!inode->i_nlink) {
++			/* The inode should have been cleared, so we
++                           don't reset inode->i_shadow here. */
++			if (shadow) {
++			if (shadow->i_shadow_op && 
++			    shadow->i_shadow_op->release)
++				shadow->i_shadow_op->release(shadow);
++			iput (shadow);
++			}
++			/* put_inode should do a clear_inode() if the
++			   inode is unlinked, so don't bother falling
++			   through... */
+ 			return;
++		}
+ 	}
+ 
+ 	if (inode->i_dirt) {
+@@ -473,6 +500,14 @@
+ 	}
+ 
+ 	nr_free_inodes++;
++	shadow = inode->i_shadow;
++	inode->i_shadow = 0;
++	if (shadow) {
++		if (shadow->i_shadow_op && 
++		    shadow->i_shadow_op->release)
++			shadow->i_shadow_op->release(shadow);
++		iput (shadow);
++	}
+ 	return;
+ }
+ 
+Index: linux/fs/open.c
+diff -u linux/fs/open.c:1.4 linux/fs/open.c:1.4.2.1
+--- linux/fs/open.c:1.4	Wed Nov  6 23:16:53 1996
++++ linux/fs/open.c	Sat Nov  9 17:26:22 1996
+@@ -523,6 +523,10 @@
+ 			goto cleanup_inode;
+ 	}
+ 
++	if (inode->i_shadow && inode->i_shadow->i_shadow_op &&
++	    inode->i_shadow->i_shadow_op->open)
++		inode->i_shadow->i_shadow_op->open(inode->i_shadow, flag);
++
+ 	f->f_inode = inode;
+ 	f->f_pos = 0;
+ 	f->f_reada = 0;
+Index: linux/fs/super.c
+diff -u linux/fs/super.c:1.9 linux/fs/super.c:1.9.2.1
+--- linux/fs/super.c:1.9	Wed Nov  6 23:16:54 1996
++++ linux/fs/super.c	Sat Nov  9 17:26:23 1996
+@@ -628,21 +628,12 @@
+  * functions, they should be faked here.  -- jrs
+  */
+ 
+-asmlinkage int sys_umount(char * name)
++int do_umounti(struct inode * inode)
+ {
+-	struct inode * inode;
+ 	kdev_t dev;
+ 	int retval;
+ 	struct inode dummy_inode;
+ 
+-	if (!suser())
+-		return -EPERM;
+-	retval = namei(name, &inode);
+-	if (retval) {
+-		retval = lnamei(name, &inode);
+-		if (retval)
+-			return retval;
+-	}
+ 	if (S_ISBLK(inode->i_mode)) {
+ 		dev = inode->i_rdev;
+ 		if (IS_NODEV(inode)) {
+@@ -681,50 +672,55 @@
+ 	return 0;
+ }
+ 
+-/*
+- * do_mount() does the actual mounting after sys_mount has done the ugly
+- * parameter parsing. When enough time has gone by, and everything uses the
+- * new mount() parameters, sys_mount() can then be cleaned up.
++asmlinkage int sys_umount(char * name)
++{
++	struct inode * inode;
++	int retval;
++
++	if (!suser())
++		return -EPERM;
++	retval = namei(name,&inode);
++	if (retval) {
++		retval = lnamei(name,&inode);
++		if (retval)
++			return retval;
++	}
++	return do_umounti(inode);
++}
++
++/* 
++ * do_mountdev() does the actual mounting after sys_mount has done the
++ * ugly parameter parsing. When enough time has gone by, and
++ * everything uses the new mount() parameters, sys_mount() can then be
++ * cleaned up.
+  *
+  * We cannot mount a filesystem if it has active, used, or dirty inodes.
+  * We also have to flush all inode-data for this device, as the new mount
+- * might need new info.
++ * might need new info.  
+  */
+ 
+-int do_mount(kdev_t dev, const char * dev_name, const char * dir_name, const char * type, int flags, void * data)
++int do_mountdev(kdev_t dev, 
++		struct inode *dir_i,
++		const char * dev_name,
++		const char * dir_name,
++		const char * type, 
++		int flags,
++		void * data)
+ {
+-	struct inode * dir_i;
+ 	struct super_block * sb;
+ 	struct vfsmount *vfsmnt;
+-	int error;
+ 
+-	if (!(flags & MS_RDONLY) && dev && is_read_only(dev))
+-		return -EACCES;
+-		/*flags |= MS_RDONLY;*/
+-	error = namei(dir_name, &dir_i);
+-	if (error)
+-		return error;
+-	if (dir_i->i_count != 1 || dir_i->i_mount) {
+-		iput(dir_i);
++	if (dir_i->i_count != 1 || dir_i->i_mount)
+ 		return -EBUSY;
+-	}
+-	if (!S_ISDIR(dir_i->i_mode)) {
+-		iput(dir_i);
++	if (!S_ISDIR(dir_i->i_mode))
+ 		return -ENOTDIR;
+-	}
+-	if (!fs_may_mount(dev)) {
+-		iput(dir_i);
++	if (!fs_may_mount(dev))
+ 		return -EBUSY;
+-	}
+ 	sb = read_super(dev,type,flags,data,0);
+-	if (!sb) {
+-		iput(dir_i);
++	if (!sb)
+ 		return -EINVAL;
+-	}
+-	if (sb->s_covered) {
+-		iput(dir_i);
++	if (sb->s_covered)
+ 		return -EBUSY;
+-	}
+ 	vfsmnt = add_vfsmnt(dev, dev_name, dir_name);
+ 	if (vfsmnt) {
+ 		vfsmnt->mnt_sb = sb;
+@@ -736,6 +732,26 @@
+ }
+ 
+ 
++int do_mount(kdev_t dev,
++	     const char * dev_name,
++	     const char * dir_name,
++	     const char * type,
++	     int flags,
++	     void * data)
++{
++	int error;
++	struct inode * dir_i;
++
++	error = namei(dir_name, &dir_i);
++	if (error)
++		return error;
++	error = do_mountdev(dev, dir_i, dev_name, dir_name, type, flags, data);
++	if (error)
++		iput(dir_i);
++	return error;
++}
++
++  
+ /*
+  * Alters the mount flags of a mounted file system. Only the mount point
+  * is used as a reference - file system type and the device are ignored.
+@@ -794,14 +810,23 @@
+ 	if (!data)
+ 		return 0;
+ 
+-	vma = find_vma(current->mm, (unsigned long) data);
+-	if (!vma || (unsigned long) data < vma->vm_start)
+-		return -EFAULT;
+-	if (!(vma->vm_flags & VM_READ))
+-		return -EFAULT;
+-	i = vma->vm_end - (unsigned long) data;
+-	if (PAGE_SIZE <= (unsigned long) i)
++	/* 
++	 * Supermount calls the mount code from kernel space, so don't
++	 * validate the mount data if it is already in kernel address
++	 * space.
++	 */
++	if (get_fs() != get_ds()) {
++		vma = find_vma(current->mm, (unsigned long) data);
++		if (!vma || (unsigned long) data < vma->vm_start)
++			return -EFAULT;
++		if (!(vma->vm_flags & VM_READ))
++			return -EFAULT;
++		i = vma->vm_end - (unsigned long) data;
++		if (PAGE_SIZE <= (unsigned long) i)
++			i = PAGE_SIZE-1;
++	} else {
+ 		i = PAGE_SIZE-1;
++	}
+ 	if (!(page = __get_free_page(GFP_KERNEL))) {
+ 		return -ENOMEM;
+ 	}
+@@ -825,15 +850,10 @@
+  * version that didn't understand them.
+  */
+ asmlinkage int sys_mount(char * dev_name, char * dir_name, char * type,
+-	unsigned long new_flags, void * data)
++			 unsigned long new_flags, void * data)
+ {
+-	struct file_system_type * fstype;
+-	struct inode * inode;
+-	struct file_operations * fops;
+-	kdev_t dev;
++	struct inode * dir_inode;
+ 	int retval;
+-	const char * t;
+-	unsigned long flags = 0;
+ 	unsigned long page = 0;
+ 
+ 	if (!suser())
+@@ -849,6 +869,29 @@
+ 		free_page(page);
+ 		return retval;
+ 	}
++	retval = namei(dir_name, &dir_inode);
++	if (retval)
++		return retval;
++	retval = do_mounti(dir_inode,dir_name,dev_name,type,new_flags,data);
++	if (retval)
++		iput(dir_inode);
++	return retval;
++}
++
++/* Mount on a given inode.  Don't iput() the mount point! */
++int do_mounti(struct inode * dir_inode, const char * dir_name, 
++	      const char * dev_name, const char * type, 
++	      unsigned long new_flags, const void * data)
++{
++	struct file_system_type * fstype;
++	struct inode * inode;
++	struct file_operations * fops;
++	dev_t dev;
++	int retval;
++	const char * t;
++	unsigned long flags = 0;
++	unsigned long page = 0;
++
+ 	retval = copy_mount_options (type, &page);
+ 	if (retval < 0)
+ 		return retval;
+@@ -906,7 +949,8 @@
+ 			return retval;
+ 		}
+ 	}
+-	retval = do_mount(dev,dev_name,dir_name,t,flags,(void *) page);
++	retval = do_mountdev(dev,dir_inode,dev_name,dir_name,
++			     t,flags,(void *) page);
+ 	free_page(page);
+ 	if (retval && fops && fops->release)
+ 		fops->release(inode, NULL);
+Index: linux/fs/supermount/Makefile
+diff -u linux/fs/supermount/Makefile:1.1 linux/fs/supermount/Makefile:1.1.6.1
+--- linux/fs/supermount/Makefile:1.1	Mon Feb 26 17:55:15 1996
++++ linux/fs/supermount/Makefile	Sat Nov  9 17:27:24 1996
+@@ -0,0 +1,14 @@
++#
++# Makefile for the linux supermounting routines.
++#
++# Note! Dependencies are done automagically by 'make dep', which also
++# removes any old dependencies. DON'T put your own dependencies here
++# unless it's something special (ie not a .c file).
++#
++# Note 2! The CFLAGS definitions are now in the main makefile...
++
++O_TARGET := supermount.o
++O_OBJS	 := dir.o inode.o namei.o super.o
++M_OBJS	 := $(O_TARGET)
++
++include $(TOPDIR)/Rules.make
+Index: linux/fs/supermount/TODO
+diff -u linux/fs/supermount/TODO:1.1 linux/fs/supermount/TODO:1.1.6.1
+--- linux/fs/supermount/TODO:1.1	Mon Feb 26 17:55:15 1996
++++ linux/fs/supermount/TODO	Sat Nov  9 17:27:24 1996
+@@ -0,0 +1,40 @@
++Notes:
++
++TODO:
++
++  Supermount directory inodes do auto-remount as root of the subfs.  Make
++  a mount option to restrict this behaviour to the root?
++
++  Make supermount_attach a special case of read_hidden_inode, not the other
++  way around.
++
++  Replace shadow inodes with shadow superblock?  Do release that way?
++
++  Unmount on suspend?  OK iff inode numbers on open directories will
++  be the same next time around!  (Normally true.)  Bad for performance, but
++  maybe necessary for ext2fs, for example.
++
++Done:::
++
++  Sigh.  We can't rely on the one-to-one mapping of superinode to
++  subinode i_ino numbers any more.  Why not?  Well, what happens if we
++  remove and remount a medium?  We can end up with one process holding
++  a handle to an old, obsolete superinode, and a new process opening a
++  subinode with the same i_ino.  Well, we can do a quadratic hash on
++  the superinode numbers to avoid collisions.  Think about this!
++
++  * What happens when we do get an inode collision?  We rehash to make
++    another superinode the current one; the old inode remains as a
++    placeholder.  But then, what if the old inode becomes released?  A
++    subsequent attach may place the subinode under that old inode
++    instead of the new superinode.
++
++    OK: There is only ever one hidden/shadow connection between super
++    and sub inodes.  If that is broken, we can reestablish it from any
++    superinode we want to.  Previously valid superinodes will have to
++    rely on i_subino to get to their subinode (the subinode i_ino will
++    NOT change behind our backs, hopefully).  Such mappings should
++    only ever be one way, from superinode to subinode, done by
++    subiget().
++
++  Special handling of root directory to do auto remount.
+Index: linux/fs/supermount/dir.c
+diff -u linux/fs/supermount/dir.c:1.1 linux/fs/supermount/dir.c:1.1.6.1
+--- linux/fs/supermount/dir.c:1.1	Mon Feb 26 17:55:15 1996
++++ linux/fs/supermount/dir.c	Sat Nov  9 17:27:24 1996
+@@ -0,0 +1,97 @@
++/*
++ *  linux/fs/supermount/dir.c
++ *
++ *  Copyright (C) 1995
++ *  Stephen Tweedie (sct@dcs.ed.ac.uk)
++ *
++ *  from
++ *
++ *  linux/fs/minix/dir.c
++ *  Copyright (C) 1991, 1992  Linus Torvalds
++ *
++ *  and
++ *
++ *  linux/fs/ext2/dir.c
++ *  Copyright (C) 1992, 1993, 1994, 1995  Remy Card
++ */
++
++#include <asm/segment.h>
++
++#include <linux/errno.h>
++#include <linux/kernel.h>
++#include <linux/fs.h>
++#include <linux/supermount_fs.h>
++#include <linux/stat.h>
++
++static int supermount_dir_open (struct inode *, struct file *);
++
++static struct file_operations supermount_dir_operations = {
++	NULL,			/* lseek - default */
++	NULL,			/* read */
++	NULL,			/* write - bad */
++	NULL,			/* readdir */
++	NULL,			/* select - default */
++	NULL,			/* ioctl */
++	NULL,			/* mmap */
++	supermount_dir_open,	/* Redirect to the subfs readdir() code */
++	NULL,			/* no special release code */
++	NULL,			/* fsync */
++	NULL,			/* fasync */
++	NULL,			/* check_media_change */
++	NULL			/* revalidate */
++};
++
++/*
++ * directories can handle most operations...  supermount/namei.c just
++ * passes them through to the underlying subfs, except for lookup().
++ */
++struct inode_operations supermount_dir_iops = {
++	&supermount_dir_operations,	/* default directory file-ops */
++	supermount_create,		/* create */
++	supermount_lookup,		/* lookup */
++	supermount_link,		/* link */
++	supermount_unlink,		/* unlink */
++	supermount_symlink,		/* symlink */
++	supermount_mkdir,		/* mkdir */
++	supermount_rmdir,		/* rmdir */
++	supermount_mknod,		/* mknod */
++	supermount_rename,		/* rename */
++	NULL,				/* readlink */
++	NULL,				/* follow_link */
++	NULL,				/* bmap */
++	NULL,				/* truncate */
++	supermount_permission,		/* permission */
++	NULL				/* smap */
++};
++
++
++/* When we open() a directory (for readdir), just rewrite the file
++   struct to point to the subfs inode, and let it handle all the
++   work. */
++static int supermount_dir_open (struct inode * inode, struct file * file)
++{
++	struct inode * subi;
++	int rc;
++	
++	if (file->f_mode & 2)
++		return -EPERM;
++
++	supermount_debug ("dir_open inode %ld\n", inode->i_ino);
++	
++	subi = subiget(inode);
++	if (!subi)
++		return -ENOENT;
++
++	file->f_inode = subi;
++	file->f_op = subi->i_op ? subi->i_op->default_file_ops : NULL;
++	if (file->f_op && file->f_op->open) {
++		rc = file->f_op->open(subi, file);
++		if (rc) {
++			iput(subi);
++			return rc;
++		}
++	}
++	iput(inode);
++	return 0;
++}
++
+Index: linux/fs/supermount/file.c
+diff -u linux/fs/supermount/file.c:1.1 linux/fs/supermount/file.c:1.1.6.1
+--- linux/fs/supermount/file.c:1.1	Mon Feb 26 17:55:15 1996
++++ linux/fs/supermount/file.c	Sat Nov  9 17:27:25 1996
+@@ -0,0 +1,21 @@
++/*
++ *  linux/fs/supermount/file.c
++ *
++ *  Copyright (C) 1995
++ *  Stephen Tweedie (sct@dcs.ed.ac.uk)
++ *
++ */
++
++#include <asm/segment.h>
++#include <asm/system.h>
++
++#include <linux/errno.h>
++#include <linux/fs.h>
++#include <linux/supermount_fs.h>
++#include <linux/fcntl.h>
++#include <linux/sched.h>
++#include <linux/stat.h>
++#include <linux/locks.h>
++
++static void supermount_inode_release (struct inode *);
++
+Index: linux/fs/supermount/inode.c
+diff -u linux/fs/supermount/inode.c:1.1 linux/fs/supermount/inode.c:1.1.6.1
+--- linux/fs/supermount/inode.c:1.1	Mon Feb 26 17:55:16 1996
++++ linux/fs/supermount/inode.c	Sat Nov  9 17:27:25 1996
+@@ -0,0 +1,380 @@
++/*
++ *  linux/fs/supermount/inode.c
++ *
++ *  Copyright (C) 1995
++ *  Stephen Tweedie (sct@dcs.ed.ac.uk)
++ *
++ *  from
++ *
++ *  linux/fs/minix/inode.c
++ *  Copyright (C) 1991, 1992  Linus Torvalds
++ *
++ *  and
++ *
++ *  linux/fs/ext2/inode.c
++ *  Copyright (C) 1992, 1993, 1994, 1995  Remy Card
++ *  and           1993  Stephen Tweedie
++ */
++
++#include <asm/segment.h>
++#include <asm/system.h>
++
++#include <linux/errno.h>
++#include <linux/fs.h>
++#include <linux/supermount_fs.h>
++#include <linux/sched.h>
++#include <linux/stat.h>
++#include <linux/string.h>
++#include <linux/locks.h>
++#include <linux/mm.h>
++
++static void read_hidden_inode (struct inode *);
++static void supermount_inode_open (struct inode *, int);
++static void supermount_inode_write (struct inode *);
++static void supermount_inode_release (struct inode *);
++
++/* Deal with the shadow interface.  Whenever a subfs inode is
++   released, break the bi-directional link between them, and close and
++   iput the supermount inode.  */
++
++struct inode_shadow_operations supermount_shadow_iops = {
++	supermount_inode_open,
++	supermount_inode_write,
++	supermount_inode_release,
++};
++
++void supermount_inode_open (struct inode *inode, int flag)
++{
++	if (flag & 2)
++		mark_subfs_dirty(inode->i_sb);
++}
++
++void supermount_inode_write (struct inode *inode)
++{
++	mark_subfs_dirty(inode->i_sb);
++}
++
++void supermount_inode_release (struct inode *inode)
++{
++	supermount_debug ("inode = %ld\n", inode->i_ino);
++	if (inode->u.supermount_i.i_hidden)
++		supermount_debug("subinode = %ld\n", 
++				 inode->u.supermount_i.i_hidden->i_ino);
++	
++	inode->u.supermount_i.i_hidden = NULL;
++	supermount_iclose(inode);
++}
++
++
++/* Do an iget on the appropriate subfs inode */
++struct inode * subiget(struct inode * inode) 
++{
++	struct inode * tmp;
++	supermount_debug("subiget inode %ld\n", inode->i_ino);
++
++	if (!S_ISDIR(inode->i_mode))
++		return 0;
++	if (supermount_media_check(inode->i_sb)) {
++		supermount_debug("media is invalid\n");
++		return 0;
++	}
++	
++	if (inode_is_obsolete(inode)) {
++		/* For obsolete directory with new mounted media ---
++                   return the new root subinode. */
++		if (inode->u.supermount_i.i_hidden) 
++			supermount_panic (inode->i_sb, "subiget", 
++					  "Hidden inode on obsolete inode %ld",
++					  inode->i_ino);
++		tmp = inode->i_sb->u.supermount_sb.s_subfs->s_mounted;
++		inode->u.supermount_i.i_subino = tmp->i_ino;
++		tmp->i_count++;
++		supermount_debug("mapping obsolete inode %ld to "
++				 "subroot inode %ld\n",
++				 inode->i_ino, tmp->i_ino);
++		return tmp;
++	}
++	
++	if (inode->u.supermount_i.i_hidden) {
++		inode->u.supermount_i.i_hidden->i_count++;
++		supermount_debug("inode %ld/%ld, found hidden, "
++				 "count now %d/%d\n",
++				 inode->i_ino,
++				 inode->u.supermount_i.i_hidden->i_ino,
++				 inode->i_count,
++				 inode->u.supermount_i.i_hidden->i_count);
++		return inode->u.supermount_i.i_hidden;
++	}
++	read_hidden_inode(inode);
++	if (!inode->u.supermount_i.i_hidden) {
++		supermount_debug("inode %ld, no subinode, count=%d\n",
++				 inode->i_ino, inode->i_count);
++		return 0;
++	}
++	
++	supermount_debug("inode %ld/%ld, found new, "
++			 "count now %d/%d\n",
++			 inode->i_ino,
++			 inode->u.supermount_i.i_hidden->i_ino,
++			 inode->i_count,
++			 inode->u.supermount_i.i_hidden->i_count);
++	return inode->u.supermount_i.i_hidden;
++}
++
++/* We sometimes do a lookup on a subinode and want to get back a
++   superinode in return, with a single iget() outstanding on both (not
++   counting the i_shadow reference).  supermount_attach generates the
++   superinode for a given subinode. */
++struct inode * supermount_attach(struct super_block *sb, struct inode *inode) 
++{
++	struct inode *tmp;
++	unsigned long new_ino, incr=1237;
++	
++	supermount_debug ("inode = %ld\n", inode->i_ino);
++	
++	if (inode->i_shadow) {
++		supermount_debug ("return existing shadow %ld, count %d/%d\n",
++				  inode->i_shadow->i_ino,
++				  inode->i_shadow->i_count, inode->i_count);
++		inode->i_shadow->i_count++;
++		return inode->i_shadow;
++	}
++	
++	/* The rules are a little different at the root. */
++	if (inode == sb->u.supermount_sb.s_subfs->s_mounted) {
++		tmp = sb->s_mounted;
++		supermount_debug ("return existing superfs root %ld, "
++				  "count %d/%d\n",
++				  tmp->i_ino, tmp->i_count, inode->i_count);
++		tmp->i_count++;
++		return tmp;
++	}
++
++	/* Find a new superinode, avoiding collisions with old
++           obsolete superinodes by a quadratic hash. */
++	new_ino = inode->i_ino;
++	for ( ; (tmp = iget(sb, new_ino)) && tmp->i_count > 1 &&
++			inode_is_obsolete(tmp); ) {
++		iput(tmp);
++		new_ino += incr;
++		new_ino &= 0xffffff;
++		incr <<= 1; incr++;
++	}
++	
++	tmp->u.supermount_i.i_subino = inode->i_ino;
++	/* If we found a previously obsolete inode which is now no
++           longer used, we can safely remove the obsolesence flag. */
++	if (inode_is_obsolete(tmp)) {
++		tmp->u.supermount_i.i_sb_version = 
++			tmp->i_sb->u.supermount_sb.s_version;
++	}
++	
++	/* We have now done iget() on superi and subi.  Doing the
++           attachment may incur another iget() on the subinode. */
++	if (!tmp->u.supermount_i.i_hidden) {
++		read_hidden_inode(tmp);
++		iput(inode);
++	}
++	return tmp;
++}
++
++/* Supermount open/close inode.  These functions maintain the
++   superblock reference counts of active inodes; the subfs is
++   suspended when that count reaches zero.
++
++   Files are opened on any significant reference, and are not closed
++   until they become fully dereferenced (during the last iput).
++   Directories, on the other hand, are always closed unless they are
++   active and opened; a directory referenced as CWD is not open.
++
++   The difference is in the way the application gets given inodes.
++   For dirs and symlinks, it will be given the superinode to deal
++   with; for other file types, we return the subinode. */
++
++
++void supermount_iopen(struct inode * inode)
++{
++	supermount_debug ("inode %ld, count %d\n", 
++			  inode->i_ino, inode->i_count);
++	if (inode->i_sb->u.supermount_sb.s_state == SUPERMOUNT_UNMOUNTED)
++		supermount_panic (inode->i_sb, "supermount_iopen", 
++				  "opening inode on unmounted subfs");
++	if (!inode->u.supermount_i.i_counted) {
++		supermount_debug("Opened inode %ld\n", inode->i_ino);
++		inode->u.supermount_i.i_counted = 1;
++		if (!subfs_is_active(inode->i_sb)) {
++			supermount_debug ("going online.\n");
++			inode->i_sb->u.supermount_sb.s_state = 
++				SUPERMOUNT_ONLINE;
++		}
++		inode->i_sb->u.supermount_sb.s_opencount++;
++	}
++}
++
++void supermount_iclose(struct inode * inode)
++{
++	supermount_debug ("inode %ld, count %d\n", 
++			  inode->i_ino, inode->i_count);
++	if (inode->u.supermount_i.i_counted) {
++		supermount_debug("Closed inode %ld\n", inode->i_ino);
++		inode->u.supermount_i.i_counted = 0;
++		inode->i_sb->u.supermount_sb.s_opencount--;
++		if (!subfs_is_active(inode->i_sb))
++			supermount_go_inactive(inode->i_sb);
++	}
++}
++
++void supermount_go_inactive(struct super_block *sb)
++{
++	supermount_debug("Checking state\n");
++	if (!subfs_is_active(sb)) {
++		supermount_debug("going offline.\n");
++		sb->u.supermount_sb.s_state = 
++			SUPERMOUNT_SUSPENDED;
++		if (subfs_is_dirty(sb)) {
++			mark_subfs_clean(sb);
++			fsync_dev(sb->u.supermount_sb.s_subfs->s_dev);
++		}
++	}
++}
++
++static void read_hidden_inode (struct inode * inode)
++{
++	struct super_block * sb;
++	struct inode * tmp;
++
++	supermount_debug("inode = %ld\n", inode->i_ino);
++	supermount_media_check(inode->i_sb);
++
++	if (inode->i_sb->u.supermount_sb.s_state ==
++	    SUPERMOUNT_UNMOUNTED) {
++		supermount_panic (inode->i_sb, "read_hidden_inode",
++				  "Trying to read inode on unmounted media");
++	}
++	sb=inode->i_sb->u.supermount_sb.s_subfs;
++	/* The root inode is a bit special.  For that one, the
++           subinode is the root of the subfs, and we can't guarantee
++           its inode number in advance. */
++	if (inode->i_ino == SUPERMOUNT_ROOT_INO) {
++		tmp = sb->s_mounted;
++		tmp->i_count++;
++	} else {
++		if (!inode->u.supermount_i.i_subino)
++			inode->u.supermount_i.i_subino = inode->i_ino;
++		tmp = iget(sb, inode->u.supermount_i.i_subino);
++	}
++	if (!tmp)
++		return;
++
++	/* If the inode is already linked to its superinode, don't do
++           any further processing.  Also, don't bother trying to
++           attach to the superinode if we are reading from an obsolete
++           superinode. */
++	if (tmp->i_shadow || inode_is_obsolete(inode))
++		return;
++	tmp->i_shadow = inode;
++	inode->u.supermount_i.i_hidden = tmp;
++	inode->i_count++;
++	supermount_iopen(inode);
++
++	inode->i_mode = tmp->i_mode;
++	inode->i_uid = tmp->i_uid;
++	inode->i_gid = tmp->i_gid;
++	inode->i_nlink = tmp->i_nlink;
++	inode->i_size = tmp->i_size;
++	inode->i_atime = tmp->i_atime;
++	inode->i_ctime = tmp->i_ctime;
++	inode->i_mtime = tmp->i_mtime;
++	inode->i_blksize = tmp->i_blksize;
++	inode->i_blocks = tmp->i_blocks;
++	inode->i_rdev = tmp->i_rdev;
++	inode->i_version = ++event;
++
++	if (S_ISDIR(inode->i_mode))
++		inode->i_op = &supermount_dir_iops;
++	else
++		inode->i_op = NULL;
++}
++
++void supermount_read_inode (struct inode * inode)
++{
++	supermount_debug ("inode = %ld\n", inode->i_ino);
++	
++	inode->i_shadow_op = &supermount_shadow_iops;
++	inode->u.supermount_i.i_sb_version = 
++		inode->i_sb->u.supermount_sb.s_version;
++	
++	switch (inode->i_ino) {
++	case SUPERMOUNT_ROOT_INO:
++		if (inode->i_sb->u.supermount_sb.s_state !=
++		    SUPERMOUNT_UNMOUNTED) {
++			supermount_panic (inode->i_sb, "supermount_read_inode",
++					  "Help - trying to read root while "
++					  "already mounted!");
++		}
++		/* Fall through */
++	case SUPERMOUNT_HIDDEN_INO:
++		inode->i_mode = inode->i_sb->u.supermount_sb.s_default_mode;
++		inode->i_uid = 0;
++		inode->i_gid = 0;
++		inode->i_nlink = 1;
++		inode->i_size = 0;
++		inode->i_atime = CURRENT_TIME;
++		inode->i_ctime = CURRENT_TIME;
++		inode->i_mtime = CURRENT_TIME;
++		inode->i_blksize = inode->i_sb->s_blocksize;
++		inode->i_blocks = 0;
++		inode->i_version = ++event;
++		inode->i_op = (inode->i_ino == SUPERMOUNT_ROOT_INO)
++			? &supermount_dir_iops : NULL;
++		return;
++	default:
++		;
++	}
++}
++
++void supermount_write_inode (struct inode * inode)
++{
++	struct super_block *tmp;
++	tmp = inode->i_sb->u.supermount_sb.s_subfs;
++	
++	if (inode->u.supermount_i.i_hidden &&
++	    tmp && tmp->s_op && tmp->s_op->write_inode)
++		tmp->s_op->write_inode(inode->u.supermount_i.i_hidden);
++
++	mark_subfs_dirty(inode->i_sb);
++}
++
++int supermount_permission (struct inode * inode, int mask)
++{
++	unsigned short mode;
++	struct inode *subi;
++
++	supermount_debug("inode %ld, mask 0%o\n", inode->i_ino, mask);
++
++	subi = subiget(inode);
++	if (!subi)
++		return -EIO;
++	if (subi->i_op && subi->i_op->permission) {
++		int rc = subi->i_op->permission(subi, mask);
++		iput(subi);
++		return rc;
++	}
++	
++	mode = inode->i_mode;
++	/*
++	 * Special case, access is always granted for root
++	 */
++	if (fsuser()) {
++		iput(subi);
++		return 0;
++	} else if (current->fsuid == inode->i_uid)
++		mode >>= 6;
++	else if (in_group_p (inode->i_gid))
++		mode >>= 3;
++	iput(subi);
++	if (((mode & mask & S_IRWXO) == mask))
++		return 0;
++	else
++		return -EACCES;
++}
+Index: linux/fs/supermount/namei.c
+diff -u linux/fs/supermount/namei.c:1.1 linux/fs/supermount/namei.c:1.1.6.1
+--- linux/fs/supermount/namei.c:1.1	Mon Feb 26 17:55:16 1996
++++ linux/fs/supermount/namei.c	Sat Nov  9 17:27:25 1996
+@@ -0,0 +1,348 @@
++/*
++ *  linux/fs/supermount/namei.c
++ *
++ *  Copyright (C) 1995
++ *  Stephen Tweedie (sct@dcs.ed.ac.uk)
++ *
++ *  from
++ *
++ *  linux/fs/minix/namei.c
++ *  Copyright (C) 1991, 1992  Linus Torvalds
++ *
++ *  and
++ *
++ *  linux/fs/ext2/namei.c
++ *  Copyright (C) 1992, 1993, 1994, 1995  Remy Card
++ */
++
++/* This file handles almost all of the normal filesystem running of
++   supermount.  We don't have to deal to much with the subfs
++   interface, since we just pass subinodes out to the application on
++   demand. */
++
++#include <asm/segment.h>
++#include <linux/errno.h>
++#include <linux/fs.h>
++#include <linux/supermount_fs.h>
++#include <linux/fcntl.h>
++#include <linux/sched.h>
++#include <linux/stat.h>
++#include <linux/string.h>
++#include <linux/locks.h>
++
++/* Attach a superinode to a subinode, and prepare a result for the
++   upper VFS layers.  We return the superinode for directories, and
++   the subinode for other file types.
++   */
++static void attach_and_prepare(struct super_block *sb,
++			       struct inode *subi, struct inode **result)
++{
++	struct inode *superi;
++	superi = supermount_attach(sb, subi);
++	/* We have now done iget() on superi and subi. */
++	
++	/* If the subfs inode is a directory or a symlink, then we
++	   need to deal with it ourselves, and only give back the
++	   superinode to the application.  Otherwise, we can just
++	   return the subfs inode. */
++	if (S_ISDIR(subi->i_mode)) {
++		superi->i_op = &supermount_dir_iops;
++		iput(subi);
++		*result = superi;
++		return;
++	} else {
++		/* Not a directory-related inode, so we return the
++		   subfs inode to the upper layers.  We still need the
++		   supermount inode in that case, though, to maintain
++		   reference counts in the supermount superblock. */
++
++		iput(superi);
++		*result = subi;
++		return;
++	}
++}
++
++int supermount_lookup (struct inode * dir, const char * name, int len,
++		       struct inode ** result)
++{
++	struct inode *subi, *subdir;
++	int rc;
++	
++	supermount_debug ("inode = %ld, name = %*s\n",
++			  dir->i_ino, len, name);
++
++	*result = NULL;
++	if (!dir)
++		return -ENOENT;
++	if (!S_ISDIR(dir->i_mode)) {
++		iput(dir);
++		return -ENOENT;
++	}
++	if (!(subdir = subiget(dir)))  {
++		/* This now becomes the *easy* case. :-) */
++		iput (dir);
++		return -EIO;
++	}
++
++	rc = subdir->i_op->lookup(subdir, name, len, &subi);
++	supermount_go_inactive(dir->i_sb);
++	iput (dir);
++	if (rc)
++		return rc;
++	/* It worked, so now create a shadow supermount inode for the
++           result... */
++	attach_and_prepare(dir->i_sb, subi, result);
++	return 0;
++}
++
++int supermount_create (struct inode * dir,const char * name, int len, int mode,
++		       struct inode ** result)
++{
++	struct inode * inode, * subi;
++	int rc;
++	
++	supermount_debug ("inode = %ld, name = %*s, mode = %o\n",
++			  dir->i_ino, len, name, mode);
++
++	*result = NULL;
++	if (!dir)
++		return -ENOENT;
++	inode = subiget(dir);
++	if (!inode) {
++		iput(dir);
++		return -ENOENT;
++	}
++	if (!inode->i_op || !inode->i_op->create) {
++		iput(dir);
++		iput(inode);
++		return -EPERM;
++	}
++	
++	rc = inode->i_op->create(inode, name, len, mode, &subi);
++	mark_subfs_dirty(dir->i_sb);
++	supermount_go_inactive(dir->i_sb);
++	iput(dir);
++	if (rc)
++		return rc;
++	attach_and_prepare(dir->i_sb, subi, result);
++	return 0;
++}
++
++int supermount_mknod (struct inode * dir, const char * name, int len, int mode,
++		      int rdev)
++{
++	struct inode * inode;
++	int rc;
++	
++	supermount_debug ("inode = %ld, name = %*s, mode = %o\n",
++			  dir->i_ino, len, name, mode);
++
++	if (!dir)
++		return -ENOENT;
++	inode = subiget(dir);
++	if (!inode) {
++		iput(dir);
++		return -ENOENT;
++	}
++	if (!inode->i_op || !inode->i_op->mknod) {
++		iput(dir);
++		iput(inode);
++		return -EPERM;
++	}
++	
++	rc = inode->i_op->mknod(inode, name, len, mode, rdev);
++	mark_subfs_dirty(dir->i_sb);
++	supermount_go_inactive(dir->i_sb);
++	iput(dir);
++	return rc;
++}
++
++int supermount_mkdir (struct inode * dir, const char * name, int len, int mode)
++{
++	struct inode * inode;
++	int rc;
++	
++	supermount_debug ("inode = %ld, name = %*s, mode = %o\n",
++			  dir->i_ino, len, name, mode);
++
++	if (!dir)
++		return -ENOENT;
++	inode = subiget(dir);
++	if (!inode) {
++		iput(dir);
++		return -ENOENT;
++	}
++	if (!inode->i_op || !inode->i_op->mkdir) {
++		iput(dir);
++		iput(inode);
++		return -EPERM;
++	}
++	
++	rc = inode->i_op->mkdir(inode, name, len, mode);
++	mark_subfs_dirty(dir->i_sb);
++	supermount_go_inactive(dir->i_sb);
++	iput(dir);
++	return rc;
++}
++
++int supermount_rmdir (struct inode * dir, const char * name, int len)
++{
++	struct inode * inode;
++	int rc;
++	
++	supermount_debug ("inode = %ld, name = %*s\n",
++			  dir->i_ino, len, name);
++
++	if (!dir)
++		return -ENOENT;
++	inode = subiget(dir);
++	if (!inode) {
++		iput(dir);
++		return -ENOENT;
++	}
++	if (!inode->i_op || !inode->i_op->rmdir) {
++		iput(dir);
++		iput(inode);
++		return -EPERM;
++	}
++	
++	rc = inode->i_op->rmdir(inode, name, len);
++	mark_subfs_dirty(dir->i_sb);
++	supermount_go_inactive(dir->i_sb);
++	iput(dir);
++	return rc;
++}
++
++int supermount_unlink (struct inode * dir, const char * name, int len)
++{
++	struct inode * inode;
++	int rc;
++	
++	supermount_debug ("inode = %ld, name = %*s\n",
++			  dir->i_ino, len, name);
++
++	if (!dir)
++		return -ENOENT;
++	inode = subiget(dir);
++	if (!inode) {
++		iput(dir);
++		return -ENOENT;
++	}
++	if (!inode->i_op || !inode->i_op->unlink) {
++		iput(dir);
++		iput(inode);
++		return -EPERM;
++	}
++	
++	rc = inode->i_op->unlink(inode, name, len);
++	mark_subfs_dirty(dir->i_sb);
++	supermount_go_inactive(dir->i_sb);
++	iput(dir);
++	return rc;
++}
++
++int supermount_symlink (struct inode * dir, const char * name, int len,
++			const char * symname)
++{
++	struct inode * inode;
++	int rc;
++	
++	supermount_debug ("inode = %ld, name = %*s, link = %s\n",
++			  dir->i_ino, len, name, symname);
++
++	if (!dir)
++		return -ENOENT;
++	inode = subiget(dir);
++	if (!inode) {
++		iput(dir);
++		return -ENOENT;
++	}
++	if (!inode->i_op || !inode->i_op->symlink) {
++		iput(dir);
++		iput(inode);
++		return -EPERM;
++	}
++	
++	rc = inode->i_op->symlink(inode, name, len, symname);
++	mark_subfs_dirty(dir->i_sb);
++	supermount_go_inactive(dir->i_sb);
++	iput(dir);
++	return rc;
++}
++
++/* This probably won't work because higher levels will complain about
++   cross-device links. */
++int supermount_link (struct inode * oldinode, struct inode * dir,
++		     const char * name, int len)
++{
++	struct inode * inode;
++	int rc;
++	
++	supermount_debug ("inode = %ld, name = %*s, link to inode %ld\n",
++			  dir->i_ino, len, name, oldinode->i_ino);
++
++	if (!dir)
++		return -ENOENT;
++	inode = subiget(dir);
++	if (!inode) {
++		iput(dir);
++		return -ENOENT;
++	}
++	if (!inode->i_op || !inode->i_op->link) {
++		iput(dir);
++		iput(inode);
++		return -EPERM;
++	}
++	
++	rc = inode->i_op->link(oldinode, inode, name, len);
++	mark_subfs_dirty(dir->i_sb);
++	supermount_go_inactive(dir->i_sb);
++	iput(dir);
++	return rc;
++}
++
++int supermount_rename (struct inode * old_dir, const char * old_name, 
++		       int old_len,
++		       struct inode * new_dir, const char * new_name, 
++		       int new_len, int must_be_dir)
++{
++	struct inode * old_subi, * new_subi;
++	int rc;
++	
++	supermount_debug ("from inode %ld, %*s to inode %ld, %*s\n",
++			  old_dir->i_ino, old_len, old_name,
++			  new_dir->i_ino, new_len, new_name);
++
++	if (!old_dir || !new_dir)
++		return -ENOENT;
++	old_subi = subiget(old_dir);
++	if (!old_subi) {
++		iput(old_dir);
++		iput(new_dir);
++		return -ENOENT;
++	}
++	new_subi = subiget(new_dir);
++	if (!new_subi) {
++		iput(old_dir);
++		iput(new_dir);
++		iput(old_subi);
++		return -ENOENT;
++	}
++
++	if (!old_subi->i_op || !old_subi->i_op->rename) {
++		iput(old_dir);
++		iput(new_dir);
++		iput(old_subi);
++		iput(new_subi);
++		return -EPERM;
++	}
++	
++	rc = old_subi->i_op->rename(old_subi, old_name, old_len,
++				    new_subi, new_name, new_len, 
++				    must_be_dir);
++	mark_subfs_dirty(old_dir->i_sb);
++	supermount_go_inactive(old_dir->i_sb);
++	iput(old_dir);
++	iput(new_dir);
++	return rc;
++}
+Index: linux/fs/supermount/super.c
+diff -u linux/fs/supermount/super.c:1.1 linux/fs/supermount/super.c:1.1.6.2
+--- linux/fs/supermount/super.c:1.1	Mon Feb 26 17:55:16 1996
++++ linux/fs/supermount/super.c	Sat Nov  9 19:57:42 1996
+@@ -0,0 +1,431 @@
++/*
++ *  linux/fs/supermount/super.c
++ *
++ *  Copyright (C) 1995
++ *  Stephen Tweedie (sct@dcs.ed.ac.uk)
++ *
++ *  from
++ *
++ *  linux/fs/minix/inode.c
++ *  Copyright (C) 1991, 1992  Linus Torvalds
++ *
++ *  and
++ *
++ *  linux/fs/ext2/super.c
++ *  Copyright (C) 1992, 1993, 1994, 1995  Remy Card
++ */
++
++#include <stdarg.h>
++
++#include <asm/segment.h>
++#include <asm/system.h>
++
++#include <linux/errno.h>
++#include <linux/fs.h>
++#include <linux/supermount_fs.h>
++#include <linux/malloc.h>
++#include <linux/sched.h>
++#include <linux/stat.h>
++#include <linux/string.h>
++#include <linux/locks.h>
++#include <linux/major.h>
++
++/* From fs/super.c */
++extern int do_umount(kdev_t);
++
++#ifdef SUPERMOUNT_DEBUG
++char supermount_debug_enable = 0;
++#endif
++
++static struct super_operations supermount_sops = { 
++	supermount_read_inode,
++	NULL,
++	supermount_write_inode,
++	NULL,				/* put_inode */
++	supermount_put_super,
++	supermount_write_super,
++	supermount_statfs,
++	NULL,				 /* supermount_remount */
++};
++
++static char error_buf[1024];
++
++/* Mount and mount the hidden fs */
++static void umount_subfs(struct super_block *);
++
++void supermount_error (struct super_block * sb, const char * function,
++		       const char * fmt, ...)
++{
++	va_list args;
++
++	va_start (args, fmt);
++	vsprintf (error_buf, fmt, args);
++	va_end (args);
++	printk (KERN_CRIT "SUPERMOUNT error (device %d/%d): %s: %s\n",
++		MAJOR(sb->s_dev), MINOR(sb->s_dev), function, error_buf);
++	/* @@ Do we want to do any special error handling here? */
++}
++
++NORET_TYPE void supermount_panic (struct super_block * sb,
++				  const char * function,
++				  const char * fmt, ...)
++{
++	va_list args;
++
++	va_start (args, fmt);
++	vsprintf (error_buf, fmt, args);
++	va_end (args);
++	panic ("SUPERMOUNT panic (device %d/%d): %s: %s\n",
++	       MAJOR(sb->s_dev), MINOR(sb->s_dev), function, error_buf);
++}
++
++void supermount_warning (struct super_block * sb, const char * function,
++		   const char * fmt, ...)
++{
++	va_list args;
++
++	va_start (args, fmt);
++	vsprintf (error_buf, fmt, args);
++	va_end (args);
++	printk (KERN_WARNING "SUPERMOUNT-fs warning (device %d/%d): %s: %s\n",
++		MAJOR(sb->s_dev), MINOR(sb->s_dev), function, error_buf);
++}
++
++/* Release the superblock and any resources it has reserved */
++void supermount_put_super (struct super_block * sb)
++{
++	lock_super (sb);
++	if (sb->u.supermount_sb.s_state != SUPERMOUNT_UNMOUNTED)
++		umount_subfs (sb);
++	sb->s_dev = 0;
++	unlock_super (sb);
++}
++
++
++static int copy_option(const char **option, const char *val)
++{
++	char *tmp;
++	supermount_debug ("assigning value \"%s\"\n", val);
++	if (!val || !*val)
++		return -EINVAL;
++	tmp = (char *) kmalloc(1 + strlen(val), GFP_KERNEL);
++	if (!tmp)
++		return -ENOMEM;
++	strcpy(tmp, val);
++	*option = tmp;
++	return 0;
++}
++
++/*
++ * This function has been shamelessly adapted from the msdos fs
++ */
++static int parse_options (char * options, struct super_block *sb)
++{
++	char * this_char;
++	char * value;
++	int rc;
++	
++	if (!options)
++		return 0;
++	while ((this_char = options)) {
++		if (!strncmp(this_char, "--,", 3))
++			this_char += 2;
++		if (*this_char == ',') {
++			/* An empty option, or the option "--",
++			   introduces options to be passed through to
++			   the subfs */
++			supermount_debug ("assigning remainder\n");
++			return copy_option(&sb->u.supermount_sb.s_data,
++					   ++this_char);
++		}
++		if ((options = strchr (this_char, ',')))
++			*options++ = 0;
++		
++		if ((value = strchr (this_char, '=')) != NULL)
++			*value++ = 0;
++
++		supermount_debug ("parsing option \"%s\"\n", this_char);
++		if (!strcmp (this_char, "fs")) {
++			rc = copy_option(&sb->u.supermount_sb.s_type, value);
++			if (rc) return rc;
++		} else if (!strcmp (this_char, "dev")) {
++			rc = copy_option(&sb->u.supermount_sb.s_devname, 
++					 value);
++			if (rc) return rc;
++		} else if (!strcmp (this_char, "debug")) {
++			supermount_debug_enable = 1;
++		} else {
++			printk ("supermount: "
++				"Unrecognized mount option %s\n", this_char);
++			return -EINVAL;
++		}
++	}
++	return 0;
++}
++
++/* read_super: the main mount() entry point into the VFS layer. */
++struct super_block * supermount_read_super (struct super_block * sb, 
++					    void * data,
++					    int silent)
++{
++	sb->s_blocksize = 1024;
++	sb->s_blocksize_bits = 10;
++	sb->s_magic = SUPERMOUNT_SUPER_MAGIC;
++	sb->s_op = &supermount_sops;
++	unlock_super(sb);
++	sb->u.supermount_sb.s_state = SUPERMOUNT_UNMOUNTED;
++	sb->u.supermount_sb.s_default_mode = 0777 | S_IFDIR;
++	sb->u.supermount_sb.s_mflags = sb->s_flags & (MS_REMOUNT - 1);
++	sb->u.supermount_sb.s_data = NULL;
++	sb->u.supermount_sb.s_undermount = NULL;
++	sb->u.supermount_sb.s_subfs = NULL;
++	sb->u.supermount_sb.s_opencount = 0;
++	sb->u.supermount_sb.s_dirty = 0;
++	sb->u.supermount_sb.s_type = NULL;
++	sb->u.supermount_sb.s_devname = NULL;
++
++	if (parse_options ((char *) data, sb)) {
++		sb->s_dev = 0;
++		return NULL;
++	}
++	if (!sb->u.supermount_sb.s_type)
++		copy_option(&sb->u.supermount_sb.s_type, "msdos");
++	if (!sb->u.supermount_sb.s_devname)
++		copy_option(&sb->u.supermount_sb.s_devname, "/dev/fd0");
++
++	sb->s_flags = sb->u.supermount_sb.s_mflags;
++	if (!(sb->s_mounted = iget(sb, SUPERMOUNT_ROOT_INO))) {
++		sb->s_dev = 0;
++		supermount_error (sb, "supermount_read_super",
++				  "get root inode failed\n");
++		return NULL;
++	}
++	return sb;
++}
++
++void supermount_write_super (struct super_block * sb)
++{
++	supermount_media_check(sb);
++	if (sb->u.supermount_sb.s_state != SUPERMOUNT_UNMOUNTED) {
++		struct super_block *tmp = sb->u.supermount_sb.s_subfs;
++		if (tmp && tmp->s_op && tmp->s_op->write_super)
++			tmp->s_op->write_super(tmp);
++	}
++	sb->s_dirt = 0;
++}
++
++#if 0
++int supermount_remount (struct super_block * sb, int * flags, char * data)
++{
++}
++#endif /* 0 */
++
++void supermount_statfs (struct super_block * sb, struct statfs * buf, 
++			int bufsize)
++{
++	unsigned short fs;
++	struct statfs tmp;
++	supermount_media_check(sb);
++
++	if (sb->u.supermount_sb.s_state != SUPERMOUNT_UNMOUNTED) {
++		struct super_block * tmpsb = 
++			sb->u.supermount_sb.s_undermount->i_mount->i_sb;
++		fs = get_fs();
++		set_fs(KERNEL_DS);
++		if (tmpsb->s_op && tmpsb->s_op->statfs)
++			tmpsb->s_op->statfs(tmpsb, &tmp, sizeof(tmp));
++		set_fs(fs);
++	} else {
++		tmp.f_bsize = sb->s_blocksize;
++		tmp.f_blocks = 0;
++		tmp.f_bfree = 0;
++		tmp.f_bavail = 0;
++		tmp.f_files = 0;
++		tmp.f_ffree = 0;
++		tmp.f_namelen = 0;
++	}
++	tmp.f_type = SUPERMOUNT_SUPER_MAGIC;
++	memcpy_tofs(buf, &tmp, bufsize);
++}
++
++/* Check for media change, but without invalidating buffers and inodes */
++static int just_check_disk_change(dev_t dev)
++{
++	if (!query_disk_change(dev))
++		return 0;
++	supermount_debug("Disk change detected on device %d/%d\n",
++			 MAJOR(dev), MINOR(dev));
++	return 1;
++}
++
++static void umount_subfs(struct super_block *sb)
++{
++	int retval;
++	struct inode *inode, *subi;
++	
++	supermount_debug("Trying to unmount device %s.\n",
++			 sb->u.supermount_sb.s_devname);
++	
++	/* Detach the subfs from the supermount root inode */
++	inode = sb->s_mounted;
++	/* Inode may not be set if we are currently unmounting the superfs */
++	if (inode) {
++		subi = inode->u.supermount_i.i_hidden;
++		if (subi) {
++			subi->i_shadow = 0;
++			inode->u.supermount_i.i_hidden = 0;
++			iput(inode);
++		}
++	}
++		
++	if (sb->u.supermount_sb.s_subfs->s_mounted->i_count != 1)
++		supermount_panic (sb, "umount_subfs",
++				  "subfs root i_count = %d, should be 1\n",
++				  sb->u.supermount_sb.s_subfs->s_mounted->i_count);
++	if (sb->u.supermount_sb.s_undermount->i_count != 1)
++		supermount_panic (sb, "umount_subfs",
++				  "undermount i_count = %d, should be 1\n",
++				  sb->u.supermount_sb.s_subfs->s_mounted->i_count);
++
++	sb->u.supermount_sb.s_subfs->s_mounted->i_count++;
++	sb->u.supermount_sb.s_state = SUPERMOUNT_UNMOUNTED;
++	retval = do_umounti(sb->u.supermount_sb.s_subfs->s_mounted);
++	if (retval)
++		supermount_panic (sb, "umount_subfs",
++				  "Help - can't umount subfs!!!");
++	supermount_debug("subfs is unmounted.\n");
++	sb->u.supermount_sb.s_undermount = 0;
++	sb->u.supermount_sb.s_version = ++event;
++	sb->u.supermount_sb.s_subfs = 0;
++	sb->s_flags = sb->u.supermount_sb.s_mflags;
++	if (inode)
++		inode->i_mode = sb->u.supermount_sb.s_default_mode;
++}
++
++/* Return 0 (OK) if medium is valid. */
++int supermount_media_check(struct super_block * sb) 
++{
++	int retval;
++	unsigned short fs;
++
++	/* If there are still files open, we never bother checking the
++           medium. */
++	if (sb->u.supermount_sb.s_subfs && 
++	    subfs_is_active(sb)) {
++		supermount_debug ("subfs is active.\n");
++		return 0;
++	}
++
++	supermount_debug ("starting (%sactive now)\n",
++			  (sb->u.supermount_sb.s_subfs &&
++			   subfs_is_active(sb)) ?
++			  "" : "not ");
++	
++	lock_super(sb);
++
++	/* Are we checking for mount or unmount/remount? */
++	if (sb->u.supermount_sb.s_state != SUPERMOUNT_UNMOUNTED) {
++		/* Already mounted --- check for disk change or
++		   disk not present */
++		int dev = sb->u.supermount_sb.s_subfs->s_dev;
++		if (!just_check_disk_change(dev)) {
++			unlock_super(sb);
++			return 0;
++		}
++		
++		/* We have a disk change!  Unmount the subfs */
++		supermount_debug ("trying to unmount\n");
++		umount_subfs(sb);
++		/* The call to just_check_disk_change may clear the media-
++		   changed flag on the device, so we need to force a media
++		   invalidation.  We don't want to do this before unmounting
++		   the subfs, naturally! */
++		invalidate_media(dev);
++		/* Now we are unmounted; fall through to the next check. */
++	}
++	
++	if (sb->u.supermount_sb.s_state != SUPERMOUNT_UNMOUNTED) {
++		unlock_super(sb);
++		return 0;
++	}
++	
++	/* OK, we're unmounted now --- can we remount?  Please? */
++	if (!sb->u.supermount_sb.s_undermount) {
++		sb->u.supermount_sb.s_undermount =
++			iget(sb, SUPERMOUNT_HIDDEN_INO);
++		if (!sb->u.supermount_sb.s_undermount)
++			supermount_panic (sb, "supermount_media_check",
++					  "Can't get root hidden inode!");
++		sb->u.supermount_sb.s_undermount->i_flags |= S_UNBOUND;
++	}
++
++	sb->u.supermount_sb.s_version = ++event;
++	sb->s_mounted->u.supermount_i.i_sb_version = event;
++	supermount_debug ("trying to mount\n");
++	supermount_debug ("fs=%s, dev=%s, data=%s, flags=%08lx\n",
++			  sb->u.supermount_sb.s_type,
++			  sb->u.supermount_sb.s_devname,
++			  sb->u.supermount_sb.s_data,
++			  sb->s_flags);
++	fs = get_fs();
++	set_fs(KERNEL_DS);
++	sb->s_flags = sb->u.supermount_sb.s_mflags,
++		retval = do_mounti(sb->u.supermount_sb.s_undermount,
++				   "<supermount>",
++				   sb->u.supermount_sb.s_devname,
++				   sb->u.supermount_sb.s_type,
++				   sb->s_flags | MS_MGC_VAL,
++				   sb->u.supermount_sb.s_data);
++	if (retval == -EROFS && !(sb->u.supermount_sb.s_mflags & MS_RDONLY)) {
++		/* OK, that failed, so try it readonly */
++		sb->s_flags |= MS_RDONLY;
++		retval = do_mounti(sb->u.supermount_sb.s_undermount,
++				   "<supermount>",
++				   sb->u.supermount_sb.s_devname,
++				   sb->u.supermount_sb.s_type,
++				   sb->s_flags | MS_MGC_VAL,
++				   sb->u.supermount_sb.s_data);
++	}
++	set_fs(fs);
++	
++	unlock_super(sb);
++	if (retval) {
++		sb->s_flags = sb->u.supermount_sb.s_mflags;
++		iput(sb->u.supermount_sb.s_undermount);
++		sb->u.supermount_sb.s_undermount = 0;
++		supermount_debug ("Mount failed, errno %d\n", -retval);
++		return 1;
++	}
++	/* Hey --- success!!! */
++	sb->u.supermount_sb.s_subfs = sb->u.supermount_sb.s_undermount
++		->i_mount->i_sb;
++	if (!sb->u.supermount_sb.s_subfs->s_mounted)
++		supermount_panic (sb, "supermount_media_check", 
++				  "Mounted subfs has no root inode!");
++	sb->u.supermount_sb.s_state = SUPERMOUNT_SUSPENDED;
++	supermount_debug ("Mount succeeded!\n");
++	/* For counting open inodes on the subfs, we rely on the fact
++           that the root inode is always exactly one count.  So make
++           sure we guarantee it is always open! */
++	supermount_iopen(sb->s_mounted);
++	sb->s_mounted->i_flags |= S_UNBOUND;
++	return 0;
++}
++
++/* Check whether an inode still belongs to valid medium. */
++int supermount_check_inode(struct inode * inode)
++{
++	supermount_debug ("inode = %ld\n", inode->i_ino);
++	
++	if (supermount_media_check(inode->i_sb))
++		return 1;
++	if (inode_is_obsolete(inode)) {
++		/* What happens if we remount an old disk, and get
++                   back the same superinode number?  subiget() will
++                   handle it through the i_subino field, and
++                   supermount_attach will avoid reusing the old
++                   inode. */
++		return 1;
++	}
++	return 0;
++}
+Index: linux/include/linux/fs.h
+diff -u linux/include/linux/fs.h:1.12 linux/include/linux/fs.h:1.12.2.1
+--- linux/include/linux/fs.h:1.12	Wed Nov  6 23:17:37 1996
++++ linux/include/linux/fs.h	Sat Nov  9 17:26:30 1996
+@@ -74,6 +74,10 @@
+ #define S_WRITE		128	/* Write on file/directory/symlink */
+ #define S_APPEND	256	/* Append-only file */
+ #define S_IMMUTABLE	512	/* Immutable file */
++#define S_UNBOUND	1024	/* inode is not bound to user space,
++				   and so the filesystem may be
++				   unmounted even if this inode is in
++				   use. */
+ 
+ /*
+  * Flags that can be altered by MS_REMOUNT
+@@ -103,6 +107,7 @@
+ #define IS_WRITABLE(inode) ((inode)->i_flags & S_WRITE)
+ #define IS_APPEND(inode) ((inode)->i_flags & S_APPEND)
+ #define IS_IMMUTABLE(inode) ((inode)->i_flags & S_IMMUTABLE)
++#define IS_UNBOUND(inode) ((inode)->i_flags & S_UNBOUND)
+ 
+ /* the read-only stuff doesn't really belong here, but any other place is
+    probably as bad and I don't want to create yet another include file. */
+@@ -216,6 +221,7 @@
+ }
+ 
+ #include <linux/pipe_fs_i.h>
++#include <linux/supermount_fs_i.h>
+ #include <linux/minix_fs_i.h>
+ #include <linux/ext_fs_i.h>
+ #include <linux/ext2_fs_i.h>
+@@ -284,6 +290,8 @@
+ 	unsigned long	i_nrpages;
+ 	struct semaphore i_sem;
+ 	struct inode_operations *i_op;
++	struct inode * i_shadow;
++	struct inode_shadow_operations * i_shadow_op;
+ 	struct super_block *i_sb;
+ 	struct wait_queue *i_wait;
+ 	struct file_lock *i_flock;
+@@ -305,6 +313,7 @@
+ 	unsigned short i_writecount;
+ 	union {
+ 		struct pipe_inode_info pipe_i;
++		struct supermount_inode_info supermount_i;
+ 		struct minix_inode_info minix_i;
+ 		struct ext_inode_info ext_i;
+ 		struct ext2_inode_info ext2_i;
+@@ -402,6 +411,7 @@
+ 
+ extern int fasync_helper(struct inode *, struct file *, int, struct fasync_struct **);
+ 
++#include <linux/supermount_fs_sb.h>
+ #include <linux/minix_fs_sb.h>
+ #include <linux/ext_fs_sb.h>
+ #include <linux/ext2_fs_sb.h>
+@@ -431,6 +441,7 @@
+ 	struct inode * s_mounted;
+ 	struct wait_queue * s_wait;
+ 	union {
++		struct supermount_sb_info supermount_sb;
+ 		struct minix_sb_info minix_sb;
+ 		struct ext_sb_info ext_sb;
+ 		struct ext2_sb_info ext2_sb;
+@@ -491,6 +502,12 @@
+ 	int (*smap) (struct inode *,int);
+ };
+ 
++struct inode_shadow_operations {
++	void (*open) (struct inode *, int);
++	void (*write) (struct inode *);
++	void (*release) (struct inode *);
++};
++
+ struct super_operations {
+ 	void (*read_inode) (struct inode *);
+ 	int (*notify_change) (struct inode *, struct iattr *);
+@@ -600,9 +617,11 @@
+ }
+ 
+ extern int check_disk_change(kdev_t dev);
++extern int query_disk_change(kdev_t dev);
+ extern void invalidate_inodes(kdev_t dev);
+ extern void invalidate_inode_pages(struct inode *);
+ extern void invalidate_buffers(kdev_t dev);
++extern void invalidate_media(kdev_t dev);
+ extern int floppy_is_wp(int minor);
+ extern void sync_inodes(kdev_t dev);
+ extern void sync_dev(kdev_t dev);
+@@ -663,6 +682,9 @@
+ 
+ extern void show_buffers(void);
+ extern void mount_root(void);
++extern int do_mounti(struct inode *_inode, const char *, const char *, 
++		     const char *, unsigned long, const void *);
++extern int do_umounti(struct inode *);
+ 
+ #ifdef CONFIG_BLK_DEV_INITRD
+ extern kdev_t real_root_dev;
+Index: linux/include/linux/supermount_fs.h
+diff -u linux/include/linux/supermount_fs.h:1.1 linux/include/linux/supermount_fs.h:1.1.4.1
+--- linux/include/linux/supermount_fs.h:1.1	Mon Feb 26 17:55:21 1996
++++ linux/include/linux/supermount_fs.h	Sat Nov  9 17:27:49 1996
+@@ -0,0 +1,165 @@
++/*
++ *  linux/include/linux/supermount_fs.h
++ *
++ *  Defines and strutures for the dynamic remounting of removable media
++ *
++ *  Copyright (C) 1995
++ *  Stephen Tweedie (sct@dcs.ed.ac.uk)
++ *
++ *  from
++ *
++ *  linux/include/linux/minix_fs.h
++ *  Copyright (C) 1991, 1992  Linus Torvalds
++ *
++ *  and
++ *
++ *  linux/include/linux/ext2_fs.h
++ *  Copyright (C) 1992, 1993, 1994, 1995  Remy Card
++ */
++
++#ifndef _LINUX_SUPERMOUNT_FS_H
++#define _LINUX_SUPERMOUNT_FS_H
++
++#include <linux/types.h>
++
++#define SUPERMOUNT_DEBUG
++
++#define SUPERMOUNT_VERSION		"0.4"
++
++/*
++ * Debug code
++ */
++#ifdef SUPERMOUNT_DEBUG
++ extern char supermount_debug_enable;
++
++ #define supermount_debug(f, a...) \
++	{ \
++		if (supermount_debug_enable) { \
++			printk ("SUPERMOUNT DEBUG (%s, %d): %s: ", \
++				__FILE__, __LINE__, __FUNCTION__); \
++			printk (f, ## a); \
++		} \
++	}
++#else
++ #define supermount_debug(f, a...)	/**/
++#endif
++
++/*
++ * Special inodes numbers
++ */
++#define SUPERMOUNT_HIDDEN_INO		 0	/* Hidden inode for
++						   sub-mounting */
++#define SUPERMOUNT_ROOT_INO		 1	/* Root inode */
++
++/*
++ * The supermount superblock magic number
++ */
++#define SUPERMOUNT_SUPER_MAGIC	0x9fa1
++
++#ifdef __KERNEL__
++/*
++ * Function prototypes
++ */
++
++/*
++ * Ok, these declarations are also in <linux/kernel.h> but none of the
++ * supermount source programs needs to include it so they are duplicated here.
++ */
++#if __GNUC__ < 2 || (__GNUC__ == 2 && __GNUC_MINOR__ < 5)
++# define NORET_TYPE    __volatile__
++# define ATTRIB_NORET  /**/
++# define NORET_AND     /**/
++#else
++# define NORET_TYPE    /**/
++# define ATTRIB_NORET  __attribute__((noreturn))
++# define NORET_AND     noreturn,
++#endif
++
++/* How to test if a supermount filesystem is active or not: */
++static inline int subfs_is_active(struct super_block *sb)
++{
++	/* The subfs is deemed inactive iff only the root is open, and
++           the its i_count is one.  */
++	return (sb->u.supermount_sb.s_state != SUPERMOUNT_UNMOUNTED &&
++		(sb->u.supermount_sb.s_opencount > 1 ||
++		 sb->u.supermount_sb.s_undermount->i_mount->i_count > 1));
++}
++
++/* How to test if an inode is obsolete: */
++static inline int inode_is_obsolete(struct inode *inode)
++{
++	return (inode->u.supermount_i.i_sb_version !=
++		inode->i_sb->u.supermount_sb.s_version);
++}
++
++/* Manage the subfs dirty flag */
++static inline void mark_subfs_dirty(struct super_block *sb)
++{
++	sb->u.supermount_sb.s_dirty = 1;
++}
++static inline void mark_subfs_clean(struct super_block *sb)
++{
++	sb->u.supermount_sb.s_dirty = 0;
++}
++static inline int subfs_is_dirty(struct super_block *sb)
++{
++	return (sb->u.supermount_sb.s_dirty);
++}
++
++/* inode.c */
++extern struct inode * subiget(struct inode *);
++extern void supermount_iopen(struct inode *);
++extern void supermount_iclose(struct inode *);
++extern void supermount_go_inactive(struct super_block *);
++extern struct inode * supermount_attach(struct super_block *, struct inode *);
++extern void supermount_read_inode (struct inode *);
++extern void supermount_write_inode (struct inode *);
++extern void supermount_put_inode (struct inode *);
++extern int supermount_permission (struct inode *, int mask);
++
++/* namei.c */
++extern void supermount_release (struct inode *, struct file *);
++extern int supermount_lookup (struct inode *,const char *, int, struct inode **);
++extern int supermount_create (struct inode *,const char *, int, int,
++			      struct inode **);
++extern int supermount_mkdir (struct inode *, const char *, int, int);
++extern int supermount_rmdir (struct inode *, const char *, int);
++extern int supermount_unlink (struct inode *, const char *, int);
++extern int supermount_symlink (struct inode *, const char *, int, const char *);
++extern int supermount_link (struct inode *, struct inode *, const char *, int);
++extern int supermount_mknod (struct inode *, const char *, int, int, int);
++extern int supermount_rename (struct inode *, const char *, int,
++			      struct inode *, const char *, int, int);
++
++/* super.c */
++extern void supermount_error (struct super_block *, const char *, const char *, ...)
++	__attribute__ ((format (printf, 3, 4)));
++extern NORET_TYPE void supermount_panic (struct super_block *, const char *,
++				   const char *, ...)
++	__attribute__ ((NORET_AND format (printf, 3, 4)));
++extern void supermount_warning (struct super_block *, const char *, const char *, ...)
++	__attribute__ ((format (printf, 3, 4)));
++extern void supermount_put_super (struct super_block *);
++extern void supermount_write_super (struct super_block *);
++extern int supermount_remount (struct super_block *, int *, char *);
++extern struct super_block * supermount_read_super (struct super_block *,void *,int);
++extern void supermount_statfs (struct super_block *, struct statfs *, int);
++extern int supermount_media_check (struct super_block *);
++extern int supermount_check_inode (struct inode *);
++
++/* dir.c */
++extern struct inode_operations supermount_dir_iops;
++extern struct inode_operations supermount_root_iops;
++
++/* inode.c */
++extern struct inode_shadow_operations supermount_shadow_iops;
++
++/* file.c */
++/* extern struct inode_operations supermount_shadow_file_iops; */
++
++/* symlink.c */
++extern struct inode_operations supermount_symlink_iops;
++
++#endif	/* __KERNEL__ */
++
++#endif	/* _LINUX_SUPERMOUNT_FS_H */
+Index: linux/include/linux/supermount_fs_i.h
+diff -u linux/include/linux/supermount_fs_i.h:1.1 linux/include/linux/supermount_fs_i.h:1.1.4.1
+--- linux/include/linux/supermount_fs_i.h:1.1	Mon Feb 26 17:55:22 1996
++++ linux/include/linux/supermount_fs_i.h	Sat Nov  9 17:27:49 1996
+@@ -0,0 +1,23 @@
++/*
++ *  linux/include/linux/supermount_fs.h
++ *
++ *  In-core inode structure for the dynamic remounting of removable media
++ *
++ *  Copyright (C) 1995
++ *  Stephen Tweedie (sct@dcs.ed.ac.uk)
++ *
++ */
++
++#ifndef _LINUX_SUPERMOUNT_FS_I_H
++#define _LINUX_SUPERMOUNT_FS_I_H
++
++struct supermount_inode_info {
++	struct inode *	i_hidden;
++	int		i_sb_version;
++	int		i_subino;
++	int		i_counted;/* Has this inode been counted in
++				     the superblock reference counts
++				     yet? */
++};
++
++#endif	/* _LINUX_SUPERMOUNT_FS_I_H */
+Index: linux/include/linux/supermount_fs_sb.h
+diff -u linux/include/linux/supermount_fs_sb.h:1.1 linux/include/linux/supermount_fs_sb.h:1.1.4.1
+--- linux/include/linux/supermount_fs_sb.h:1.1	Mon Feb 26 17:55:22 1996
++++ linux/include/linux/supermount_fs_sb.h	Sat Nov  9 17:27:49 1996
+@@ -0,0 +1,44 @@
++/*
++ *  linux/include/linux/supermount_sb_fs.h
++ *
++ *  In-core superblock struct for the dynamic remounting of removable media
++ *
++ *  Copyright (C) 1995
++ *  Stephen Tweedie (sct@dcs.ed.ac.uk)
++ *
++ */
++
++#ifndef _LINUX_SUPERMOUNT_FS_SB_H
++#define _LINUX_SUPERMOUNT_FS_SB_H
++
++typedef enum {
++	SUPERMOUNT_UNMOUNTED,	/* No media mounted */
++	SUPERMOUNT_SUSPENDED,	/* Mounted but suspended because 
++				   no files open */
++	SUPERMOUNT_ONLINE,	/* Mounted and active */
++} sm_state_t;
++
++/*
++ * supermount super-block data in memory
++ */
++struct supermount_sb_info {
++	sm_state_t	s_state;
++	int		s_version;	/* Used to indicate obsolete inodes */
++	mode_t		s_default_mode;	/* Default mode for supermount root */
++
++	const char *	s_type;		/* Type of fs to be sub-mounted */
++	const char *	s_devname;	/* Where to mount the subfs */
++	int		s_mflags;	/* Flags to pass when mounting subfs */
++	const char *	s_data;		/* Data to pass when mounting subfs */
++
++	struct inode *	s_undermount;	/* Mount point for subfs */
++	struct super_block * s_subfs;	/* The submounted fs sb */
++	int		s_opencount;	/* Refcount of opened inodes
++					   (an inode in use as cwd
++					   does not count as open) */
++	
++	/* Flags */
++	int		s_dirty : 1;	/* Do we need to fsync() the subfs? */
++};
++
++#endif	/* _LINUX_SUPERMOUNT_FS_SB_H */

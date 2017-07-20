@@ -1,0 +1,885 @@
+<!DOCTYPE html PUBLIC '-//W3C//DTD XHTML 1.0 Transitional//EN'
+		 'http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd'>
+<html xmlns='http://www.w3.org/1999/xhtml' lang='utf-8' xml:lang='utf-8'>
+<head>
+<title>Tool to populate a filesystem?</title>
+<meta http-equiv='Content-Type; charset=utf-8' />
+<link rel='stylesheet' type='text/css' href='../../../lg.css' />
+</head>
+<body>
+<a href="../../../"><img alt="Linux Gazette" src="../../../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" /></a><img alt="Tux" src="../../../gx/tux_86x95_indexed.png" id="tux" /><p id="fun">...making Linux just a little more fun!</p><div class='content articlecontent'><a name="top"></a><h3>Tool to populate a filesystem?</h3>
+<p>
+<b><p>
+Ren&eacute; Pfeiffer [lynx at luchs.at]
+
+</p>
+</b><br />
+<b>Wed, 16 Jul 2008 23:46:06 +0200</b>
+</p>
+
+<p>
+Hello!
+</p>
+
+<p>
+I am playing with 2.6.26, e2fsprogs 1.41 and ext4, just to see what ext4
+can do and what workloads it can handle. Do you know of any tools that
+can populate a filesystem with a random amount of files filled with
+random data stored a random amount of directories? I know that some
+benchmarking tools do a lot of file/directory creation, but I'd like to
+create a random filesystem layout with data, so I can use the usual
+tools such as tar, rsync, cp and others to do things you usually do when
+setting up, backuping and restoring servers.
+</p>
+
+<p>
+Curious,
+Ren&eacute;.
+</p>
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_mail.html#mb-tool_to_populate_a_filesystem">Back</a><hr width="50%" align="left" /><p><br /></p><p>
+<b><p>
+Ben Okopnik [ben at linuxgazette.net]
+
+</p>
+</b><br />
+<b>Wed, 16 Jul 2008 18:59:37 -0400</b>
+</p>
+
+<p>
+On Wed, Jul 16, 2008 at 11:46:06PM +0200, Ren&eacute; Pfeiffer wrote:
+</p>
+
+<pre>
+&gt; Hello!
+&gt; 
+&gt; I am playing with 2.6.26, e2fsprogs 1.41 and ext4, just to see what ext4
+&gt; can do and what workloads it can handle. Do you know of any tools that
+&gt; can populate a filesystem with a random amount of files filled with
+&gt; random data stored a random amount of directories? I know that some
+&gt; benchmarking tools do a lot of file/directory creation, but I'd like to
+&gt; create a random filesystem layout with data, so I can use the usual
+&gt; tools such as tar, rsync, cp and others to do things you usually do when
+&gt; setting up, backuping and restoring servers.
+</pre>
+
+<p>
+That would be a fairly easy shell script: a loop that a) creates a
+random number of files of random size, b) creates a random number of
+directories, c) dives into all the subdirectories that were created, and
+d) repeats the process. The only thing is that you would have to set
+some hard limits: 1) how deep do you want to go, 2) max number for
+directories and files, and 3) max file size. Recursive functions of this
+sort will run away from you very quickly if you don't watch them.
+</p>
+
+<p>
+Here's a quick hack that should do it (not very well tested, but should
+work OK). Again, you'll need to set the vars at the top as per your
+requirements.
+</p>
+
+<p>
+<pre class='code'>
+#!/bin/bash
+# Created by Ben Okopnik on Wed Jul 16 18:04:33 EDT 2008
+ 
+########    User settings     ############
+MAXDIRS=5
+MAXDEPTH=2
+MAXFILES=10
+MAXSIZE=1000
+######## End of user settings ############
+ 
+# How deep in the file system are we now?
+TOP=`pwd|tr -cd '/'|wc -c`
+ 
+populate() {
+	cd $1
+	curdir=$PWD
+ 
+	files=$(($RANDOM*$MAXFILES/32767))
+	for n in `seq $files`
+	do
+		f=`mktemp XXXXXX`
+		size=$(($RANDOM*$MAXSIZE/32767))
+		head -c $size /dev/urandom &gt; $f
+	done
+ 
+	depth=`pwd|tr -cd '/'|wc -c`
+	if [ $(($depth-$TOP)) -ge $MAXDEPTH ]
+	then
+		return
+	fi
+ 
+	unset dirlist
+	dirs=$(($RANDOM*$MAXDIRS/32767))
+	for n in `seq $dirs`
+	do
+		d=`mktemp -d XXXXXX`
+		dirlist="$dirlist${dirlist:+ }$PWD/$d"
+	done
+ 
+	for dir in $dirlist
+	do
+		populate "$dir"
+	done
+}
+ 
+populate $PWD
+</pre>
+
+
+<pre>-- 
+* Ben Okopnik * Editor-in-Chief, Linux Gazette * <a href="http://LinuxGazette.NET">http://LinuxGazette.NET</a> *
+</pre>
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_mail.html#mb-tool_to_populate_a_filesystem">Back</a><hr width="50%" align="left" /><p><br /></p><p>
+<b><p>
+Ren&eacute; Pfeiffer [lynx at luchs.at]
+
+</p>
+</b><br />
+<b>Thu, 17 Jul 2008 01:16:56 +0200</b>
+</p>
+
+<p>
+On Jul 16, 2008 at 1859 -0400, Ben Okopnik appeared and said:
+</p>
+
+<pre>
+&gt; On Wed, Jul 16, 2008 at 11:46:06PM +0200, Ren&eacute; Pfeiffer wrote:
+&gt; &gt; [...]
+&gt; &gt; I am playing with 2.6.26, e2fsprogs 1.41 and ext4, just to see what ext4
+&gt; &gt; can do and what workloads it can handle. Do you know of any tools that
+&gt; &gt; can populate a filesystem with a random amount of files [...]
+&gt;=20
+&gt; That would be a fairly easy shell script: a loop that a) creates a
+&gt; random number of files of random size, b) creates a random number of
+&gt; directories, c) dives into all the subdirectories that were created, and
+&gt; d) repeats the process.
+</pre>
+
+<p>
+I thought you would say something like that. <img src="../gx/smile.png" alt=":)"> It seems I was rather
+thinking in tools than in what one would need to do to solve this
+problem. I'll try your script tomorrow and see what it does. I am
+curious to see how long it takes for a Bash script to create the files.
+</p>
+
+
+<pre>
+&gt; The only thing is that you would have to set some hard limits: 1) how
+&gt; deep do you want to go, 2) max number for directories and files, and
+&gt; 3) max file size. [...]
+</pre>
+
+<p>
+Yes, and it's wise to start with low numbers. As initial defaults 32768
+came to my mind, but 32768^2 if you use it for both max number for
+directories and files is a bit of an overkill. <img src="../gx/smile.png" alt=":)">
+</p>
+
+<p>
+Thanks,
+Ren&eacute;.
+</p>
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_mail.html#mb-tool_to_populate_a_filesystem">Back</a><hr width="50%" align="left" /><p><br /></p><p>
+<b><p>
+Ben Okopnik [ben at linuxgazette.net]
+
+</p>
+</b><br />
+<b>Wed, 16 Jul 2008 19:48:48 -0400</b>
+</p>
+
+<p>
+On Thu, Jul 17, 2008 at 01:16:56AM +0200, Ren&eacute; Pfeiffer wrote:
+</p>
+
+<pre>
+&gt; On Jul 16, 2008 at 1859 -0400, Ben Okopnik appeared and said:
+&gt; &gt; On Wed, Jul 16, 2008 at 11:46:06PM +0200, Ren&eacute; Pfeiffer wrote:
+&gt; &gt; &gt; [...]
+&gt; &gt; &gt; I am playing with 2.6.26, e2fsprogs 1.41 and ext4, just to see what ext4
+&gt; &gt; &gt; can do and what workloads it can handle. Do you know of any tools that
+&gt; &gt; &gt; can populate a filesystem with a random amount of files [...]
+&gt; &gt; 
+&gt; &gt; That would be a fairly easy shell script: a loop that a) creates a
+&gt; &gt; random number of files of random size, b) creates a random number of
+&gt; &gt; directories, c) dives into all the subdirectories that were created, and
+&gt; &gt; d) repeats the process.
+&gt; 
+&gt; I thought you would say something like that. <img src="../gx/smile.png" alt=":)"> 
+</pre>
+
+<p>
+You know me so well. <img src="../gx/smile.png" alt=":)">
+</p>
+
+
+<pre>
+&gt; It seems I was rather
+&gt; thinking in tools than in what one would need to do to solve this
+&gt; problem. I'll try your script tomorrow and see what it does. I am
+&gt; curious to see how long it takes for a Bash script to create the files.
+</pre>
+
+<p>
+Running it repeatedly with
+</p>
+
+<pre>
+MAXDIRS=5
+MAXDEPTH=5
+MAXFILES=100
+MAXSIZE=1000
+</pre>
+
+<p>
+gives me times ranging from 1/3 of a second (no directories created) to
+13.5 seconds. The maximum for that depth would probably still be under a
+minute. The shell isn't the fastest thing in the world, but there's not
+a whole lot of calculation going on here.
+</p>
+
+
+<pre>
+&gt; &gt; The only thing is that you would have to set some hard limits: 1) how
+&gt; &gt; deep do you want to go, 2) max number for directories and files, and
+&gt; &gt; 3) max file size. [...]
+&gt; 
+&gt; Yes, and it's wise to start with low numbers. As initial defaults 32768
+&gt; came to my mind, but 32768^2 if you use it for both max number for
+&gt; directories and files is a bit of an overkill. <img src="../gx/smile.png" alt=":)">
+</pre>
+
+<p>
+[laugh] And would take a good long while, as well - no matter what
+language you used. A tree that's 32768 directories deep, with a max of
+32768 subdirectories and the same max of files in each one would be...
+ridiculously large - 32768^32768 + 32768^32767 and so on (or something
+of that sort. It's aggravating to be this stupid at math, but you either
+use it or you lose it.) A structure that's 5 dirs deep and 10 wide would
+have a maximum of over 100k directories - 100k+10k+1k+100+10 - and
+that's before even counting the files.
+</p>
+
+
+<pre>-- 
+* Ben Okopnik * Editor-in-Chief, Linux Gazette * <a href="http://LinuxGazette.NET">http://LinuxGazette.NET</a> *
+</pre>
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_mail.html#mb-tool_to_populate_a_filesystem">Back</a><hr width="50%" align="left" /><p><br /></p><p>
+<b><p>
+Ren&eacute; Pfeiffer [lynx at luchs.at]
+
+</p>
+</b><br />
+<b>Thu, 17 Jul 2008 14:49:58 +0200</b>
+</p>
+
+<p>
+On Jul 16, 2008 at 1948 -0400, Ben Okopnik appeared and said:
+</p>
+
+<pre>
+&gt; [...]
+&gt; Running it repeatedly with
+&gt;
+&gt; MAXDIRS=5
+&gt; MAXDEPTH=5
+&gt; MAXFILES=100
+&gt; MAXSIZE=1000
+&gt;
+&gt; gives me times ranging from 1/3 of a second (no directories created) to
+&gt; 13.5 seconds. The maximum for that depth would probably still be under a
+&gt; minute. [...]
+</pre>
+
+<p>
+Sounds reasonable. I don't think I will create lots of filesystems once
+I have one for testing.
+</p>
+
+
+<pre>
+&gt; &gt; [...]
+&gt; &gt; Yes, and it's wise to start with low numbers. As initial defaults 32768
+&gt; &gt; came to my mind, but 32768^2 if you use it for both max number for
+&gt; &gt; directories and files is a bit of an overkill. <img src="../gx/smile.png" alt=":)">
+&gt;
+&gt; [laugh] And would take a good long while, as well - no matter what
+&gt; language you used. A tree that's 32768 directories deep, with a max of
+&gt; 32768 subdirectories and the same max of files in each one would be...
+&gt; ridiculously large - 32768^32768 + 32768^32767 and so on (or something
+&gt; of that sort. It's aggravating to be this stupid at math, [...]
+</pre>
+
+<p>
+No, it's not. Physicists usually assume (pi)=e=3 unless they need exacter
+results. ;)
+</p>
+
+
+<pre>
+&gt; [...] A structure that's 5 dirs deep and 10 wide would
+&gt; have a maximum of over 100k directories - 100k+10k+1k+100+10 - and
+&gt; that's before even counting the files.
+</pre>
+
+<p>
+Well, big filesystems reach this size. I just counted the content of our
+backup server that holds copies of 8 productions systems. It uses 132 GB
+out of 1.2 TB (freshly installed in May). The filesystem holds 1,419,834
+files and 88,564 directories. One of the external disks that hold
+incremental backups (realised through hard links and separate
+directories) holds even more files and directories. So it's not that rare to run
+into big filesystems, at least for backup servers. $(find . -type f |
+wc -l) takes ages (I waited for 30 minutes now and I still have no files
+count).
+</p>
+
+<p>
+It's a shame people don't delete data anymore. ;)
+</p>
+
+<p>
+Best,
+Ren&eacute;.
+</p>
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_mail.html#mb-tool_to_populate_a_filesystem">Back</a><hr width="50%" align="left" /><p><br /></p><p>
+<b><p>
+Ben Okopnik [ben at linuxgazette.net]
+
+</p>
+</b><br />
+<b>Thu, 17 Jul 2008 13:06:16 -0400</b>
+</p>
+
+<p>
+On Thu, Jul 17, 2008 at 02:49:58PM +0200, Ren&eacute; Pfeiffer wrote:
+</p>
+
+<pre>
+&gt; On Jul 16, 2008 at 1948 -0400, Ben Okopnik appeared and said:
+&gt; &gt; [...]
+&gt; &gt; Running it repeatedly with
+&gt; &gt; 
+&gt; &gt; MAXDIRS=5
+&gt; &gt; MAXDEPTH=5
+&gt; &gt; MAXFILES=100
+&gt; &gt; MAXSIZE=1000
+&gt; &gt; 
+&gt; &gt; gives me times ranging from 1/3 of a second (no directories created) to
+&gt; &gt; 13.5 seconds. The maximum for that depth would probably still be under a
+&gt; &gt; minute. [...]
+&gt; 
+&gt; Sounds reasonable. I don't think I will create lots of filesystems once
+&gt; I have one for testing.
+</pre>
+
+<p>
+Since I used 'mktemp' to create the files and the directories, you can
+run this script multiple times to give yourself even more granular
+control. It'll "back off and redo" if the directory or filename already
+exist.
+ 
+</p>
+
+<pre>
+&gt; &gt; [...] A structure that's 5 dirs deep and 10 wide would
+&gt; &gt; have a maximum of over 100k directories - 100k+10k+1k+100+10 - and
+&gt; &gt; that's before even counting the files.
+&gt; 
+&gt; Well, big filesystems reach this size. 
+</pre>
+
+<p>
+That was sorta my point, backwards. <img src="../gx/smile.png" alt=":)"> Setting 'MAXDEPTH' to much more
+than 5 will give you ridiculous runtimes and numbers.
+</p>
+
+
+<pre>
+&gt; I just counted the content of our
+&gt; backup server that holds copies of 8 productions systems. It uses 132 GB
+&gt; out of 1.2 TB (freshly installed in May). The filesystem holds 1,419,834
+&gt; files and 88,564 directories. 
+</pre>
+
+<p>
+So, maybe a MAXDEPTH=5 and MAXDIRS=11? That gives you a maximum of 177155
+or an average of 88577 directories. For files, you could do MAXFILES=32
+and MAXSIZE=200000.
+</p>
+
+
+<pre>
+&gt; One of the external disks that hold
+&gt; incremental backups (realised through hard links and separate
+&gt; directories) holds even more files and directories. So it's not that rare to run
+&gt; into big filesystems, at least for backup servers. $(find . -type f |
+&gt; wc -l) takes ages (I waited for 30 minutes now and I still have no files
+&gt; count).
+</pre>
+
+<p>
+I suspect that 'du -s' would be a lot faster.
+ 
+</p>
+
+<pre>
+&gt; It's a shame people don't delete data anymore. ;)
+</pre>
+
+<p>
+[laugh] Drive space is cheap, right? And Shakespeare's entire life's
+work fits into 5MB or so. What's the big deal?
+</p>
+
+<p>
+Yeah, we've got serious information pollution going on - and no way to
+really stop it, given the associated psychological factors. We'll just
+have to scrape along somehow... just like we've managed for the past few
+million years.
+</p>
+
+
+<pre>-- 
+* Ben Okopnik * Editor-in-Chief, Linux Gazette * <a href="http://LinuxGazette.NET">http://LinuxGazette.NET</a> *
+</pre>
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_mail.html#mb-tool_to_populate_a_filesystem">Back</a><hr width="50%" align="left" /><p><br /></p><p>
+<b><p>
+Ben Okopnik [ben at linuxgazette.net]
+
+</p>
+</b><br />
+<b>Fri, 18 Jul 2008 08:35:56 -0400</b>
+</p>
+
+<p>
+On Sat, Jul 19, 2008 at 12:42:18AM +1200, Chris Bannister wrote:
+</p>
+
+<pre>
+&gt; On Thu, Jul 17, 2008 at 01:16:56AM +0200, Ren&eacute; Pfeiffer wrote:
+&gt; &gt; On Jul 16, 2008 at 1859 -0400, Ben Okopnik appeared and said:
+&gt; &gt; &gt; On Wed, Jul 16, 2008 at 11:46:06PM +0200, Ren&eacute; Pfeiffer wrote:
+&gt; &gt; &gt; &gt; [...]
+&gt; &gt; &gt; &gt; I am playing with 2.6.26, e2fsprogs 1.41 and ext4, just to see what ext4
+&gt; &gt; &gt; &gt; can do and what workloads it can handle. Do you know of any tools that
+&gt; &gt; &gt; &gt; can populate a filesystem with a random amount of files [...]
+&gt; &gt; &gt; 
+&gt; &gt; &gt; That would be a fairly easy shell script: a loop that a) creates a
+&gt; &gt; &gt; random number of files of random size, b) creates a random number of
+&gt; &gt; &gt; directories, c) dives into all the subdirectories that were created, and
+&gt; &gt; &gt; d) repeats the process.
+&gt; &gt; 
+&gt; &gt; I thought you would say something like that. <img src="../gx/smile.png" alt=":)"> It seems I was rather
+&gt; 
+&gt; I was expecting a Perl script. <img src="../gx/smile.png" alt=":-)">
+</pre>
+
+<p>
+[laugh] I generally try to avoid driving screws with a hammer, or
+pounding nails in with a screwdriver. My rule of thumb is, "if it's got
+a lot of filesystem operations and not a lot of calculation or
+processing, it's a shell script; otherwise, it's Perl."
+</p>
+
+
+<pre>-- 
+* Ben Okopnik * Editor-in-Chief, Linux Gazette * <a href="http://LinuxGazette.NET">http://LinuxGazette.NET</a> *
+</pre>
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_mail.html#mb-tool_to_populate_a_filesystem">Back</a><hr width="50%" align="left" /><p><br /></p><p>
+<b><p>
+Chris Bannister [mockingbird at earthlight.co.nz]
+
+</p>
+</b><br />
+<b>Sat, 19 Jul 2008 00:42:18 +1200</b>
+</p>
+
+<p>
+On Thu, Jul 17, 2008 at 01:16:56AM +0200, Ren&eacute; Pfeiffer wrote:
+</p>
+
+<pre>
+&gt; On Jul 16, 2008 at 1859 -0400, Ben Okopnik appeared and said:
+&gt; &gt; On Wed, Jul 16, 2008 at 11:46:06PM +0200, Ren&eacute; Pfeiffer wrote:
+&gt; &gt; &gt; [...]
+&gt; &gt; &gt; I am playing with 2.6.26, e2fsprogs 1.41 and ext4, just to see what ext4
+&gt; &gt; &gt; can do and what workloads it can handle. Do you know of any tools that
+&gt; &gt; &gt; can populate a filesystem with a random amount of files [...]
+&gt; &gt; 
+&gt; &gt; That would be a fairly easy shell script: a loop that a) creates a
+&gt; &gt; random number of files of random size, b) creates a random number of
+&gt; &gt; directories, c) dives into all the subdirectories that were created, and
+&gt; &gt; d) repeats the process.
+&gt; 
+&gt; I thought you would say something like that. <img src="../gx/smile.png" alt=":)"> It seems I was rather
+</pre>
+
+<p>
+I was expecting a Perl script. <img src="../gx/smile.png" alt=":-)">
+</p>
+
+<pre>-- 
+Chris.
+======
+"One, with God, is always a majority, but many a martyr has been burned
+   at the stake while the votes were being counted."  -- Thomas B. Reed
+</pre>
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_mail.html#mb-tool_to_populate_a_filesystem">Back</a><hr width="50%" align="left" /><p><br /></p><p>
+<b><p>
+Ren&eacute; Pfeiffer [lynx at luchs.at]
+
+</p>
+</b><br />
+<b>Fri, 18 Jul 2008 18:15:48 +0200</b>
+</p>
+
+<pre>
+&gt; On Sat, Jul 19, 2008 at 12:42:18AM +1200, Chris Bannister wrote:
+&gt; &gt; [...]
+&gt; &gt; I was expecting a Perl script. <img src="../gx/smile.png" alt=":-)">
+&gt;
+&gt; [laugh] I generally try to avoid driving screws with a hammer, or
+&gt; pounding nails in with a screwdriver. My rule of thumb is, "if it's got
+&gt; a lot of filesystem operations and not a lot of calculation or
+&gt; processing, it's a shell script; otherwise, it's Perl."
+</pre>
+
+<p>
+What about awk? ;)
+</p>
+
+<p>
+So, now I checked your Bash script. It works and it was a wonderful
+template for getting slightly insane and coding a population tool in C++
+with a SSE2-capable Mersenne Twister PRNG linked in for some extra fast
+randomness. The latest test run already filled a NFS share used for
+temporary data. <img src="../gx/smile.png" alt=":)"> I'll polish the source, write some text glue and
+submit it for LG's "Getting Decently Distracted with Simple Problems,
+Screws and Hammers" column.
+</p>
+
+<p>
+Best,
+Ren&eacute;.
+</p>
+
+<p>
+P.S.: You might have guessed that I tried avoiding some real problems,
+such as repairing a site with PHP code that can't properly deal with=20
+Unicode strings. ;)
+</p>
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_mail.html#mb-tool_to_populate_a_filesystem">Back</a><hr width="50%" align="left" /><p><br /></p><p>
+<b><p>
+Ben Okopnik [ben at linuxgazette.net]
+
+</p>
+</b><br />
+<b>Fri, 18 Jul 2008 16:55:36 -0400</b>
+</p>
+
+<p>
+On Fri, Jul 18, 2008 at 06:15:48PM +0200, Ren&eacute; Pfeiffer wrote:
+</p>
+
+<pre>
+&gt; On Jul 18, 2008 at 0835 -0400, Ben Okopnik appeared and said:
+&gt; &gt; On Sat, Jul 19, 2008 at 12:42:18AM +1200, Chris Bannister wrote:
+&gt; &gt; &gt; [...]
+&gt; &gt; &gt; I was expecting a Perl script. <img src="../gx/smile.png" alt=":-)">
+&gt; &gt; 
+&gt; &gt; [laugh] I generally try to avoid driving screws with a hammer, or
+&gt; &gt; pounding nails in with a screwdriver. My rule of thumb is, "if it's got
+&gt; &gt; a lot of filesystem operations and not a lot of calculation or
+&gt; &gt; processing, it's a shell script; otherwise, it's Perl."
+&gt; 
+&gt; What about awk? ;)
+</pre>
+
+<p>
+There's supposed to be an actual use for that stuff??? <img src="../gx/smile.png" alt=":)">
+</p>
+
+<p>
+Yeah, I use it once in a very rare while - when I have a very specific
+and very narrow task to do (i.e., printing a 'field' on a line that
+matches a regex) and feel too lazy to type the few extra characters.
+</p>
+
+<pre>
+# Print the 3rd field in colon-delimited file 'foo' where the line
+# begins with 'X'
+awk -F: '/^X/{print $3}' foo
+perl -F: -walne'print $F[2] if /^X/' foo
+</pre>
+
+<p>
+Other than that... well, keeping backup tools in your mental toolbox is
+the Unix way. Besides, I have to teach people about the stuff.
+</p>
+
+
+<pre>
+&gt; So, now I checked your Bash script. It works and it was a wonderful
+&gt; template for getting slightly insane and coding a population tool in C++
+&gt; with a SSE2-capable Mersenne Twister PRNG linked in for some extra fast
+&gt; randomness. The latest test run already filled a NFS share used for
+&gt; temporary data. <img src="../gx/smile.png" alt=":)"> I'll polish the source, write some text glue and
+&gt; submit it for LG's "Getting Decently Distracted with Simple Problems,
+&gt; Screws and Hammers" column.
+</pre>
+
+<p>
+See, this is why I like robust tools. "...so then, I used these
+Vise-Grips to hammer on the chain coupler and broke it loose, which
+prevented the fission reaction and saved the world from a nuclear
+winter." You never know how someone is going to creatively misuse your
+code. <img src="../gx/smile.png" alt=":)">
+</p>
+
+
+<pre>
+&gt; P.S.: You might have guessed that I tried avoiding some real problems,
+&gt; such as repairing a site with PHP code that can't properly deal with 
+&gt; Unicode strings. ;)
+</pre>
+
+<p>
+PHP and Unicode strings. Isn't this like that door in the movie, with
+all the chains and warnings and skulls/crossbones on it that the "spear
+carrier" type decides to open while everybody in the audience is going
+"NO! NO! DON'T DO IT!!!"... only to hear gristly crunching and squishing
+sounds a moment later?
+</p>
+
+
+<pre>-- 
+* Ben Okopnik * Editor-in-Chief, Linux Gazette * <a href="http://LinuxGazette.NET">http://LinuxGazette.NET</a> *
+</pre>
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_mail.html#mb-tool_to_populate_a_filesystem">Back</a><hr width="50%" align="left" /><p><br /></p><p>
+<b><p>
+Ren&eacute; Pfeiffer [lynx at luchs.at]
+
+</p>
+</b><br />
+<b>Fri, 18 Jul 2008 23:18:57 +0200</b>
+</p>
+
+<pre>
+&gt; On Fri, Jul 18, 2008 at 06:15:48PM +0200, Ren&eacute; Pfeiffer wrote:
+&gt; &gt; [...]
+&gt; &gt; What about awk? ;)
+&gt;
+&gt; There's supposed to be an actual use for that stuff??? <img src="../gx/smile.png" alt=":)">
+&gt;
+&gt; Yeah, I use it once in a very rare while - when I have a very specific
+&gt; and very narrow task to do (i.e., printing a 'field' on a line that
+&gt; matches a regex) and feel too lazy to type the few extra characters.
+</pre>
+
+<p>
+That's about the only occasion when I use awk, too.
+</p>
+
+
+<pre>
+&gt; [...]
+&gt; &gt; I'll polish the source, write some text glue and
+&gt; &gt; submit it for LG's "Getting Decently Distracted with Simple Problems,
+&gt; &gt; Screws and Hammers" column.
+&gt;
+&gt; See, this is why I like robust tools. "...so then, I used these
+&gt; Vise-Grips to hammer on the chain coupler and broke it loose, which
+&gt; prevented the fission reaction and saved the world from a nuclear
+&gt; winter." You never know how someone is going to creatively misuse your
+&gt; code. <img src="../gx/smile.png" alt=":)">
+</pre>
+
+<p>
+Where's your sense of adventure?
+Do you know why engineers and no physicists run nuclear power plants?
+The physicists would only replace the circuit breakers with copper rods
+and start the experiments. <img src="../gx/smile.png" alt=":)">
+</p>
+
+
+<pre>
+&gt; [...]
+&gt; PHP and Unicode strings. Isn't this like that door in the movie, with
+&gt; all the chains and warnings and skulls/crossbones on it that the "spear
+&gt; carrier" type decides to open while everybody in the audience is going
+&gt; "NO! NO! DON'T DO IT!!!"... only to hear gristly crunching and squishing
+&gt; sounds a moment later?
+</pre>
+
+<p>
+Exactly, and after I read <a href="http://www.phpwact.org/php/i18n/utf-8">http://www.phpwact.org/php/i18n/utf-8</a> I gave
+up all hope. It's a mess. I think the PHP developers shouldn't run
+nuclear power plants either.
+</p>
+
+<p>
+Best,
+Ren&eacute;.
+</p>
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_mail.html#mb-tool_to_populate_a_filesystem">Back</a><hr width="50%" align="left" /><p><br /></p><p>
+<b><p>
+Chris Bannister [mockingbird at earthlight.co.nz]
+
+</p>
+</b><br />
+<b>Sun, 20 Jul 2008 11:22:51 +1200</b>
+</p>
+
+<p>
+On Fri, Jul 18, 2008 at 08:35:56AM -0400, Ben Okopnik wrote:
+</p>
+
+<pre>
+&gt; On Sat, Jul 19, 2008 at 12:42:18AM +1200, Chris Bannister wrote:
+&gt; &gt; On Thu, Jul 17, 2008 at 01:16:56AM +0200, Ren&eacute; Pfeiffer wrote:
+&gt; &gt; &gt; On Jul 16, 2008 at 1859 -0400, Ben Okopnik appeared and said:
+&gt; &gt; &gt; &gt; On Wed, Jul 16, 2008 at 11:46:06PM +0200, Ren&eacute; Pfeiffer wrote:
+&gt; &gt; &gt; &gt; &gt; [...]
+&gt; &gt; &gt; &gt; &gt; I am playing with 2.6.26, e2fsprogs 1.41 and ext4, just to see what ext4
+&gt; &gt; &gt; &gt; &gt; can do and what workloads it can handle. Do you know of any tools that
+&gt; &gt; &gt; &gt; &gt; can populate a filesystem with a random amount of files [...]
+&gt; &gt; &gt; &gt; 
+&gt; &gt; &gt; &gt; That would be a fairly easy shell script: a loop that a) creates a
+&gt; &gt; &gt; &gt; random number of files of random size, b) creates a random number of
+&gt; &gt; &gt; &gt; directories, c) dives into all the subdirectories that were created, and
+&gt; &gt; &gt; &gt; d) repeats the process.
+&gt; &gt; &gt; 
+&gt; &gt; &gt; I thought you would say something like that. <img src="../gx/smile.png" alt=":)"> It seems I was rather
+&gt; &gt; 
+&gt; &gt; I was expecting a Perl script. <img src="../gx/smile.png" alt=":-)">
+&gt; 
+&gt; [laugh] I generally try to avoid driving screws with a hammer, or
+&gt; pounding nails in with a screwdriver. My rule of thumb is, "if it's got
+&gt; a lot of filesystem operations and not a lot of calculation or
+&gt; processing, it's a shell script; otherwise, it's Perl."
+</pre>
+
+<p>
+Nice tip.
+</p>
+
+<p>
+I've been marvelling over:
+</p>
+
+<p>
+	<a href="http://www.stonehenge.com/merlyn/PerlJournal/">http://www.stonehenge.com/merlyn/PerlJournal/</a>
+	<a href="http://www.stonehenge.com/merlyn/UnixReview/">http://www.stonehenge.com/merlyn/UnixReview/</a>
+	<a href="http://www.stonehenge.com/merlyn/WebTechniques/">http://www.stonehenge.com/merlyn/WebTechniques/</a>
+</p>
+
+<p>
+Good reading.
+	
+<pre>-- 
+Chris.
+======
+"One, with God, is always a majority, but many a martyr has been burned
+   at the stake while the votes were being counted."  -- Thomas B. Reed
+</pre>
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_mail.html#mb-tool_to_populate_a_filesystem">Back</a><hr width="50%" align="left" /><p><br /></p><p>
+<b><p>
+Ben Okopnik [ben at linuxgazette.net]
+
+</p>
+</b><br />
+<b>Sat, 19 Jul 2008 22:13:13 -0400</b>
+</p>
+
+<p>
+On Sun, Jul 20, 2008 at 11:22:51AM +1200, Chris Bannister wrote:
+</p>
+
+<pre>
+&gt; On Fri, Jul 18, 2008 at 08:35:56AM -0400, Ben Okopnik wrote:
+&gt; &gt; 
+&gt; &gt; [laugh] I generally try to avoid driving screws with a hammer, or
+&gt; &gt; pounding nails in with a screwdriver. My rule of thumb is, "if it's got
+&gt; &gt; a lot of filesystem operations and not a lot of calculation or
+&gt; &gt; processing, it's a shell script; otherwise, it's Perl."
+&gt; 
+&gt; Nice tip.
+&gt; 
+&gt; I've been marvelling over:
+&gt; 
+&gt; 	<a href="http://www.stonehenge.com/merlyn/PerlJournal/">http://www.stonehenge.com/merlyn/PerlJournal/</a>
+&gt; 	<a href="http://www.stonehenge.com/merlyn/UnixReview/">http://www.stonehenge.com/merlyn/UnixReview/</a>
+&gt; 	<a href="http://www.stonehenge.com/merlyn/WebTechniques/">http://www.stonehenge.com/merlyn/WebTechniques/</a>
+&gt; 
+&gt; Good reading.
+</pre>
+
+<p>
+Oh, Randal is one of the amazing people in the Perl community. Nice guy,
+<em>brilliant</em> coder, excellent teacher... one of the pillars [no pun
+intended], really. I've got a whole lot of respect for the man.
+</p>
+
+
+<pre>-- 
+* Ben Okopnik * Editor-in-Chief, Linux Gazette * <a href="http://LinuxGazette.NET">http://LinuxGazette.NET</a> *
+</pre>
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_mail.html#mb-tool_to_populate_a_filesystem">Back</a><hr width="50%" align="left" /><p><br /></p></div>
+</body>
+</html>

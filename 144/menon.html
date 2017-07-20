@@ -1,0 +1,449 @@
+<!DOCTYPE html
+	PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+	 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="utf-8" xml:lang="utf-8">
+<head>
+<title>Slow Receivers in a Distributed Data Management System LG #144</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link rel="stylesheet" href="../lg.css" type="text/css" media="screen, projection"  />
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+<link rel="shortcut icon" href="../favicon.ico" />
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+</head>
+<body>
+
+<a href="../">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+<div id="navigation">
+<table summary="masthead" width="100%">
+<tr>
+<td align="center" colspan="3" style="font-size: 10px; font-weight: bold">
+<a href="../index.html">Home</a>
+<a href="http://linuxgazette.net">Main Site</a>
+<a href="../faq/index.html">FAQ</a>
+
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/mailman/listinfo/">Mailing Lists</a>
+<a href="../jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+<hr width="99%" style="border: 1px inset #000033">
+</td>
+</tr>
+<tr>
+<td width="40%" align="left" style="font-size: 10px; font-weight: bold">
+The Free International Online Linux Monthly
+</td>
+<td width="20%" align="center" style="font-size: 10px; font-weight: bold">
+ISSN: 1934-371X
+</td>
+<td width="40%" align="right" style="font-size: 10px; font-weight: bold">
+Main site: <a href="http://linuxgazette.net">http://linuxgazette.net</a> 
+</td>
+</table>
+</div>
+
+
+<div id="breadcrumbs1">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">November 2007 (#144)</a> &gt; 
+Article
+
+</div>
+
+<div class="articlecontent1">
+<div class="content">
+
+<div id="previousnexttop">
+<A HREF="john.html" >&lt;-- prev</A> | <A HREF="okopnik.html" >next --&gt;</A>
+</div>
+
+<h1>Slow Receivers in a Distributed Data Management System</h1>
+<p id="by"><b>By <a href="../authors/menon.html">Sudhir Menon</a></b></p>
+
+
+<h3>Slow receivers explained</h3>
+
+<p>
+A slow receiver is a node in the distributed system that cannot process
+incoming messages due to limited network bandwidth, CPU,  I/O,
+or a combination of these issues. In all cases, the slow receiver
+either fails to pick up data from its incoming network buffers causing
+the system to bottleneck or fails to send application or protocol level
+acknowledgements which would allow the sender to proceed.
+</p>
+
+<p>
+Slow receivers represent a performance problem in a distributed system.
+When using TCP or multicast, the presence of a slow receiver causes
+other members of the distributed system to slow down, and in extreme
+cases bring system throughput to a complete standstill.
+</p>
+
+
+<p>
+In connection-oriented protocols like TCP, the sender has to copy data
+into its kernel buffers and send it out to each receiver individually.
+The send completes only when the data has been delivered to the
+receiver's kernel socket buffers. If the receiver's socket buffers are
+full, the send blocks until the buffers become available, slowing down
+the performance of other receivers who cannot receive messages from this
+sender because the sender is blocked trying to send a message to this
+slow receiver.
+</p>
+
+<p>
+In connectionless protocols like reliable multicast, the sender sends
+the data out onto the multicast network by copying it out once onto the
+Ethernet card and then broadcasting it out on the network with the
+appropriate time-to-live parameters. The sender is not bogged down by
+receivers at the network buffer level.
+</p> 
+
+<p>
+Protocol reliability is achieved by having the sender maintain a buffer
+of sent messages and waiting to receive ACK messages from the receivers
+that they have received a particular message. The senders' buffer is the
+limiting factor when it comes to re-transmissions to receivers who
+cannot pick up data from the receiver buffers fast enough and then
+request the sender to re-transmit the lost data. Even in this case, one
+can see that senders end up spending CPU cycles and memory resources
+tending to slow receivers and thereby bogging down the system
+throughput. Slow receivers are often referred to as "crybaby" receivers
+in network parlance.
+</p>
+
+<h3>Slow Receivers and Cache Consistency</h3>
+
+<p>
+The ability to receive and process every piece of relevant data is
+critical to the functioning of a distributed cache. It is assumed that
+the messages coming in are relevant to the receiver and in order to
+maintain cache consistency, it is essential to make attempts to process
+the incoming data and provide some cache consistency guarantees to the
+consuming application.
+</p>
+
+<p>
+At the same time, this desire to receive and process every message can
+result in a system that runs at the speed of the slowest consumer -
+clearly something that most distributed applications would not want to
+tolerate.
+</p>
+
+<p>
+The solution is to define the consistency level that the cache elements
+within an application need and then provide a solution that deals with
+receiver slowdown.  However, before looking at solutions, let us consider
+the situations that result in a slow receiver.
+</p>
+
+<ul>
+<li><strong>Born slow receiver</strong><br>
+Consider a system that is comprised of 16 servers and one desktop machine,
+which needs to receive data from one or more servers. If the desktop is
+configured to be a peer, clearly its CPU will be unable to keep up with the
+flood of messages coming from the server machines. Eventually (defined as a
+couple of seconds at most in such systems), the desktop application's
+socket buffers fill up, bringing the publishing servers to a standstill,
+even though there are other consuming servers that can keep up with the
+publisher rate.
+
+<li><strong>Slow decline into slow receivership</strong><br>
+In this system, all nodes start out as equals. Activity levels on different
+nodes, however, tend to vary, and one of the nodes ends up having to deal
+with heap fragmentation issues, or garbage collection issues, or one of its
+threads start to run hot. In this type of a system, the performance drop is
+gradual and it takes a bit longer for its effects to be felt by the rest of
+the system - but the end result is the same nevertheless.
+
+<li><strong>Poorly written applications</strong><br>
+This category of slow receivers usually has two components: the component
+that picks up data from the socket buffers and hands it over for
+processing, and the component that does the actual processing. The first
+one may work just fine, but the second is unable to keep up. This type of
+slow receiver usually dies a quick death but the effects are felt later on.
+If the failed application is a server, the clients that it was processing
+quickly fail over to the other servers decreasing their throughput.
+
+<li><strong>Receiver living in a hostile neighborhood</strong><br>
+TCP applications are like well-mannered suburban drivers: making way for
+one another, going at the same speed as everyone else, and generally living
+a fair life from a network bandwidth perspective. When a multicast
+application steps into the TCP neighborhood, unless the multicast
+application is designed to have some group control rate, the network
+suddenly looks a lot like the crowded streets of big cities where fairness
+is no longer the norm. In such cases, a previously well behaved TCP
+receiver starts to look more and more like a slow receiver slowing down the
+whole system.
+</ul>
+
+
+<h3>Detecting a slow receiver</h3>
+
+<p>
+For every message that is sent from a sender to a receiver, the sender
+maintains some stats on the average time to completion. When the time to
+completion stat starts showing an upward trend and breaches a threshold,
+the sender flags that receiver as a slow one. This sort of detection works
+well in connection-oriented environments where the sender and receiver
+share a connection.
+</p>
+
+<p>
+In connectionless environments, the sender has to maintain stats on the
+number of retransmission requests made by the receiver, and when that
+crosses a certain threshold, tag the receiver as a slow receiver.
+</p>
+
+<p>
+A third class of slow receiver detection is not really detection. Instead,
+a slow receiver, upon failing to keep up with the rest of the system or
+finding excessive use of memory in its application announces itself as a
+slow receiver, allowing the rest of the system to activate policies that
+have been configured for slow receivers.
+</p>
+
+<p>
+Each member of the distributed system has stats that allow the member to
+detect that it is entering into slow receiver mode and can be configured
+with policies to deal with the situation.
+</p>
+
+<h3>Dealing with Slow Receivers</h3>
+
+<p>
+When it comes to slow receivers, there is no "one size fits all" policy
+that works (that works well anyway). The options that the system has
+once it encounters a slow receiver depend on its data consistency
+policy. What this implies is that a node has set certain data
+consistency expectations with other system members. These expectations
+play a major role in deciding how the member will be dealt with once it
+goes into slow receiver mode.
+</p>
+
+<p>
+The slow receiver can choose to drop data, fire data loss notifications
+to the application, and catch up if the problem was temporary. This
+implies that not every update coming into the system has to be processed
+in order, and that if the application needs to fetch data from the cache,
+it will be fetched from other nodes on demand.
+</p>
+
+<p>
+The slow receiver can send out a notification to other nodes stating
+that it is unable to accept any data until further notice. The remaining
+nodes would then ignore the member until they received a notice that the
+member was again open for business. Cache misses on other nodes would
+not be directed to this node, and data on the slow receiver would be
+considered suspect for the rest of the system, even though the local
+cache on the slow receiver would continue to serve the application and
+clients that it was attached to.
+</p>
+
+<p>
+The system can quarantine the slow receiver thus isolating the rest of
+the system from the ill effects of the slow receiver. The senders could
+consider, store, and forward models for updates to that slow receiver.
+Applying interleaved updates from multiple publishers would become an
+issue in a system where all publishers were equal peers. In a single
+publisher system for a given piece of information, this would work well.
+</p>
+
+<p>
+Another option is to have the notion of data ownership. This allows the
+slow receiver to apply updates from the owner of the data, without
+worrying about updates from other nodes.
+</p>
+
+<p>
+A less desirable option is for the system to do nothing and run at the
+speed of the slow receiver. If the problem is temporary, the slow receiver
+comes out of that mode and the performance of the system improves.
+</p>
+
+<p>
+Thus the options for dealing with slow receivers come down to the
+following:
+</p>
+
+<ul>
+<li>	Quarantine the slow receiver until it recovers. Store and
+forward messages to disk-based mechanisms and let the slow receiver
+continue.
+<li>	The slow receiver drops messages, catches up, and fires
+appropriate notifications to connected applications and clients.
+<li>	Alert the system administrator about the slow receiver so that
+remedial action can be initiated.
+<li>	Drop messages to slow receivers and let them continue while
+alerting the system administrators.
+</ul>
+
+
+<h3>Slow Receiver Support in an Enterprise Data Fabric (EDF)</h3>
+
+<p>
+In the previous section, we discussed a problem scenario in a distributed
+data management system. An Enterprise Data Fabric (EDF) provides mechanisms
+to detect slow receivers in a distributed system by collecting stats on
+network activities in the system; in addition, since the EDF is an active data management
+platform, it can be configured to make decisions on slow receivers in
+real-time. These decisions can be based on the applications sharing data in
+the data fabric and the need for data consistency across multiple
+applications. It can also be based on roles played by different
+applications in the data fabric and the criticality of getting data to the
+applications in the event of slow receiver behavior in the system.
+
+<!-- *** Whoops - we're getting into salesmanship territory here! ***
+ More
+importantly, an EDF can speed time to market in customer deployments and is
+easily configurable to maximize application performance when faced with a
+slow receiver in the system.  Since data sharing and event delivery in the
+data fabric are built on a highly available platform that supports
+transparent failover and recovery, customers can deal with slow receivers
+to deploy applications that are guaranteed to have Extreme Transaction
+Processing capabilities. This can be done even in the face of slowdowns
+in sections of the fabric without losing any data and allows customers to
+adapt to network vagaries in real-time while maintaining data consistency.
+ -->
+</p>
+
+<h3>Conclusion</h3>
+
+A distributed data management system is a complex entity and deploying
+one in a production environment requires careful planning and analysis.
+Since we are dealing with temporal data and data consistency, it is
+important to have a good understanding of the network environment in
+which the application operates.
+</p> 
+
+<p>
+Every distributed system needs to have policies for dealing with slow
+receivers in the system. These policies have to be crafted keeping in mind
+the load characteristics of the system, data consistency guarantees, data
+loss notifications, and the system throughput requirements. Tuning the
+network to meet system objectives including throughput and latency has to
+be a part of the overall system design when you consider deploying an
+Enterprise Data Fabric.
+</p>
+
+<p>
+Up-front capacity planning to ensure that hardware resources like
+network bandwidth, network partitioning, CPU, memory, and I/O
+characteristics of the nodes that participate in the distributed system
+will go a long way in avoiding unnecessary slowdowns and glitches in
+overall system performance. It is also important to understand the
+congestion characteristics of the network to ensure that the system as a
+whole is geared to deal with bursty traffic and temporary unavailability.
+Planning system redundancy, disk usage, and number of
+applications/instances that compete for resources on a system are factors
+that help prevent slow receiver problems and result in a smooth-running
+system.
+</p>
+
+<p>
+It is also a very good idea to ask what support your distributed data
+management vendor has in their offering to deal with slow receivers.
+When it comes to dealing with slow receivers in a distributed data
+fabric, it is a question of "when" rather than "if."
+</p>
+
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:144/menon.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/authors/menon.jpg" class="bio">
+</p>
+
+<em>
+<p>
+Sudhir Menon, Director of Engineering, GemStone Systems
+</p>
+
+<p>
+With over 17 years of cutting edge software experience with marquee
+ firms like Gemstone, Intel, EDS and CenterSpan communications, Sudhir
+ Menon is one of the key architects for the Gemfire Enterprise Data
+ Fabric. Sudhir is the Director of Engineering for GemStone Systems, Inc.
+ and works closely with various development teams (both onsite and
+ offshore) working on the Gemfire Enterprise Data Fabric. His expertise
+ in distributed data management spans multiple languages (Java, C++ and
+ .NET) and multiple platforms and he has architected and developed
+ network stacks for the last 10+ years. At Centerspan communications, he
+ was one of the key architects who built the largest secure peer to peer
+ content distribution platform over the internet.
+</p>
+
+
+
+</em>
+
+<br clear="all">
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2007, Sudhir Menon. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication License</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 144 of Linux Gazette, November 2007
+</p>
+
+</div>
+
+<div id="previousnextbottom">
+<A HREF="john.html" >&lt;-- prev</A> | <A HREF="okopnik.html" >next --&gt;</A>
+</div>
+
+</div>
+</div>
+
+<script src="http://www.google-analytics.com/urchin.js"
+type="text/javascript">
+</script>
+<script type="text/javascript">
+_uacct = "UA-1204316-1";
+urchinTracker();
+</script>
+
+
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+</body>
+</html>
+

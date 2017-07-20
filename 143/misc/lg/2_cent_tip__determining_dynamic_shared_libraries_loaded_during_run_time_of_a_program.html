@@ -1,0 +1,278 @@
+<!DOCTYPE html
+	PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+	 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en-US" xml:lang="en-US">
+<head>
+<title>2 cent tip: Determining dynamic shared libraries loaded during run-time of a program</title>
+<link rel="stylesheet" type="text/css" href="../../../lg.css" />
+<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1" />
+</head>
+<body>
+<a href="../../../"><img alt="Linux Gazette" src="../../../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" /></a><img alt="Tux" src="../../../gx/tux_86x95_indexed.png" id="tux" /><p id="fun">...making Linux just a little more fun!</p><div class='content articlecontent'><a name="top"></a><h3>2 cent tip: Determining dynamic shared libraries loaded during run-time of a program</h3>
+<p>
+<b><p>
+Mulyadi Santosa [mulyadi.santosa at gmail.com]
+</p>
+</b><br />
+<b>Wed, 15 Aug 2007 20:34:22 +0700</b>
+</p>
+
+<p>
+Good day LG readers!
+</p>
+
+<p>
+    How do you find out the library dependency of your program? Sure, 
+ldd helps but doesn't always help in every circumstances. Some programs 
+load the needed dynamic libraries with the help of dlopen() function, 
+making ldd unaware of them.  But you need to track them all, let's say 
+in order to setup a chroot jail. So, how do you detect them?
+</p>
+
+<p>
+To explain this concept, take a look on the below codes (taken from man 
+dlopen):
+</p>
+
+<p>
+#include &lt;stdio.h&gt;
+#include &lt;dlfcn.h&gt;
+</p>
+
+<p>
+int main(int argc, char **argv)
+{
+    void *handle;
+    double (*cosine) (double);
+    char *error;
+</p>
+
+<p>
+    handle = dlopen("libm.so", RTLD_LAZY);
+    if (!handle) {
+    fprintf(stderr, "%s\n", dlerror());
+    exit(1);
+    }
+</p>
+
+<p>
+    cosine = dlsym(handle, "cos");
+    if ((error = dlerror()) != NULL) {
+    fprintf(stderr, "%s\n", error);
+    exit(1);
+    }
+</p>
+
+<p>
+    printf("%f\n", (*cosine) (1.0));
+    dlclose(handle);
+    return 0;
+}
+Assume you save it as trace.c. Later you compile it with:
+$ gcc -ldl -o trace trace.c
+</p>
+
+<p>
+ldd shows you this:
+$ ldd ./trace
+        libdl.so.2 =&gt; /lib/libdl.so.2 (0x40029000)
+        libc.so.6 =&gt; /lib/tls/libc.so.6 (0x42000000)
+        /lib/ld-linux.so.2 =&gt; /lib/ld-linux.so.2 (0x40000000)
+</p>
+
+<p>
+OK, where's that libm.so? It doesn't show up. This won't be a serious 
+problem if you have its source code, but what if not? ltrace comes to 
+rescue. You just need to tell ltrace to find the occurence of dlopen():
+$ ltrace -f -e dlopen ./trace
+dlopen("libm.so", 1)
+....
+</p>
+
+<p>
+-f tells ltrace to trace its forked children, not just the parent 
+process. Now, the rest is just a matter of finding those libraries in 
+library search path i.e any paths that are mentioned in /etc/ld.so.conf 
+or LD_LIBRARY_PATH environment variable.
+</p>
+
+<p>
+reference: man dlopen
+</p>
+
+<p>
+regards,
+</p>
+
+<p>
+Mulyadi
+</p>
+
+
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_tips.html#mb-2_cent_tip__determining_dynamic_shared_libraries_loaded_during_run_time_of_a_program">Back</a><hr width="50%" align="left" /><p><br /></p><p>
+<b><p>
+Ben Okopnik [ben at linuxgazette.net]
+</p>
+</b><br />
+<b>Thu, 16 Aug 2007 12:26:06 -0400</b>
+</p>
+
+<p>
+On Wed, Aug 15, 2007 at 08:34:22PM +0700, Mulyadi Santosa wrote:
+</p>
+
+<pre>
+&gt; Good day LG readers!
+&gt; 
+&gt;    How do you find out the library dependency of your program? Sure, 
+&gt; ldd helps but doesn't always help in every circumstances. Some programs 
+&gt; load the needed dynamic libraries with the help of dlopen() function, 
+&gt; making ldd unaware of them.  But you need to track them all, let's say 
+&gt; in order to setup a chroot jail. So, how do you detect them?
+</pre>
+
+<p>
+Now that you mention it [1], I'd run something like this:
+</p>
+
+<pre>
+strace ./trace 2&gt;&amp;1| grep '^open.*[0-9]$'
+</pre>
+It shows any successful calls to 'open', in various flavors - which, of
+course, will get 'libm.so', etc. 'ldd', of course, is the only thing
+that shows a dependency on 'ld-linux-&lt;whatever&gt;'... I think I understand
+the mechanism, though (it's really an "external" dependency, not
+something that "trace" itself calls.)
+</p>
+
+
+<p>
+[1] When I build a chroot jail, I usually do something like
+</p>
+
+<p>
+<pre class="code">
+ldd /my/chroot/bin/*|awk '/lib/{print $1}'|sort -u
+</pre>
+to generate a list of all the required libraries, which I then install
+in the jail. I can't say that I've ever had a program fail to work due
+to a lib dependency problem after that (other external dependencies -
+e.g., config files, data sources, etc. - are usually the culprits.)
+</p>
+
+
+<pre>-- 
+* Ben Okopnik * Editor-in-Chief, Linux Gazette * <a href="http://LinuxGazette.NET">http://LinuxGazette.NET</a> *
+</pre>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_tips.html#mb-2_cent_tip__determining_dynamic_shared_libraries_loaded_during_run_time_of_a_program">Back</a><hr width="50%" align="left" /><p><br /></p><p>
+<b><p>
+Mulyadi Santosa [mulyadi.santosa at gmail.com]
+</p>
+</b><br />
+<b>Fri, 17 Aug 2007 00:12:24 +0700</b>
+</p>
+
+<p>
+Hi <img src="../gx/smile.png" alt=":)">
+</p>
+
+
+<pre>
+&gt; Now that you mention it [1], I'd run something like this:
+&gt;
+&gt; ``
+&gt; strace ./trace 2&gt;&amp;1| grep '^open.*[0-9]$'
+</pre>
+
+<p>
+Good point! <img src="../gx/smile.png" alt=":)"> Actually, I wanna suggest that too, but I thought
+tracking dlopen() specificly is a good way to go since it gives you
+fewer trace and AFAIK dlopen() is the only C function that loads
+dynamic library. Of course, since I am not so fluent in C/C++ world, I
+might miss something <img src="../gx/smile.png" alt=":)">
+</p>
+
+<p>
+All in all, thanks for the feedback, I really appreciate it
+</p>
+
+<p>
+NB: Writing tips is the best thing I can do so far, sorry. I'll see if
+I can write a complete article in near future.
+</p>
+
+<p>
+regards.
+</p>
+
+<p>
+Mulyadi
+</p>
+
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_tips.html#mb-2_cent_tip__determining_dynamic_shared_libraries_loaded_during_run_time_of_a_program">Back</a><hr width="50%" align="left" /><p><br /></p><p>
+<b><p>
+Ben Okopnik [ben at linuxgazette.net]
+</p>
+</b><br />
+<b>Thu, 16 Aug 2007 21:25:33 -0400</b>
+</p>
+
+<p>
+On Fri, Aug 17, 2007 at 12:12:24AM +0700, Mulyadi Santosa wrote:
+</p>
+
+<pre>
+&gt; Hi <img src="../gx/smile.png" alt=":)">
+&gt; 
+&gt; &gt; Now that you mention it [1], I'd run something like this:
+&gt; &gt;
+&gt; &gt; ``
+&gt; &gt; strace ./trace 2&gt;&amp;1| grep '^open.*[0-9]$'
+&gt; 
+&gt; Good point! <img src="../gx/smile.png" alt=":)"> Actually, I wanna suggest that too, but I thought
+&gt; tracking dlopen() specificly is a good way to go since it gives you
+&gt; fewer trace 
+</pre>
+
+<p>
+Actually, 'strace' has some very useful "macros" predefined for that;
+e.g., "strace -e trace=file &lt;foo&gt;" gives you <em>just</em> the file access
+calls (open, stat, chmod, unlink, lstat, etc.) It's pretty easy to
+select a subset.
+</p>
+
+
+<pre>
+&gt; NB: Writing tips is the best thing I can do so far, sorry. 
+</pre>
+
+<p>
+[laugh] That's not something to be sorry about - it's something to be
+proud of, since it's still a positive contribution to the Linux
+community.
+</p>
+
+
+<pre>
+&gt; I'll see if I can write a complete article in near future.
+</pre>
+
+<p>
+That would be an even bigger contribution. It's all good. <img src="../gx/smile.png" alt=":)">
+</p>
+
+
+<pre>-- 
+* Ben Okopnik * Editor-in-Chief, Linux Gazette * <a href="http://LinuxGazette.NET">http://LinuxGazette.NET</a> *
+</pre>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_tips.html#mb-2_cent_tip__determining_dynamic_shared_libraries_loaded_during_run_time_of_a_program">Back</a><hr width="50%" align="left" /><p><br /></p></div>
+</body>
+</html>

@@ -1,0 +1,347 @@
+<!--startcut ==========================================================-->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML>
+<HEAD>
+<title>SETTING UP A PPP/POP DIAL-IN SERVER LG #36</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#A000A0"
+ALINK="#FF0000">
+<!--endcut ============================================================-->
+
+<H4>
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H1><font color="maroon">Setting Up a PPP/POP Dial-in Server USING Red Hat Linux 5.1</font></H1>
+<H4>By <a href="mailto:hassan@glcom.com">Hassan Ali</a></H4>
+</center>
+<P> <HR> <P>  
+DISCLAIMER:
+<P>
+This worked for me. Your mileage may vary!
+<P>
+OBJECTIVES:<BR> 
+To install PPP and POP/IMAP services on a Red Hat Linux 5.1 server for
+dial-in users.
+<P>
+TOOLS: <BR> 
+Red Hat Linux 5.1 CDs
+<P>
+ASSUMPTIONS:<BR> 
+You have a PC with basic installation of Red Hat Linux 5.1 with
+a Linux kernel that supports IP forwarding.
+<P><HR> <P> 
+STEP 1: Install "mgetty" (if not yet installed) from Red Hat 5.1 CD #1<BR> 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+<ol>
+<li>Login as "root", insert Red Hat 5.1 CD #1 in the CD-ROM drive and
+     mount it using the command:
+<pre>
+     # mount -t iso9660 /dev/hdb /mnt/cdrom
+</pre>
+     (It is assumed that your CD-ROM drive is device /dev/hdb, if not
+     change it accordingly)
+<li>Get to the RPMS directory:
+<pre>
+     # cd /mnt/cdrom/RedHat/RPMS
+</pre>
+<li>Install "mgetty" rpm files:
+<pre>
+     # rpm -Uvh mgetty*
+</pre>
+     This will install mgetty and all its cousins, but who cares!! If you
+     hate extended family, have your way and replace "mgetty*" with
+     "mgetty-1.1.14-2.i386.rpm". 
+
+<li>At the end of /etc/mgetty+sendfax/mgetty.config file, add the
+     following set of three lines for each serial port connected to a modem
+     for dial-in users. Here is an example for /dev/ttyS1 and /dev/ttyC15:
+<pre>
+     # For US Robotics Sportster 28.8 with speaker off
+     port ttyS1
+     init-chat "" ATZ OK AT&F1M0E1Q0S0=0 OK
+     answer-chat "" ATA CONNECT \c \r
+
+     # For Practical Peripheral 14.4 with fax disabled and prolonged
+     # carrier wait time (90 sec)
+     port ttyC15
+     init-chat "" ATZ OK AT&F1M0E1Q0S0=0S7=90+FCLASS=0 OK
+     answer-chat "" ATA CONNECT \c \r
+</pre>
+Notes:
+<ol>
+   <li>AT&F1 sets hardware flow-control mode on many modems. For other
+         modems use appropriate initializations in the init-chat line.
+         <li>Just in case you wonder why I took as an example a ttyC15
+	 port; well, you may have such a port if you have a multiport
+	 serial card. If you need one, I recommend Cyclades cards.
+</ol>
+<li>In /etc/mgetty+sendfax/login.config file, search for the line that
+     starts with /AutoPPP/. Make sure that it is not commented (i.e. there
+     is no "#" at the beginning of the line), and edit it to be:
+<pre>
+     /AutoPPP/	-	a_ppp  	/etc/ppp/ppplogin
+</pre>
+     If you wish to have users' login names (rather than "a_ppp") to
+     appear in the /var/run/utmp and /var/log/wtmp log files, then the
+     above line should be:
+<pre>
+     /AutoPPP/	-	-	/etc/ppp/ppplogin
+</pre>
+<li>In /etc/inittab file, search for the section that runs "getty"
+     processes and add at the end of that section one line of the
+     following form for each modem port. Example here is given for ttyS1
+     and ttyC15.
+<pre>
+     7:2345:respawn:/sbin/mgetty -x 3 ttyS1
+     8:2345:respawn:/sbin/mgetty -x 3 ttyC15
+</pre>
+     [the first number (7,8) is arbitrary (in fact I have seen in some
+     cases "s1", "s2", etc, used instead). Just give a different number
+     for each port. And why not you go by the order!!? Me wonders!]
+
+<li> Connect the modems to the serial ports, switch them ON and then
+     initialize "mgetty" with the command:
+<pre>
+     # init q
+</pre>
+     NOTE: If you spawn "mgetty" on a serial port with no modem
+     connected to it, or the modem is not switched ON, you'll get
+     lots of error messages in "/var/log/messages" or/and in the other
+     mgetty ("/var/log/log_mg.ttyXX") log files. In fact those
+     error messages may continuosly pop up on your screen. Quite
+     annoying, eh? To avoid this annoyance, each serial port that has no 
+     modem connected to it should have its corresponding lines
+     commented out in /etc/inittab and in 
+     /etc/mgetty+sendfax/mgetty.config files.
+</ol>
+<P><HR> <P> 
+STEP 2: Install PPP (if not installed) from Red Hat 5.1 CD #1<BR> 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+<ol>
+<li> If the Red Hat CD #1 is properly mounted (see STEP 1.1), to
+     install PPP type the following command:
+<pre>
+ # rpm -Uvh /mnt/cdrom/RedHat/RPMS/ppp*
+</pre>
+<li>Edit /etc/ppp/options files to read as follows:
+<pre>
+     -detach
+     crtscts
+     netmask 255.255.255.0
+     asyncmap 0
+     modem
+     proxyarp
+</pre>
+     NOTES: 
+<ol>
+<li>Use appropriate netmask for your network. It doesn't have to
+           be 255.255.255.0, in fact in my case it was 255.255.255.224
+           <li>Read man pages for "pppd" to understand those options.
+</ol>
+<li>Edit /etc/ppp/ppplogin file (create it if it doesn't exist) to read as
+     follows:
+<pre>
+     #!/bin/sh
+     mesg n
+     stty -echo
+     /usr/sbin/pppd silent auth -chap +pap login
+</pre>
+     Make the file executable using command:
+<pre>
+     # chmod +x /etc/ppp/ppplogin
+</pre>
+     NOTE: We're going to use PAP authentication BUT using the ordinary
+           /etc/passwd password file. That's what "+pap login" means.
+
+<li> For each serial port connected to a modem, create a corresponding
+     /etc/ppp/options.ttyXX file, where "XX" is "S1" for ttyS1 port,
+     "S2" for ttyS2 port, "C15" for ttyC15, etc. In one such file put
+     the following line:
+<pre>
+     myhost:ppp01
+</pre>
+     
+     where "myhost" is the hostname of the PPP server - change it
+     accordingly to the actual hostname of your Linux box. If you're
+     more forgetful than you can REMEMBER to admit, remind yourself of
+     the hostname of your server using the "hostname" command.
+<pre>
+     # hostname
+</pre>
+     The word "ppp01" used above is just an arbitrarily chosen name for
+     the virtual host associated with one of the PPP dial-in lines and
+     its corresponding IP address as defined in /etc/hosts file (to be
+     discussed later). 
+     In another /etc/ppp/options.ttyXX file, you may wish to type in the
+     following line:
+<pre>
+     myhost:ppp02
+</pre>
+     That is, here you define a different PPP hostname, "ppp02". Use
+     a different hostname for each serial port. You can choose any names
+     that your lil' old heart desires! They don't have to be ppp01,
+     ppp02, ppp03, etc. They can be "junkie", "newbie", "noname",
+     whatever!
+
+<li>Edit /etc/ppp/pap-secrets file and add one line as shown below for
+     each IP address that is to be dynamically assigned to PPP dial-in
+     users. This, of course, assumes that you have a pool of IP
+     addresses that you can assign to your dial-in clients:
+<pre>
+     # Secrets for authentication using PAP
+     # client	server		secret		IP addresses
+     *		*		""		10.0.0.3
+     *		*		""		10.0.0.4
+</pre>
+    
+     This says: no PAP secrets (passwords) set for any client from
+     anywhere in the world with the shown IP address. We don't need to
+     use PAP secrets if we will be using /etc/passwd instead. If
+     you are REALLY not paranoid, you can have just one following line 
+     that will serve all the IP addresses (yours and your
+     neighbour's!):
+<pre>
+     # Secrets for authentication using PAP
+     # client	server		secret		IP addresses
+     *		*		""		*	
+</pre>
+<li>Make /usr/sbin/pppd program setuid "root" by using command:
+<pre>
+     # chmod u+s /usr/sbin/pppd
+</pre>
+<li>Edit /etc/hosts file to assign IP addresses to all PPP hostnames
+     you used in STEP 2.4. Use the pool of IP addresses used in STEP
+     2.5:
+<pre>
+     10.0.0.3	ppp01	ppp01.mydomain.com
+     10.0.0.4	ppp02	ppp02.mydomain.com
+</pre>
+     NOTE: Replace "mydomain.com" with the actual domain name of your PPP
+     server. Just in case you're confused, I assume your PPP server is
+     "myhost.mydomain.com".
+</ol>
+<P><HR> <P> 
+STEP 3: Install POP/IMAP servers (if not installed) from Red Hat 5.1 CD #1<BR> 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+<ol>
+<li>With the Red Hat CD #1 properly mounted, issue the following
+     command to install POP and IMAP:
+<pre>
+     # rpm -Uvh /mnt/cdrom/RedHat/RPMS/imap*
+</pre>
+<li>Check /etc/inetd.conf file to see if "pop-2", "pop-3", and "imap"
+     service lines are all uncommented. If not, uncomment them (i.e
+     remove the leading "#"). If you only want to support POP3
+     clients, just uncomment the "pop-3" line. If POP2 and POP3
+     files are not in the "imap*" RPM file, try to see if you have
+     "ipop*" RPM file and use it instead.
+
+<li>Activate the new services by using command:
+<pre>
+     # kill -HUP `cat /var/run/inetd.pid`
+</pre>
+</ol>
+<P> <HR> <P> 
+STEP 4: Enable IP fowarding <BR> 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+<ol>
+<li>If you use the already compiled Linux kernel that comes with
+     Red Hat 5.1, it does normally have support for IP forwarding. If you
+     compile your own Linux kernel, you have to enable "IP:
+     forwarding/gatewaying" networking option during compilation. 
+     
+     For RFC compliance, the default bootup process does not enable
+     IP forwarding.  Enable IP forwarding by setting it to "yes" in
+     /etc/sysconfig/network file, like so:
+<pre>
+     FORWARD_IPV4=yes
+</pre>
+<li>Activate IP forwarding by using command:
+<pre>
+     # echo "1" > /proc/net/ip_forward
+</pre>
+     or by rebooting the system.
+</ol>
+<P><HR> <P> 
+STEP 5: Test the server<BR> 
+~~~~~~~~~~~~~~~~~~~~~~~
+<ol>
+<li>First create users (if not ready). You can give them
+     "/home/username" home directory and "/bin/bash" login shell if you 
+     want them to have both "PPP" and shell access. Give them
+     "/home/username" home directory and "/etc/ppp/ppplogin" login program if
+     you want them to have PPP access but not shell access. It's better
+     to use "usercfg" tool to set-up new users.
+     Typical /etc/passwd file entries may be as follows:
+<pre>
+     jodoe:tdgsHjBn/hkg.:509:509:John Doe:/home/jodoe:/bin/bash
+     jadoe:t8j/MonJd9kxy:510:510:Jane Doe:/home/jadoe:/etc/ppp/ppplogin
+</pre>
+     In this example, John Doe will have both PPP and shell access,
+     while Jane Doe will only have PPP access. If you have just started
+     to wonder how John Doe may have PPP access, the answer lies with
+     the /AutoPPP/ configuration in "mgetty" - it does the magic. Any 
+     user that will dial in and talk PPP, mgetty will give him/her the 
+     /etc/ppp/ppplogin program. 
+ <P>     
+     So, if John Doe dials-in using Windows 95 dial-up adaptor
+     which is set up to make a PPP connection, mgetty will give John Doe
+     PPP access. If he dials in with any other communication software
+     e.g HyperTerminal, (with no PPP negotiation) he will be given the 
+     normal login shell. This will never happen for Jane Doe. She will
+     always be welcome by the "/etc/ppp/ppplogin" program. 
+ <P>     
+     In fact "mgetty" allows you to use the same modem lines for various
+     protocols. For example, your UUCP clients (if you have any) may use
+     the same modem lines as your PPP clients! Of course, you have to
+     give your UUCP clients "/var/spool/uucppublic" home directory and
+     "/usr/sbin/uucico" login program.
+
+<li>Assuming you have a web server (Apache) already setup (it's a
+     piece-a-cake to setup Apache), use a web browser, and a POP e-mail
+     client (e.g Eudora) on a remote PC connected to a modem and a phone
+     line. If it is a Windows 95/98 PC, setup the Dial-up Adaptor
+     appropriately by specifying the IP address of the PPP server as the
+     Gateway, use correct DNS IP address, and specify that the server
+     will assign an IP address automatically. In the POP client (e.g
+     Eudora), set SMTP and POP host as the IP address of the PPP/POP
+     server.
+<P>
+     Now dial-up the server and wait for connection. Test out web
+     browsing, and POP mail sending and receiving. If it doesn't work...
+     something is wrong somewhere ;-) 
+ </ol>    
+<P><HR> <P> 
+REFERENCES:
+<P>
+1. PPP-HOWTO
+2. NET-3-HOWTO
+3. "Using Linux", Bill Ball, published by Que (around 
+   US$30 - highly recommended)
+4. mgetty documentation
+<P>
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<center><H5>Copyright &copy; 1999, Hassan O. Ali <BR> 
+Published in Issue 36 of <i>Linux Gazette</i>, January 1999</H5></center>
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<A HREF="./index.html"><IMG ALIGN=BOTTOM SRC="../gx/indexnew.gif" 
+ALT="[ TABLE OF CONTENTS ]"></A>
+<A HREF="../index.html"><IMG ALIGN=BOTTOM SRC="../gx/homenew.gif"
+ALT="[ FRONT PAGE ]"></A>
+<A HREF="./merlino.html"><IMG SRC="../gx/back2.gif"
+ALT=" Back "></A>
+<A HREF="./bennetjan.html"><IMG SRC="../gx/fwd.gif" ALT=" Next "></A>
+<P> <hr> <P> 
+<!--startcut ==========================================================-->
+</BODY>
+</HTML>
+<!--endcut ============================================================-->

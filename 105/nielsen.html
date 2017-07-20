@@ -1,0 +1,596 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>White Box Linux Kickstart Tricks LG #105</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="murray.html" >&lt;-- prev</A> | <A HREF="odonovan.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>White Box Linux Kickstart Tricks</h1>
+<p id="by"><b>By <A HREF="../authors/nielsen.html">Mark Nielsen</A></b></p>
+
+<p>
+<!-- 27July2004 dsrich
+I reverted back to the original article at one point after having committed some changes,
+so there might be some wierdness if you look at diffs.
+-->
+<ol>
+  <li><a href="#Introduction">Introduction</a></li>
+  <li><a href="#Kickstart">Kickstart walk through</a></li>
+  <li><a href="#kickpost">KickPost trick</a></li>
+  <li><a href="#dhcp">DHCP Stupidity + ksappend Trick</a></li>
+  <li><a href="#cdrom">Boot installation cdrom</a> </li>
+  <li><a href="#boot">Boot prompt options</a></li>
+  <li><a href="#wget">pre and post tricks with wget</a></li>
+  <li><a href="#install">Kickstart tricks with the installer: ssh, bash, and other binaries</a> </li>
+  <li><a href="#improve">Things to improve</a></li>
+  <li><a href="#conclusion">Conclusion</a></li>
+</ol>
+
+<h3><a name="Introduction"></a>Introduction</h3>
+<strong>What is White Box?</strong> <a href="http://whiteboxlinux.org/">White Box
+Enterprise Linux</a> is just RedHat's Enterprise Server 3 recompiled from
+the source RPMs RH provides. Just for kicks, I ran a md5sum comparison
+between the RH RPMs and WhiteBox RPMs, and in almost all cases, they were
+identical. Most of the mismatches were related to trademark logos and such
+or were RPMs that WhiteBox didn't need.
+<p>
+White Box is very good for testing and developing since it doesn't
+require any licenses to use. It also should be considered for
+production use. Please consider contributing towards the White Box. 
+It is a great project!
+<p>
+<strong>What is Kickstart?</strong> A means of automating Linux installations
+and upgrades. First, you create a single configuration file which
+you put on a floppy disk. Then, you boot your computer from the floppy disk, and
+it will be configured based on the Kickstart configuration file. 
+If the configuration file is set up right, no questions or prompts are asked
+during the installation.
+<p>
+<strong>So what are the Kickstart tricks?</strong> In this article, I'm
+going to talk about the experience I've gained using Kickstart during the
+last 6 years and in the course of my work at <a
+href="http://www.nuasis.com/">Nuasis</a>
+as a Systems Administrator and Programmer.<p>
+Please read the following manual before reading the rest of this
+article.
+<ol>
+  <li><a
+ href="https://www.redhat.com/docs/manuals/linux/RHL-9-Manual/custom-guide/">
+ https://www.redhat.com/docs/manuals/linux/RHL-9-Manual/custom-guide/</a></li>
+</ol>
+
+<h3><a name="Kickstart"></a>Kickstart walk through</h3>
+To me, this is what Kickstart does:
+<ol>
+  <li>You stick in your boot floppy or boot cdrom.</li>
+  <li>It brings you to the isolinux boot prompt (similar to lilo). You
+can override various settings. 
+  </li>
+  <li>It boots from the media. 
+  </li>
+  <li>Installs a shell and the installation software from an image
+(from the media or the net).
+  </li>
+  <li>Tries to get the Kickstart file (ks.cfg), whether it is on the net or on
+your media.</li>
+  <li>Starts the installation.</li>
+</ol>
+
+<h3><a name="kickpost"></a>KickPost trick</h3>
+There is a neat trick you can do to your ks.cfg file. An undocumented
+feature which works just fine is the ability to include another ks.cfg
+file in your ks.cfg file. Put something like this
+<pre>
+%ksappend http://10.10.10.10/include_this_file.ks
+</pre>
+into your ks.cfg file. It will probably also work with another file on the
+floppy disk or cdrom (but why would you do that?).
+<p>
+
+<h3><a name="dhcp"></a>DHCP Stupidity + ksappend Trick</h3>
+By setting <code>append ip=dhcp</code>
+in the isolinux.cfg file of the boot floppy or cdrom, or by typing in
+"ip=dhcp" at
+the boot prompt, you can boot your computer from a DHCP server for
+Kickstarting
+purposes. The Kickstart process will also try to use DHCP if you try to get
+something from the net and the network settings were not specified. 
+NOTE: The ip address during Kickstart doesn't have to be the same as
+when
+the computer reboots after installation.
+<p>Besides setting up the network settings, DHCP has the capability of
+telling your computer where to get the Kickstart file. Here is the
+problem: The installation program has no way of getting a file except
+through NFS. Trying to pass a url for a the location of the file won't work.
+I hate
+NFS. I have always had problems with it. I prefer to use a web server
+for Kickstarts. </p>
+<p>There are two solutions around this:
+
+<ol>
+  <li>issue the <tt>ks=http://somewhere.com/myconfig.ks</tt> command at boot
+time or in the isolinux.cfg file located on the boot floppy or boot
+cdrom. <br>
+  </li>
+  <li>Use the kickpost command in a generic Kickstart file. <br>
+  </li>
+</ol>
+If you decide to use the kickpost command in the Kickstart file, then
+leave the ks.cfg file on your boot media as generic as possible. The
+kickpost command in the Kickstart file will download the rest of your
+Kickstart file. <p>
+Thus, the ks.cfg file located on the floppy or cdrom would look like
+this:
+<pre class="code">
+keyboard us
+lang en_US
+langsupport en_US
+network --bootproto=dhcp
+%ksappend http://10.10.10.10/include_this_file.ks
+</pre><p>
+The isolinux.cfg file would look like<br>
+<pre class="code">
+default my_default
+prompt 1
+timeout 600
+display boot.msg
+F1 boot.msg
+F2 options.msg
+F3 general.msg
+F4 param.msg
+F5 rescue.msg
+F7 snake.msg
+label my_default
+  kernel vmlinuz
+  append ip=dhcp initrd=initrd.img 
+  kssendmac ksdevice=eth0 lang=en_US
+label linux
+  kernel vmlinuz
+  append ks initrd=initrd.img
+label text
+  kernel vmlinuz
+  append initrd=initrd.img text
+label expert
+  kernel vmlinuz
+  append expert initrd=initrd.img
+label ks
+  kernel vmlinuz
+  append ks initrd=initrd.img
+label lowres
+  kernel vmlinuz
+  append initrd=initrd.img lowres</pre>
+Thus, you can get around the fact that DHCP can't send a url as the location
+of your Kickstart file. 
+Also, <tt>include_this_file.ks</tt>
+doesn't have to be a text file. It could be a script which prints out
+the correct Kickstart file based on the ip or MAC address. 
+<p>
+Another trick -- let the DHCP server be a DNS server as well. 
+<br>If your include command is something like this:
+<pre>%ksappend http://Kickstart.foo/include_this_file.ks</pre>
+Then have DHCP point to itself to be the DNS server, and it can assign
+an ip address for "Kickstart.foo" (which could be itself).
+ This enables you use an arbitrary
+server. Practically, you would probably have the dhcp, dns, and Kickstart
+services run on the same computer. 
+<p>
+
+<h3><a name="cdrom"></a>Boot installation cdrom</h3>
+If you want to create your own bootable cdrom for installation, then
+please read the link below. This eliminates the need to use floppies.
+Another nice thing to do is have your computer eject the cdrom and reboot.
+(Assuming
+your rack mount server doesn't reload your cdrom after a reboot) you start the
+Kickstart, walk away and go to lunch, come back, and your computer is
+ready to be used. If your computer loads the cdrom after a reboot, then
+you don't want to do that. <br>
+<a
+ href="https://www.redhat.com/docs/manuals/linux/RHL-9-Manual/install-guide/s1-steps-install-cdrom.html#S2-STEPS-MAKE-CD">
+https://www.redhat.com/docs/manuals/linux/RHL-9-Manual/install-guide/s1-steps-install-cdrom.html#S2-STEPS-MAKE-CD</a>
+<p>
+A sample isolinux.cfg file for the bootable cdrom would look like this:
+<br>
+<pre class="code">
+default my_default
+prompt 1
+timeout 600
+display boot.msg
+F1 boot.msg
+F2 options.msg
+F3 general.msg
+F4 param.msg
+F5 rescue.msg
+F7 snake.msg
+label my_default
+  kernel vmlinuz
+  append ks=http://10.10.10.10/Kickstart/wb.ks ip=10.10.10.100 gateway=10.10.10.1 netmask=255.255.255.0 dns=10.10.10.50 initrd=initrd.img kssendmac \
+  ksdevice=eth0 lang=en_US
+label linux
+  kernel vmlinuz
+  append ks initrd=initrd.img
+label text
+  kernel vmlinuz
+  append initrd=initrd.img text
+label expert
+  kernel vmlinuz
+  append expert initrd=initrd.img
+label ks
+  kernel vmlinuz
+  append ks initrd=initrd.img
+label lowres
+  kernel vmlinuz
+  append initrd=initrd.img lowres</pre>
+<br>
+Now how do you eject the cdrom at the end of the installation?
+Put <tt>reboot</tt> as an option in your ks.cfg file if your computer doesn't
+reload the cdrom after a reboot. 
+Otherwise, put this at the end of the post section in your <tt>ks.cfg</tt> file. 
+It will basically try to eject every IDE device. If it is a hard drive,
+who cares, but if is a cdrom, it works.
+If there is an easy way to do it with a normal command in Kickstart, I
+missed it.
+<pre class="code">
+mkdir /mnt/hda
+mkdir /mnt/hdb
+mkdir /mnt/hdc
+mkdir /mnt/hdd
+mknod /dev/hda b 3 0
+mknod /dev/hdb b 3 64
+mknod /dev/hdc b 22 0
+mknod /dev/hdd b 22 64
+echo '/dev/hda /mnt/hda iso9660,ro 0 0
+/dev/hdb /mnt/hdb iso9660,ro 0 0
+/dev/hdc /mnt/hdc iso9660,ro 0 0
+/dev/hdd /mnt/hdd iso9660,ro 0 0' &gt;&gt; /etc/fstab
+/mnt/sysimage/usr/bin/eject /dev/hda
+/mnt/sysimage/usr/bin/eject /dev/hdb
+/mnt/sysimage/usr/bin/eject /dev/hdc
+/mnt/sysimage/usr/bin/eject /dev/hdd</pre>
+
+<h3><a name="boot"></a>Boot prompt options</h3>
+Read these two docs. <br>
+<ol>
+  <li><a
+ href="https://www.redhat.com/docs/manuals/linux/RHL-9-Manual/install-guide/ch-bootopts.html">https://www.redhat.com/docs/manuals/linux/RHL-9-Manual/install-guide/ch-bootopts.html</a></li>
+  <li><a
+ href="http://docs.rage.net/system/anaconda-9.0/command-line.txt">http://docs.rage.net/system/anaconda-9.0/command-line.txt</a></li>
+</ol>
+Whether you boot from a floppy disk or a cdrom, these two docs are very
+useful. Basically, what you want to do is customize the isolinux.cfg
+file located on the floppy disk or cdrom. For example, you can put in
+the ip address, netmask, dns, gateway, and even the location of the
+Kickstart file on the net. This can be very useful if you Kickstart a
+computer over and over again and you don't have or want dhcp. You can
+override these options at boot time. One idea is to create a generic boot
+cdrom, and then at the boot prompt
+ type in the ip address you want to use (if you
+don't have a DHCP server).<p>
+Here is a useful trick given the configuration below. The "wb.ks" file
+on the web server doesn't have to be a text file. If can actually be a
+script which detects the ip address or MAC address of the computer
+being Kickstarted and print out the appropriate Kickstart file. Thus,
+the url for the Kickstart file will stay the same, but the network
+settings might change. This is useful if you don't have a DHCP server.
+For Perl, look at the %ENV hash and for Python, look at the os.environ
+dictionary, to get the ip address or the MAC address. 
+You can also pass arguments in the url if you know what you are doing
+ (for example, pass the host name, and then the perl or python script
+can determine which Kickstart file to use if it doesn't recognize your
+ip address or MAC address).
+<p>
+A sample isolinux.cfg file for the bootable cdrom would look like this:
+<br>
+<pre class="code">
+default my_default
+prompt 1
+timeout 600
+display boot.msg
+F1 boot.msg
+F2 options.msg
+F3 general.msg
+F4 param.msg
+F5 rescue.msg
+F7 snake.msg
+label my_default
+  kernel vmlinuz
+  append ks=http://10.10.10.10/Kickstart/wb.ks ip=10.10.10.100 gateway=10.10.10.1 netmask=255.255.255.0 dns=10.10.10.50 initrd=initrd.img kssendmac \
+  ksdevice=eth0 lang=en_US
+label linux
+  kernel vmlinuz
+  append ks initrd=initrd.img
+label text
+  kernel vmlinuz
+  append initrd=initrd.img text
+label expert
+  kernel vmlinuz
+  append expert initrd=initrd.img
+label ks
+  kernel vmlinuz
+  append ks initrd=initrd.img
+label lowres
+  kernel vmlinuz
+  append initrd=initrd.img lowres</pre>
+<br>
+
+<h3><a name="wget"></a>pre and post tricks with wget</h3>
+"wget" is a program which is available during installation time. It can
+download files over the net. Why is this program useful during
+Kickstart? In your ks.cfg file, you can use it to download files and
+put it on your computer. Why is this useful? Well, if you can only
+install an rpm after the computer has booted, then you can at least
+download it during installation time. Then, if you are smart
+enough, you can use a firstboot script to install the rpm the first
+time the computer comes up. <p>
+An example in the ks.cfg file would be:<br>
+<pre>%post
+wget -q -O /mnt/sysimage/usr/src/local/sompackage.rpm http://myserver.local/sompackage.rpm</pre>
+
+<h3><a name="install"></a>Kickstart tricks with the installer:
+ssh,
+bash, and other binaries</h3>
+Here is an advanced trick which you should only do if you are good at
+Linux in general. You can basically install any piece of software into
+your installation program. For example, you can install ssh and ssh to
+a computer somewhere to you read your email while the computer is being
+Kickstarted. Sometimes, I am trapped in our Network Operations Center at work, and I am bored
+watching a Kickstart process, so I use ssh to connect to one of my
+computers to do something useful. <p>
+Below, I am going to show you how to install any binary file. You have
+to be careful about how much space you use up. First off, the
+installation program uses an image to get a lot of the binaries it uses
+during installation. An example image is 
+<a href="ftp://mirror.physics.ncsu.edu/pub/whitebox/3.0/en/os/i386/RedHat/base/netstg2.img">
+ftp://mirror.physics.ncsu.edu/pub/whitebox/3.0/en/os/i386/RedHat/base/netstg2.img</a><p>
+Now, what you do is modify this image. Here is an example script:<br>
+
+<pre class="code">
+
+### in case you run this script twice
+mkdir -p mnt
+umount mnt
+rm -rf new_image
+rm -f netstg2.img
+
+  ## Get and mount the old image
+wget -q -O netstg2_orig.img ftp://mirror.physics.ncsu.edu/pub/whitebox/3.0/en/os/i386/RedHat/base/netstg2.img
+mkdir -p mnt
+mount -o loop netstg2_orig.img mnt
+  ## Make the new image directory
+mkdir -p new_image
+
+  ## rsync the old image to the new image
+rsync -a mnt/* new_image/
+ 
+  ## rsync a bunch of other stuff over
+rsync -a /usr/sbin/ssh* new_image/usr/sbin/
+rsync -a /usr/bin/ssh* new_image/usr/bin/
+rsync -a /usr/bin/rsync* new_image/usr/bin/
+rsync -a /usr/bin/nmap* new_image/usr/bin/
+rsync -a /usr/bin/scp* new_image/usr/bin/
+rsync -a /bin/bash new_image/usr/bin/
+
+  ## Make a dependency list -- very crude
+ldd /usr/sbin/sshd | cut -d ' ' -f3 | cut -d '.' -f1 &gt; List.dep
+ldd /usr/bin/ssh | cut -d ' ' -f3 | cut -d '.' -f1 &gt;&gt; List.dep
+ldd /usr/bin/nmap | cut -d ' ' -f3 | cut -d '.' -f1 &gt;&gt; List.dep
+ldd /bin/bash | cut -d ' ' -f3 | cut -d '.' -f1 &gt;&gt; List.dep
+ldd /usr/bin/rsync | cut -d ' ' -f3 | cut -d '.' -f1 &gt;&gt; List.dep
+ldd /usr/bin/scp | cut -d ' ' -f3 | cut -d '.' -f1 &gt;&gt; List.dep
+ldd /usr/bin/screen | cut -d ' ' -f3 | cut -d '.' -f1 &gt;&gt; List.dep
+
+  ### execute the perl script to copy over the libraries
+chmod 755 Copy_Lib.pl
+./Copy_Lib.pl
+
+  ### Make your image. 
+mkcramfs --verbose new_image netstg2.img
+
+  ### replace netstg2.img on the Kickstart server or cdrom 
+  ### with the new one you just created.
+</pre>
+<p>
+Here is the Copy_Lib.pl script:
+<pre class="code">
+#!/usr/bin/perl
+
+open(FILE,&quot;List.dep&quot;);
+my @Lines = &lt;FILE&gt;;
+close FILE;
+(@Lines) = grep($_ =~ /[a-zA-Z0-9]/, @Lines);
+
+my $Home = &quot;new_image&quot;;
+foreach my $Line (@Lines) {
+    chomp $Line;
+    my $Reverse = reverse $Line;
+    my (@Temp) = split(/\//, $Reverse, 2);
+    my $Dir = reverse($Temp[1]);
+    print `mkdir -vp $Home/$Dir`;
+    $Command = &quot;rsync -av --ignore-existing $Line* $Home/$Dir/&quot; ;
+    $Command2 = &quot;rsync -av --copy-links --ignore-existing $Line* $Home/$Dir/&quot;;
+    print &quot;$Command\n&quot;;
+    print `$Command`;
+    print &quot;$Command2\n&quot;;
+    print `$Command2`;
+}
+</pre>
+<p>
+I had trouble changing the default shell to bash during the Kickstart. 
+So, in the <tt>%pre</tt> section of the ks.cfg file, I entered this command:
+<pre>cp /usr/bin/bash /</pre>
+then when I clicked on Alt-F2 during installation time, I executed the
+command:
+<pre>./bash</pre>
+and I got a good bash shell. 
+<p>
+
+Here is another interesting tidbit, you can also install a service. For
+example, I tried to get sshd running during a Kickstart. I copied over
+all the libraries, created a shadow password file, modified
+/etc/passwd, and actually got sshd to run at Kickstart time
+automatically. However, when I tried to connect to the computer being
+Kickstarted, it would crash sshd running on that computer. Crashing
+sshd didn't affect the Kickstart process. It wasn't important enough
+for me to get it working, so I gave up.<p>If I actually could get
+to work, I could watch the Kickstart process from my desktop.
+ I think running an Apache web server should be fine.
+I could setup the web server
+with a few python scripts. Those scripts would report on the health of
+the Kickstart process. That would be cool. Python already exists in the
+Kickstart program. <br>
+
+
+<h3><a name="improve"></a>Things to improve</h3>
+There are only two things in Kickstart which upset me, and either I can
+live without. <br>
+<ol>
+  <li>You can't send a host name request to the DHCP server (you
+would have to change the boot options of your install media to do this
+if it were possible). The only thing the DHCP server can do is match
+your computer by its MAC address. With the normal dhclient program
+(after you have installed Linux) you can make a host name request, but
+not during Kickstart (maybe we should copy over the dhclient
+software onto the netstg2.img file and execute dhclient in the
+%pre section of the ks file?). If you know how to setup the
+dhcp server, it can return the correct fixed ip address even without
+knowing the MAC address. It is beyond the scope of this article to
+explain how to do that. <br>
+  </li>
+  <li>DHCP only lets you get the Kickstart file from an NFS server.
+This is not a problem with DHCP but with the Kickstart process.
+It should be able to return a url and the installer
+should be able to detect the url and download  the ks file. It looks
+like it should be very easy to edit the source code of Anaconda to make
+it do just that. I briefly looked at the source code and everything is
+there to download files from a web or ftp server, so it is just a
+matter of someone doing it.</li>
+</ol>
+My complaints above actually affect my work. Because DHCP relied
+heavily on the MAC address, and we couldn't get MAC addresses ahead of
+time, we ended up not using DHCP for one solution. That was
+unfortunate. <br>
+<h3><a name="conclusion"></a>Conclusion</h3>
+Overall, I have been pleased with Kickstarting computers. It has proven to 
+be a very powerful tool. 
+<p>
+I pretty much have no future plans with Kickstart except to contribute
+to the <A href="http://linux.duke.edu/projects/yum/">Yum</a>
+ project by making a Yum server capable of making Kickstart configurations
+ and managing Yum repositories. My dream is to replace
+RH satellite servers with Yum servers.
+I would of course use the Python
+programming language to do this, as it is my favorite programming language
+and Yum is already written in Python (yeah!). 
+
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<P>
+<img ALIGN="LEFT" ALT="[BIO]" SRC="../gx/2002/note.png" class="bio">
+<em>
+Mark Nielsen was enjoying his work at cnet.com as a MySQL DBA, but
+is moving to Google as a MySQL DBA.   
+During his spare time, he uses Python heavily for mathematical and web
+projects.
+</em>
+<br CLEAR="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2004, Mark Nielsen. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 105 of Linux Gazette, August 2004
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="murray.html" >&lt;-- prev</A> | <A HREF="odonovan.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">August 2004 (#105)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

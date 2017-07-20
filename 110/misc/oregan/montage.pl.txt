@@ -1,0 +1,141 @@
+use Flickr::API;
+use XML::Parser::Lite::Tree::XPath;
+use Getopt::Long;
+use Data::Dumper;
+use Image::Magick;
+use LWP::Simple;
+
+use warnings;
+use strict;
+
+# Getopt vars. All arguments with default values.
+# You probably want to set this a bit lower
+my $count = 24;
+my $theuser = "http://flickr.com/photos/jimregan";
+my $type = 'photos';
+my $email = '';
+my $pass = '';
+
+my $xpath;
+
+my $result = GetOptions ("user=s"     => \$theuser,
+		         "type=s"     => \$type,
+		         "count=i"    => \$count,
+			 "password=s" => \$pass,
+			 "email=s"    => \$email);
+
+# For some reason Image::Magick doesn't read the 
+# last image on the list. <shrug>
+$count++;
+
+my $api = new Flickr::API({'key' => ''});
+my $response;
+
+my $debug = 1;
+
+my $user = finduser ($theuser);
+
+if ($type eq 'photos')
+{
+	$response = $api->execute_method ('flickr.people.getPublicPhotos', {
+					  'user_id'  => $user,
+					  'per_page' => $count,
+					  'page'     => 1});
+}
+elsif ($type eq 'favourites'||$type eq 'favorites')
+{
+	$response = $api->execute_method ('flickr.favorites.getList', {
+					  'user_id'  => $user,
+					  'per_page' => $count,
+					  'email'    => $email,
+					  'password' => $pass,
+					  'page'     => 1});
+}
+elsif ($type eq 'contacts')
+{
+	$response = $api->execute_method ('flickr.photos.getContactsPhotos', {
+					  'count'    => $count,
+					  'email'    => $email,
+					  'password' => $pass,});
+}
+else
+{
+	die "--type must be 'photos', 'contacts' or 'favo[u]rites'\n";
+}
+
+if ($response->{success} == 0)
+{
+	die "Error $response->{error_code}: $response->{error_message}"
+	    . "\nDid you remember to pass --email and --password?\n";
+}
+
+my $photolist = new XML::Parser::Lite::Tree::XPath($response->{tree});
+my @bphoto = $photolist->select_nodes('/photos/photo');
+my ($photo, $photofile, @photofiles);
+
+# Set up the image for our montage
+my $image=Image::Magick->new;
+
+foreach (@bphoto)
+{
+	$photo = "http://photos" 
+	       . $_->{attributes}->{server} 
+	       . ".flickr.com/"
+	       . $_->{attributes}->{id} . "_"
+	       . $_->{attributes}->{secret} . ".jpg";
+	$photofile = "tmp-$_->{attributes}->{id}.jpg";
+	push @photofiles, $photofile;
+	open (FILE, ">$photofile");
+	my $g = get($photo);
+	print FILE $g;
+}
+
+foreach (@photofiles)
+{
+	$image->Read($_);
+}
+
+if ($debug)
+{
+	warn "$image\n" if "$image";
+	print 0+$image;
+	print "\n";
+}
+
+print Dumper ($image);
+
+my $montage = $image->Montage;
+$montage->Write ('output.jpg');
+
+foreach (@photofiles)
+{
+	unlink $_;
+}
+
+sub finduser
+{
+	my $fuser = shift;
+	my ($xpath, @username, $userid);
+	if ($fuser =~ m!http://!i)
+	{
+		$response = $api->execute_method ('flickr.urls.lookupUser', {
+						  'url' => $fuser,
+					     	  });
+
+		$xpath = new XML::Parser::Lite::Tree::XPath($response->{tree});
+		@username = $xpath->select_nodes('/user');
+		$userid = $username[0]->{attributes}->{id};
+	}
+	else			         
+	{
+		$response = $api->execute_method ('flickr.people.findByUsername', {
+						  'username' => $fuser,
+						  });
+
+		$xpath = new XML::Parser::Lite::Tree::XPath($response->{tree});
+		@username = $xpath->select_nodes('/user');
+		$userid = $username[0]->{attributes}->{nsid};
+	}
+
+	return $userid;
+}

@@ -1,0 +1,210 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>A Linux Client for the Brother Internet Print Protocol LG #68</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<CENTER>
+<A HREF="http://www.linuxgazette.net/">
+<IMG ALT="LINUX GAZETTE" SRC="../gx/lglogo.png" 
+	WIDTH="600" HEIGHT="124" border="0"></A> 
+<BR>
+
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="ghosh.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../faq/index.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="mitchell.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+<P>
+</CENTER>
+
+<!--endcut ============================================================-->
+
+<H4 ALIGN="center">
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H1><font color="maroon">A Linux Client for the Brother Internet Print Protocol</font></H1>
+<H4>By <a href="mailto:grahjenk@au1.ibm.com">Graham Jenkins</a></H4>
+</center>
+<P> <HR> <P>  
+
+<!-- END header -->
+
+
+
+
+<h2>The Brother Internet Print Protocol</h2>
+
+<p>A recent article <a href="../issue65/jenkins.html">
+Internet Printing--Another Way</a> described a printing protocol which
+can be used with some 
+<a href="http://www.brother.com">Brother</a> printers. It enables users
+of Windows machines to send a multi-part base-64 encoded print file via
+email directly to a Brother print server.</p>
+
+<p>The article went on to show how the functionality of the Brother print
+server can be implemented in simple Perl program which periodically polls
+a POP3 server to check for jobs whose parts have all arrived. When such a
+job is detected, its parts are downloaded in sequence and decoded for
+printing.</p>
+
+<h2>A Linux Client</h2>
+
+<p>The Perl program mentioned above has been in use at my place for a few
+months, and has made it a lot easier for me to print Word and other
+Microsoft-format documents to a remote printer. But it hasn't made life
+any easier for those at my place who use Linux workstations.</p>
+
+<p>A brief search on the Brother website failed to reveal a Linux client,
+so it was decided that I should develop one. The result is described
+hereunder.</p>
+
+<h2>Implementation</h2>
+
+<p>Conventional wisdom probably dictates that a program which breaks a binary
+input stream into chunks for feeding into a decoder in sequence - should be
+implemented in Perl, or perhaps in C. In fact, the common Bourne shell and
+its derivatives have all the necessary capabilities when used with a couple
+of general Unix/Linux tools like 'split' and 'wc'.</p>
+
+<h2>Program Walk-Through</h2>
+
+<p>As shown in the listing
+(<a href="misc/jenkins/BIPclient.sh.txt">text version</a>),
+the program starts by checking that it has been
+called with two arguments; a usage message is printed if this is not the
+case.  It then defines a function which will be called later to print
+a header on each part as it is sent. In particular, this function will
+include an address for notification, a part number, a part count, and
+a job identifier.</p>
+
+<p>The program body begins by generating an email address for the originator,
+together with a timestamp. These are concatenated and used to generate a
+name for a scratch directory. A trap is set to remove any directory having
+that name in the event of error, and an attempt is made to create the scratch
+directory.</p>
+
+<p>The Unix/Linux 'split' utility is then used to split the program input
+into parts whose size is given by the first program argument.  Each of these
+is fed into a base-64 encoder and mailer (with appropriate pre-amble) to
+the address given by the second program argument.</p>
+
+<p>The program ends by removing the scratch directory and returning 
+an exit status.</p>
+
+<pre>
+#!/bin/sh
+# BIPclient.sh  Brother Internet Print client program. Breaks incoming stream
+#               into parts of designated size, then does base-64 encoding of
+#               each part and emails it with appropriate preamble etc. to
+#               designated email address.  Graham Jenkins, IBM GSA, June 2001.
+
+[ $# -ne 2 ] &amp;&amp; echo "Usage: `basename $0` kb-per-part destination"&gt;&amp;2 &amp;&amp;
+  echo " e.g.: man a2ps | a2ps -o - | `basename $0` 16 lp3@acme.com"&gt;&amp;2&amp;&amp; exit 2
+
+do_header () {                                  # Function to print header
+cat &lt;&lt;EOF
+START-BROBROBRO-START
+BRO-SERVICE=ZYXWVUTSRQ980
+BRO-NOTIFY=Always
+BRO-REPLY=$Me
+BRO-PARTIAL=$Part/$Total
+BRO-UID=$Me$Now
+STOP-BROBROBRO-STOP
+
+Content-Type: application/octet-stream; name="PrintJob.PRN"
+Content-Transfer-Encoding: base64
+
+EOF
+}
+
+Me=`whoami`@`hostname`
+[ -n "`domainname`" ] &amp;&amp; [ "`domainname`" != "(none)" ] &amp;&amp; Me=$Me.`domainname`
+Now=`date '+%Y%m%d%H%M%S'`                      # Generate email address,
+Dir=/tmp/`basename $0`.$Me$Now                  # timestamp and directory name
+trap 'rm -rf $Dir;echo Oops&gt;&amp;2;exit 1' 1 2 3 15 # Set cleanup trap
+
+mkdir $Dir                      || exit 1       # Create directory
+split -b ${1}k - $Dir/          || exit 1       # Generate parts
+Total=`ls $Dir|wc -w |tr -d ' '`|| exit 1       # Count parts
+
+Part=0
+for File in `ls $Dir/*` ; do                    # Encode and send parts
+  Part=`expr 1 + $Part`
+  [ -t 2 ] &amp;&amp; echo "Sending part: $Part/"$Total"  to: $2 .. $Now" &gt;&amp;2
+  ( do_header
+    base64 $File                                # Use mmencode or base64
+    echo ) | Mail -s "Brother Internet Print Job" $2 
+done
+
+rm -rf $Dir                                     # Cleanup and exit
+exit 0
+</pre>
+
+<h2>Limitations</h2>
+
+<p>In the interests of simplicity, the 'do_header' function shown in
+the listing leaves out some of the header lines which
+are generated by the Windows client programs,
+and uses a dummy value for 'BRO-SERVICE'. In consequence, it may not
+work satisfactorily with a genuine Brother print server. If any readers
+have such a device, I would be interested in their feedback.<p>
+
+<p>The 'unique' message identifier can actually be duplicated if a user
+submits two jobs within the same one-second period; this is a limitation of
+the Brother identifier format. An alternative identifier format which inserts
+a process number before the user's email address could be used if required.</p>
+
+<p>And finally, the creation of a scratch directory to hold what is
+effectively a duplicate of the raw print file - may be seen as a problem
+if the client machine has a limited amount of temporary file-space. The
+issue here is that we really have to take a copy of the raw print file
+as it arrives so that we can generate a "total-parts" figure for
+inclusion in the header of each mailed component.</P>
+
+<p>It is possible (using Perl or 'dd') to generate and mail parts on the
+fly, without using any temporary files - provided that the server program
+is modified slightly so as not to require a "total-parts" figure in
+the header of each part. I will be happy to send details to anyone who
+would like to do it this way.</p>
+
+
+
+
+
+<!-- *** BEGIN bio *** -->
+<SPACER TYPE="vertical" SIZE="30">
+<P> 
+<H4><IMG ALIGN=BOTTOM ALT="" SRC="../gx/note.gif">Graham Jenkins</H4>
+<CITE>Graham is a Unix Specialist at IBM Global Services, Australia. He lives
+in Melbourne and has
+built and managed many flavors of proprietary and open systems on several
+hardware platforms.</CITE>
+
+<!-- *** END bio *** -->
+
+<!-- *** BEGIN copyright *** -->
+<P> <hr> <!-- P --> 
+<H5 ALIGN=center>
+
+Copyright &copy; 2001, Graham Jenkins.<BR>
+Copying license <A HREF="../copying.html">http://www.linuxgazette.net/copying.html</A><BR> 
+Published in Issue 68 of <i>Linux Gazette</i>, July 2001</H5>
+<!-- *** END copyright *** -->
+
+<!--startcut ==========================================================-->
+<HR><P>
+<CENTER>
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="ghosh.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../faq/index.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="mitchell.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+</CENTER>
+</BODY></HTML>
+<!--endcut ============================================================-->

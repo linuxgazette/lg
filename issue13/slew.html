@@ -1,0 +1,221 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML>
+<HEAD>
+<title>SLEW: Space Low Early Warning Issue 13</title>
+</HEAD>
+<BODY >
+
+<H4>
+&quot;Linux Gazette...<I>making Linux just a little more fun!</I>
+&quot;</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H2>SLEW: Space Low Early Warning</H2>
+<H4>By James T. Dennis
+<a href="mailto:jim@starshine.org">jim@starshine.org</a></H4>
+</center>
+<P> <HR> <P>  
+
+<p>One of the worst things you can do to your linux or other
+Unix-like system is to allow any of the filesystems to get full.
+
+<p>System performance and stability will suffer noticeable degradation
+when you pass about 95% and programs will begin failing and dying
+at %100 percent.  Processes that are run as 'root' (like sendmail
+and syslog) will actually fill their filesystem past 100% since the
+kernel will allocate some of the reserved space for them.
+
+<p>(Yes, you read that right -- when you format  a file system a 
+bit of space is reserved for root's exclusive use -- read the 
+mke2fs, e2fsck, tune2fs for more on that).
+
+<p>Considering the importance of this issue you might think that our
+sophisticated distributions would come with a pre-configured way
+to warn you long before there was a real problem.  
+
+<p>Sadly this is one of those things that is "too easy" to bother
+with.  Any professional Unix developer, system administrator
+or consultant would estimate a total time for writing, installing
+and testing such an application at about 15 minutes (I took my 
+time and spent an hour on it).  
+
+<p>Here's the script:
+
+<pre>
+
+	#! /bin/bash
+		## SLEW: Space Low Early Warning
+		## 	by James T. Dennis, 
+		##	Starshine Technical Services
+		##	
+		## Warns if any filesystem in df's output
+		## is over a certain percentage full --
+		## mails a short report -- listing just 
+		## "full" filesystem.
+		## Additions can be made to specify
+		## *which* host is affected for 
+		## admins that manage multiple hosts
+
+	adminmail="root"
+		## who to mail the report to
+
+
+	threshold=${1:?"Specify a numeric argument"}
+		## a percentage -- *just the digits*
+
+	# first catch the output in a variable
+	fsstat=`/bin/df`
+
+	echo "$fsstat" \
+		| gawk '$5 + 0 > '$threshold' {exit 1}'  \
+	   || echo "$fsstat" \
+		| { echo -e "\n\n\t Warning: some of your" \
+			"filesystems are almost full \n\n" ;
+			gawk  '$5 + 0 > '${threshold}' + 0 { print $NF, $5, $4 }' } \
+		| /bin/mail -s "SLEW Alert" $adminmail
+
+	exit
+
+
+</pre>
+That's twelve lines of code and a mess of comments
+(counting each of the "continued" lines as a separate line).
+
+<p>Here's my crontab entry:
+
+<pre>
+	## jtd: antares /etc/crontab
+	## SLEW: Space Low Early Warning
+	## 	Warn me of any filesystems that fill past 90%
+	30 1 * * * nobody /root/bin/slew 90
+</pre>
+
+<p>Note that the only parameter is a 1 to 3 digit percentage.
+slew will silently fail (ignore without error) any parameter(s)
+that don't "look like" numbers to gawk.
+
+<p>Here's some typical output from the 'df' command:
+
+<pre>
+Filesystem         1024-blocks  Used Available Capacity Mounted on
+/dev/sda5              96136   25684    65488     28%   /
+/dev/sda6              32695      93    30914      0%   /tmp
+/dev/sda10            485747  353709   106951     77%   /usr
+/dev/sda7              48563   39150     6905     85%   /var
+/dev/sda8              96152    1886    89301      2%   /var/log
+/dev/sda9             254736  218333    23246     90%   /var/spool
+/dev/sdb5             510443  229519   254557     47%   /usr/local
+</pre>
+
+<p>Note that I will be getting a message from slew tomorrow if
+my news expire doesn't clean off some space on /var/spool.  The 
+rest of my filesystems are fine.
+
+<p>Obviously you can set the cron job to run more or less often
+and at any time you like -- this script takes almost no time
+memory or resources.
+
+<p>The message generated can be easily modified -- just 
+add more "continuation" lines after the 'echo -e' command
+like:
+
+<pre>
+
+	   || echo "$fsstat" \
+		| { echo -e "\n\n\t Warning: some of your" \
+			"filesystems are almost full \n\n" \
+			"You should add your custom text here.\n"\
+			"Don't forget to move the ';' semicolon "\
+			"and don't put whitespace\n" \
+			"after the backslash at the ends of these lines\n\n";
+
+</pre>
+Note how the first echo feeds into the grouping (enclosed by the 
+braces) so that the contents of $fsstat are appended after the message.
+This is a trick that might not work under other shells.
+
+<p>Also, if you plan on writing similar shell scripts,  note that the double 
+quotes around the variable names (like "$fsstat") preserve the linefeeds in
+their values.  If you leave the quotes out your text will look ugly.
+
+<p>The obvious limitation to this script is that you can only specify one
+threshold value for all of the file systems.  While it would be possible
+(and probably quite easy) to do this some other way -- it  doesn't matter to 
+90% of us.  I suspect that almost anyone who does install this script will set
+the threshold to 85, 90 or 95 and forget about it.
+
+<p>One could also extend this script to do some groping (using various 
+complex find commands) to list things like: 
+
+<ul>
+
+<li>	Who is the biggest disk hog (which user is taking up all the space
+	and what are his or her largest files)?
+
+<p>
+<li>	What are the oldest, least accessed files on that filesystem? 
+	
+<p>	This last question could be answered using something like 
+<pre>
+	
+		'find -xdev -printf "%A@" | sort -n | head' --
+
+</pre>
+	which reads something like "find all the links on this filesystem
+	and print time that they were last access (expressed as seconds
+	since 1970) and their filenames; sort that and just give me a 
+	few of the ones from the top of the sorted list."  As you can 
+	see, find commands can get very complex very quickly.
+
+</ul>
+
+<p>I chose to keep this script very simple and will develope specific scripts
+to suggest file migrations and deletions as needed.
+
+<p>As you can see it is possible to do quite a bit in Linux/Unix using
+high level tools and very terse commands.  Certainly the hardest part
+of writing a script like this is figuring out minor details about quoting
+and syntax (when to enclose blocks in braces or parentheses) and in
+determining how to massage the text that's flowing through your pipes.
+
+<p>The first time I wrote slew was while standing in a bookstore a couple of
+years ago.  A woman near me was perusing Unix books in my favorite section 
+of the store and I asked if I could help her find something in particular.  
+She described the problem as it was presented to her in a job interview.
+I suggested a 'df | grep && df | mail' type of approach and later, at 
+home, fleshed it in and got it working.
+
+<p>Over the years I lost the original (which was a one-liner) and eventually
+had one of the systems I was working with hiccup.  That made me re-write
+this.  I've left it on all of my systems ever since.
+
+<p>I'd like to encourage anyone who developes or maintains a distribution
+(Linux, FreeBSD, or whatever) to add this or something like it to the 
+default configuration on your systems.  Naturally it is free for any use
+(it's too trivial to copyright in my personal opinion; so, that there is 
+no doubt, I hereby place SLEW (comments and code) into the public domain).
+
+
+<P> <hr> <P> 
+<center><H5>Copyright &copy; 1997, James T. Dennis, Starshine Technical 
+Services<BR> 
+Published in Issue 13 of the Linux Gazette</H5></center>
+
+
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<A HREF="./index.html"><IMG ALIGN=BOTTOM SRC="../gx/indexnew.gif" 
+ALT="[ TABLE OF CONTENTS ]"></A>
+<A HREF="../index.html"><IMG ALIGN=BOTTOM SRC="../gx/homenew.gif"
+ALT="[ FRONT PAGE ]"></A>
+<A HREF="./tmark.html"><IMG SRC="../gx/back2.gif"
+ALT=" Back "></A>
+<A HREF="./lg_backpage13.html"><IMG SRC="../gx/fwd.gif" ALT=" Next "></A>
+<P> <hr> <P> 
+</BODY>
+</HTML>
+

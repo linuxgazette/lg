@@ -1,0 +1,261 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.0 Transitional//EN">
+<HTML><HEAD><TITLE>Automatic Firewall Hardening with Linux and 
+      IPTABLES</TITLE>
+<META content="text/html; charset=windows-1252" http-equiv=Content-Type>
+<META content="Microsoft FrontPage 4.0" name=GENERATOR></HEAD>
+<BODY>
+      <P><b><font size="5">Automatic Firewall Hardening with Linux and 
+      IPTABLES</font></b></P>
+      <P>Written by Vasoo Veerapen (<A 
+      href="mailto:dive_mauritius@hotmail.com">dive_mauritius@hotmail.com</A>)&nbsp;&nbsp;<BR>Version 1.1,&nbsp;modified on the
+      20th of January 2002.<br>
+      The original documents can always be found at <A 
+      href="http://www.islandsoft.net/harden.html">http://www.islandsoft.net/veerapen.html
+      </A></P>
+      <P><i><b>Please note that any content within this document is Copyrighted material at all times. Any reproduction, modification, or use of this document
+      and/or contents from the islandsoft.net domain, in part or entirety, is prohibited&nbsp;
+      unless explicit permission is obtained from the author.&nbsp;</b></i></P>
+      <P>The objective of this document is to show you how you can automatically harden your IPTABLES based firewall in
+      real-time which is a technique used by commercial firewalls to prevent
+      invalid packets from reaching protected networks. The content has been
+      tested against Linux Mandrake 8.0 with Kernel 2.4.3 and IPTABLES 1.2.1a.&nbsp;Mandrake
+claim their distribution to be Red Hat compliant so the content in this article should be fully Red Hat
+compatible.&nbsp;<u>I don't have any experience whatsoever with other distros</u>,
+      but then, I live on the island of Mauritius which is a hell of a journey
+      from civilisation, and all of us here are scantily clad Zulu
+      warriors :-) For more info about Mauritius <a href="http://www.islandsoft.net" target="_blank">click
+      here</a>.&nbsp;</P>
+      <P>There are many books available on Linux Security. I like these ones.
+</P>
+      <P><a HREF="http://www.amazon.com/exec/obidos/ASIN/0130281875/scubadivingtheis" target="_blank">Real
+      World Linux Security (Intrusion, Prevention, Detection and Recovery)</a><br>
+      <a HREF="http://www.amazon.com/exec/obidos/ASIN/0072127732/scubadivingtheis" target="_blank">Hacking Linux Exposed</a>
+ </P>
+      <P>Usually IPTABLES only logs messages via the SYSLOGD mechanism. Logs by themselves are fine for basic security but do not address advanced
+      security issues. For advanced security you need to make your
+      system run&nbsp;custom scripts as soon as illegal operations are logged by&nbsp;the
+      firewall. Depending on the severity of the violations, you can program
+      these scripts to perform various actions such
+      as paging network admins or blocking offending IP addresses. All too often,
+      firewall logs are checked once daily, or utilities such as
+LOGCHECK are used in scheduled CRON jobs to inform network admins of anything 
+      abnormal. By the time the logs are verified, the damage
+      to your system is already 
+      done.</P>
+      <P>Linux SYSLOGD incorporates a neat feature which allows SYSLOGD to send
+      the messages it receives to user defined pipes which can pass the message
+      in turn to a script of your choice. The message flow is outlined
+      below.&nbsp;</P>
+      <P>IPTABLES &gt; SYSLOGD &gt; named pipe &gt; custom script</P>
+      <P>&nbsp;In the following exercise, I will show you
+      how to add a DROP command to
+IPTABLES in order to block offending IP addresses in real-time as soon as a FIN scan is
+      detected.&nbsp; You could of course
+      program&nbsp; your scripts to do a multitude of other things as well.&nbsp;</P>
+      <P>You can get the entire tarball for this exercise <a href="http://www.islandsoft.net/veerapen.tar.gz">here</a>.</P>
+<P><b><u>Requirements for this exercise:</u></b></P>
+      <P>Machine X (192.168.0.1)<br>
+      Needs IPTABLES, SYSLOGD enabled, the C shell(csh) and Apache. This is the
+      machine that we will be tinkering with and where you will need to install
+      the demo scripts.</P>
+<P>Machine Y (192.168.0.2)<br>
+Install
+      NMAP on Machine Y</P>
+      <P>This is what we will be doing:</P>
+      <P>(1) Create a firewall script using IPTABLES<BR>(2) Create a named 
+      pipe.<BR>(3) Create a firewall hardening script.<BR>(4) Convey data from 
+      the named pipe to the firewall hardening script.<BR>(5) Tell SYSLOGD to 
+      echo messages to the named pipe.<BR>(6) Send SIGHUP to syslogd.<BR>(7) Use 
+      NMAP to generate SYN/FIN scans</P>
+      <P><b><font size="3">(1) <u>Create a Firewall Script using IPTABLES</u></font></b></P>
+      <P>I have included the demo IPTABLES script as a <a href="http://www.islandsoft.net/iptables.sh.txt" target="_blank">text
+      version</a> for you to download. Make the script executable and run it. Don't
+      forget to be logged in as root.</P>
+      <P><i>chmod 750 script_name<br>
+      ./script_name</i></P>
+      <pre>      
+<i>
+#!/bin/sh
+#
+# Automatic Firewall Hardening
+# by Vasoo Veerapen (dive_mauritius@hotmail.com)
+# http://www.islandsoft.net/veerapen.html
+#
+# Please note that this script is Copyrighted material at all times.
+# Any reproduction, modification or use of this document and/or its contents, 
+# in part or entirety, is prohibited unless permission is obtained from the author.
+#
+# Maybe you are interested in scuba diving, marine conservation or my
+# homeland, the paradise island of Mauritius where the Dodo used to live?
+# Its simply
+# http://www.islandsoft.net
+#
+# Revised on 1st of December 2001
+#
+# ----------------------------------------------------------------------
+#
+# This is a very basic IPTABLES script which checks for TCP scans with
+# only the FIN bit set. FIN never occurs on its own and is an indication
+# that someone is probably scanning your firewall and up to no good.
+#
+# If a scan is detected, it gets logged and the firewall is hardened
+# against the offending IP address. This is a base for much more
+# complex operations such as intrusion detection, paging  network
+# admins, etc.
+#
+# The hardening is performed via syslogd which echoes messages
+# to a named pipe rather than the screen. The named pipe then conveys
+# data from syslogd to a hardening script of your choice.
+#
+# -----------------------------------------------------------------------
+#
+# Q: How do I generate SYN/FIN scans?
+# A: Get NMAP at http://www.insecure.org/nmap
+#
+# Q: How do I create a named pipe?
+# A: mknod /path/named_pipe p
+#    chmod 600 /path/named_pipe
+#
+# Q: How do I tell syslogd to send data to the named pipe?
+# A: Edit /etc/syslog.conf
+#    Look for an entry starting like
+#	*.info;mail.none;authpriv.none
+#    Change the line to look like
+#	*.info;mail.none;authpriv.none |/path/named_pipe
+#
+#	Replace the space between .none and | with a TAB!
+#
+# Q: How do I convey data from the named pipe to my script.
+# A: (/path/my_script &lt; /path/named_pipe)&amp;
+#    Then send kill -1 to syslogd.
+#
+#	Unless you want to type in this command every time you restart your
+#	system I suggest that it be issued on system startup.
+#	I use Red Hat/Mandrake, so in my case I put it into /etc/rc.d/rc.local
+
+IPT=&quot;/sbin/iptables&quot;
+
+INT_IF=&quot;eth0&quot;
+
+LOG_LEVEL=&quot;notice&quot;
+
+$IPT -F INPUT
+$IPT -F OUTPUT
+$IPT -F FORWARD
+
+$IPT -P INPUT ACCEPT
+$IPT -P OUTPUT ACCEPT
+$IPT -P FORWARD DROP
+
+#*******************************************************************************
+#FILTER_FLAGS
+#*******************************************************************************
+echo Entering FILTER_FLAGS
+$IPT -N FILTER_FLAGS
+$IPT -F FILTER_FLAGS
+##----------------------------------------------------------------------------##
+$IPT -A FILTER_FLAGS -p tcp --tcp-flags ALL FIN -m limit \
+	--limit 5/minute -j LOG --log-level $LOG_LEVEL \
+	--log-prefix &quot;*SCAN*&quot;
+$IPT -A FILTER_FLAGS -p tcp --tcp-flags ALL FIN -j DROP
+
+##----------------------------------------------------------------------------##
+echo Leaving FILTER_FLAGS
+
+#*******************************************************************************
+# BANNED
+#*******************************************************************************
+echo Entering BANNED
+$IPT -N BANNED
+$IPT -F BANNED
+##----------------------------------------------------------------------------##
+# Leave blank
+##----------------------------------------------------------------------------##
+echo Leaving BANNED
+
+	$IPT -A INPUT -j BANNED
+	$IPT -A INPUT -j FILTER_FLAGS
+
+	$IPT -A OUTPUT -j BANNED
+	$IPT -A OUTPUT -j FILTER_FLAGS
+
+#------------- End firewall script
+</i>      </pre>
+      
+      
+      
+      <P><b>(2) <u> Create a Named Pipe</u></b> </P>
+      <P>This creates a FIFO buffer which can store information coming from
+      syslogd.</P>
+      <P><i>mknod /path/my_pipe p<BR>chmod 600 /path/my_pipe</i></P>
+      <P>You could also use the <i> mkfifo</i> command. For more information, man is
+      your friend.</P>
+      <P><b>(3) <u> Create a Firewall Hardening 
+      Script</u></b></P>
+      <P>This script analyses the messages sent from SYSLOGD. If the messages 
+      contain the *SCAN* string, they&nbsp;get processed and the appropriate action 
+      is taken. I have included the demo script as a <a href="http://www.islandsoft.net/scan.csh.txt" target="_blank">text
+      version</a> for you to download.</P>
+      <pre>
+<i>
+#!/bin/csh -f
+#
+# Please note that this script is Copyrighted material at all times.
+# Any reproduction, modification or use of this document and/or its contents, 
+# in part or entirety, is prohibited unless permission is obtained from the author.
+#
+loop:
+set x=&quot;$&lt;&quot;
+
+echo &quot;$x&quot; | grep -q '*SCAN*'
+if ($status == 0 ) then
+	set banned_ip=`echo &quot;$x&quot; | sed &quot;s/.*SRC=\([^ ]*\) .*/\1/&quot;`
+	echo &quot;# IP address $banned_ip was terminated.&quot;
+	/sbin/iptables -A BANNED -s $banned_ip -j DROP
+	/sbin/iptables -A BANNED -d $banned_ip -j DROP
+endif
+
+goto loop
+#-----End shell script
+</i>      </pre>
+      
+      
+      <P><b>(4) <u> Convey Data from the Named Pipe to Script</u></b></P>
+      <P>At the command line, type in the following</P>
+      <P><i>(/path/my_script &lt; /path/my_pipe)&amp;</i></P>
+      <P>Unless you want to type in this command every time you restart your 
+      system I suggest that it be issued on system startup. In my case I placed
+      the above line into /etc/rc.d/rc.local</P>
+      <P><b>(5) <u> Tell syslogd to echo messages to the named 
+      pipe.</u></b><BR></P>
+      <P>Backup and edit /etc/syslog.conf<BR>Look for an entry starting 
+      like&nbsp;<BR><i>*.info;mail.none;authpriv.none</i></P>
+      <P><BR>If you can't/can find the line then add/change the line to look 
+      like&nbsp;<BR><i>*.info;mail.none;authpriv.none |/path/my_pipe</i>&nbsp; <BR></P>
+      <P>Remember the following points:<BR>Make sure that you <u> do not use spaces</u> 
+      between authpriv.none and the pipe sign | Always use TAB. <BR><u>Do not leave spaces</u> 
+      between the pipe sign | and /path/my_pipe. They must be side by side
+      without any spaces between them.</P>
+      <P><b>(6) <u> Send SIGHUP to syslogd</u></b></P>
+      <P>Run ps -ax to find the pid of SYSLOGD. Issue a kill -1 to SYSLOGD</P>
+      <P>kill -1 [pid of syslogd]</P>
+      <P><b>(7) <u> Use NMAP to send SYN/FIN scans</u></b></P>
+      <P>I have Apache (httpd) running on machine X (192.168.0.1)&nbsp;and I 
+      have installed my state-of-the-art IPTABLES firewall&nbsp;without 
+      forgetting my extremely intelligent C shell script.</P>
+      <P>On Machine Y (192.168.0.2) I open my favorite web browser.</P>
+      <P>On Y, I type in <A href="http://192.168.0.1/">http://192.168.0.1/</A> 
+      and get my&nbsp;default Apache page. Nothing abnormal here. Now trying something 
+      slightly more evil, I go to the command line and type</P>
+      <P><i>nmap -sF -p 80 192.168.0.1</i></P>
+      <P>Taking a look at the screen on Machine X, I see</P>
+      <P>IP Address 192.168.0.2 was terminated.</P>
+      <P>Issue the command iptables -L on Machine X to verify if this is indeed the 
+      case.</P>
+      <P>Now try to get access to <a href="http://192.168.0.1">http://192.168.0.1</a>
+      from Machine Y</P>
+      <hr>
+      <P><i><b>Please note that any content within this document is Copyrighted material at all times. Any reproduction, modification, or use of this document
+      and/or contents from the islandsoft.net domain, in part or entirety,      is prohibited&nbsp; unless
+      explicit permission is obtained from the author. </b></i> </P>
+</BODY></HTML>

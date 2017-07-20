@@ -1,0 +1,204 @@
+#!/usr/bin/perl
+
+#### This perl script is copyrighted by Mark Nielsen, 5-2000. 
+#### This script falls under the GNU License. 
+
+#### This is a horrible perl script that requires you to have RedHat 5.1 and rsync. 
+#### It is only the first version of better versions to come. 
+
+
+my $Home = "/home/CDROM";
+my $Image_Dir = "$Home/Boot_Mount";
+my $Speed = 4;
+my $Dev = "0,0,0";
+my $Blank = "blank=fast";
+my $Make_Boot = 1;
+
+#--------------------
+if (!(-d $Home)) {system "mkdir -p $Home"}
+if (!(-d $Floppy_Mount)) {system "mkdir -p $Floppy_Mount"}
+
+my $Command = "";
+
+system "clear";
+
+print <<TEXT;
+Welcome to version Alpha 0.1 of MILAS. 
+MILAS stands for MILAS Installs Linux And Stuff. 
+It has these purposes,
+1. To Create a bootable cdrom. 
+2. To install a bruned image of a Linux installation (with or without other
+     operating system images) onto computers using a cdrom, hard drive,
+    or over the network. In addition, to post-configure the burned
+    image. 
+
+Option 1 is the only current option right now. 
+Option 2 is crudely done, and is not supported. 
+In addition, we want to convert MILAS from Perl to Python, create
+a PythonTk interface, and also to create a web interface (for employees
+to use over the network). 
+
+Send email to zing\@tcu-inc.com for comments, suggestions, or if you want
+to help. 
+
+Press enter to continue.
+TEXT
+$R = <STDIN>;
+system "clear";
+
+##### Now making boot image for Floppy disk. 
+
+#### At this point, we need a floppy disk. 
+#### Do a "mkbootdisk `uname -r`" and then 
+#### mount the floppy disk, change /etc/lilo.conf, 
+#### we still have a lilo boot problem. 
+#### We need to mount the floppy disk and redo lilo so that it boots
+#### off the the cdrom and not the floppy drive.  
+
+print "We need to make a bootdisk. If you type in \"yes\", we will go 
+ahead and make a bootdisk, modify the bootdisk, and then make an image 
+of it for our cdrom so that the cdrom is bootable.
+You should have a pre-configured lilo.conf file at 
+$Home/Extra/etc/lilo.conf
+>";
+my $Lilo = <STDIN>;
+if ($Lilo =~ /y/) {$Lilo = 1} else {$Lilo = 0;} 
+
+if ($Lilo == 1) 
+  {
+  print "Making /mnt/floppy2\n";
+  $Command = "mkdir -p /mnt/floppy2";
+  print "$Command\n";  system "$Command";
+
+  print "Unmounting /dev/fd0 or the floppy drive.\n";
+  $Command = "umount /dev/fd0 /mnt/floppy2";
+  print "$Command\n";  system "$Command";
+ 
+  print "Formatting the floppy disk on /dev/fd0.\n";
+  $Command = "mkfs -t ext2 /dev/fd0";
+  print "$Command\n";  system "$Command";
+  system "mkbootdisk `uname -r`";
+  system "mkdir -p /mnt/floppy2";
+  print "Mounting the floppy drive for modifications.\n";
+  $Command = "mount /dev/fd0 /mnt/floppy2";
+  print "$Command\n";  system "$Command";
+
+  print "Copying over lilo.conf.\n";
+  $Command = "cp $Home/Extra/etc/lilo.conf $Image_Dir/etc/lilo.conf";
+  print "$Command\n";  system "$Command";
+  $Command = "cp $Home/Extra/etc/lilo.conf /mnt/floppy2/etc/lilo.conf";
+  print "$Command\n";  system "$Command";
+
+  my @Hd = ("hda1","hda2","hda3","hda4","hda","hdb","hdc","hdd","sda","sda1","sda2");
+  foreach my $Number (@Hd) {system "rsync -av /dev/$Number /mnt/floppy2/dev/";}
+  print "Rsyncing soem /dev files over.\n";
+#  $Command = "rsync -a /dev/hd  /mnt/floppy/dev/";
+#  print "$Command\n";  system "$Command";
+ 
+
+  print "Executing lilo on the floppy drive.\n";
+  $Command = "lilo -r /mnt/floppy2/";
+  print "$Command\n";  system "$Command";
+
+  print "Making Floppy boot image to $Home/Extra/Boot.img\n";
+  $Command = "umount /mnt/floppy2";
+  print "$Command\n";  system "$Command";
+  $Command = "dd if=/dev/fd0 of=$Home/Extra/Boot.img";
+  print "$Command\n";  system "$Command";
+
+  print "\n\nPRESS ENTER TO CONTINUE. DONE MAKING FLOPPY IMAGE.\n>";
+  $R = <STDIN>;
+  }
+
+### Now rsync over critical stuff to our directory
+### Add configuration files, like the ability to use ramdisk for /tmp
+## Make custom changes for the system to use the cdrom for the main part
+### and /usr and possibly /usr/local should be mounted from the hard drive
+### and /tmp from ramdisk, also mount /home
+
+#These directories need to be blank
+# home proc tmp  root  usr opt
+foreach my $Dir ("home","proc","tmp","root","usr","opt","misc")
+  {system "mkdir -p $Image_Dir/$Dir";}
+system "chmod 777 $Image_Dir/tmp";
+system "chmod +t $Image_Dir/tmp";
+
+# These directories need to be rsycned
+# dev  mnt  sbin var  bin  lib  boot   
+foreach my $Dir ("dev","mnt","sbin","bin","lib","boot","usr/bin","usr/sbin")
+  {
+  print "\nRsyncing /$Dir to $Image_Dir/$Dir\n";
+  system "mkdir -p $Image_Dir/$Dir";
+  system "rsync -av /$Dir/ $Image_Dir/$Dir/";
+  }
+
+## These directories need to be rsynced once, 
+## and then change for cusotmizations. Make a file, and if the file exists
+## in /etc, do not rsync. 
+
+my $File = "$Image_Dir/etc/RSYNCED";
+if (-e $File) {print "\netc already rsynced. make your changes.\n";}
+else 
+  {
+  print "Rsyncing /etc.\n";
+  system "rsync -av /etc $Image_Dir";
+  system "echo \"\" >> $File";
+  }
+
+my $File = "$Image_Dir/var/RSYNCED";
+#if (-e $File) {print "\nvar already rsynced. make your changes.\n";}
+#else
+#  {
+#  print "Rsyncing /var\n";
+#  system "rsync -av /var $Image_Dir";
+#  system "echo \"\" >> $File";
+#  }
+
+#### Now do some post configuration stuff
+  ### Make a MILAS directory to back things up into or to keep stuff
+$Command = "mkdir -p $Image_Dir/MILAS/Backups";
+system "$Command";
+
+if (!(-l "$Image_Dir/var"))
+  {
+  $Command = "mv $Image_Dir/var $Image_Dir/MILAS/Backups";
+  system "$Command";
+  $Command = "cd $Image_Dir; ln -s tmp/var var";
+  system "$Command";
+  }
+
+if (!(-l "$Image_Dir/etc/mtab")) 
+  {
+  $Command = "cd $Image_Dir/etc; ln -s ../tmp/etc/mtab mtab";
+  system "$Command";
+  $Command = "cd $Image_Dir/etc; ln -s ../tmp/etc/mtab~ mtab~";
+  system "$Command";
+  }
+
+#### Copy over any configuration files you want to change
+
+print "Copying over specific files from $Home/Extra.\n"; 
+$Command = "rsync -av $Home/Extra/* $Image_Dir";
+print "$Command\n"; system "$Command";
+
+### Now make a cdrom image
+
+### copy this script just for the heck of it.
+system "cp $Home/Milas-0_1.pl $Image_Dir";
+
+### Make a mkisofs image
+my $Boot = " -b Boot.img ";
+if ($Make_Boot < 1) {$Boot = "";}
+$Command = "cd $Home ; mkisofs -aJlL  -r $Boot -o $Home/CDROM.img $Image_Dir ";
+print "$Command\n"; 
+system "$Command\n";
+
+
+### Now use cdrecord to burn it onto the cdrom
+
+print "Now making the cdrom. Make sure you have a blank cdrom in it.
+Press enter to continue. Hope it works!\n>";
+$R = <STDIN>;
+my $Command = "cdrecord -v speed=$Speed dev=$Dev -data $Home/CDROM.img $Blank";
+print "$Command\n";
+system "$Command\n";

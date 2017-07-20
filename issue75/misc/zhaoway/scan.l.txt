@@ -1,0 +1,112 @@
+/* $Id: scan.l.txt,v 1.1.1.1 2002/08/14 22:28:26 dan Exp $ -*-C-*- */
+
+%{
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+  
+#define NUM_TYPES 4
+enum key_type {
+  TITLE = 0, DESCRIPTION = 1, KEYWORDS = 2, HERE = 3, BIG_NaN = 99999999
+} current_key;
+
+char *keys[NUM_TYPES];
+int flag_lex = 0;
+int flag_key = 0;
+
+%}
+
+%%
+
+\<lex {
+  if (flag_lex == 0) flag_lex = 1;
+  else
+    {
+      fprintf(stderr, "scan: error: ill format\n");
+      exit(EXIT_FAILURE);
+    }
+}
+
+\/> {
+  if (flag_lex == 1) flag_lex = 0;
+  else ECHO;
+}
+
+[a-z]+= {
+  if (flag_lex == 1 && flag_key == 0)
+    {
+      flag_key = 1;
+    
+      if (! strcmp(yytext, "title=")) current_key = TITLE;
+      else if (! strcmp(yytext, "description=")) current_key = DESCRIPTION;
+      else if (! strcmp(yytext, "keywords=")) current_key = KEYWORDS;
+      else if (! strcmp(yytext, "here=")) current_key = HERE;
+      else current_key = BIG_NaN;
+    }
+  else ECHO;
+}
+
+\"header\" {
+  if (flag_lex == 1 && flag_key == 1 && current_key == HERE)
+    {
+      fprintf(yyout,
+	      "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+	      "<!DOCTYPE html\n"
+	      "     PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\"\n"
+	      "     \"DTD/xhtml1-transitional.dtd\">\n"
+	      "<html xmlns=\"http://www.w3.org/1999/xhtml\" xml:lang=\"en\" lang=\"en\">\n"
+	      "<head>\n<title>{zhaoway} %s</title>\n"
+	      "<meta http-equiv=\"Content-Type\" content=\"text/html; charset=utf-8\"/>\n"
+	      "<meta name=\"description\" content=%s/>\n"
+	      "<meta name=\"keywords\" content=%s/>\n"
+	      "<link rel=\"stylesheet\" href=\"style.css\" type=\"text/css\"/>\n"
+	      "</head>\n<body>\n"
+	      "<script type=\"text/javascript\" src=\"header.js\" charset=\"utf-8\">\n"
+	      "</script>\n",
+	      keys[TITLE], keys[DESCRIPTION], keys[KEYWORDS]
+	      );
+      flag_key = 0;
+    }
+  else ECHO;
+}
+
+\"footer\" {
+  if (flag_lex == 1 && flag_key == 1 && current_key == HERE)
+    {
+      fprintf(yyout,
+	      "<script type=\"text/javascript\" src=\"footer.js\" charset=\"utf-8\">\n"
+	      "</script></body></html>\n"
+	      );
+      flag_key = 0;
+    }
+  else ECHO;
+}
+
+\"[^\"]*\" {
+  int len;
+
+  if (flag_lex != 1) ECHO;
+  else if (flag_key != 1)
+    {
+      fprintf(stderr, "scan: error: ill format\n");
+      exit(EXIT_FAILURE);
+    }
+  else if (current_key != BIG_NaN)
+    {
+      len = strlen(yytext) + 1;
+      keys[current_key] = (char *) malloc(len);
+      if (keys[current_key] == NULL) exit(EXIT_FAILURE);
+      memcpy(keys[current_key], yytext, len);
+    }
+  flag_key = 0;      
+}
+
+%%
+
+int main(void)
+{
+  current_key = BIG_NaN;
+  yylex();
+  return(0);
+}

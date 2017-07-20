@@ -1,0 +1,527 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Poor Man's Laptop: Richer Features LG #133</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+<a href="../">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="luana.html" >&lt;-- prev</A> | <A HREF="saha.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Poor Man's Laptop: Richer Features</h1>
+<p id="by"><b>By <A HREF="../authors/renker.html">Gerrit Renker</A></b></p>
+
+
+<p>The <a href="../132/renker.html">first part of this article</a>
+introduced the basic idea of using an inexpensive USB stick instead of a
+laptop for home/work demands. This part turns the bare-bones script (a
+glorified wrapper around <tt>tar</tt>) into a robust, conveniently usable
+day-to-day solution.</p>
+
+<img src="misc/renker/help_screen.png" border="0" alt="help screen" align="right">
+
+<p>One of the main drawbacks of the basic version is that one has to 
+explicitly state the maximum age of files (<tt>--days x</tt> option),
+and this is the first thing that can/will go wrong - especially when
+synchronising only once in a while. Imagine taking your last batch of
+files home, going on vacation and then coming back after some weeks. The
+question then is '<em>When was it I last synced my files from work ... 3
+days or ... wait a minute ... could be 5 ... better make it 7?</em>'
+This is tedious, therefore a <em>timestamping mechanism</em>
+is implemented.</p>
+
+<p>The <em>second aspect</em> that complicates usage is that directories
+can be synchronised as they grow, but not as they shrink - and this
+is again tedious to keep track of. A simple script to automate this
+process is presented.</p>
+
+<p>The remainder of this article contains brief discussions of further
+add-ons. These can be used as-is, but the intention is rather to
+illustrate that a usable solution requires neither expensive hardware
+nor complicated programs.</p>
+
+<div class="pullquotes">
+<a name="pullquote_133_renker_1"></a>
+<table border="2">
+<tr>
+<td align="left" bgcolor="#bd3a3a">
+<sup>Category: File synchronisation</sup>
+<br />
+<strong>
+Imagine taking your last batch of files home, going on vacation and then coming back after some weeks. The question then is 'When was it I last synced my files from work ... 3 days or ... wait a minute ... could be 5 ... better make it 7?'
+</strong>
+</td>
+</tr>
+</table>
+</div>
+
+
+		<h2>A More Usable Script</h2> 
+
+<p>To recap the last part, the <a href="misc/renker/pack.pl.txt">main
+script</a> uses a <a href="misc/renker/pack.list-example.txt">configuration file</a>, <tt>$config</tt>, which
+stores (tagged) names of directories or files that are to be
+tracked.  A good idea is to put it in a fixed location
+(e.g., <tt>/etc/pack.list</tt>), and allow all USB stick users write
+access to that file. Then, it is possible to simply add a new directory,
+in the following manner:</p>
+
+<pre class="code">
+pwd &gt;&gt; /etc/pack.list
+</pre>
+
+<p>To resolve the question '<em>But how do I keep my configuration files
+themselves synchronised?</em>', a second level of configurability is
+implemented in form of the <tt>essential()</tt> routine. It provides
+robustness against overwriting by tracking a few selected, important
+files - among these <tt>$config</tt> itself:</p>
+
+<pre class="code">
+sub essential {
+  open( ESSENTIAL, "&gt;$tmpconf") || die "can't store essential files in $tmpconf: $!\n";
+  print ESSENTIAL "/home/gerrit/.{bash?[place]*,alias,functions,dircolors}\n";
+  # ...
+  print ESSENTIAL "${config}\n";
+  close ESSENTIAL;
+}
+</pre>
+
+<p>An alternative is to always carry around the configuration file
+list on the stick. There is support for such a solution: a directory
+<tt>$confdir = $flashdir/.conf.d</tt> exists, and is heavily used by
+the other functions that will now be discussed.</p>
+
+
+		   <h3>Time-stamping</h3>
+
+<p>It is easy to get the number of days (in the <tt>--days x</tt>
+option) wrong, and then one ends up with stale files - a nuisance.
+The timestamping mechanism is superior to the day-wise backup, and makes
+the usage much simpler. It is based on recording a timestamp value in
+a file, much like the files <tt>anacron(8)</tt> uses. The important bits
+are:</p> 
+<ul>
+  <li>each host gets its own <em>timestamp file</em>, named <tt>$confdir/timestamp-<em>hostname</em></tt></li>
+  <li>when <em>unpacking</em> a file from another host, the timestamp for this host is updated</li>
+  <li>when <em>packing</em> a new archive, the timestamp for <em>this</em> host (if there) is consulted</li>
+  <li>all file modification times are tracked relative to this timestamp</li>
+</ul> 
+
+So the mechanism is: <em>at work</em> - create archive, <em>at home</em> -
+unpack archive, update timestamp. Then, after doing some work,
+create a new archive with pack: only those tracked files are archived
+that are newer than the last recorded timestamp.
+
+<p>If you look inside the timestamp file, there is just a single
+number (epoch time in seconds). It is easy to make the contents
+human-readable:</p>
+
+<pre class="code">
+alias seconds_to_timestring="perl -le 'for (&lt;STDIN&gt;) { print \$_=localtime(\$_) }'"
+</pre>
+<img src="misc/renker/decoding_timestamp.png"  border="0" alt="Decoding a timestamp" align="top">
+
+<p> With <tt>pack --info</tt>, you can see timestamps of all hosts you
+use; <a href="misc/renker/packinfo.png">here</a> is an example screenshot.
+(The script recognises which timestamp is local.)  To bootstrap this
+mechanism, the <tt>--days x</tt> option is still needed - once, for initial
+creation of timestamps.</p>
+
+<p>Since several functions (archive label and timestamping) depend
+on <em>distinct hostnames</em>, the source and target PCs should use
+different ones (e.g., not both '<tt>localhost.localdomain</tt>').</p>
+
+
+         <h3>Remote command execution</h3>
+
+<p>An archive can only transport, not delete, files.  While it is not
+possible to mimic the <tt>--delete</tt> flag of e.g. <tt>rsync</tt>,
+a useful approximation is possible, and not too complicated to implement.
+It is based on executing commands that change the structure of directories
+(e.g., new owners, file deletion, file access times ...) locally and,
+when successful, <em>recording</em> them for later use. The principle is
+simple: in essence, the <a href="misc/renker/cmd.bash.txt">script</a>
+does the following:</p>
+
+<pre class="code">
+cmds=$confdir/commands
+while read -p'#' line; do  eval $line &amp;&amp; echo $line &gt;&gt; $cmds; done
+</pre>
+
+<p>The <a href="misc/renker/cmd.bash.txt">actual script</a> is a bit more
+sophisticated: it keeps track of the <em>current working directory </em>
+(as most commands use relative, not absolute directory names); performs
+<em>alias expansion</em>; and uses '<tt>su</tt>' to track file ownership.
+
+<p>The output generated by this script is in turn an executable,
+'<em>write-once-execute-once</em>', shell script.  If you supplied such a
+file in <tt>$confdir</tt>, <tt>pack</tt> will automatically execute
+it within the <tt>execute_cmds()</tt> routine - which looks like this:</p>
+
+<pre class="code">
+sub execute_cmds {
+  (-s $cmds) || return;             # ignore empty files
+  # ...
+  system "bash $cmds";              # execute commands
+  system "mv $cmds /tmp/commands";  # store in /tmp
+}
+</pre>
+
+To merely <em>see</em> what would happen (without executing), you can use <tt>pack --show</tt>. 
+
+Here is an <a href="misc/renker/removing_a_kernel.jpg">example</a>
+where a kernel is removed both locally and remotely (the remote side
+is shown further below).  When using such a script, asterisks and
+other shell-special characters  need to be escaped, as shown in <a
+href="misc/renker/cleaning_up_maildir.jpg">this</a> example.
+
+
+            <h2>Extensibility</h2>
+	    
+   <h3>The 'pre.2' and 'add.2' archive files</h3>
+
+<p>Often the one-off situation arises to just carry some files home
+once, e.g., some source files or PDF files to read. To provide a simpler
+alternative to day-to-day tracking, there are two <em>archives with special names</em>
+that will automatically be unpacked:</p>
+<ul>
+  <li><tt>$pret</tt> (defaults to `pre.2') is unpacked <em>before</em> the main archive is unpacked</li>
+  <li><tt>$addt</tt> (defaults to `add.2') is unpacked <em>after</em> the main archive is unpacked</li>
+</ul>
+
+<p>The former is useful if there is overlap with files that are already
+tracked; the latter is a good all-round default.  The convenience of this
+solution is the automatic unpacking via the script - no more forgotten archives.
+To create either of the two files, use the <tt>-j</tt> option
+(bzip2 compression) and the <tt>-P</tt> option (to not strip leading
+'/') with <tt>tar</tt>.  For example, I often do this:</p>
+
+<pre class="code">
+tar -jcpPvf  /vol/flash/<b>add.2</b>    /usr/src/patches/  /home/bin
+</pre>
+
+
+   <h3>Automatic unpacking at boot-time</h3>
+
+<div class="pullquotes">
+<a name="pullquote_133_renker_2"></a>
+<table border="2">
+<tr>
+<td align="left" bgcolor="#3acf3a">
+<sup>Category: Security</sup>
+<br />
+<strong>
+Using a synchroniser system, potentially with command execution, short-circuits all the hard work other hackers have done to make your Linux box a safe place.
+</strong>
+</td>
+</tr>
+</table>
+</div>
+
+<p>Archives of tracked files need to be unpacked before any running
+program has a chance of overwriting them. Un-packing is thus
+best performed either at boot-time or before the window manager
+starts. KDE for instance provides a place for such executables in
+<tt>~/.kde/Autostart</tt>. Since not everyone uses KDE, I will present the
+former alternative.</p>
+
+<p>But not without a <b>BIG FAT WARNING</b>: Using a synchroniser system,
+potentially with command execution, short-circuits all the hard work
+other hackers have done to make your Linux box a safe place. A malicious
+'<em>bad guy</em>' could feed your computer garbage archives or venomous
+scripts which render your system unusable.</p>
+
+<p>At the very least, use some form of authorization; a
+simple, but efficient, variant is presented below.  The automatic <a
+href="misc/renker/unpackUSB.txt">unpack script</a> is a
+standard SysV init script; place or symlink it into <tt>/etc/init.d</tt>
+and create a symlink for the appropriate runlevel. (On my Debian box, I use
+<tt>/etc/rc2.d/S30unpackUSB</tt>, RH/Fedora
+are similar and there is <tt>chkconfig</tt> support.)  When invoked with
+the `<tt>start</tt>' argument at boot-time, the script will:</p>
+
+<ul>
+  <li>verify that the archive was not created on this host</li>
+  <li>authorise the USB stick (described below)</li>
+  <li>call <tt>pack --unpack</tt></li>
+  <li>create a log of the transaction, both in <tt>/var/log</tt> and in <tt>$confdir</tt> on the USB stick</li>
+</ul>
+
+<p>The authentication mechanism uses a MD5 hash of a well-known file.
+(Below, it is the script itself.)</p>
+
+<pre class="code">
+idfile=$confdir/.idfile
+serialnum=$confdir/.serialnum
+md5sum $0 | tee ${serialnum} | tee "$(&lt;${idfile})"
+</pre>
+
+<p>The <tt>$serialnum</tt> will be automatically created in <tt>$confdir</tt>.
+The <tt>$idfile</tt> contains the location (absolute path) of some file known only to the user.
+This file must be manually edited (e.g. <tt>echo `pwd`/mysecretfile &gt; $idfile</tt>).
+The trick is that the file <em>pointed to by</em> <tt>$idfile</tt> contains the same
+hash value as the <tt>$serialnum</tt>.  Hence, the following happens at script invocation time: </p>
+
+<pre class="code">
+if ! [ -e "${serialnum}" -a -e "${idfile}" ] || [ "$(&lt;$(&lt;${idfile}))" != "$(&lt;${serialnum})" ]
+then
+   echo "Authentication procedure failed." &gt;&amp;2
+   exit 1
+fi
+</pre>
+<p>This means if some malicious other person tries to compromise your
+computer with his forged USB stick, the process will fail
+if (1) there is no <tt>$serialnum</tt> on the stick, (2) there is no <tt>$idfile</tt>
+on the stick. Both of these could be accomplished but cost hacking and spoofing effort,
+and more protection is provided by number (3):</p>
+
+<pre class="code">
+"$(&lt;$(&lt;${idfile}))" != "$(&lt;${serialnum})"
+</pre>
+
+<p>Translated: '<i>The contents of the file pointed to by <tt>$idfile</tt>
+must match the contents of <tt>$serialnum</tt></i>'. To accomplish
+this, intrusive hacking is needed. If you are paranoid about
+security (sometimes not a bad idea), you can disable this mechanism
+entirely. Statistically speaking, however, the theft of a laptop is far more
+likely than such a planned intrusion.</p>
+
+		<h3>The Big Picture</h3>
+
+<p>Returning to the above screenshot with the local removal of a kernel,
+this <a href="misc/renker/unpack_LOG.png">screenshot</a> shows the
+log of what subsequently happened on the remote computer.  First the
+'pre.2' file (a new kernel) is unpacked, followed by command execution
+(where the old kernel is removed), finally the main archive is unpacked.</p>
+
+
+	<h2>Further extensions</h2>
+
+<div class="pullquotes">
+<a name="pullquote_133_renker_3"></a>
+<table border="2">
+<tr>
+<td align="left" bgcolor="#e5942c">
+<sup>Category: Programming</sup>
+<br />
+<strong>
+Creativity is not as easily exhausted as money.
+</strong>
+</td>
+</tr>
+</table>
+</div>
+
+<p>The next extension is a kind of <em>personal organiser</em> for taking
+day-to-day notes such as important things to do, buy, or organise;
+telephone numbers and URLs that are not to be forgotten; and the
+like. It is actually very useful, as everything is in one place.</p> 
+
+
+	      <h3>Note-taker</h3>
+<p>Palmtops are horribly and unnecessarily expensive. Let's
+code a part of their luxuriant functionality by storing notes in
+<tt>$confdir</tt>; <a href="misc/renker/note-taking.png">here</a>
+is an example screenshot. Since there are so many scripts already, a
+(bash) <a href="misc/renker/note-function.txt">shell function</a>
+is used for a change:</p>
+
+<pre class="code">
+function note() {
+   test -t 0  &amp;&amp;  echo "Type in text, terminated by CTRL-D."
+   if note=$(fold -s) &amp;&amp; test -n "$note";  then
+      echo "at $(date): ${note}"  &gt;&gt;/vol/flash/.conf.d/notes
+   fi
+}
+</pre>
+
+The first test checks if input is from a keyboard (terminal) and prints
+a prompt if so.  Otherwise, it will simply pipe from stdin into the
+file. This allows very practical uses such as the following:
+
+<pre class="code">
+echo "CVS commit ID was $(cat /tmp/commit-id), done at $(date)" <b>| note</b>
+</pre>
+
+
+<p>To make this a complete system, convenient access to the notes is required.
+One is built into the script already: notes can be accessed using <tt>pack --read</tt>.
+More convenient is an <a href="misc/renker/read_pack_notes.sh.txt">Autostart script</a> 
+(placed in <tt>~/.kde/Autostart</tt>). This  has the following core:</p>
+<pre class="code">
+kedit --caption "PACK NOTES" $notes &amp;
+</pre>
+This can easily be changed to suit your individual text viewer/editor of choice.
+		
+		<h3>How many MBRs fit on one stick?</h3>
+
+<p>Nowadays, hard drive sizes of up to 500GB are no exception. However, on any
+such disk there are 64 bytes which, when corrupted, can create a real hell
+for an afternoon or two - the <em>partition table</em>, located in the
+MBR. I've experienced it more than once that an MBR became damaged at some
+time. I wouldn't wish the painful process of restoration to anyone.</p>
+
+<p class="editorial">[ ...but see "<a
+href="../issue63/okopnik.html">Clearing out the Master Boot Record</a>" in
+issue 63. Perhaps this will convince you of the necessity of following
+Gerrit's advice, if nothing else will. :) -- Ben ]
+</p>
+
+<p>Code to save the MBR on the stick is easy enough to add. Procedure
+<tt>save_mbr</tt> is invoked before creating the archive and will copy
+the MBR into <tt>$confdir</tt>.  It uses <tt>rdev(8)</tt> to determine
+your root device:</p>
+
+<pre class="code">
+sub save_mbr {
+  my $rdev = qx{/usr/sbin/rdev 2&gt;&amp;1}; 
+  # ...
+  system("dd if=$rdev of=$mbr bs=512 count=1") == 0 ||  warn "Cannot save MBR";
+} 
+</pre>
+
+<p>
+The warning shown in the last line will in particular appear if you
+don't have read access to the device - you should make sure that you do,
+which usually means running the script as root.
+</p>
+
+
+		<h2>Conclusions</h2> 
+
+<p>
+What I have presented here has evolved from real day-to-day use over the
+period of three and a half years.
+</p>
+
+<p>I found the system so useful that I still prefer it to buying a laptop. 
+Not only has it saved the expense of buying
+costly gadgets, it is amazing how long the lifetime of a 'cheap' USB
+stick actually is.  The most fragile part is the connector, for which
+a warranty is given (usually about 10000 plug-ins and pull-outs). Mine
+had cracked circuits, so I must have been past that - but it was easy to
+fix; all that was needed was a soldering iron. On another occasion, I
+accidentally forgot the stick in the laundry. After
+drying, it worked fine ever after. I don't think
+a laptop would survive comparable treatment: it is strange that more
+expensive things are usually also more fragile.</p>
+
+<p>I hope that the many programming hints throughout these two
+parts will aid in modifying, to fit individual ideas and
+requirements - creativity is not as easily exhausted as money.</p>
+
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:133/renker.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/2002/note.png" class="bio">
+</p>
+
+<em>
+<p>
+<br clear="all">
+</p>
+</em>
+
+<br clear="all">
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2006, Gerrit Renker. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 133 of Linux Gazette, December 2006
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="luana.html" >&lt;-- prev</A> | <A HREF="saha.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/mailman/listinfo/">Mailing Lists</a>
+<a href="../jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">December 2006 (#133)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

@@ -1,0 +1,103 @@
+#!/bin/sh
+#******************************************************************
+#ident mirror Time-stamp: <97/09/29 13:28:44 bav>
+#******************************************************************
+#                           Gerd Bavendiek  bav@rw.sni.de  97-09-04
+#
+# Usage: mirror [-f|-verify|-floppy]
+#
+# This script tries to mirror the current working directory  on the
+# node "mirror". It will copy all files via rdist(1). This way a true
+# mirror of the current directory and its subdirectories is created.
+#
+# A remark for those, wo are not familiar with rdist(1):
+# In subsequent calls to the script only files, that do not exist on
+# node "mirror", will be copied.
+#
+# Files on "mirror", which are younger than on the actual node, will
+# be mentioned but remain untouched (rdist option younger)
+#
+# Remarks:
+# You will need an entry "mirror" in your /etc/hosts.
+# The files "distfile" and "Distfile" have special meaning to
+# rdist. If such a file is found, mirror exits immediatly.
+# Emacs-Backup-Files (except-pattern *~$) will not be mirrored. Watch
+# quoting in the here-document.
+#
+# Options:
+#
+# -f		will force removing of files on "mirror", which are 
+# 		not on this side - this is somewhat dangerous.
+# -verify	just watch what would be done.
+#
+# Finally:
+# I sometimes want to do a quick backup of a directory using a floppy with
+# an ext2-Filesystem. Here cp -urvp can be used. The disadvantage of
+# this is handling of insufficient space on the floppy. Furthermore 
+# the rdist's -f option cannot be used with cp. That's why I say:
+#
+# -floppy	Haven't finished this one. Ideas welcome. Use only, if
+# 		you are knowing, what you do ...
+#------------------------------------------------------------------
+if [ -r Distfile -o -r distfile ]; then
+   echo "[dD]istfile found - no action !"
+   exit 0
+fi
+
+if [ -r .distfile ]; then
+   rdist -f .distfile # Gerd's special - just for personal use
+   exit $?
+fi
+
+# Force ! Remove files on "mirror", which can not be found on this
+# side ! Remember: there is no "unremove" in Linux ;-)
+if [ "$1" = "-f" ]; then
+   rdist  -d PWD=`pwd` -f - << EOF
+${PWD} -> mirror
+	install -oyounger,remove ${PWD};
+        except_pat ( ~\\$ );
+EOF
+# Do nothing, just watch what would be done.
+elif [ "$1" = "-verify" ]; then
+   rdist  -d PWD=`pwd` -f - << EOF
+${PWD} -> mirror
+	install -oyounger,verify ${PWD};
+        except_pat ( ~\\$ );
+
+EOF
+elif [ "$1" = "-floppy" ]; then
+# Mount floppy. Don't give up, if it's already mounted. Rely on
+   # RetCode 3 in this case ! You will need something like the following
+   # in your /etc/fstab:
+   # /dev/fd0	        /floppy		ext2	user	    0	    0
+   mount /floppy || if [ $? -ne 3 ]; then echo "$0: mount /floppy failed !"; exit 1; fi
+   # If the mount hasn't succeded, don't panic: cp will totally break.
+   # The options: r recursive (subdir's yes), u update (copy only if
+   # file on /floppy is older), v verbose (tell me what you are
+   # doing), p preserve (preserve timestamps)
+   # Copying . really isn't cool.
+
+   if [ "$2" != "-nodescend" ]; then	
+      DIRSIZE=`du -s . | cut -f1`	
+      CP_OPTIONS="-ruvp ."
+   else
+      # Shudder ! Really ugly ! Just a personal hack ! Will not handle dot-files !
+      DIRSIZE=`du --total -s \`find . -type f -print -maxdepth 1\` | grep total | cut -f1`
+      CP_OPTIONS="-uvp *"
+   fi
+
+   FLOPPYSIZE=`df -k /floppy | awk 'NR==2 {print $2}'`
+   if [ `expr $FLOPPYSIZE \<\= $DIRSIZE` -eq 1 ]; then
+      echo "Insufficient space: Files will not fit on /floppy ($DIRSIZE kB needed, $FLOPPYSIZE kB avail)" 
+      echo "$0: exiting without copying anything !"
+   else	
+      cp $CP_OPTIONS /floppy
+   fi
+   umount /floppy || echo "$0: umount /floppy failed !"; exit 1
+else
+   rdist  -d PWD=`pwd` -f - << EOF
+${PWD} -> mirror
+	install -oyounger ${PWD};
+        except_pat ( ~\\$ );
+EOF
+fi

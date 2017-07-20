@@ -1,0 +1,362 @@
+<!DOCTYPE html PUBLIC '-//W3C//DTD XHTML 1.0 Transitional//EN'
+		 'http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd'>
+<html xmlns='http://www.w3.org/1999/xhtml' lang='utf-8' xml:lang='utf-8'>
+<head>
+<title>"A Question Of Rounding" in issue #143</title>
+<meta http-equiv='Content-Type; charset=utf-8' />
+<link rel='stylesheet' type='text/css' href='../../../lg.css' />
+</head>
+<body>
+<a href="../../../"><img alt="Linux Gazette" src="../../../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" /></a><img alt="Tux" src="../../../gx/tux_86x95_indexed.png" id="tux" /><p id="fun">...making Linux just a little more fun!</p><div class='content articlecontent'><a name="top"></a><h3>"A Question Of Rounding" in issue #143</h3>
+<p>
+<b><p>
+Paul Sephton [paul at inet.co.za]
+
+</p>
+</b><br />
+<b>Sat, 06 Oct 2007 19:53:57 +0200</b>
+</p>
+
+<p>
+Hello, all
+</p>
+
+<p>
+In order to clarify a few points, set some issues to rest, and update
+the listing of the source code that appeared in "A Question Of
+Rounding", the following may be of interest.
+</p>
+
+<p>
+First of all, I have to state unequivocally that there is no bug. There
+never was a bug.  The printf() family of functions completely follow the
+letter of both the C99 and IEEE specifications (at least for GLibC).
+The matter has been completely explored and put to rest.
+</p>
+
+<p>
+The issues brought to light in the article are, however very pertinent
+to those of us who make a living producing code.  The listing below
+addresses some of the real life issues some of us face when having to
+deal with floating point arithmetic.
+</p>
+
+<p>
+Please refer to the discussion which follows for an explanation as to
+why printf() behaves the way it does, and what this code does to address
+some of the problems I highlighted in my article.  The discussion is
+also a summary of some of the many points raised in the bug report
+discussion, and the information provided to me during that process by a
+few very smart people.
+</p>
+
+<pre>
+#include &lt;math.h&gt;
+#include &lt;string.h&gt;
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+ 
+//______________________________________________________________________
+// Utility function converts an IEEE double precision number to a
+// fixed precision decimal format stored in a buffer.
+void tobuf(size_t max, unsigned int *len, char *buf, 
+           double x, int decimals, double max_prec)
+{
+  int    l_dec = 0, sign  = x &lt; 0;                // remember the sign
+  double q     = pow(10,decimals);                // current mask
+  double i;                                       // Integer portion
+  double y = modf(x*q, &amp;i) / q;                   // Fractional portion
+  double l_div = round(y*max_prec)/max_prec;      // significant digit
+  if (q &lt;= max_prec)
+    l_dec = abs((int)round(l_div*10*q))%10;       // this decimal
+  
+  if (l_dec) x = i / q;
+  
+  if (fabs(x) &gt; 0)                            // recurse while |x| &gt; 0
+    tobuf(max, len, buf, x, decimals-1, max_prec);
+  else {                                      // x == 0 - first digit
+    if (*len+1 &lt; max &amp;&amp; sign) buf[(*len)++] = '-';
+    if (*len+2 &lt; max &amp;&amp; decimals &gt;= 0) { 
+      buf[(*len)++] = '0'; 
+      buf[(*len)++] = '.'; 
+    }
+    while (*len+1 &lt; max &amp;&amp; decimals-- &gt; 0) 
+      buf[(*len)++] = '0';
+  }
+  if (*len+1 &lt; max &amp;&amp; decimals == 0)
+    buf[(*len)++] = '.'; 
+  
+  // for first and subsequent digits, add the digit to the buffer
+  if (*len+1 &gt;= max) return;
+  buf[(*len)++] = '0' + l_dec;
+}
+ 
+ 
+//______________________________________________________________________
+// Convert the value x to a decimal representation stored in a buffer
+unsigned int dbl2buf(size_t max, char *buf, double x, int decimals) {
+  const int DECIMALS=15;                         // max significant
+digits
+  int    max_dec = DECIMALS-(int)(trunc(log10(fabs(x)))+1); 
+  double max_prec = pow(10,max_dec);             // magnitude for
+precision loss
+  unsigned int len = 0;                          // buffer length init
+  
+  if (x != x) { strncpy(buf, "NAN", max); return 0; }
+  if ((x-x) != (x-x)) { strncpy(buf, "INF", max); return 0; }
+  
+  tobuf(max, &amp;len, buf, x, decimals-1, max_prec); // fill in buffer
+  buf[len] = 0;                                   // terminate buffer
+  return len;                                     // return buffer
+length used
+}
+ 
+//______________________________________________________________________
+//  Test the dbl2buf function.
+int main (void)
+{
+  int n, nfails=0, nspfails=0;
+  char buf1[128];
+  char buf2[64];
+  char buf3[64];
+  
+  for(n=0;n&lt;10000000;n++){
+    // generate a random floating point number with random exponent
+    double x = random() / (double)random() * pow(10, 15-random()%30);
+    x *= (random()%2==0)?1:-1;          // gen negative numbers too
+    dbl2buf(sizeof(buf1), buf1, x, random()%20);  // constraint
+    
+    x = atof(buf1);         // initialise test value from decimal.
+    dbl2buf(sizeof(buf2), buf2, x, 20);          // IEEE-&gt;decimal
+    snprintf(buf3, sizeof(buf3), "%-.20f", x);   // ditto (sprintf)
+    if (x != atof(buf2)) {                       // decimal-&gt;IEEE
+      nfails++;
+    }
+    if (x != atof(buf3)) {                       // decimal=&gt;IEEE
+      nspfails++;
+    }    
+  }
+  printf("%i random floating point values tested\n", n);
+  printf("  Number of dbl2buf failures: %i\n", nfails);
+  printf("  Number of sprintf failures: %i\n", nspfails);
+  return 0;
+}
+</pre>
+
+<p>
+Output:
+<pre>
+10000000 random floating point values tested
+  Number of dbl2buf failures: 0
+  Number of sprintf failures: 0
+</pre>
+
+<p>
+The dbl2buf procedure implements a IEEE to decimal conversion similar
+to snprintf().  The main differences are:
+  a)  Usage of the "common rounding" rules where precision is lost,
+      in a conversion as opposed to "bankers rounding" as implemented 
+      in sprintf()
+  b)  Recognises the loss of accuracy when a number was first
+      converted from decimal=&gt;IEEE, and consequently limits 
+      the allowable precision when converting back to decimal.  
+      This internal precision is fixed at 15 significant decimal
+      digits, for which decimal=&gt;IEEE=&gt;decimal is the identity.
+  c)  Only supports fixed point output at present
+  d)  It's slower <img src="../gx/smile.png" alt=":-)">
+</p>
+
+<p>
+Discussion:
+</p>
+
+<p>
+The C functions atof() and strtod() convert to a number from a string
+containing a decimal representation.  IEEE often cannot store the
+decimal number accurately, as:
+</p>
+
+<pre>
+   a) Binary and decimal radix do not share the same set of irrational
+      numbers
+   b) The size of the floating point unit is constrained to a fixed 
+      size.
+</pre>
+
+<p>
+The above is untrue for the conversion from IEEE format to decimal,
+where the width of the decimal number is unconstrained.  It is always
+possible to convert IEEE=&gt;decimal in such a way that the exact same IEEE
+number can be reproduced from the decimal buffer, provided the buffer is
+big enough.  
+</p>
+
+<p>
+Therefore, it is always possible to have
+  IEEE=&gt;decimal=&gt;IEEE as the identity function,
+but with
+  decimal=&gt;IEEE=&gt;decimal 
+it is only possible to retain identity by constraining the precision of
+the decimal number you wish to reproduce to a maximum as dictated by the
+size of the floating point unit.
+</p>
+
+<p>
+The following examples all involve decimal=&gt;IEEE=&gt;decimal conversions.
+The statement printf("%.5f", 1.234) tells the compiler to produce the
+binary equivalent of 1.234 and store it on stack, or in an FP register
+(decimal=&gt;binary) before calling the printf() function to convert it
+back to decimal, and printing it to the screen.
+</p>
+
+<p>
+printf() is not specified to allow for artificial precision constraints
+when doing the binary=&gt;decimal conversion; as a result there is no loss
+in accuracy for it's output.  This allows for reproducing an IEEE value
+from it's result, and so you get for example:
+<pre>
+    printf("%.64f\n", 0.15);
+    =&gt;0.1499999999999999944488848768742172978818416595458984375000000000
+</pre>
+such that
+<pre>
+    x = 0.15;
+    sprintf(buf, "%64f", x);
+    y = atof(buf);
+    return x == y; // is the identity
+</pre>
+which is very nice if you want atof() to reproduce the original binary
+number, but not so good if what you really wanted to see was
+<pre>
+    dbl2buf(sizeof(buf1), buf1, 0.15, 64);  printf("%s\n", buf1);
+    =&gt;0.1500000000000000000000000000000000000000000000000000000000000000
+</pre>
+Of course, we all know that 
+<pre>
+  printf("%.2f\n", 0.15); would have given us
+  =&gt;0.15
+</pre>
+since printf() would round the number to the nearest value at decimal
+place 2.  This is exactly what we would expect to see given the
+circumstance.  But, how many people would have expected
+<pre>
+  printf("%.1f\n", 0.15);  to have given us
+  =&gt;0.1  as a result?
+</pre>
+
+<p>
+There is a perfectly logical reasons for this: The stored number, being
+less than 1.5 (having lost accuracy in the decimal=&gt;IEEE conversion) is
+accurately and correctly rounded to 0.1 since it is closer to 0.1 than
+to 0.2.
+</p>
+
+<p>
+what one might have preferred to see, is
+<pre>
+  dbl2buf(sizeof(buf1), buf1, 0.15, 2); printf("%s\n", buf1);
+  =&gt;0.15
+  dbl2buf(sizeof(buf1), buf1, 0.15, 1); printf("%s\n", buf1);
+  =&gt;0.2
+</pre>
+
+<p>
+We can correctly round the number in the above example only if we are
+willing to dispense with some of the accuracy in the Floating Point
+Unit.  There are a whole bunch of Floating Point numbers which would
+produce the value 0.2 when rounded to a single decimal digit of
+precision, or indeed the decimal number 0.150000000000000 rounded to 15
+decimal digits of precision.
+</p>
+
+<p>
+Constraining the precision of the target decimal value, though,
+effectively makes it impossible to ensure that subsequent decimal=&gt;IEEE
+conversion will produce the exact same IEEE number.
+</p>
+
+<p>
+For this reason amongst many others, printf() cannot be altered to use
+the above (precision constraint) logic, as the C specification
+explicitly states that IEEE=&gt;decimal=&gt;IEEE must be the identity
+function.
+</p>
+
+<p>
+One more surprise awaits (some of) us, though: 
+<pre>
+  printf("%.64f\n", 1.25);
+    =&gt;1.2500000000000000000000000000000000000000000000000000000000000000
+  printf("%.2f\n", 1.25);
+    =&gt;1.25
+  printf("%.1f\n", 1.25);
+    =&gt;1.2
+</pre>
+
+<p>
+This has a perfectly good explanation too.  Although we cannot blame the
+accuracy of the floating point unit for this, we are looking at a
+situation where 1.25 is no closer to 1.3 than it is to 1.2.  Either 1.2
+or 1.3 would therefore suffice, and we fall back to the rounding rule
+used by printf().  
+</p>
+
+<p>
+For the GNU C library, the rounding rule used by printf() is "bankers
+rounding" or "round to even". This is more correct than some other C
+libraries, as the C99 specification says that conversion to decimal
+should use the currently selected IEEE rounding mode (default bankers
+rounding).
+</p>
+
+<p>
+The dbl2buf() procedure though, is free to implement what is known as
+"common rounding" or  "symmetric arithmetic rounding" which is commonly
+tought in schools. It therefore produces
+<pre>
+    dbl2buf(sizeof(buf1), buf1, 1.25, 2); printf("%s\n", buf1);
+      =&gt;1.25
+    dbl2buf(sizeof(buf1), buf1, 1.25, 1); printf("%s\n", buf1);
+      =&gt;1.3
+</pre>
+
+<p>
+It should be stressed that neither "bankers rounding" nor "common
+rounding" is necessarily the more "correct" way to round numbers.
+Indeed, these are far from being the only two choices of rounding rules.
+</p>
+
+<p>
+Bankers rounding produces less error when the number is used in further
+calculations, as the error averages out.  However, common rounding is so
+named, because it is the most common and well known form of rounding. 
+</p>
+
+<p>
+It is relatively simple to adapt the dbl2buf() procedure for whichever
+form of rounding is most suitable.
+</p>
+
+<p>
+IEEE does not specify a "common rounding" or "round away from zero"
+option, so again printf() would be wrong to implement common rounding-
+even as an option.  For those of us who, like myself, need this sort of
+rounding, we need to code our own binary to decimal conversions.  
+</p>
+
+<p>
+Frankly, doing so has the distinct advantage of not being reliant on a
+particular library's implementation of printf() and family.  If this is
+your case, I hope the provided method will be of some use.
+</p>
+
+<p>
+Paul Sephton
+</p>
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_talkback.html#mb-a_question_of_rounding_in_issue_143">Back</a><hr width="50%" align="left" /><p><br /></p></div>
+</body>
+</html>

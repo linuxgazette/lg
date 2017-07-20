@@ -1,0 +1,69 @@
+#!/usr/bin/perl
+
+use Flickr::API;
+use XML::Parser::Lite::Tree::XPath;
+use Date::Format qw(time2str);
+
+use warnings;
+use strict;
+
+my $api = new Flickr::API({'key' => ''});
+my $response;
+my $photo_id = $ARGV[0];
+my ($desc, $date, $title, $taken, $photo);
+
+if ($#ARGV == 1)
+{
+	$response = $api->execute_method ('flickr.photos.getInfo', {
+   		       	                  'photo_id' => $ARGV[0],
+					  'secret'   => $ARGV[1]
+					  });
+}
+else
+{
+	$response = $api->execute_method ('flickr.photos.getInfo', {
+   		       	                  'photo_id' => $ARGV[0],
+					  });
+}
+
+my $xpath = new XML::Parser::Lite::Tree::XPath($response->{tree});
+my @notes = $xpath->select_nodes('/photo/notes/note');
+
+my @tmp = $xpath->select_nodes('/photo/dates');
+$taken = $tmp[0]->{attributes}->{taken};
+
+@tmp = $xpath->select_nodes('/photo/dates');
+$date = time2str "%a %b %e %H:%M:%S %Y", $tmp[0]->{attributes}->{posted};
+
+@tmp = $xpath->select_nodes('/photo/description');
+$desc = $tmp[0]->{children}[0]->{content};
+
+@tmp = $xpath->select_nodes('/photo/title');
+$title = $tmp[0]->{children}[0]->{content};
+
+@tmp = $xpath->select_nodes('/photo');
+$photo = "http://photos" 
+       . $tmp[0]->{attributes}->{server} 
+       . ".flickr.com/"
+       . $tmp[0]->{attributes}->{id} . "_"
+       . $tmp[0]->{attributes}->{secret} . ".jpg";
+
+print "<html>\n<head>\n<title>$title</title>\n</head>\n";
+print "<img src=\"$photo\" alt=\"$title\" usemap=\"#genmap\">\n";
+print "<map name=\"genmap\">\n";
+
+foreach (@notes)
+{
+	print "<area shape=\"rect\" coords=\"";
+	print "$_->{attributes}->{x}, ";
+	print "$_->{attributes}->{y}, ";
+	print $_->{attributes}->{x} + $_->{attributes}->{w} .", ";
+	print $_->{attributes}->{y} + $_->{attributes}->{h} ."\" ";
+	print "alt=\"$_->{children}[0]->{content}\" ";
+	print "title=\"$_->{children}[0]->{content}\" nohref>\n";
+}
+print "</map>\n";
+print "<p>$desc</p>\n";
+print "<p>Taken: $taken, Uploaded: $date</p>\n";
+print "</html>\n";
+

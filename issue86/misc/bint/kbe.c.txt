@@ -1,0 +1,82 @@
+/* This function changes a key's action and saves the old one 
+ * in an integer you pass in by reference:
+ */
+
+#include <sys/ioctl.h>
+#include <linux/kd.h>
+#include <linux/keyboard.h>
+#include <stdio.h>
+
+int set_kb_entry( unsigned short table, unsigned short keycode, 
+                  unsigned short value, unsigned short *oldvalue ) {
+
+   struct kbentry ke;
+
+   ke.kb_table = table;
+   ke.kb_index = keycode;
+
+/* Get old value, return error if table or keycode are duff */
+   if( ioctl( fileno(stdin), KDGKBENT, &ke ) )
+      return -1;
+
+/* Unless oldvalue ptr is NULL, save old value to restore later */
+   if( oldvalue ) *oldvalue = ke.kb_value;
+
+/* The new action for this key */
+   ke.kb_value = value; 
+
+/* Do the business, return error if value is duff */
+   if( ioctl( fileno(stdin), KDSKBENT, &ke ) )
+      return -1;
+
+   return 0;
+   }
+
+/* To use the above function to disable scrollback and 
+ * restore it on exit: 
+ */
+
+#include <stdlib.h>
+
+/* Old key action values will be stored in these */
+unsigned short scroll_forward = 0;
+unsigned short scroll_backward = 0;
+
+/* The magic numbers gleaned from dumpkeys and loadkeys -m */
+#define SHIFT_TABLE          1
+#define PAGE_UP_KEYCODE    104
+#define PAGE_DOWN_KEYCODE  109
+#define PAGE_UP_ACTION     0x0118 /* Prior */
+#define PAGE_DOWN_ACTION   0x0119 /* Next  */
+
+
+/* Restore default funcs for shift-PageUp and shift-PageDown */
+static void restore_scrollback() {
+
+   if( scroll_backward )
+      set_kb_entry( SHIFT_TABLE, PAGE_UP_KEYCODE, 
+                    scroll_backward, 0 );
+
+   if( scroll_forward )
+      set_kb_entry( SHIFT_TABLE, PAGE_DOWN_KEYCODE, 
+                    scroll_forward, 0 );
+   }
+
+
+/* Liberate shift-PageUp and shift-PageDown for normal use */
+int disable_scrollback() {
+
+   if( set_kb_entry( SHIFT_TABLE, PAGE_UP_KEYCODE, 
+                     PAGE_UP_ACTION, &scroll_backward ) )
+      return -1;
+
+   if( set_kb_entry( SHIFT_TABLE, PAGE_DOWN_KEYCODE, 
+                     PAGE_DOWN_ACTION, &scroll_forward ) )
+      return -1;
+
+   atexit( restore_scrollback );
+
+   return 0;
+   }
+
+

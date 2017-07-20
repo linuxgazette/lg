@@ -1,0 +1,477 @@
+<!DOCTYPE html PUBLIC '-//W3C//DTD XHTML 1.0 Transitional//EN'
+		 'http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd'>
+<html xmlns='http://www.w3.org/1999/xhtml' lang='utf-8' xml:lang='utf-8'>
+<head>
+<title>Scalable TCP Tuning</title>
+<meta http-equiv='Content-Type; charset=utf-8' />
+<link rel='stylesheet' type='text/css' href='../../../lg.css' />
+</head>
+<body>
+<a href="../../../"><img alt="Linux Gazette" src="../../../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" /></a><img alt="Tux" src="../../../gx/tux_86x95_indexed.png" id="tux" /><p id="fun">...making Linux just a little more fun!</p><div class='content articlecontent'><a name="top"></a><h3>Scalable TCP Tuning</h3>
+<p>
+<b><p>
+Ren&eacute; Pfeiffer [lynx at luchs.at]
+
+</p>
+</b><br />
+<b>Mon, 31 Mar 2008 21:29:06 +0200</b>
+</p>
+
+<p>
+On Mar 31, 2008 at 0024 -0700, Erik van Zijst appeared and said:
+</p>
+
+<pre>
+&gt; Ren&eacute; Pfeiffer wrote:
+&gt;&gt; [...]
+&gt;&gt;  - /proc/sys/net/ipv4/tcp_low_latency controls if the data is forwarded
+&gt;&gt;    directly through the TCP stack to the application buffer (=1) or not
+&gt;&gt;    (=0). I have never benchmarked or compared this setting, thought it's
+&gt;&gt;    always on on my laptop (as I noticed just now, I must have fiddled
+&gt;&gt;    with sysctl.conf here).
+&gt;
+&gt; I'm not sure what that one does exactly, but the problem is not the 
+&gt; client-side, as it is fast enough to read the video from the socket. 
+&gt; Instead, it's the server-side that saturates the socket, filling up the 
+&gt; entire send buffer and thereby increasing the end-to-end time it takes for 
+&gt; data to travel from server to client.
+</pre>
+
+<p>
+I meant to try this on the server. I think it is designed to work on the
+client side, but I am not sure.
+</p>
+
+
+<pre>
+&gt; The way our streaming solution works is by letting the server anticipate 
+&gt; congestion (blocking write calls) by reducing the video bitrate in 
+&gt; real-time. As a result, the send buffer is usually completely filled. For 
+&gt; that same reason, disabling Nagle's algorithm has no effect either: the send 
+&gt; buffer always contains more than one MSS of data.
+</pre>
+
+<p>
+I see.
+</p>
+
+
+<pre>
+&gt; This is fine, but as I frequently get buffer underruns on networks with 
+&gt; highly fluctuating Bandwidth-Delay-Products, it looks like Linux is happy to 
+&gt; increase the send buffer's capacity when beneficial, but less so to decrease 
+&gt; it again when circumstances change.
+</pre>
+
+<p>
+Judging from the measurements I've seen when playing with the
+congestion algorithms, the Linux kernel seems to be able to decrease
+the sender window. However I think the behaviour is really targetted at
+having a full buffer and a suitable queue all of the time. You could
+check which one of the algorithms works best for your application and
+create another kernel module with the desired window behaviour. I make
+the distinction between buffer and window size since I believe that the
+congestion algorithms only affect the window handling, not the buffer
+handling.
+</p>
+
+
+<pre>
+&gt;&gt;  - The application keeps its own buffer, but you can also influence the
+&gt;&gt;    maximum socket buffers of the TCP stack in the kernel.
+&gt;&gt;    <a href="http://dsd.lbl.gov/TCP-tuning/linux.html">http://dsd.lbl.gov/TCP-tuning/linux.html</a> describes the maximum size
+&gt;&gt;    of send/receive buffers. You could try reducing this, but maybe you
+&gt;&gt;    can't influence both sides of the connection.
+&gt;
+&gt; Yes, I've been tempted to manually shrink the send buffer from the 
+&gt; application-level, but since the fluctuating bandwidth and delay justify a 
+&gt; dynamic buffer size, I'm reluctant to try and hardwire any fixed values in 
+&gt; user space.
+</pre>
+
+<p>
+Yes, I agree, having an algorithm doing that automatically would be more useful.
+</p>
+
+
+<pre>
+&gt; What I need effectively (I think), is to let the kernel make sure the total 
+&gt; send buffer is always exactly twice the cwnd. There's an interesting 2002 
+&gt; paper addressing exactly this issue: 
+&gt; <a href="http://www.eecg.toronto.edu/~ashvin/publications/iwqos2002.pdf">http://www.eecg.toronto.edu/~ashvin/publications/iwqos2002.pdf</a>
+</pre>
+
+<p>
+I haven't seen this one, thanks. Now I know how to start the day
+tomorrow at the office. <img src="../gx/smile.png" alt=":)"> It seems this publication fits perfectly to
+your problem.
+</p>
+
+<p>
+BTW, I am playing with IPv6 now and the typical delays increase if you
+don't have native IPv6 connectivity but tunnels in IPv4 space. Have you
+done any experiments with streaming through IPv6-in-IPv4 tunnels? It
+might not be widely deployed, but I am curious.
+</p>
+
+<p>
+Cheers,
+Ren&eacute;.
+</p>
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_mail.html#mb-scalable_tcp_tuning">Back</a><hr width="50%" align="left" /><p><br /></p><p>
+<b><p>
+Erik van Zijst [erik.van.zijst at layerstream.com]
+
+</p>
+</b><br />
+<b>Mon, 31 Mar 2008 21:41:57 -0700</b>
+</p>
+
+<p>
+Ren&eacute; Pfeiffer wrote:
+</p>
+
+<pre>
+&gt; Judging from the measurements I've seen when playing with the
+&gt; congestion algorithms, the Linux kernel seems to be able to decrease
+&gt; the sender window. However I think the behaviour is really targetted at
+&gt; having a full buffer and a suitable queue all of the time. You could
+&gt; check which one of the algorithms works best for your application and
+&gt; create another kernel module with the desired window behaviour. I make
+&gt; the distinction between buffer and window size since I believe that the
+&gt; congestion algorithms only affect the window handling, not the buffer
+&gt; handling.
+</pre>
+
+<p>
+Yes, after more experimentation I confirm that Linux also decreases the 
+buffer size. From what I've seen now, tcp_westwood works best and seems 
+capable of decreasing average latency. Not surprisingly, it uses the 
+smallest send buffer.
+</p>
+
+<p>
+I agree that the main responsibility of the congestion algorithms is 
+manipulation of the sliding window rather than the send buffer, but if 
+real-time buffer tuning is possible in the kernel module, it'd be nice 
+to see an implementation that provides low end-to-end latency even on 
+congested networks. Not sure I have the required skills though ;-)
+</p>
+
+
+<pre>
+&gt;&gt; What I need effectively (I think), is to let the kernel make sure the total 
+&gt;&gt; send buffer is always exactly twice the cwnd. There's an interesting 2002 
+&gt;&gt; paper addressing exactly this issue: 
+&gt;&gt; <a href="http://www.eecg.toronto.edu/~ashvin/publications/iwqos2002.pdf">http://www.eecg.toronto.edu/~ashvin/publications/iwqos2002.pdf</a>
+&gt; 
+&gt; I haven't seen this one, thanks. Now I know how to start the day
+&gt; tomorrow at the office. <img src="../gx/smile.png" alt=":)"> It seems this publication fits perfectly to
+&gt; your problem.
+</pre>
+
+<p>
+Yes it does.
+</p>
+
+<p>
+With the spectacular growth of online video, I'm sure we are not the 
+only ones pushing TCP as a viable protocol for real-time streaming 
+applications. Its reliability eliminates forward error correction 
+overhead, while its congestion-control prevents unfair resource hogging, 
+which is good for everyone. Currently however, it could benefit from a 
+bit of tuning.
+</p>
+
+
+<pre>
+&gt; BTW, I am playing with IPv6 now and the typical delays increase if you
+&gt; don't have native IPv6 connectivity but tunnels in IPv4 space. Have you
+&gt; done any experiments with streaming through IPv6-in-IPv4 tunnels? It
+&gt; might not be widely deployed, but I am curious.
+</pre>
+
+<p>
+No, I haven't. My measurements are gathered from production servers with 
+real streams. All IPv4 at the moment.
+</p>
+
+<p>
+cheers,
+Erik
+</p>
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_mail.html#mb-scalable_tcp_tuning">Back</a><hr width="50%" align="left" /><p><br /></p><p>
+<b><p>
+Ren&eacute; Pfeiffer [lynx at luchs.at]
+
+</p>
+</b><br />
+<b>Tue, 1 Apr 2008 12:57:11 +0200</b>
+</p>
+
+<p>
+On Mar 31, 2008 at 1143 -0700, Erik van Zijst appeared and said:
+</p>
+
+<pre>
+&gt; Rene,
+&gt;
+&gt; One short follow-up question: is the new TCP module effective on each new 
+&gt; TCP connection immediately after loading, or does it require a restart of 
+&gt; the server process? Also, what happens to established connections? Do they 
+&gt; continue to use the old congestion control algorithm until there are torn 
+&gt; down?
+</pre>
+
+<p>
+There is one setting that helps to use the congestion modules to the
+fullest. You should set
+</p>
+
+<pre>
+net.ipv4.tcp_no_metrics_save=1
+</pre>
+
+<p>
+in /etc/sysctl.conf (or write 1 to
+/proc/sys/net/ipv4/tcp_no_metrics_save). According to the kernel sources
+and the Gentoo Wiki (<a href="http://gentoo-wiki.com/HOWTO_TCP_Tuning">http://gentoo-wiki.com/HOWTO_TCP_Tuning</a>) it does
+the following:
+</p>
+
+<p>
+"This removes an odd behavior in the 2.6 kernels, whereby the kernel
+stores the slow start threshold for a client between TCP sessions. This
+can cause undesired results, as a single period of congestion can affect
+many subsequent connections."
+</p>
+
+<p>
+I think established connections are not affected by a change of the TCP
+module, but I've never verified this. I noticed that you can even set
+the congestion algorithm per connection by using a parameter with
+setsockopt(), but I don't remeber the URL. I saw it yesterday though.
+</p>
+
+<p>
+Cheers,
+Ren&eacute;.
+</p>
+
+<pre>-- 
+  )\._.,--....,'``.  fL  Let GNU/Linux work for you while you take a nap.
+ /,   _.. \   _\  (`._ ,. R. Pfeiffer &lt;lynx at luchs.at&gt; + <a href="http://web.luchs.at/">http://web.luchs.at/</a>
+`._.-(,_..'--(,_..'`-.;.'  - System administration + Consulting + Teaching -
+Got mail delivery problems?  <a href="http://web.luchs.at/information/blockedmail.php">http://web.luchs.at/information/blockedmail.php</a>
+</pre>
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_mail.html#mb-scalable_tcp_tuning">Back</a><hr width="50%" align="left" /><p><br /></p><p>
+<b><p>
+Ren&eacute; Pfeiffer [lynx at luchs.at]
+
+</p>
+</b><br />
+<b>Wed, 16 Apr 2008 13:46:32 +0200</b>
+</p>
+
+<p>
+Hello, Erik!
+</p>
+
+<p>
+While preparing a network programming tutorial for game developers I
+found an interesting article that might also be useful for streaming
+data. It deals with the interaction of Nagle's algorithm and delayed ACK
+packets.
+</p>
+
+<p>
+<a href="http://www.stuartcheshire.org/papers/NagleDelayedAck/">http://www.stuartcheshire.org/papers/NagleDelayedAck/</a>
+</p>
+
+<p>
+Maybe you have heard of this, maybe not; in either case it's
+interesting, so it goes to TAG as well.
+</p>
+
+<p>
+Best,
+Ren&eacute;.
+</p>
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_mail.html#mb-scalable_tcp_tuning">Back</a><hr width="50%" align="left" /><p><br /></p><p>
+<b><p>
+Erik van Zijst [erik.van.zijst at gmail.com]
+
+</p>
+</b><br />
+<b>Thu, 17 Apr 2008 17:34:03 +0200</b>
+</p>
+
+<p>
+Hi Rene,
+</p>
+
+<p>
+Thanks for the article!
+</p>
+
+<p>
+I'm still kind of struggling with the fact that the TCP send buffer has 
+a tendency to get bigger than necessary, but found some relief in Linux' 
+pluggable congestion algorithms.
+</p>
+
+<p>
+The article is interesting, but isn't really applicable for me. I'm well 
+aware of the interaction between delayed ACKs and Nagle's algorithm, but 
+it mainly plagues interactive communication that involves 
+application-level replies, which is exactly what the article exposes: 
+each 100k, the client sends an application-level reply that triggers the 
+next 100k.
+</p>
+
+<p>
+In our streaming environment there's no interactivity of this kind. The 
+server just continuously sends packets. There's no application-level 
+return traffic.
+</p>
+
+<p>
+I've not actually tried to disable Nagle on the sending-side to see what 
+happens, but I expect no noticeable effect in my case.
+</p>
+
+<p>
+cheers,
+</p>
+
+<p>
+Erik
+</p>
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_mail.html#mb-scalable_tcp_tuning">Back</a><hr width="50%" align="left" /><p><br /></p><p>
+<b><p>
+Ren&eacute; Pfeiffer [lynx at luchs.at]
+
+</p>
+</b><br />
+<b>Thu, 17 Apr 2008 18:49:53 +0200</b>
+</p>
+
+<p>
+Hello, Erik!
+</p>
+
+<p>
+On Apr 17, 2008 at 1734 +0200, Erik van Zijst appeared and said:
+</p>
+
+<pre>
+&gt; [...]
+&gt; I'm still kind of struggling with the fact that the TCP send buffer has a 
+&gt; tendency to get bigger than necessary, but found some relief in Linux' 
+&gt; pluggable congestion algorithms.
+</pre>
+
+<p>
+Maybe we'll see your name some day in the kernel's changelog. <img src="../gx/smile.png" alt=":)">
+</p>
+
+
+<pre>
+&gt; [...]
+&gt; In our streaming environment there's no interactivity of this kind. The 
+&gt; server just continuously sends packets. There's no application-level return 
+&gt; traffic.
+</pre>
+
+<p>
+I wasn't sure about that since I remembered Real Player's statistics
+feedback. I assume that some streaming protocols have some kind of
+feedback mechanism to tell the server about the link quality, but I have
+next to none in-depth experience with streaming.
+</p>
+
+<p>
+Best,
+Ren&eacute;.
+</p>
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_mail.html#mb-scalable_tcp_tuning">Back</a><hr width="50%" align="left" /><p><br /></p><p>
+<b><p>
+Erik van Zijst [erik.van.zijst at gmail.com]
+
+</p>
+</b><br />
+<b>Thu, 17 Apr 2008 19:29:36 +0200</b>
+</p>
+
+<p>
+Ren&eacute; Pfeiffer wrote:
+</p>
+
+<pre>
+&gt; 
+&gt; Maybe we'll see your name some day in the kernel's changelog. <img src="../gx/smile.png" alt=":)">
+</pre>
+
+<p>
+Who knows, but I doubt I have such skills ;-)
+</p>
+
+
+<pre>
+&gt;&gt; In our streaming environment there's no interactivity of this kind. The 
+&gt;&gt; server just continuously sends packets. There's no application-level return 
+&gt;&gt; traffic.
+&gt; 
+&gt; I wasn't sure about that since I remembered Real Player's statistics
+&gt; feedback. I assume that some streaming protocols have some kind of
+&gt; feedback mechanism to tell the server about the link quality, but I have
+&gt; next to none in-depth experience with streaming.
+</pre>
+
+<p>
+Yes you're right, they do. And we pride ourselves on the fact that we 
+don't <img src="../gx/smile.png" alt=":-)">
+</p>
+
+<p>
+In our little start-up company we designed and built a new real-time, 
+TCP-friendly, streaming protocol in combination with bitrate-adaptive 
+video coding. This protocol does network-capacity analysis without 
+interactivity between client and server.
+</p>
+
+<p>
+cheers,
+Erik
+</p>
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_mail.html#mb-scalable_tcp_tuning">Back</a><hr width="50%" align="left" /><p><br /></p></div>
+</body>
+</html>

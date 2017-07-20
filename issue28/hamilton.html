@@ -1,0 +1,532 @@
+<!--startcut ==========================================================-->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML>
+<HEAD>
+<title>LG #28</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#A000A0"
+ALINK="#FF0000">
+<!--endcut ============================================================-->
+
+<H4>
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<h1><font color="maroon">Building an Audio CD Player, Part 1</font></h1>
+<H4>By <a href="mailto:michael@actrix.gen.nz">Michael Hamilton</a></H4>
+</center>
+<P> <HR> <P>  
+
+This article outlines my recent experiences writing Jcd, a Java CD
+player. It is aimed at people who have browsed through an
+introductory Java or C++ text and feel they know their way around
+either language. While reading the article, I think it
+would be a good idea to have a Java textbook on hand to fill in any items
+I might gloss over. 
+<p>
+I have been experimenting with Java in order to evaluate its
+usefulness as a general purpose language. One of the things I've written
+is a GUI CD player with a track-title database. I chose to write a
+CD player because it requires the use of a large part of the language
+and its associated libraries: graphical user interfaces, threads,
+file I/O sockets, text parsing, image manipulation, data entry forms
+and native C calls to interface to the kernel's CD drivers. Since
+this is one of my initial attempts at using Java, you shouldn't
+assume everything you read below is authoritative or definitive--I'm
+just reporting what worked for me.
+<p><HR> <P> 
+<h3>Features of Jcd</h3>
+<p><HR> <P> 
+Jcd has the following features:
+<p>
+<ul>
+  <li> 	Play/Stop/Pause/Previous/Next/Eject/Volume control panel
+  <li> 	Track/Index direct access
+  <li> 	Track, index, number-of-tracks, track-time, track-remaining,
+disc-remaining displays
+  <li> 	Program play, continuous/single play, shuffle play
+  <li> 	Xmcd CDDB artist, disc, track title look up and display
+  <li> 	Xmcd CDDB database format and protocols courtesy of Ti Kan and 
+Steve Scherf (<A
+HREF="http://sunsite.unc.edu/~cddb/xmcd/">http://sunsite.unc.edu/~cddb/xmcd/</A>)
+  <li> 	Optional remote CDDB server look up
+  <li> 	Autosave of remote look ups to local cache
+  <li> 	GUI window for creating/editing artist/title/track local cache entries
+  <li> 	Icon button widgets, e.g., play button, pause button light up when active
+  <li> 	Penguin button (a built-in plug for Linux)
+  <li> 	Multi-threaded, e.g., the controls and display run in a 
+separate thread to the database look ups to prevent remote database
+look ups from blocking other activities
+</ul>
+The finished system is shown here:
+<p> <center>
+<img src="./gx/hamilton/figure1.gif"></center>
+<p><HR> <P> 
+<h3>Java Application Programming on Linux</h3>
+<P> <HR> <P> 
+Jcd is a Java application, not a Java applet. That is, it
+can't be run in the secure sand box of a Web browser. This is because
+Jcd reads and writes files in your local file system, and because
+it requires a native-machine-language driver specific to your
+operating system and processor architecture. In the future it 
+may be possible to make Jcd an Applet, as Sun is working on standards
+for controlled accessed to local files and for portable
+access to hardware such as CD audio drives. Until then, Jcd must be
+run in a Java run-time environment, such as that provided by Sun's
+Java Development Kit. I developed Jcd using the
+Linux Java Porting Project's port of the Java Development Kit 1.0.2
+and 1.1.1. You can find out how to obtain the JDK for Linux by
+pointing your browser at <A
+HREF="http://java.blackdown.org/">http://java.blackdown.org/</A>.
+<p>
+This article will lead you through the code of a cut-down version of
+Jcd, much as it appeared in the early stages of its development. At the
+end of the article, we will have a working command-line-driven player
+that can be built upon to create a GUI player such as Jcd.
+<p>
+Linux supports a set of Sun <b>ioctl</b> commands--device I/O
+control calls to the
+kernel, for controlling audio CD operations. The kernel's CD-ROM
+ioctl interface is defined in the /usr/include/linux/cdrom.h file. This
+interface provides a set of calls for functions such as play, stop,
+pause, cd-info and others. The Java interface described below
+closely parallels the functions the kernel provides.
+<p>
+<A HREF="./hamilton1.html">Listing 1</A> 
+shows a test rig for testing my Java interface.
+Ignoring the details for the moment, you can see in lines 26
+through 71 that I have a loop reading from <b>cmd_stream</b>. On lines 31
+through 65, I check the command read for a keyword. If I match a
+keyword, I call the appropriate <b>cd_drive</b> operation.
+<p>
+At line 1 I declare that Jcd.java is
+part of the package Jcd; that is, all classes 
+defined in Jcd.java are part of the package Jcd. This serves to
+keep the Jcd classes together and grants them 
+mutual access to each other's data and methods, except where the data
+and methods are explicitly declared private. All classes outside the
+package can only access the data and methods that are explicitly
+declared public. The Java run-time environment locates the Jcd
+package by looking for a Jcd subdirectory in the directories listed in
+the CLASSPATH environment variable. While developing Jcd, I put my
+working directory . (dot) in the CLASSPATH and created a dummy Jcd
+subdirectory by using a symbolic link pointing back to my working
+directory:
+<p>
+<pre>
+ln -s . Jcd
+</pre>
+Later, when I installed the finished Jcd, I put the Jcd package
+in the /usr/local/lib/jcd/Jcd directory and added that directory
+to my CLASSPATH.
+<p>
+On lines 8 and 10 of 
+<A HREF="./hamilton1.html">Listing 1</A>,
+I import the standard Java I/O
+classes--a wild card is used to get them all--and I import the
+Jcd.Drive class that calls the kernel interface. When referring to
+the Drive class I have used the package qualifier Jcd, as well
+as the class name Drive.
+<p>
+At line 14 I declare the <b>main</b> method. The main method is static,
+which makes it a class method, so it doesn't belong to any
+particular Jcd instance; instead, it belongs to the class as a whole. This is
+the method that will be invoked when I run Jcd by typing: 
+<p>
+<pre>
+java Jcd.Jcd
+</pre>
+The Java loader looks for a static method called main in the
+class you tell it to run. One implication of this, is that every
+class you write can have its own test rig by including a static main
+method in its implementation.
+<p>
+At lines 16 through 18, I declare cd_drive and assign it to a new
+instance of the Drive object. I pass both the drive device name,
+/dev/cdrom, and the location of the compiled C shared object module,
+Jcd_Drive.so, to the object constructor so that the object can
+initialize itself appropriately.
+<p>
+At line 19 I wrap a DataInputStream object around the System.in
+standard input object. DataInputStream is a filter that allows
+me to read a byte stream as strings terminated by newlines. The
+idea of layering filters over data streams to add new processing
+functionality is very prominent in the Java I/O classes.
+<p>
+The only remaining unexplained pieces of code in 
+<A HREF="./hamilton1.html">Listing 1</A> are the
+<i>try-catch</i> statements that surround most of the code. In Java, errors
+are signalled by throwing exceptions which, if un-caught, cause the
+program to issue a diagnostic error. These ``Thowables'' are divided
+into two sub-classes: Errors, major problems that will probably
+result in a program crash (such as running out of memory); and
+Exceptions, problems that you are expected to be able to
+handle inside the program (such as reading past end-of-file). Any
+action that can result in an Exception has to be handled in one of two
+ways: the method in which it can occur must either have a try-catch
+statement that handles the exception, or the method must declare that
+it can cause the exception, which passes the buck to callers of the
+method. Because this is enforced by the compiler, it's a very nice
+mechanism for ensuring that exceptions do not go unconsidered by the
+programmer.
+<p>
+In 
+<A HREF="./hamilton1.html">Listing 1</A>,
+the System.in class can throw an IOException, such as
+end-of-file. The Jcd main() method either has to catch each
+IOException or pass it on. In this case, my empty catch body will
+effectively ignore I/O errors. After catching an exception, execution
+continues from the catch statement. The cd_drive object that the main
+method uses to control the CD-ROM can also return a DriveException. The main
+method has to catch these too--I just print the reason for the
+exception and let the program continue.
+<p><HR> <P> 
+<h3>Jcd Design Details</h3>
+<p><HR> <P> 
+Now look at Drive.java <A HREF="./hamilton2.html">Listing 2</A>. This file declares the Java
+to C interface as a set of body-less native methods on lines 69
+through 138. These native methods are implemented in the
+Jcd_Drive_ix86-Linux.c C module (<A HREF="./hamilton4.html">Listing 4</A>). The native methods in
+<A HREF="./hamilton2.html">Listing 2</A>
+are augmented by some Java methods that add additional
+operations to make life simpler for the users of the class--for
+example on lines 139 to 152, there are several variations of the
+<b>play()</b> method to simplify the most common types of requests.
+<p>
+On lines 13 through 35 of <A HREF="./hamilton2.html">Listing 2</A> the Drive class defines static
+class constants for all the instances of the Drive object to share.
+The keyword <i>final</i> means a value is constant. There seems to be a
+convention amongst Java programmers for representing constants in
+uppercase. All the constants in the Drive class are related to the
+kernel interface. For example, the frames per second defines the
+address unit used by CD-ROM drives; the lead out track number defined
+on line 18 is a dummy track that contains info on the total playing
+time of the CD.
+<p>
+Lines 35 through 51 define data unique to each Drive object that is
+created. The C module that carries out the kernel calls will access and
+update some of this data.
+<p>
+Most of the methods can throw a DriveException. DriveException is
+defined on line 157, and below it a series of sub-classes
+define the full range of exceptions that a DriveException may
+actually represent. The bodies of these exception classes are almost
+empty because the actual processing is passed on to the super
+(parent) class to handle which is ultimately the standard Java
+library's Exception class. The super-class constructors accept calls
+with and without an explanation string, so I've defined both. It
+would be nice if the official Java language supported default values
+for arguments, so that the excessive repetition of nearly identical
+constructors could be avoided (one of the features of the Python
+language that I miss the most).
+<p>
+All of my native methods are declared to be ``synchronized''. Making the
+methods synchronized gives each method exclusive access to the Drive when
+it is called. This prevents a multi-threaded application from issuing
+multiple conflicting (or overlapping) calls to the kernel. Synchronized
+methods carry more overhead than non-synchronized ones, but in this
+case we are unlikely to request more than a few CD operations per second,
+so we needn't worry about the overhead.
+<p>
+Having defined the interface, I used the <b>javah</b> utility from Sun's Java
+Development Kit to help me generate the code for the C module. I used
+javah to generate the C header file, Jcd_Drive.h, and the C stubs file,
+Jcd_Drive.c.
+<p>
+<pre>
+javah Jcd.Drive
+javah -stubs Jcd.Drive
+</pre>
+@lay:Place 2397l3 around here
+<p>
+The Jcd_Drive.h file contains data definitions and function prototypes
+that define the native C interface. The generated header
+file is a little messy, so a more readable version of it is presented in
+<A HREF="./hamilton3.html">Listing 3</A>.
+It contains a define for each of the final static data
+items in the Drive class. Note that javah has used the package name
+(Jcd) and class name (Drive) to form the Jcd_Drive prefix for the
+native data and function names.
+<p>
+The Jcd_Drive.c that javah generates provides code that handles the
+messy details of taking the data Java passes and making it more palatable
+before passing it on to the actual C routines. Aside from compiling
+this file and including its object with my own code, I pretty much
+ignore its existence. All I have to do is implement the interface
+defined in Jcd_Drive.h, I don't need to know which part Jcd_Drive.c
+plays in the process.
+<p><HR> <P> 
+<h3>Integrating Java with C</h3>
+<p><HR> <P> 
+For me, the ease with which Java and C can be integrated is one of
+Java's biggest selling points. I know there's much talk about 
+sticking to pure Java, but I'm interested in using Java as a general 
+purpose language. I'm sure I'll still need to fall back on C both 
+for reasons of performance, and in order to integrate Java into existing 
+systems.
+If I can write 90% of my systems code in Java and 10% in a well-defined
+C module, that may still make for good portability. For example, after
+writing a CD-ROM module in C for Linux, it only took me a few hours to
+create another C module for SGI IRIX. The Java code in my final
+player interrogates its environment to find out which operating system and
+architecture it's running on and then dynamically loads the
+appropriate native shared object module.
+<p>
+On line 16 of <A HREF="./hamilton3.html">Listing 3</A>, the Jcd_Drive.h file defines the
+ClassJcd_Drive structure that the C run-time environment and Java
+run-time environments can use to gain mutual access to data belonging
+to Drive objects. The raw data structure has to be augmented with
+some Java-environment bookkeeping by the
+<tt>HandleTo(Jcd_Drive)</tt> macro
+call which creates a new structure called HJcd_Drive on line 26. The C
+functions that make up the native interface are always passed
+HJcd_Drive as their first argument. The prototypes for these
+functions are listed on lines 28 through 45.
+<p>
+<A HREF="./hamilton4.html">Listing 4</A> 
+details Jcd_Drive_ix86-Linux.c, the Linux Intel 
+version of the C module. I've used a methodical architecture/OS naming 
+convention based on properties I can retrieve from the Java runtime
+environment. This allows Jcd to select and locate the appropriate 
+native module for each platform at runtime--for the cut down
+version of Jcd, I've just hard-coded the module (see line 17 of 
+<A HREF="./hamilton1.html">Listing 1</A>).
+<p>
+Most of the code in 
+<A HREF="./hamilton4.html">Listing 4</A> 
+is concerned with making the kernel
+ioctl calls. Before discussing these calls, I'll get the Java to C native
+call side of the equation squared away. Looking at a simple case
+first: on lines 181 through 189 of 
+<A HREF="./hamilton4.html">Listing 4</A>,
+the Jcd_Drive_status()
+C function implements the Jcd native <b>status()</b> method (from 
+<A HREF="./hamilton2.html">Listing 2</A> 
+line 122). When called, the status() function is passed the
+HJcd_Drive struct and can access the ClassJcd_Drive it contains by
+using the <b>unhand()</b> function. It first checks a C file descriptor to
+see if the drive has previously been opened successfully. If the file
+descriptor is <tt>-1</tt>, the drive isn't currently 
+assigned, so the
+function just returns the last known status (which was
+stored in the ClassJcd_Drive structure). Otherwise, if the file
+descriptor is valid, the new_status() function is called to retrieve a
+new status value into the ClassJcd_Drive structure.
+<p>
+A slightly more complex case is seen on lines 217
+to 234, where the <b>Jcd_Drive_trackAddress()</b> function implements the Jcd
+native <b>trackAddress()</b> method. The trackAddress() method returns the
+address of a track as the number of 75ths of a second from the start
+of the CD. The function is passed two parameters: the HJcd_Drive
+structure that contains the Java object's data and the track number
+in the form of a long integer. The integer is declared as Java_Int,
+but as you can see on line 39, this is just my way of getting around
+the differences between the Kaffe and Sun Java compilers--looks like
+native call implementations can vary a bit between compilers--
+hopefully this is something that will be standardized. In fact
+under JDK 1.1.1, my Java_Int should be defined as <tt>int32_t</tt>.
+<p>
+The trackAddress function sets up a <tt>cdrom_tocentry</tt> structure (defined
+in /usr/include/linux/cdrom.h) for passing to a kernel ioctl program. In
+Unix/Linux, ioctl calls provide access to a variety of kernel services
+related to devices. The device the ioctl is to work on is determined
+by the file descriptor passed as its first parameter--in Unix all
+devices can usually be accessed as special files resident in /dev.
+The kind of service an ioctl performs is determined by its second
+parameter. In our case we are doing a <tt>CDROMREADTOCENTRY</tt>, i.e., CD-ROM read
+table of contents entry. The third parameter to an ioctl is usually
+the address of some structure specific to that particular ioctl call.
+In this case the third parameter, the <tt>cdrom_tocentry</tt> 
+structure, is initialized to contain the track number, and the kernel
+will copy the result into fields within the same structure.
+<p>
+If an ioctl call goes wrong, perhaps due to a drive fault or 
+to the drive being empty, the ioctl call returns <tt>-1</tt>. If
+this happens, we need to raise a Java exception in the calling Java
+module. Line 228 accomplishes this by calling SignalError and
+passing it the text name of the exception as the second parameter--in
+this case, one of the exceptions declared in 
+<A HREF="./hamilton2.html">Listing 2</A>.
+The
+first parameter to SignalError is used to control the environment in
+which the error handling will occur (I left it to default). The last
+parameter is any extra text explanation that we may wish to provide--in
+this case I'm simply translating the C error number to a text
+string. It's important to note that SignalError sets up an exception
+that will be processed when the C error routine returns. On returning
+to the calling Java routine, only the last of any SignalError calls
+will have any effect, i.e., you can't communicate multiple errors via
+multiple SignalError calls in one C call.
+<p>
+If the ioctl call succeeds, we take the address the kernel returned in
+<tt>tocentry.cdte_addr.msf</tt> and translate it from minute-second frame to
+an integer number of 75ths of a second. This value is returned as
+the result of the native method call on line 231.
+<p>
+As we have seen above, passing numerical data backward and forward
+between Java and C is pretty easy. Character strings are almost
+as easy, but do require conversion. These two functions do the
+necessary conversions:
+<p>
+<pre>
+Hjava_lang_String *makeJavaString(char *from,
+	int len);
+char *javaString2CString(Hjava_lang_String *from, char *to, int max_len);
+</pre>
+The function <b>Jcd_Drive_cddbID()</b> on lines 263 to 279 computes the
+CDDB ID for a CD-ROM and uses <b>makeJavaString()</b> to convert it to a Java
+string before returning it (CDDB is the database format used by the
+Xmcd CD player). On lines 64 and 65 the <b>take_player()</b> function uses
+<b>javaString2CString()</b> to make a C version of the Java string containing
+the device name of the CD-ROM.
+<p><HR> <P> 
+<h3>Practical Design Issues</h3>
+<p><HR> <P> 
+If you look at almost any C routine in 
+<A HREF="./hamilton4.html">Listing 4</A>, you will see that the
+C code is constantly checking things like whether the drive is open or
+not. I'm trying to avoid monopolizing the drive. This is especially
+important on ejecting the drive tray. When the user uses Jcd to eject
+the tray, I relinquish the the drive by closing it and won't access it
+again until the user issues another Jcd request. This allows
+the user to use the drive for other purposes without leaving Jcd. It
+also prevents a problem on my system--if I keep polling the
+drive status after an eject, the drive will immediately close again.
+There's quite a bit of code that attempts to tip-toe around issues
+such as this one.
+<p>
+I also found that with my particular CD-ROM, if I issue an
+inappropriate pause or resume (for example, pause when the drive
+isn't playing anything), the kernel driver may become confused, and
+further ioctl calls to the drive will hang indefinitely. Once this
+happens the only way to get the drive to respond is to reboot. The
+pause/resume code on Lines 359 to 386 is careful to check before
+proceeding.
+<p>
+I also found that some kernel CD-ROM drivers won't respond to a play
+command while they are already playing. That's why the STOP_PLAY
+flag is defined on line 34 in 
+<A HREF="./hamilton2.html">Listing 2</A>.
+<p>
+You would think that CDs would include an ID unique to the album's
+artist and title, and perhaps even artist and track information--well,
+apparently, this isn't so. As a result, the writers of CD-players
+such as Xcd and my own Jcd use a hash-key ID computed from the
+lengths of the CDs and the lengths of their tracks. The hash key is
+used to look up a database of CD artists, titles and track-titles.
+There is a problem with using track lengths to create an ID. For an
+artist/title album there may be many pressings (if that's the right
+word) manufactured in different counties and states, and the different
+pressings may have slightly different lead-in/lead-out times and 
+time intervals between tracks. The
+ID is constructed so that all approximate matches can be identified--
+if there isn't a unique match, the GUI interface of Jcd will present a
+list of possibilities.
+<p><HR> <P> 
+<h3>Making the Makefile</h3>
+<p><HR> <P> 
+The final thing I'd like to discuss is the Makefile that builds this
+lite version of Jcd. Inter-module/inter-class dependencies in Java
+tend to depend more on whether a class has changed its interface.
+Just because a source file has been modified, it does not necessarily
+follow that defined interfaces within it have changed. If you
+construct a Makefile using file based inter-dependencies, you are going
+to do a lot of needless re-compiles. I don't have a solution to
+this problem--maybe a new kind of Java-aware build tool is necessary.
+This aside, the Makefile in 
+<A HREF="./hamilton5.html">Listing 5</A> does the job.
+The CFLAGS option
+<tt>-fPIC</tt> is very important; it makes the gcc compiler 
+generate position-independent code suitable for loading as a shared library. The
+LDFLAGS option <tt>-shared</tt> is obvious enough--it tells the loader to
+create a shared object. The LDFLAGS options <tt>-Wl,-soname,Jcd_Drive</tt>
+passes the <tt>-soname</tt> option to the linker so that the shared object will
+be named Jcd_Drive. Otherwise, the linker will include its path
+in its name, and we may get a mismatch on loading a module called
+Jcd_Drive. The Makefile adds a new default rule--a <i>.class</i> file
+depends on a corresponding <i>.java</i> file. The Makefile installs the
+native shared library in an appropriate directory structure to support
+multiple architectures and operating systems.
+<p>
+That's about all you need to know to create a simple CD player. My
+next article will examine the Abstract Windowing Toolkit in order to
+add a GUI and multi-threading in order to add programmed play.
+<p><HR> <P> 
+<h3>Resources</h3>
+<p><HR> <P> 
+ftp://sunsite.unc.edu/pub/Linux/apps/sound/cdrom/:
+The sunsite directory where the latest Jcd can be found.
+Currently this would be jcd-1.1.tar.gz
+<p>
+<A
+HREF="http://www.actrix.gen.nz/users/michael/">http://www.actrix.gen.nz/users/michael/</A>:
+Patches or news concerning Jcd can be found on my home page.
+<p>
+<A HREF="http://www.blackdown.org/">http://www.blackdown.org/</A>: The Linux Java site.
+<p>
+<i>Java in a Nutshell</i>, David Flanagan,
+O'Reilly & Associates, 1996.
+Very nice introduction, with enough detail to build things like Jcd if 
+you team it up with Sun's on-line documentation. By the time you read
+this article, the second edition will be out--you can use O'Reilly's 
+web page, <A HREF="http://www.ora.com/">http://www.ora.com/</A>, to check on its status.
+<p>
+<i>The Java Language Specification</i>, Gosling, Joy, Steele,
+Addison-Wesley 1996.
+Good reference on the language and class libraries but doesn't cover
+the Abstract Windowing Toolkit.
+<p>
+InfoMagic Java CD-ROM, Spring 1996:
+I used this CD-ROM to gain access to Sun's HTML documentation via my
+browser. This was my main source of AWT documentation.
+You can't use the JDK on this CD, as it is out of date--but 
+the documentation was still useful.
+<p>
+<i>The Java Class Libraries</i>, Chan and Lee, Addison-Wesley, 1997.
+This book covers the AWT, but also repeats much of what I found in 
+the previous two. This is the heaviest book I own--I think I
+would prefer a lighter
+AWT only reference. On brief inspection, <i>Java AWT Reference</i>,
+John Zukowski, O'Reilly & Associates, 1997, looks like a good
+possibility, and it covers the latest AWT too.
+<p>
+<i>Advanced Programming in the UNIX Environment</i>, W. Richard Stevens.
+Great general reference on Unix programming and provides a good background for
+ioctl basics and other stuff.
+<p>
+<A
+HREF="http://sunsite.unc.edu/~cddb/xmcd/">http://sunsite.unc.edu/~cddb/xmcd/ </A>: 
+The Xmcd and CDDB home page.
+Ti Kan and Steve Scherf developed a Motif CD player, and its
+CDDB database format has become a popular standard for free and
+shareware CD players. They've defined a protocol for remote
+look ups via TCP sockets.
+<p>
+All listings referred to in this article are available by
+anonymous download in the file
+<A HREF="./hamilton.tgz">hamilton.tgz</A>.
+<p>
+<p>
+<!--===================================================================-->
+<P> <hr> <P> 
+<center><H5>Copyright &copy; 1998, Michael Hamilton <BR> 
+Published in Issue 28 of <i>Linux Gazette</i>, May 1998</H5></center>
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<A HREF="./index.html"><IMG ALIGN=BOTTOM SRC="../gx/indexnew.gif" 
+ALT="[ TABLE OF CONTENTS ]"></A>
+<A HREF="../index.html"><IMG ALIGN=BOTTOM SRC="../gx/homenew.gif"
+ALT="[ FRONT PAGE ]"></A>
+<A HREF="./pizzi.html"><IMG SRC="../gx/back2.gif"
+ALT=" Back "></A>
+<A HREF="./hall.html"><IMG SRC="../gx/fwd.gif" ALT=" Next "></A>
+<P> <hr> <P> 
+<!--startcut ==========================================================-->
+</BODY>
+</HTML>
+<!--endcut ============================================================-->

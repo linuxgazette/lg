@@ -1,0 +1,203 @@
+/*============ pp_skeleton.c =====================================
+
+  PURPOSE - this program will check to see what parallel and serial
+            ports can be accessed by program code.  It offers helpful
+            suggestions about what to do if a port is not accessible.      
+*/
+
+#include <string.h>
+#include <stdio.h>
+
+#include "serial_access.h"
+#include "pp_access.h"
+
+
+void print_usage()
+{char* intro = 
+"\r\n============ Usage for pp_serial_check : version 1.0 =========================="
+"\r\n"
+"\r\n  PURPOSE : this program will check what parallel and serial ports on your PC"
+"\r\n            can be accessed as general IO ports.  It will also offer helpful"
+"\r\n            hints to solve problems."
+"\r\n"
+"\r\n    USAGE : there are several preliminary steps to complete before this program"
+"\r\n            can be run."
+"\r\n          - Startup your PC and enter the BIOS setup.  Ensure the parallel"
+"\r\n            printer ports you wish to use are set to \"SPP\", \"compatible\", or"
+"\r\n            \"bi-directional\" mode."
+"\r\n            Be careful to save any new settings as you exit BIOS."
+"\r\n          - For best detection on a parallel port connect pins 14 and 15 " 
+"\r\n            together.  These are the bottom right two pins when looking into"
+"\r\n            the 25 pin female D connector of the parallel port on your PC."
+"\r\n            The connection can be made using a thin paper clip bent into a"
+"\r\n            U shape."
+"\r\n          - For best detection on a serial port connect together pins 6 and 7"
+"\r\n            on the 9 pin male D connector on the back of your PC (pins 6 and 4"    
+"\r\n            on a 25 pin connector).  On a 9 pin connector these are the bottom"  
+"\r\n            left two pins.  This can be achieved using a small clip or piece"
+"\r\n            of wire."
+"\r\n          - Log in as root, or have this program owned by root and have the uid"
+"\r\n            and run this program as-"
+"\r\n               pp_serial_check run"         
+"\r\n"
+"\r\n   AUTHOR : Pj Radcliffe 31/8/2004.  This code is free for any use but you must"
+"\r\n            maintain the author acknowledgement."
+"\r\n"
+"\r\n" ;
+
+ printf( intro) ;
+}
+
+
+/*------------------ enable_pp_serial_IO ----------------------------------------
+
+  PURPOSE - enable IO to all pp and serial ports.
+*/
+
+void enable_pp_serial_IO()
+ {  if (ioperm(lp0, lp_length, 1)) 
+      perror("Failed ioperm on lp0") ; 
+    if (ioperm(lp1, lp_length, 1)) 
+      perror("Failed ioperm on lp1") ; 
+    if (ioperm(lp2, lp_length, 1)) 
+      perror("Failed ioperm on lp2") ; 
+      
+    if (ioperm(ttyS0, ttyS_length, 1)) 
+      perror("Failed ioperm on ttyS0") ; 
+    if (ioperm(ttyS1, ttyS_length, 1)) 
+      perror("Failed ioperm on ttyS1") ; 
+    if (ioperm(ttyS2, ttyS_length, 1)) 
+      perror("Failed ioperm on ttyS2") ; 
+    if (ioperm(ttyS3, ttyS_length, 1)) 
+      perror("Failed ioperm on ttyS3") ; 
+
+ }
+
+
+/*-------------------- check_pp_present -----------------------------------------
+
+  PURPOSE - see if given parallel printer port exists.  
+*/
+
+short check_pp_present(int pport)
+ {//--- try data port.
+     lp_init( pport) ;
+     int lpt = pport+1 ;
+     short fail = 0 ;
+     printf("\n   lp%i : looking for parallel printer port lp%i ( LPT%i) .... \n", pport, pport, lpt) ;
+     WR_pp_data( 0x55) ;
+     if ( RD_pp_data != 0x55)
+       fail = 1 ;
+     WR_pp_data( 0xAA) ;
+     if ( RD_pp_data != 0xAA)
+       fail = 1 ;
+     if ( fail)
+       { printf("      - No data port found.  Either parallel port lp%i does not exist\n", pport) ;
+         printf("        or is not set to SPP, compatible, or bi-directional in BIOS.\n") ;  
+         lp_restore() ;
+         return( 0) ;     
+       }
+     else
+       { printf("      + Data register found at lp%i,  port may exist.\n", pport) ;
+       }
+
+   //--- try for loop back.
+     SET_nLinefeed ;
+     if ( TEST_Error == 0)
+       fail = 1 ;
+     CLR_nLinefeed ;
+     if ( TEST_Error != 0)
+       fail = 1 ;
+     if ( fail)
+       { printf("      - There was no loop back found from pin 14 to pin 15.\n") ;
+         printf("        If the loop back is on the right pins then lp%i does not work.\n", pport) ;  
+         lp_restore() ;
+         return( 0) ;     
+       }
+     else
+       { printf("      + Parallel port lp%i works !! ( Loopback from pin 14 to 15 found).\n", pport) ;
+       }
+
+     lp_restore() ;
+     return( 1) ;
+ }
+
+
+/*-------------------- check_serial_present -----------------------------------------
+
+  PURPOSE - see if given serial port exists.  
+*/
+
+short check_serial_present(int sport)
+ {//--- try data port.
+     serial_init( sport) ;
+     int com = sport+1 ;
+     short fail = 0 ;
+     printf("\n   ttys%i : looking for serial port ttyS%i ( COM%i) .... \n", sport, sport, com) ;
+     WR_MCR( 0x05) ;
+     if ( RD_MCR != 0x05)
+       fail = 1 ;
+     WR_MCR( 0x0A) ;
+     if ( RD_MCR != 0x0A)
+       fail = 1 ;
+     if ( fail)
+       { printf("      - No MCR register found.  Serial port ttyS%i does not exist.\n", sport) ;
+         serial_restore() ;
+         return( 0) ;     
+       }
+     else
+       { printf("      + MCR register found at ttyS%i,  serial port may exist.\n", sport) ;
+       }
+
+   //--- try for loop back RTS to DSR.
+     SET_RTS ;
+     if ( GET_DSR == 0)
+       fail = 1 ;
+     CLR_RTS ;
+     if ( GET_DSR != 0)
+       fail = 1 ;
+     if ( fail)
+       { printf("      - There was no loop back found from pin 6 to pin 7 (9 pin D).\n") ;
+         printf("        If the loop back is on the right pins then ttyS%i does not work.\n", sport) ;  
+         lp_restore() ;
+         return( 0) ;     
+       }
+     else
+       { printf("      + Serial port ttyS%i works !! ( Loopback from pin 6 to 7 found).\n", sport) ;
+       }
+
+     serial_restore() ;
+     return( 1) ;
+ }
+
+//=========================== MAIN ============================================
+
+int main(int argc, char *argv[])
+{ //---- check for proper start,  give intro message if anything is wrong. */ 
+    if ( ( argc != 2) )
+      { print_usage() ;
+        return( -1) ;
+      } 
+    printf("\n   Type the program name with no parameters for instructions.\n") ;
+
+  //---- check the use is root,  if not abort.
+    if ( geteuid() != 0 )
+      { printf("\n   You must be logged in as root, or set this program to be") ;
+        printf("\n   owned by root and have the UID bit set.\n\n") ;
+        exit( -1) ;
+      }
+
+  //---- do the parallel ports.
+    enable_pp_serial_IO() ;
+    short port ;
+    for ( port=0 ; port < 3 ; port++ )
+      check_pp_present( port) ;
+    printf("\n") ;
+
+  //---- do the serial ports.
+    for ( port=0 ; port < 4 ; port++ )
+      check_serial_present( port) ;
+    printf("\n") ;
+
+
+}

@@ -1,0 +1,371 @@
+<!--startcut BEGIN header ==============================================-->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>Chez Marcel LG #47</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!--endcut ============================================================-->
+
+<H4>
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H1><font color="maroon">Chez Marcel</font></H1>
+<H4>By <a href="mailto:mcfly@workmail.com">Marty McGowan</a></H4>
+</center>
+<P> <HR> <P>  
+
+<!-- END header -->
+
+
+
+
+<P> Marcel Gagn&eacute;'s article (<I>Linux Journal</I> #65, September 1999) on
+French cooking inspired me to share some recipes of my own.  The cooking
+metaphor is not new to computing, as Donald Knuth, in his forward to
+"Fundamental Algorithms" confesses he almost used "Recipes for the Computer" as
+its title.  Without stirring the metaphor too vigorously, Gagn&eacute;'s
+article gives me the opportunity to share two items of interest and give them
+the needed cooking flavor.
+<P>
+For some time, I've been concerned about what I regard are overuse or
+misuse of two programming constructs:
+<ul>
+<li>temporary variables and files, and
+<li>nested logic and decisions.
+</ul>
+To continue the cooking analogy, these two may be thought of
+respectively as inconsistent or lumpy sauce, and uneven temperature.
+Realizing that we chefs like to work on one another's recipes, lets
+see what happens when we apply them to Marcel Gagn&eacute;'s recipe, "Check
+User Mail".
+<P>
+Before I'd read Marcel's article, my style of programming used the tool
+metaphor.  While not much of a chef, I now prefer the cooking
+metaphor, as it connotes more of a learning, and sharing model, which
+is what we do in programming.
+<P>
+Marcel's recipe is an excellent starting point for my school of
+cooking, as his recipe is complete, all by itself, and offers the
+opportunity to visit each of the points once.  First, here is a copy
+of his recipe, without the comment header.
+<pre>
+for user_name in 'cat /usr/local/etc/mail_notify'
+do
+	no_messages='frm $user_name |
+		grep -v "Mail System Internal Data" |
+		wc -l'
+	if [ "$no_messages" -gt "0" ]
+	then
+		echo "You have $no_messages e-mail message(s) waiting." > /tmp/$user_name.msg
+		echo " " >> /tmp/$user_name.msg
+		echo "Please start your e-mail client to collect mail." >> /tmp/$user_name.msg
+		/usr/bin/smbclient -M $user_name < /tmp/$user_name.msg
+	fi
+done
+</pre>
+This script isn't hard to maintain or understand, but I think the
+chefs in the audience will profit from the seasonings I offer here.
+<P>
+A by-product of my cooking school is lots of short functions.  There
+are those who are skeptical about adopting this approach.  Let's
+suspend belief for just a moment as we go through the method.  I'll
+introduce my seasonings one at a time, and then put Marcel Gagn&eacute;'s
+recipe back together at the end.  Then you may judge the sauce.
+<P>
+One of the languages in my schooling was Pascal, which if you recall
+puts the main procedure last.  So, I've learned to read scripts backwards,
+as that's usually where the action is anyway.  In Marcel Gagn&eacute;'s script,
+we come to the point in the last line, where he sends the message
+to each client.  (I don't know Samba, but I assume this will make
+a suitable function):
+<PRE> 
+	function to_samba { /usr/bin/smbclient -M $1; }
+</PRE> 
+This presumes samba reads from its standard input without another flag
+or argument.  It's used:   "to_samba {user_name}", reading the standard
+input, writing to the samba client.
+<P>
+And, what are we going to send the user, but a message indicating they
+have new mail.  That function looks like this:
+<PRE> 
+	function you_have_mail {
+		echo "You have $1 e-mail message(s) waiting."
+		echo " " 
+		echo "Please start your e-mail client to collect mail."
+	}
+</PRE> 
+and it is used:   you_have_mail {num_messages}.  writing the 
+message on the standard output.
+<P>
+At this point, you've noticed a couple of things.  The file names and
+the redirection of output and input are missing.  We'll use them if we
+need them.  But let me give you a little hint: we won't.  Unix(Linux)
+was designed with the principle that recipes are best made from simple
+ingredients.  Temporary files are OK, but Linux has other means to
+reduce your reliance on them. Introducing temporary files does a few
+things:
+<ul>
+<li>leaves you with extra cleaning to do after the meal is served,
+<li>forces you to make sure someone else isn't using the bowl when
+		you need it for your recipe.
+</ul>
+Therefore, we seek to save ourselves these tasks.  We'll see how this
+happens in a bit.
+<P>
+A key piece of the recipe is deciding whether or not our user needs to
+be alerted to incoming mail.   Let's take care of that now:
+<PRE> 
+	function num_msg { frm $1 | but_not "Mail System Internal Data" | linecount; }
+</PRE> 
+This is almost identical with Marcel's code fragment.  We'll deal with
+the differences later.  The curious among you have already guessed.
+This function is used: num_msg {user_name}, returning a count of the
+number of lines.
+<P>
+What does the final recipe look like.  All of Marcel Gagn&eacute;'s recipe is
+wrapped up in this one line of shell program:
+<PRE> 
+	foreach user_notify  'cat /usr/etc/local/mail_notify'
+</PRE> 
+And that's exactly how it's used.  This single line is the entire
+program, supported of course, by the functions, or recipe fragments we
+have been building.  We peeked ahead, breaking with Pascal tradition,
+because, after looking at some low-level ingredients, I thought it
+important to see where we are going at this point.  You can see the
+value of a single-line program.  It now can be moved around in your
+operations plan at will.  You may serve your users with the frequency
+and taste they demand.  Note, at this point, you won't have much code
+to change if you wanted to serve your A-M diners at 10 minute
+intervals beginning at 5 after the hour and your N-Z diners on the
+10-minute marks.
+<P>
+So what does "user_notify" look like?   I toiled with this one.  Let me
+share the trials.  First I did this:
+<PRE> 
+	function user_notify { do_notify $(num_msg $1) $1; }
+</PRE> 
+thinking that if I first calculated the number of messages for the
+user, and supplied that number and the user name to the function, then
+that function (do_notify) could perform the decision and send the
+message.  Before going further, we have to digress.  In the Korn
+shell, which I use exclusively, the result of the operation in the
+expression: $( ... ) is returned to the command line.  So, in our
+case, the result of "num_mag {user_name}" is a number 0 through some
+positive number, indicating the number of mail messages the user has
+waiting.
+<P>
+This version of user_notify would expect a "do_notify" to look like
+this:
+<PRE> 
+	function do_notify { if [ "$1" -gt "0" ]; then notify_user $2 $1; fi; }
+</PRE> 
+This is OK, but it means yet another "notify" function, and even for
+this one-line fanatic, that's a bit much.  So, what to do?  Observe,
+the only useful piece of information in this function is another
+function name "notify_user".  This is where culinary art, inspiration,
+and experience come in.  Let's try a function which looks like this:
+<PRE> 
+	function foo { { if [ "$X" -gt "0" ]; then eval $*; fi }
+</PRE> 
+This is different than the "do_notify" we currently have.  First of
+all, $X, is not an actual shell variable, but here the X stands for
+"lets see what is the best argument number to use for the numeric
+test".  And the "eval $*" performs an evaluation of all its
+arguments.  And here's the spice that gives this whole recipe it's
+flavor!  The first argument may be another command or function name!
+A remarkable, and little used property of the shell is to pass command
+names as arguments.
+<P>
+So, let's give "foo" a name.  What does it do?  If one of its
+arguments is non-zero, then it performs a function (it's first
+argument) on all the other arguments.  Let's solve for X.  It could be
+any of the positional parameters, but to be completely general, it
+probably should be the next one, as it's the only other one this
+function ever has to know about.  So, let's call this thing:
+<PRE> 
+	if_non_zero {function} {number} ....
+</PRE> 
+Using another convenient shorthand, it all becomes:
+<PRE> 
+	function if_non_zero { [ $2 -gt 0 ] && eval $*; }
+</PRE> 
+and we'll see how it's used later.  With this function, user_notify now
+looks like:
+<PRE> 
+	function user_notify { if_non_zero do_notify $(num_msg $1) $1; }
+</PRE> 
+and is used: user_notify {user_name}.  Note the dual use of the first
+argument, which is the user's name.  In one case, it is a further
+argument to the num_msg function which return the number for that
+user, in the other case, it merely stands for itself, but now as the
+2nd argument to "do_notify".  So, what does "do_notify" look like.
+We've already written the sub pieces, so, it's simply:
+<PRE> 
+	function do_notify { you_have_mail $1 | to_samba $2; }
+</PRE> 
+At this point, we have (almost) all the recipe ingredients. The
+careful reader has noted the omission of "but_not", "linecount", and
+"foreach".  Permit me another gastronomic aside.  Ruth Reichel,
+recently food editor of the New York Times, is now the editor for
+Gourmet magazine.  One of the things she promises to do is correct the
+complicated recipes so frequently seen in their pages.  For example,
+"use 1/4 cup lemon juice" will replace the paragraph of instructions
+on how to extract that juice from a lemon.
+<P>
+In that spirit, I'll let you readers write your own "but_not" and
+"linecount".  Let me show you the "foreach" you can use:
+<PRE> 
+      function foreach { cmd=$1; shift; for arg in $*; do eval $cmd $arg; done; }
+</PRE> 
+A slightly more elegant version avoids the temporary file name:
+<PRE> 
+      function foreach { for a $(shifted $*); do eval $1 $a; done; }
+</PRE> 
+which requires "shifted":
+<PRE> 
+      function shifted { shift; echo $*; }
+</PRE> 
+The former "foreach", to be completely secure, needs a "typeset"
+qualifier in front of the "cmd" variable.  It's another reason to
+avoid the use of variable names.  This comes under the general rule
+that not every programming feature needs to be used.
+<P>
+We need one final "Chapters of the Cookbook" instruction before
+putting this recipe back together.  Let's imagine by now, that we are
+practicing student chefs and we have a little repertoire of our own.
+So what's an easy way to re-use those cooking tricks of the past.  In
+the programming sense, we put them in a function library and invoke
+the library in our scripts.  In this case, let's assume we have
+"foreach", "but_not", and "linecount" in the cookbook.  Put that file
+"cookbook" either in the current directory, but more usefully,
+somewhere along your PATH variable.  Using Marcel Gagn&eacute;'s example, we
+might expect to put it in, say, /usr/local/recipe/cookbook, so you
+might do this in your environment:
+<PRE> 
+   PATH=$PATH:/usr/local/recipe
+</PRE> 
+and then, in your shell files, or recipes, you would have a line like this:
+<PRE> 
+    . cookbook		#  "dot - cookbook"
+</PRE> 
+where the "dot" reads, or "sources" the contents of the cookbook file into
+the current shell.   So, let's put it together:
+ <PRE> 
+# -- Mail Notification, Marty McGowan, mcfly@workmail.com, 9/9/99
+#
+  . cookbook
+# -------------------------------------------- General Purpose --
+function if_non_zero	{ [ $2 -gt 0 ] && eval $*; }
+function to_samba	{ /usr/bin/smbclient -M $1; }
+# --------------------------------------- Application Specific --
+function num_msg	{ frm $1 | but_not "Mail System Internal Data" | linecount; }
+function you_have_mail	{
+	echo "You have $1 e-mail message(s) waiting."
+	echo " " 
+	echo "Please start your e-mail client to collect mail."
+}
+function do_notify	{ you_have_mail $1 | to_samba $2; }
+function user_notify	{ if_non_zero do_notify $(num_msg $1) $1; }
+#
+# ------------------------------------------ Mail Notification --
+#
+  foreach user_notify  'cat /usr/etc/local/mail_notify'
+</PRE> 
+On closing, there are a few things that suggest themselves here.
+"if_non_zero" probably belongs in the cookbook.  It may already be in
+mine.  And also "to_samba".  Where does that go?  I keep one master
+cookbook, for little recipes that may be used in any type of cooking.
+Also, I keep specialty cookbooks for each style that needs its own
+repertoire.  So, I may have a Samba cookbook as well.  After I've done
+some cooking, and in a new recipe, I might find the need for some
+fragment I've used before.  Hopefully, it's in the cookbook.  If it's
+not there, I ask myself, "is this little bit ready for wider use?".
+If so, I put it in the cookbook, or, after a while other little
+fragments might find their way into the specialty books.  So, in the
+not too distant future, I might have a file, called "samba_recipe",
+which starts out like:
+<PRE> 
+# --------------- Samba Recipes, uses the Cookbook, Adds SAMBA --
+. cookbook
+# -------------------------------------------- General Purpose --
+function to_samba	{ /usr/bin/smbclient -M $1; }
+</PRE> 
+This leads to a recipe with three fewer lines and the cookbook
+has been replace with 'samba_recipes" at the start.  
+<P>
+Let me say just two things about style: my functions either fit
+on one line or not.  If they do, each phrase needs to be separated
+by a semi-colon (;), if not, a newline is sufficient.  My multi-line
+function closes with a curly brace on it's own line.  Also, my 
+comments are "right-justified", with two trailing dashes.  Find your
+style, and stick to it.
+<P>
+In conclusion, note how we've eliminated temporary files and variables.
+Nor are there nested decisions or program flow.  How was this
+achieved?  Each of these are now "atomic" actions.  The one decision
+in this recipe, "does Marcel have any mail now?" has been encapsulated
+in the "if_non_zero" function, which is supplied the result of the
+"num_msg" query.  Also, the looping construct has been folded into the
+"foreach" function.  This one function has simplified my recipes
+greatly.  (I've also found it necessary to write a "foreach" function
+which passes a single argument to each function executed.)
+<P>
+The temporary files disappeared into the pipe, which was Unix's (Linux's)
+single greatest invention.  The idea that one program might read its
+input from the output from another was not widely understood when Unix
+was invented.  And the temporary names disappeared into the shell
+variable arguments.  The shell function, which is very well defined in
+the Korn shell, adds greatly to this simplification.
+<P>
+To debug in this style, I've found it practical to add two things
+to a function to tell me what's going on in the oven.  For example:
+<PRE> 
+   function do_notify	{ comment do_notify $*
+	    you_have_mail $1 | tee do_notify.$$ |  to_samba $2
+	    }
+</PRE> 
+where "comment" looks like:
+<PRE> 
+      function comment { echo $* 1>&2; } 
+</PRE> 
+Hopefully, the chefs in the audience will find use for these
+approaches to their recipes. I'll admit this style is not the easiest
+to adapt, but soon it will yield recipes of more even consistency,
+both in taste and temperature.  And a programming style that will expand
+each chef's culinary art.
+
+
+
+<!-- BEGIN copyright ==================================================-->
+<P> <hr> <P> 
+<H5 ALIGN=center>
+
+Copyright &copy; 1999, Marty McGowan<BR> 
+Published in Issue 47 of <i>Linux Gazette</i>, November 1999</H5>
+<!-- END copyright ===================================================-->
+
+
+
+
+
+<!--startcut footer ===================================================-->
+<P> <hr> <P> 
+<A HREF="index.html"><IMG ALIGN=BOTTOM SRC="../gx/indexnew.gif" 
+ALT="[ TABLE OF CONTENTS ]"></A>
+<A HREF="../index.html"><IMG ALIGN=BOTTOM SRC="../gx/homenew.gif"
+ALT="[ FRONT PAGE ]"></A>
+<A HREF="makarov.html"><IMG SRC="../gx/back2.gif"
+ALT=" Back "></A>
+<A HREF="../faq/index.html"
+	><IMG SRC="./../gx/dennis/faq.gif"
+              ALT="[ Linux Gazette FAQ ]"></A>
+<A HREF="nielsen.html"><IMG SRC="../gx/fwd.gif" ALT=" Next "></A>
+<P> <hr> <P> 
+</BODY></HTML>
+<!--endcut ============================================================-->

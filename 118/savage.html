@@ -1,0 +1,752 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Snort Inline Part II LG #118</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="knaggs.html" >&lt;-- prev</A> | <A HREF="senryu.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Snort Inline Part II</h1>
+<p id="by"><b>By <A HREF="../authors/savage.html">Pete Savage</A></b></p>
+
+<p>
+  <h3>Introduction</h3>
+
+  <p>Last month, we danced around with joy at achieving our goal of
+  compiling and installing snort_inline, the IPS modification to
+  the common snort package. This month, however, we turn our
+  attention to some of the maintenance tasks that will keep our
+  Intrusion Prevention System running and up to date.</p>
+
+  <p>This second installment will focus on the following tasks;</p>
+
+  <ul>
+    <li>Automatically updating snorts rules.</li>
+
+    <li>Designing a script to enable snort to be restarted easily,
+    and started at boot time.</li>
+  </ul>
+
+  <p>In last month's article, we converted all of our snort rules
+  from accept to drop. It is useful to peruse the logs from time to
+  time, as there are always false positives being offered in the
+  snort community. If you do discover that a rule is causing normal
+  traffic to be dropped, you can always change the rules action
+  type from drop back to alert.</p>
+
+  <p>Whilst your snort_inline box at the end of last month may have
+  been reasonably up to date, a lot has happened since then. Virus
+  writers have been busy and shell coders have been feverishly
+  coding. The world being the place it is, it is is important that
+  you keep the rules on your snort_inline box up to date. This
+  process can be performed manually, or with the help of a small
+  package called OinkMaster.</p>
+
+  <p>The snort.org website offers three different types of rule
+  update downloads: subscription, i.e., payed for, registered, and
+  unregistered. Since the unregistered rules are updated only at
+  the time of the latest major release from snort.org, and
+  subscription rules require payment, we have opted to use the
+  registration rules for this article.</p>
+
+  <p>You will need to create an account with snort.org, before you
+  can continue. At the bottom of your user preferences page, click
+  the add code button to generate your unique snort code. We are
+  going to use a fictional code for purposes of this article,
+  587cba039g9f03300f9e98b.</p>
+
+  <p>You unique snort code is used to allow you to download the
+  latest snort rules as a registered user. We will need to modify
+  the configuration file for OinkMaster, for it to download these
+  latest rules for us. Please follow the steps below to obtain
+  OinkMaster, and begin configuration. For reference, we used the
+  file <a href=
+  "http://prdownloads.sourceforge.net/oinkmaster/oinkmaster-1.2.tar.gz?download">
+  oinkmaster-1.2.tar.gz</a>. As in the previous article, we will be
+  assuming that all files will be downloaded to /home/snort/</p>
+
+<pre>
+mv /home/snort/oinkmaster-1.2.tar.gz /usr/src/
+cd /usr/src
+tar xzvf oinkmaster-1.2.tar.gz
+cd oinkmaster-1.2
+cp oinkmaster.pl /usr/local/bin/
+cp oinkmaster.conf /etc/
+</pre>
+
+  <p>Above, we have moved the oinkmaster script to the
+  /usr/local/bin directory. This can be moved to any location you
+  desire, but, for the rest of this article, we will assume that it
+  is residing in /usr/local/bin/. The same applies to the
+  oinkmaster.conf file, except this has been moved to /etc/. We are
+  now ready to begin editing the OinkMaster configuration file, to
+  take advantage of our snort registration. Open the file
+  /etc/oinkmaster.conf in your favorite editor. At around line 61,
+  your should modify the line...</p>
+<pre>
+# url = http://www.snort.org/pub-bin/oinkmaster.cgi/&lt;oinkcode&gt;/snortrules-snapshot-2.3.tar.gz
+</pre>
+
+  <p>...and replace &lt;oinkcode&gt; with your newly acquired key from
+  above. We will be using our dummy key from above, as an
+  example.</p>
+
+<pre>
+url = http://www.snort.org/pub-bin/oinkmaster.cgi/587cba039g9f03300f9e98b/
+	snortrules-snapshot-2.3.tar.gz
+</pre>
+
+  <p>This should now make OinkMaster able to download all available
+  snort updates. We will perform one more modification, in order to
+  make OinkMaster change all alert rules to drop rules. The
+  implications of this have already been discussed previously.
+  There may in fact be some rules that you do not want to be of the
+  type "drop".</p>
+
+  <p>At around line 292 in the oinkmaster.conf file, you should see
+  the comment below:</p>
+
+<pre>
+# Example to make SID 1378 a 'drop' rule (valid if you're running
+# Snort_inline).
+# modifysid 1378 "^alert" | "drop"
+</pre>
+
+  <p>This makes a direct reference to our implementation of snort,
+  and gives us an example of how to modify a rule from alert to
+  drop. It is worth noting, at this stage, that all official snort
+  rules come with an SID. This is a unique value used to identify
+  the rule against others, and allow release notes for each rule.
+  In this way, we can perform a modification to a specific rule. We
+  will now add a line below this, to convert all of our alert rules
+  to drop rules.</p>
+
+<pre>
+modifysid * "^alert" | "drop"
+</pre>
+
+  <p>The star in the line above tells OinkMaster to apply the
+  modification to all rules it downloads.</p>
+
+  <p>If we now create a temporary directory, we can test our
+  OinkMaster configuration, and see if our rules have been
+  downloaded and modified.</p>
+
+<pre>
+cd /usr/src/oinkmaster-1.2
+mkdir temp_rules
+/usr/local/bin/oinkmaster.pl -o /usr/src/oinkmaster-1.2/temp_rules/
+</pre>
+
+  <p>After issuing the commands above, you should see some output,
+  similar to that below. This output has been abbreviated to save
+  space.</p>
+
+<pre>
+Loading /etc/oinkmaster.conf
+Downloading file from http://www.snort.org/pub-bin/oinkmaster.cgi/
+	5266c89575f91010b2315c594281c4b1baebd965/snortrules-snapshot-2.3.tar.gz... done.
+Archive successfully downloaded, unpacking... done.
+Setting up rules structures... done.
+Processing downloaded rules... disabled 0, enabled 0, modified 3190, total=3304
+Setting up rules structures... done.
+Comparing new files to the old ones... done.
+Updating rules... done.
+
+[***] Results from Oinkmaster started 20050811 11:06:44 [***]
+
+[*] Rules modifications: [*]
+    None.
+
+[*] Non-rule line modifications: [*]
+    None.
+
+[+] Added files (consider updating your snort.conf to include them if needed): [+]
+
+    -&gt; attack-responses.rules
+    -&gt; backdoor.rules
+    -&gt; bad-traffic.rules
+    -&gt; chat.rules
+...
+</pre>
+
+  <p>From the output above, we can tell that OinkMaster modified
+  all 3190 rules, and added all rules that weren't already
+  present: In our case, this was all of them. Now, issue the
+  command below;</p>
+
+<pre>
+head /usr/src/oinkmaster-1.2/temp_rules/web-attacks.rules -n 20
+</pre>
+
+  <p>After some comments about licensing, you should see two rules,
+  as below. Notice that the first word of each line is drop,
+  indicating that our SID modification has worked.</p>
+
+<pre>
+drop tcp $EXTERNAL_NET any -&gt; $HTTP_SERVERS $HTTP_PORTS 
+	(msg:"WEB-ATTACKS /bin/ps command attempt"; flow:to_server,established;
+	uricontent:"/bin/ps"; nocase; classtype:web-application-attack; sid:1328; rev:6;)
+drop tcp $EXTERNAL_NET any -&gt; $HTTP_SERVERS $HTTP_PORTS
+	(msg:"WEB-ATTACKS ps command attempt"; flow:to_server,established; 
+	uricontent:"ps%20"; nocase; classtype:web-application-attack; sid:1329; rev:6;)
+</pre>
+
+  <p>We are in a position to download these rules into our proper
+  snort_inline rules directory from last month. I strongly advise
+  that you take a backup of your rules directory, before continuing
+  beyond this point. I also suggest you move all custom rules that
+  you may have been experimenting with into a file called
+  local.rules. This is because OinkMaster will remove any rule that
+  is not in the offical release, unless it is present in a separate
+  file. This will constitute a modification to the
+  snort_inline.conf file, which we will perform in a little while.
+  Issuing the following command will perform the same process as
+  before, but will now modify our actual snort_inline rules.</p>
+
+<pre>
+/usr/local/bin/oinkmaster.pl -o /etc/snort_inline/rules/
+</pre>
+
+  <p>The output should be similar if not identical to that shown
+  earlier. If we now run snort_inline, as we did previously, with
+  the command...</p>
+
+<pre>
+snort_inline -c /etc/snort_inline/snort_inline.conf -Q -N -l /var/log/snort_inline/ \
+	-t /var/log/snort_inline/ -v
+</pre>
+
+  <p>...you may receive the following error;</p>
+
+<pre>
+ERROR: FLOWBITS ERROR: The number of flowbit IDs in the current ruleset exceed the maximum
+number of IDs that are allowed.  Fatal Error, Quitting..
+</pre>
+
+  <p>This is because the new rule set uses a rule where the number
+  of flowbit tags exceeds snort_inline's configuration. Flowbits are
+  used to keep track of the state of a TCP/IP connection. We can
+  modify a line in the snort_inline configuration, to overcome this
+  problem.</p>
+
+  <p>Load /etc/snort_inline/snort_inline.conf in your favorite
+  editor, and add a line reading:</p>
+
+<pre>
+config flowbits_size: 256
+</pre>
+
+  <p>If you now try running snort_inline again, you should be
+  presented with the familiar;</p>
+
+<pre>
+        --== Initialization Complete ==--
+</pre>
+
+  <p>If so, you have just used OinkMaster to update your
+  snort_inline ruleset to the latest available from snort.org.</p>
+
+  <p>It would be beneficial, though, to have these updates happen
+  automatically, so that the process is transparent to us. We are
+  going to add this process to the cronjob routine and ensure that
+  it happens every night. To do this, we will run the following
+  command:</p>
+
+<pre>
+crontab -e
+</pre>
+
+  <p>This will open cron's nightly jobs for the current user, this
+  being root. We are going to use a slightly modified version of
+  the command line used previously to start OinkMaster. Usually,
+  when running a process as a cronjob, any output from this process
+  is emailed to the cronjob's owner. Whilst this can be useful, it
+  can also be annoying to receive an email every night, saying the
+  same thing. We are going to suppress the output from the
+  OinkMaster process, in order to save on mailbox space. You will
+  need to add a line similar to the following to your crontab
+  file:</p>
+
+<pre>
+55 00 * * * /usr/local/bin/oinkmaster.pl -o /etc/snort_inline/rules/ &gt; /dev/null 2&gt;&amp;1 
+</pre>
+
+  <p>The line above will run the update at 00:55 every night. Since
+  most people are asleep at this time (apart from the ones writing
+  this article), this is a good time to perform maintenance tasks.
+  The '&gt; /dev/null 2&gt;&amp; 1' appended to the end of this
+  line routes all output to the /dev/null device, effectively
+  ignoring it. On saving and exiting, you should see a line similar
+  to the following:</p>
+
+<pre>
+crontab: installing new crontab
+</pre>
+
+  <p>This indicates that your new cronjob has been successfully
+  installed.</p>
+
+  <p>This would be a good time to try creating the local.rules
+  file, and linking it in to your snort_inline configuration file.
+  Follow the steps below to create a local.rules file:</p>
+
+<pre>
+touch /etc/snort_inline/rules/local.rules
+</pre>
+
+  <p>Edit this file in your favorite editor, and add the following
+  line to it;</p>
+
+<pre>
+drop tcp any any -&gt; any 80 (classtype:attempted-user; msg:"Port 80 connection initiated";)
+</pre>
+
+  <p>This will function in much the same way as the test performed
+  in Part I: It would be useful to refer back to this article to
+  help you here. We must restart the snort process as before.</p>
+
+  <p>To digress slightly from the topic at hand, it is worth noting
+  that some portions of snort_inline are, as yet, not fully
+  complete. I am referring to snort_inline's handling of certain
+  shell-based connections. At the time of writing this article,
+  there is a problem with, for example, telnet rule matching. The
+  problem occurs because of the order in which the packets are
+  processed. In the original snort, the network card is placed into
+  promiscuous mode, allowing it to see all of the network traffic,
+  but not alter it.</p>
+
+  <p>This is analogous to watching a conveyor belt of items
+  whizzing past a man with a clipboard. The man sits down and
+  notes any items that he believes are defective or troublesome,
+  and reports these to his supervisor. Once the parts reach the end
+  of the conveyor belt, they are assembled together to make a
+  complete item.</p>
+
+  <p>In contrast, snort_inline actually interferes with the
+  conveyor belt process. snort_inline picks the items up and
+  examines them itself. This is where snort_inline does its content
+  matching. The original snort also has a mechanism called
+  stream4_reassemble. This is analogous to having a second man
+  watching over the parts as they are assembled, at the end of the
+  conveyor belt. This second quality-control checker can then
+  check the whole assembly, to see if there are any problems.</p>
+
+  <p>The problem is that snort_inline functions with only one man
+  in the middle of the conveyor belt. This has the effect that
+  connections like telnet, where each character typed is sent as a
+  separate packet, can bypass certain rules.</p>
+
+  <p>This occurs because dropping a connection when, for example, a
+  user types 'to su root' (an actual snort rule, SID 715), would
+  require the stream to be reassembled before the content matching
+  can be performed. The man in the middle will just see, t - o - -
+  s - u - - r - o - o - t, all of which seem perfectly acceptable.
+  The original snort would see the finished stream at the end of
+  the conveyor belt 'to su root', which would trigger an alert to
+  the supervisor.</p>
+
+  <p>It is because of this that some of the snort_inline rules do
+  not actually work, even at an alert level. Some people have
+  suggested running two versions of snort, one for dropping and one
+  for alerting. How you choose to implement and overcome this
+  problem is up to you. However, there is word that the developers
+  of snort_inline are working on this. It would require the
+  handling of out-of-sequence packets.</p>
+
+  <p>Wouldn't it be nice if we could start, stop, and restart snort
+  at the push of a button? Well, maybe we can't do it with just one
+  button, but the current method takes too much time. It would be
+  nice to have a startup script that would take care of loading
+  ip_queue, creating the iptables rules, and starting the
+  snort_inline daemon. I have written a very simple script to take
+  care of this procedure. The script has been written with a Red
+  Hat/Fedora system in mind. This being the case, it will not work
+  on many of the other distributions. It is not difficult to create
+  an init.d script. Use a current one as reference, and edit as
+  necessary to learn the basics.</p>
+
+  <p>Let us take a brief look at the script below, to determine
+  what each portion does and how it relates to our usual process,
+  for starting and stopping snort_inline. The first few lines, with
+  a # in front of them are comment lines. These will be ignored
+  when the script is run, but a few are required in order to put
+  snort_inline into the boot sequence. There are two source
+  commands that load standard libraries. The first line of real
+  interest is:</p>
+
+<pre>
+[ -f /usr/local/bin/snort_inline ] || exit 0
+</pre>
+
+  <p>This checks to see if the snort_inline binary file actually
+  exists. If the file is not present, the script aborts.</p>
+
+  <p>The start function first checks to see if the ip_queue module
+  is loaded. If the module is not present, then it uses modprobe to
+  load the module. As you will see, most of the commands in the
+  startup script are similar, if not identical, to those used in
+  last month's article. The echo statements in this script are
+  simply there to produce the [ OK ]/[ FAILED ] lines that are
+  displayed when an init.d script is run.</p>
+
+  <p>The next few commands differ from our standard procedure.
+  Instead of simply creating a single rule for iptables, as we did
+  previously, we are going to create an iptables group. This group
+  will serve as a collection for all our iptables rules for
+  snort_inline. Why you ask? When it comes to stopping the
+  snort_inline service, we want our iptables rules to be removed as
+  well. Instead of flushing the entire iptables rule set, we can
+  simply flush our new group to remove our snort_inline rules.</p>
+<pre>
+        iptables -N ip_queue
+        iptables -I INPUT -p tcp -j ip_queue
+        iptables -I ip_queue -p tcp --dport 80 -j QUEUE
+</pre>
+
+  <p>These three lines accomplish the following;<br>
+  Line 1: Creates a new iptables group called ip_queue<br>
+  Line 2: Routes all tcp input to this new group<br>
+  Line 3: Adds our default rule for port 80 to be sent to the
+  ip_queue</p>
+
+  <p>Last, the snort_inline binary is loaded via a fairly typical
+  command line. Notice the word daemon has been added to the front.
+  This starts snort_inline in background mode mode, detaching it
+  from the terminal.</p>
+
+  <p>The stop function performs all of this, but in reverse. In
+  other words, first the snort_inline process is stopped, then the
+  iptables rules are flushed before finally removing the ip_queue
+  module. Notice the way the iptables rules are flushed.</p>
+
+<pre>
+        iptables -F ip_queue
+        iptables -D INPUT -p tcp -j ip_queue
+        iptables -X ip_queue
+</pre>
+
+  <p>Line 1: Flushes (deletes) all rules in the ip_queue group<br>
+  Line 2: Removes the link from the INPUT queue to the ip_queue
+  group<br>
+  Line 3: Removes the ip_queue group</p>
+
+  <p>As can be seen from the script below, there is also a restart
+  function, which performs the stop function, quickly followed by
+  the start function. This will make our life much easier from now
+  on. We are now able to add snort_inline to the startup sequence,
+  allowing it to be run at boot time. The script should now be
+  copied from below, or from <a href="misc/savage/snort_inline.txt">this link</a>, and should be
+  placed in the /etc/init.d/ directory, and should be called
+  snort_inline. The file must also be chmod 755 and both owned and
+  group owned by root, else service will not use it. If you are
+  unsure how to do this, once the file is created in /etc/init.d/,
+  run the following commands;</p>
+
+<pre>
+chmod 755 /etc/init.d/snort_inline
+chmod root.root /etc/init.d/snort_inline 
+</pre>
+
+<p>You should now test the startup script, to make sure it is
+running effectively. First, ensure that snort_inline
+isn't running and that iptables rules have been
+removed and ipqueue has been stopped. Then, run the following
+command:
+
+<pre>
+service snort_inline start
+</pre>
+
+  <p>Your snort_inline box should then display the lines below:</p>
+
+<pre>
+[root@localhost ~]# service snort_inline start
+Starting ip_queue module:                                       [  OK  ]
+Starting iptables rules:                                        [  OK  ]
+Starting snort_inline: Reading from iptables
+Initializing Inline mode                                        [  OK  ]
+[root@localhost ~]#
+</pre>
+
+  <p>Providing you see OKs down the line, you should be fine. If
+  there are some [ FAILED ] remarks, you should run each command
+  individually again. If you have typed the script out again by
+  yourself, check for mistakes. If not, check to see if you have
+  made any changes to directories, or last month's
+  configuration.</p>
+
+  <p>We are now going to allow snort_inline to be run at boot time.
+  It is important that you remember to add the chkconfig and
+  description comment lines, as these are required by chkconfig in
+  order to add it to the startup sequence. Issuing the command
+  below will add snort_inline to the services handler in Red
+  Hat/Fedora;</p>
+
+<pre>
+chkconfig snort_inline --add
+</pre>
+
+  <p>This line adds snort_inline into the services database.
+  Further, issuing...</p>
+
+<pre>
+chkconfig --levels 2345 snort_inline on
+</pre>
+
+  <p>...will instruct the init daemon to load snort_inline, in run
+  levels 234 and 5. In order to test this, you are going to have to
+  reboot the server. You should, during the boot sequence, see the
+  output from before flash by, indicating that the services have
+  been started correctly. Incidentally, the...</p>
+
+<pre>
+# chkconfig: 2345 20 40 
+</pre>
+
+  <p>...line determines the initial run levels in which snort_inline
+  should be started, followed by the minimum start and stop
+  priorities. These values work fine on this testing server, and
+  shouldn't present a problem to you.</p>
+
+  <p>Please note that this is a very simple script, and should not
+  be taken as a definitive init.d script. It just takes care of the
+  essentials, and allows easy restarting of the snort_inline
+  process.</p>
+
+  <p>As a final step, we will instruct crontab to restart the
+  snort_inline daemon, once the downloading of the rules via
+  OinkMaster has been completed. The OinkMaster script was set to
+  run at 55 minutes past midnight. We will set snort_inline to
+  restart half an hour later. Run the following command:</p>
+
+<pre>
+crontab -e
+</pre>
+
+  <p>Now, edit this document, putting the snort_inline restart line
+  below the OinkMaster command, as shown below.</p>
+
+<pre>
+55 00 * * * /usr/local/bin/oinkmaster.pl -o /etc/snort_inline/rules/ &gt; /dev/null 2&gt;&amp;1 
+25 01 * * * /sbin/service snort_inline restart &gt; /dev/null 2&gt;&amp;1
+</pre>
+
+  <p>The above lines redirect all of their output to the null
+  process, thus basically ignoring it. It may be that you would like
+  to see the output from these processes, in which case remove the
+  '&gt; /dev/null 2&gt;&amp;1' from the lines above. You are quite
+  welcome to alter the times, also. Indeed, for testing purposes,
+  it is probably best that you do.</p>
+
+  <p>Below is the script in its entirety:</p>
+
+<pre>
+#!/bin/bash
+#
+# chkconfig: 2345 20 40
+# description: Snort_inline is an IPS implementation of the popular snort IDS package
+# processname: snort_inline
+# config: /etc/snort_inline/snort_inline.conf
+
+# Source function library.
+. /etc/init.d/functions
+
+# Source networking configuration.
+. /etc/sysconfig/network
+
+[ -f /usr/local/bin/snort_inline ] || exit 0
+
+start() {
+        # Start daemons.
+        echo -n $"Starting ip_queue module:"
+        lsmod | grep ip_queue &gt;/dev/null || /sbin/modprobe ip_queue;
+        echo -e '\t\t\t\t   [  \033[32mOK\033[37m  ]'
+        
+        echo -n $"Starting iptables rules:"
+        iptables -N ip_queue
+        iptables -I INPUT -p tcp -j ip_queue
+        #Add new IPTABLES rules here and they will be added into the ip_queue Ruleset
+        iptables -I ip_queue -p tcp --dport 80 -j QUEUE
+
+        echo -e '\t\t\t\t   [  \033[32mOK\033[37m  ]'
+        echo -n $"Starting snort_inline: "
+        daemon /usr/local/bin/snort_inline -c /etc/snort_inline/snort_inline.conf -Q -N -l \
+		/var/log/snort_inline -t /var/log/snort_inline -D
+
+        RETVAL=$?
+        echo
+        [ $RETVAL = 0 ] &amp;&amp; touch /var/lock/subsys/snort_inline
+}
+
+stop() {
+        # Stop daemons.
+        echo -n $"Shutting down snort_inline: "
+        killproc snort_inline
+        echo -ne $"\nRemoving iptables rules:"
+        iptables -F ip_queue
+        iptables -D INPUT -p tcp -j ip_queue
+        iptables -X ip_queue
+        echo -e '\t\t\t\t   [  \033[32mOK\033[37m  ]'
+        echo -n $"Unloading ip_queue module:"
+        rmmod ip_queue
+        echo -en '\t\t\t\t   [  \033[32mOK\033[37m  ]'
+
+        RETVAL=$?
+        echo
+        [ $RETVAL = 0 ] &amp;&amp; rm -f /var/lock/subsys/snort_inline
+}
+
+restart() {
+        stop
+        start
+}
+
+# Arguments passed.
+case "$1" in
+  start)
+        start
+        ;;
+  stop)
+        stop
+        ;;
+  restart)
+        restart
+        ;;
+  *)
+        echo $"Usage: $0 {start|stop|restart|}"
+        exit 1
+esac
+
+exit $RETVAL
+</pre>
+
+  <p>So, in summary, I must apologize for not getting to custom
+  rules. It is on next month's agenda for snort_inline Part III. I
+  had several emails about both custom rules and, indeed, simple ways
+  to start and restart snort_inline.</p>
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/2002/note.png" class="bio">
+
+<!-- 
+If the author has sent his pic, save it to the right directory
+and enable the line below.
+
+<img align="left" alt="[BIO]" src="../gx/authors/pic.jpg" class="bio">
+
+-->
+
+<em>
+
+<p> Pete has been programming since the age of 10 on an old Atari 800 XE.
+Though he took an Acoustical Engineering degree from the world-renowned
+ISVR in Southampton UK, the call of programming brought him back and he
+has been working as a Web developer ever since. He uses both Linux and
+Windows platforms. He still lives in the UK, and is currently living
+happily with his wife.
+
+</em>
+<br clear="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2005, Pete Savage. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 118 of Linux Gazette, September 2005
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="knaggs.html" >&lt;-- prev</A> | <A HREF="senryu.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">September 2005 (#118)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

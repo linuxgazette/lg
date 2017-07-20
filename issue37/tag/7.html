@@ -1,0 +1,344 @@
+<!--startcut ======================================================= -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<html>
+<head>
+<META NAME="generator" CONTENT="lgazmail v1.1H.i">
+<TITLE>The Answer Guy 37: Setting up ISP Mail Services</TITLE>
+</HEAD><BODY BGCOLOR="#FFFFFF" TEXT="#000000"
+	LINK="#3366FF" VLINK="#A000A0">
+<!-- ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::: -->
+<H4>"The Linux Gazette...<I>making Linux just a little more fun!</I>"</H4>
+<P> <hr> <P>
+<!-- ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::: -->
+<center>
+<H1><A NAME="answer">
+	<img src="../../gx/dennis/qbubble.gif" alt="(?)" 
+		border="0" align="middle">
+	<font color="#B03060">The Answer Guy</font>
+	<img src="../../gx/dennis/bbubble.gif" alt="(!)" 
+		border="0" align="middle">
+</A></H1> 
+<BR>
+<H4>By James T. Dennis,
+	<a href="mailto:tag@lists.linuxgazette.net">tag@lists.linuxgazette.net</a><BR>
+	Starshine Technical Services,
+	<A HREF="http://www.starshine.org/">http://www.starshine.org/</A> 
+</H4>
+</center>
+
+<p><hr><p>
+<!--  endcut ======================================================= -->
+<!-- begin 7 -->
+<H3 align="left"><img src="../../gx/dennis/qbubble.gif" 
+	height="50" width="60" alt="(?) " border="0"
+	>Setting up ISP Mail Services</H3>
+
+
+<p><strong>From chris smith  on Tue, 29 Dec 1998  
+</strong></p>
+<!-- ::
+Setting up ISP Mail Services
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+:: -->
+<P><STRONG><IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	>
+James:
+</STRONG></P>
+<P><STRONG>
+I have been going over all the back issues of the Linux gazette (and
+many books and articals) looking for info on setting up a Linux(5.1)
+machine  as an ISP to serve e-mail to customers.
+</STRONG></P>
+<P><STRONG>
+In a test sceneraio I hava created new accounts with passwords
+and sent them e-mail from an outside( through another ISP), but trying
+to find the info on how to retrive the e-mail is very difficult.  My
+intent was to use POP3, and aparentaly I have to configure inetd.conf to
+run POP3 and  allow others access to ther accounts.
+</STRONG></P>
+<BLOCKQUOTE><IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	>
+On most distributions POP and various servers are enabled
+by default.  Normally it's wise edit <TT>/etc/inetd.conf</TT> to
+<EM>disable</EM> POP and other services.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+When you created these accounts --- one thing you should
+probably do is disable user access to shell (login) services
+by setting their shell to <TT>/bin/false.</TT>
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+Actually there is a problem with that, too.  It gets a bit
+complicated by the fact that <TT>/bin/false</TT> on many Linux and
+other Unix systems is actually a shell script.  You'd think
+that a shell script that does an immediate <EM>exit</EM> would be
+safe enough.  However, 'telnetd' and some other services will
+propagate certain types of environment variables to the
+login shell.    It's possible (using some shell quoting
+hackery) to trick <TT>/bin/false</TT> (the shell script) into
+executing arbitrary chunks of shell code if they aren't
+filtered by the telnet daemon.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+So, you should compile your own binary equivalent of
+false --- actually I wrote my own I call "<tt>denysh</tt>" as
+shown here:
+</BLOCKQUOTE>
+
+<blockquote><pre>#include &lt;unistd.h&gt;
+	/* denysh
+	 *	by: James T. Dennis,  &lt;jim@starshine.org&gt;
+	 *	    Proprietor, Starshine Technical Services
+	 *
+	 * 	Deny a user shell access.  Intended for use as
+	 * 	the "shell" for POP mail, FTP only and other users
+	 *	who are supposed to be restricted to non interactive
+	 *	use of the system.
+	 *
+	 * 	Usage:  using vipw you can replace the "shell" field
+	 *	of any user's account record in the /etc/passwd with
+	 *	the full path to this binary.  You can also add this
+	 *	to /etc/shells and (as root) use the chsh command to
+	 *	apply this (no need to edit /etc/passwd if that bothers
+	 *	you).
+         *
+         *  compile with:
+	 *                   gcc -static -o denysh denysh.c
+         *
+         *  to prevent any chance for shared library (LD_PRELOAD)
+	 *  exploits
+	 */
+
+int main () {
+  char *message= "Access Denied:  Your account is not"
+		" permitted interactive login!\n";
+  write (STDERR_FILENO, message, strlen(message));
+  exit(1);
+}
+</pre></blockquote>
+<BLOCKQUOTE>
+... just compile that and read the comments.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+I also recommend setting the home directories
+of "POP Only" users to some directory that they
+<em>don't</em> own, to which they do not have any 
+other access, and also denying them FTP access.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+Of course if your customers have special needs
+--- for example they intend to run 'procmail'
+on your server, etc --- then you'll need to review
+your policies and make your own decisions.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+Of course, most sites don't secure their systems
+all that well.  So many sites will continue to
+use the <TT>/bin/false</TT>, and they'll occasionally see
+their "POP Only" users (or people who've sniffed
+or stolen the passwords for their users) subvert
+the "<TT>/bin/false</TT>" into full interactive shell access.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+Of course if your system is using PAM there are
+ways that you can limit specific users and groups
+to specific services (particularly using the 'listfile'
+module.  PAM is the default authentication model
+for <A HREF="http://www.redhat.com/">Red Hat</A> Inc's 
+distribution --- and it can
+be installed on other systems as you like.  It's
+also possible to limit access to services based
+on where the request is coming from.  Thus it's
+pretty easy to institute a policy that allows
+'telnet' and other forms of access from your
+local LAN while denying it to anyone whose
+request is coming from an "outside" system.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+If your going to run an ISP system you'll want to
+learn quite a bit more about Linux security than
+the average sysadmin.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+(Shamless plug: I'll be giving a tutorial on
+the subject at the upcoming LinuxWorld Expo:
+<A HREF="http://www.linuxexpo.com"
+	>http://www.linuxexpo.com</A>).
+</BLOCKQUOTE>
+<P><STRONG><IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	>
+any Help that you can give will be much apriciated.
+</STRONG></P>
+<P><STRONG>
+chris
+</STRONG></P>
+<P><STRONG>
+ps. I got handed this job under protest saying I  am willing to learn
+( I come from the land of windows and dos where everything is in one
+directory not scattered around {what is up with that anyway} ), and I am
+reading everything that I can, but there are still many many holes, the
+local groups are some help, but the continued refference to read the man
+pages  helps little. I hardly under stand what they are saying 1/2 the
+time.  just venting i guess
+</STRONG></P>
+<BLOCKQUOTE><IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	>
+I've never seen an MS-DOS or Windows system where
+"everything is in one directory" --- even if you consider
+the Win '9x "Registry" --- that is more of a "virtual file
+system" than a "single file" (since it has many "sub trees"
+and "nodes").
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+Indeed, you'd find (if you'd studied any operating systems
+beyond MS-DOS, Windows, and Unix) that the similarities
+between MS-DOS and Unix are somewhat greater than their
+differences.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+However, the Unix, and consequently the Linux, convention
+is to use relatively simple text files for configuration of
+almost all services.  System services are almost all
+controlled by files under the <TT>/etc</TT> directory tree.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+The use of text files allows for easy repair, auditing and
+relatively easy automation of changes (since awk, Perl
+and other text processing scripts can be written to
+modify many settings on systems across a network.  It's also
+possible to distribute new configuration files (including
+passwd and group files to update user account information)
+over the net.  This is facilitated by having separate
+files for different services.
+</BLOCKQUOTE>
+<P><STRONG><IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	>
+"in the deep end and over my head  comming up for air soon I hope"
+</STRONG></P>
+<BLOCKQUOTE><IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	>
+Well, one approach would be to just "go with the flow" ---
+just enable the POP daemon support in inetd and let the
+users access whatever <EM>other</EM> services they like.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+Professionally your best bet is to recommend that a
+consultant be placed on retainer to help you set up
+each new service as requested.  That consultant should
+review your needs, show you how to install/configure the
+service and give you some pointers on maintaining it.
+It would be a good idea to have that consultant --- or
+better yet, a different one --- come in to do periodic
+systems administration and security audits.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+In this way you get the help you need, the services
+installed and configured by someone whose done it before,
+some training, and a direction to which you can escalate
+emergencies.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+If your boss expects you to "just do it" and expects it
+to all get done right and in a timely fashion, and refuses
+to provide you with the additional resources (consultants,
+training, time, leeway to mess things up, whatever) then
+you should definitely consider your negotiating position.
+</BLOCKQUOTE>
+<BLOCKQUOTE>
+(Many employers exhibit unreasonable expectations in this
+field.  They've fallen victim to the lies of software
+company marketeers that have been chanting "ease of use"
+for the last two decades.  A lot of software is only
+"easy to use" if you want to do it "their way" and accept
+whatever limitations and flaws --- particularly security
+flaws --- it shipped with.  However, many of these managers
+will listen to reason --- and the <EM>really</EM> important part
+of a sysadmin's job is to manage the expectations of his or
+her users and management).
+</BLOCKQUOTE>
+<!-- sig -->
+
+<!-- end 7 -->
+<!--startcut ======================================================= -->
+<P> <hr> <P>
+<H5 align="center"><a href="http://www.linuxgazette.net/copying.html"
+	>Copyright &copy;</a> 1999, James T. Dennis 
+<BR>Published in <I>The Linux Gazette</I> Issue 37 February 1999</H5>
+<P> <hr> <P>
+<!-- ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::: -->
+<P align="center">
+<table width="98%"><tr valign="center" align="center">
+<td rowspan="3" colspan="4"><A HREF="../lg_answer37.html"><IMG
+        SRC="../../gx/dennis/answernew.gif"
+        ALT="[ Answer Guy Index ]"></A></td>
+  <TD width="8%"><A HREF="./1.html">1</A></TD>
+  <TD width="8%"><A HREF="./2.html">2</A></TD>
+  <TD width="8%"><A HREF="./3.html">3</A></TD>
+  <TD width="8%"><A HREF="./4.html">4</A></TD>
+  <TD width="8%"><A HREF="./5.html">5</A></TD>
+  <TD width="8%"><A HREF="./6.html">6</A></TD>
+  <TD width="8%"><A HREF="./7.html">7</A></TD>
+  <TD width="8%"><A HREF="./8.html">8</A></TD>
+  <TD width="8%"><A HREF="./9.html">9</A></TD>
+  <TD width="8%"><A HREF="./10.html">10</A></TD>
+
+</tr><tr valign="center" align="center">
+  <TD><A HREF="./11.html">11</A></TD>
+  <TD><A HREF="./12.html">12</A></TD>
+  <TD><A HREF="./14.html">14</A></TD>
+  <TD><A HREF="./15.html">15</A></TD>
+  <TD><A HREF="./16.html">16</A></TD>
+  <TD><A HREF="./17.html">17</A></TD>
+  <TD><A HREF="./18.html">18</A></TD>
+  <TD><A HREF="./19.html">19</A></TD>
+  <TD><A HREF="./21.html">21</A></TD>
+  <TD><A HREF="./22.html">22</A></TD>
+
+</tr><tr valign="center" align="center">
+  <TD><A HREF="./23.html">23</A></TD>
+  <TD><A HREF="./28.html">28</A></TD>
+  <TD><A HREF="./29.html">29</A></TD>
+  <TD><A HREF="./30.html">30</A></TD>
+  <TD><A HREF="./31.html">31</A></TD>
+  <TD><A HREF="./32.html">32</A></TD>
+  <TD><A HREF="./33.html">33</A></TD>
+  <TD><A HREF="./34.html">34</A></TD>
+  <TD><A HREF="./37.html">37</A></TD>
+  <TD><A HREF="./38.html">38</A></TD>
+
+</tr><tr valign="center" align="center">
+  <TD><A HREF="./39.html">39</A></TD>
+  <TD><A HREF="./41.html">41</A></TD>
+  <TD><A HREF="./42.html">42</A></TD>
+  <TD><A HREF="./43.html">43</A></TD>
+  <TD><A HREF="./44.html">44</A></TD>
+  <TD><A HREF="./45.html">45</A></TD>
+  <TD><A HREF="./46.html">46</A></TD>
+  <TD><A HREF="./47.html">47</A></TD>
+  <TD><A HREF="./48.html">48</A></TD>
+  <TD><A HREF="./49.html">49</A></TD>
+
+</tr></table>
+	</P>
+<P> <hr> <P>
+<!-- ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::: -->
+<P> <hr> <P>
+<!-- begin lgnav ::::::::::::::::::::::::::::::::::::::::::::::::::: -->
+<A HREF="../index.html"
+	><IMG SRC="../../gx/indexnew.gif" ALT="[ Table Of Contents ]"></A>
+<A HREF="../../index.html"
+	><IMG SRC="../../gx/homenew.gif" ALT="[ Front Page ]"></A>
+<A HREF="../lg_bytes37.html"
+	><IMG SRC="../../gx/back2.gif" ALT="[ Previous Section ]"></A>
+<A HREF="../york.html"
+	><IMG SRC="../../gx/fwd.gif" ALT="[ Next Section ]"></A>
+<!-- end lgnav ::::::::::::::::::::::::::::::::::::::::::::::::::::: -->
+<!-- ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::: -->
+</BODY></HTML>
+<!--endcut ========================================================= -->

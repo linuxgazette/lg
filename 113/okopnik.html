@@ -1,0 +1,638 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Introduction to Shell Scripting - Part 3 LG #113</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="lodato.html" >&lt;-- prev</A> | <A HREF="oregan.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Introduction to Shell Scripting - Part 3</h1>
+<p id="by"><b>By <A HREF="../authors/okopnik.html">Ben Okopnik</A></b></p>
+
+<p>
+<img src="../gx/reprint.png" alt="A Blast from the Past!">
+<strong><em>Originally published in Issue 54 of Linux Gazette, May
+2000</em></strong>
+
+<pre>
+
+Never write it in 'C' if you can do it in 'awk';
+Never do it in 'awk' if 'sed' can handle it;
+Never use 'sed' when 'tr' can do the job;
+Never invoke 'tr' when 'cat' is sufficient;
+Avoid using 'cat' whenever possible.
+ -- Taylor's Laws of Programming
+
+</pre>
+
+<p> Last month, we looked at loops and conditional execution. This time
+around, we'll look at a few of the simpler "external" tools (i.e., GNU
+utilities) that are commonly used in shell scripts. Recall that shell
+scripts are made up of 1) internal shell commands and structures, 2)
+external tools, comprised of the standard utilities, and 3) installed
+programs; the first are always going to be there, as long as you're
+executing the script with the same shell (the shebang usually takes care of
+that), the second will <em>usually</em> be there (but watch out for
+non-portable syntax between different versions, e.g., the '-A' switch in
+'cat', the various levels of regex parsing in different 'grep' versions,
+etc.), and the last is essentially arbitrary since you don't know what
+another person executing your script has installed (or not installed) on
+their machine. If you're planning on distributing your script, you may need
+to write code to test for the presence of any external programs you use and
+issue warnings if they're absent.
+
+<p> Oh, and - the reason for the above quote: the tools available to you as
+a script writer, as you might have guessed from it, are arranged in a rough
+sort of a "power hierarchy". It's important to remember this if you find
+yourself continually being frustrated by the limitations of a specific
+tool, it may not have enough "juice" to do the job. Conversely, it does not
+make sense to use some heavy-duty utility that's big and slow to perform a
+simple operation.
+
+<p> Some years ago, while writing a script that processed Clipper database
+files, I found myself pushed up against the wall by the limitations of
+arrays in "bash"; after a day and a half of fighting it, I swore a bitter
+oath, glued a "screw it" label over the original attempt, and rewrote the
+entire thing in "awk".
+
+<p>  It took a total of 15 minutes.
+
+<p>  I didn't tell anyone at the time; even my good friends would
+have taken a Clue-By-4 to my head to make sure that the lesson stuck...
+
+<p> <strong>Don't</strong> be stubborn about changing tools when the
+original one proves under-powered.
+
+<h3>cat</h3>
+
+<p> Strange as it may seem, 'cat' - which you've probably used on
+innumerable occasions - can do a number of useful things beyond simple
+concatenation and printing to the screen. As an example, 'cat -v file.txt'
+will print the contents of "file.txt" to the screen - and will also show
+you all the non-text characters that might normally be invisible (this
+excludes the standard textfile characters such as `end-of-line' and `tab'),
+in '^' (for Ctrl- characters) and 'M-' (for Alt- characters) notation.
+This can be very useful when you've got something that is supposed to be a
+text file, but various utilities keep failing to process it and give errors
+like "This is a binary file!". This capability can also come in handy when
+converting files from one type to another (see the section on 'tr'). If you
+decide you'd like to see all the characters in the file, the `-A' switch
+will fill the bill - `$' signs will show the end-of-lines (the buck stops
+here?), and `^I' will show the tabs. Note that '-A' is just a shortcut for
+'-vet' - something that used to be known as "taking your cat to the vet".
+(Yes, Unix command usage can be quite odd. :)
+
+<p> '-n' is another useful option. This one will number all the lines (you
+can use `-b' to number only the non-blank lines) of a file - very useful
+when you want to create a `line selector', i.e., whenever you want to have
+a "handle" for a specific line which you would then pass to another
+utility, say, 'sed' (which works well with line numbers).
+
+<p> 'cat' can also be used for "here-doc"s - i.e., to generate multi-line,
+formatted text output. The syntax is a little odd but not difficult; here
+are two script "snippets" showing the differences between using 'echo' and
+a here-doc:
+
+<pre class="code"> 
+...
+echo "'guess' - a shell script that reads your mind"
+echo "and runs the program you're thinking about."
+echo
+echo "Syntax:"
+echo
+echo "guess [-fnrs]"
+echo
+echo "-f Force mode: if no mental activity is detected,"
+echo "   take a Scientific Wild-Ass Guess (SWAG) and execute."
+echo "-n Read your neighbor's mind; commonly used to retrieve"
+echo "   the URLs of really good porno sites."
+echo "-r Reboot brain via TCP (Telepathic Control Protocol) - for
+echo "   those times when you're drawing a complete blank."
+echo "-s Read the supervisor's mind; implies the '-f' option."
+echo
+exit
+...
+
+</pre> 
+<pre class="code">
+...
+cat &lt;&lt;!
+'guess' - a shell script that reads your mind
+and runs the program you're thinking about.
+
+Syntax:
+
+guess [-fnrs]
+
+-f Force mode: if no mental activity is detected,
+   take a Scientific Wild-Ass Guess (SWAG) and execute.
+-n Read your neighbor's mind; commonly used to retrieve
+   the URLs of really good porno sites.
+-r Reboot brain via TCP (Telepathic Control Protocol) - for
+   those times when you're drawing a complete blank.
+-s Read the supervisor's mind; implies the '-f' option.
+
+!
+exit
+...
+
+</pre>
+
+Everything between the two exclamation points will be printed to 'stdout'
+(the screen) as formatted. Note that the terminator ('!', in this case) is
+arbitrary - you could use 'EOF' or '^+-+^' or 'This_is_the_end_my_friend' -
+but '!' is traditional.  The only constraints on the above are, there must
+be a space between the terminator and the redirection symbol following it
+(otherwise, the redirector could be seen as a part of the terminator!), and
+the closing terminator must be on a line by itself, with no trailing
+whitespace. This allows the terminator to be used as a part of the text
+without closing the here-doc.
+
+<p> Using the same mechanism with redirection gives you a mini-editor:
+
+<pre class="code">
+ben@Fenrir:~$ cat &lt;&lt;! &gt; file.txt
+&gt; Everything entered here
+&gt; 	will be written to file.txt
+&gt; 		exactly as entered.
+!
+ben@Fenrir:~$ cat file.txt
+Everything entered here
+        will be written to file.txt
+                exactly as entered.
+</pre>
+
+<p> I tend to think of 'cat' as an "initial processor" for text that will
+be further worked on with other tools. That's not to say that it's unimportant
+- in some cases, it's almost irreplaceable. Indeed, your 'cat' can do tricks
+that are not only entertaining but useful... and you don't even need a
+litter box.
+
+
+<h3>tr</h3>
+
+<p> When it comes to "character-by-character" processing, this utility,
+despite its oddities in certain respects (e.g., characters specified by
+their ASCII value have to be entered in <em>octal</em>), is one of the most
+useful ones in our toolbox. Here's a script using it that replaces those
+"DOS-text-to-Unix" conversion utilities:
+
+<pre class="code">#!/bin/bash
+[ -z "$1" ] &amp;&amp; { 
+	echo "d2u - converts DOS text to Unix."
+	echo "Syntax: d2u &lt;file&gt;"
+	exit
+}
+
+cat "$1"|tr -d '\015'
+</pre>
+
+<p> &lt;grin&gt; I guess I'd better take time to explain; I can already
+hear the screams of rage from all those folks who just learned about 'if'
+constructs in last month's column.
+
+<p> <i>"What happened to that nice `if' statement you said we needed at
+the beginning of the script? and what's that `&amp;&amp;' thing?"</i>
+
+<p> Believe it or not, it's all still there - at least the mechanism that
+makes the "right stuff" happen. Now, though, instead of using
+the structure of the statement and fitting our commands into the "slots"
+in the syntax, we use the <i>return value</i> of the commands,
+and make the logic do the work. Let's take a look at this very
+important concept.
+
+<p> Whenever you use a command, it returns a code on exit - typically 0 for
+success, and 1 for failure (exceptions are things like the 'length'
+function, which returns a value). Some programs return a variety of numbers
+for specific types of exits, which is why you'd normally want to test for
+zero versus non-zero, rather than testing for `1' specifically. You can
+implement the same mechanism in your scripts (this is a good coding
+policy): if your script generates a variety of messages on different exit
+conditions, use 'exit n' as the last statement, where `n' is the code to be
+returned (the plain 'exit' statement will returns the value of the
+operation immediately preceding it.) These codes, by the way, are invisible
+- they're internal "flags"; there's nothing printed on the screen, so don't
+bother looking. If you want to see what the exit code of the last command
+was, try echoing '$?' - it stores the numerical value of the last exit flag.
+
+<p> To test for them, 'bash' provides a simple mechanism - the reserved
+words `&amp;&amp;' (logical AND) and `||' (logical OR). In the script
+above, the statement basically says "if $1 has a length of zero, then the
+following statements (echo... echo... exit) should be executed". If you're
+not familiar with binary logic, this may be confusing, so here's a quick
+rundown that will suffice for our purposes: back in the days when the
+dinosaurs roamed the earth, and learning about computers meant
+understanding hardware design, we had gadgets called 'AND gates' and 'OR
+gates' - logic circuits - that operated like this:
+
+<pre class="code">
+     AND (&amp;&amp;)                   OR (||)
+    truth table                truth table
+
+     A   B  out                 A   B  out
+    -----------                -----------
+   | 0 | 0 | 0 |              | 0 | 0 | 0 |
+   | 0 | 1 | 0 |              | 0 | 1 | 1 |
+   | 1 | 0 | 0 |              | 1 | 0 | 1 |
+   | 1 | 1 | 1 |              | 1 | 1 | 1 |
+    -----------                -----------
+
+If any input is 0,          If any input is 1,
+the output will be 0.       the output will be 1.
+</pre>
+
+In other words, if we knew the value of one of the inputs, we could decide
+if we needed to evaluate the other input or not (e.g., with an AND gate, if
+the known input is a 0, we don't need to evaluate the other one - we know
+what the output is going to be!) This is the logic we use in dealing with
+the logical operators in the shell as well: if we have something that is
+<em>true</em> in front of an AND operator, we obviously need to evaluate
+(i.e., execute) the back part - and ditto for a <em>false</em> input for an
+OR operator.
+
+<p> As a comparison, here are two script fragments that do much the same
+thing:
+
+<pre class="code"> 
+if [ -z $1 ]
+then
+	echo "Enter a parameter."
+else
+	echo "Parameter entered."
+fi
+</pre>
+
+<pre class="code"> 
+[ -z $1 ] &amp;&amp; echo "Enter a parameter." || echo "Parameter entered."
+</pre>
+
+<p> You have to be a bit cautious about using the second version for
+anything more complex than "echo" statements: if you use a command in the
+part after the `&amp;&amp;' which returns a failure code, both it and the
+statements after `||' will be executed, unless you force an explicit
+successful exit! This in itself can be useful, if that's what you need -
+but you have to be aware of how the mechanism works.
+
+<p> Back to the original "d2u" script - the "active" part of the script,
+<code>cat "$1"|tr -d '\015'</code>, pipes the original text into 'tr',
+which deletes DOS's "CR/Carriage Return" character (0x0D), shown here in
+octal (\015).  That's the bit... err, <strong>byte</strong> that makes DOS
+text different from Unix text - we use just the "LF/Newline" character
+(0x0A), while DOS uses both (CR/LF). This is why Unix text looks like
+
+<pre> 
+This is line one*This is line two*This is line three*
+</pre>
+
+in DOS, and DOS text like
+
+<pre> 
+This is line one^M
+This is line two^M
+This is line three^M
+</pre>
+in Unix.
+
+<p> "A word to the wise" applicable to any budding shell-script writer:
+close study of the "tr" man page will pay off handsomely. This is a
+tool that you will find yourself using again and again.
+
+
+<h3>head/tail</h3>
+
+<p> A very useful pair of tools, with mostly identical syntax. By default
+they print, respectively, the first/last 10 lines of a given file; the
+number and the units are easily changed via syntax. Here's a snippet that
+shows how to read a specific line in a file, using its line number as a
+"handle" (you may recall this from the discussion on "cat"):
+
+<pre> 
+handle=5
+line="$(head -$handle $1|tail -1)"
+</pre>
+
+Having defined `$handle' as `5', we use "head -$handle" to read a file
+specified on the command line and print all lines from 1 to 5; we then use
+"tail -1" to read only the last line of that. This can, of course, be done
+with more powerful tools like "sed"... but we won't get to that for a bit -
+and Taylor's law, above, is often a sensible guideline.
+
+<p> These programs can also be used to "identify" very large files without
+the necessity of reading the whole thing; if you know that
+one of a number of very large databases contains a unique field name
+that identifies it as the one you want, you can do something like
+this:
+
+<pre class="code"> 
+for fname in *dbf
+do
+	head -c10k "$fname"|grep -is "cost_in_sheckels_per_cubit"
+	echo $fname
+done
+</pre>
+
+(Yes, I realize we haven't covered 'grep' yet. I trust those readers that
+aren't familiar with it will use their "man" pages wisely... or hold their
+water until we get to that part. :)
+
+<p> So - the above case is simple enough; we take the first 10k bytes (you'd
+adjust it to whatever size chunk is necessary to capture all the field
+names) off the top of each database by using 'head', then use 'grep' to
+look for the string. If it's found, we print the name of the file. Those
+of you who have to deal with large numbers of multi-megabyte databases
+can really appreciate this capability.
+
+<p> 'tail' is interesting in its own way; one of the syntax differences
+between it and 'head' is the '+' switch, which answers the question of "how
+do I read everything <em>after</em> the first X characters/lines?" Believe
+it or not, that can be a very important question - and a very difficult one
+to answer in any other way... (<i>Also sprach</i> The Voice of Bitter
+Experience.) As an example, to get the output of something like "ls -l"
+<em>without</em> the 'total:' header, try<code>'ls -l|tail +2'</code>. 
+
+
+<h3>cut/paste</h3>
+
+<p> In my experience, 'cut' comes in for a lot more usage than 'paste' -
+it's very good at dealing with fields in formatted data, allowing you to
+separate out the info you need. As an example, let's say that you have
+a directory where you need to get a list of all the files that are 100k
+or more in size, once a week (logfiles over a size limit, perhaps). You
+can set up a "cron" job to e-mail you:
+
+<pre class="code"> 
+ ...
+ ls -lr --sort=size $dir|tr -s ' '|cut -d ' ' -f 5,8|grep \
+ -E ^'[1-9]{6,} '|mail joe@thefarm.com -s "Logfile info"
+ ...
+</pre>
+
+<p> <code>'ls -lr --sort=size $dir'</code> gives us a listing of `$dir'
+sorted by size in `reverse' order (smallest to largest). We pipe that
+through "tr -s ' '" to collapse all repeated spaces to a single space, then
+use "cut" with space as a delimiter (now that the spaces are singular, we
+can actually use them to separate the fields) to return fields 5 and 8
+(size and filename).  We then use 'grep' to look at the very beginning of
+the line (where the size is listed) and print every line that starts with a
+digit, repeats that match 5 times, and is followed by a space. The lines
+that match are piped into 'mail' and sent off to the recipient.
+
+<p> 'paste' can be useful at times. The simplest way of describing it that
+I can think of is a "vertical 'cat'" - it merges files line by line,
+instead of "head to tail". If you have, e.g., two files containing,
+respectively, the names of the people on your mullet-throwing team, and the
+records for each one arranged in the correct order, you can simply "glue"
+the two of them together with "paste". If you specify the 'names' files
+first and the 'records' second, each line of the result would contain the
+name followed by the record, separated by a tab or whatever delimiter you
+specified with the '-d' option.
+
+
+<h3>grep</h3>
+
+<p>  The "Vise-Grips" of Unix. This utility, as well as its more
+specialized relatives 'fgrep' and 'egrep', is used primarily for searching
+files for matching text strings, using the 'regexp' (Regular Expression)
+mechanism to specify the text to match.
+
+<p> 'grep' can be used to answer questions like <i>"Let's see now; I know
+the quote that I want is in of these 400+ text files in this directory -
+something about "Who hath desired the Sea". What was it, again?..."</i>
+
+<pre>
+Odin:~$ grep -iA 12 "who hath desired the sea" *
+Poems.txt-Who hath desired the Sea? - the sight of salt water unbounded -
+Poems.txt-The heave and the halt and the hurl and the crash of the comber
+Poems.txt- wind-hounded?
+Poems.txt-The sleek-barrelled swell before storm, grey, foamless, enormous,
+Poems.txt- and growing -
+Poems.txt-Stark calm on the lap of the Line or the crazy-eyed hurricane
+Poems.txt- blowing -
+Poems.txt-His Sea in no showing the same - his Sea and the same 'neath each
+Poems.txt- showing:
+Poems.txt- His Sea as she slackens or thrills?
+Poems.txt-So and no otherwise - so and no otherwise - hillmen desire their
+Poems.txt- Hills!
+Odin:~$
+</pre>
+
+<i>"Ah, it's in `Poems.txt'..."</i>
+
+<p> 'grep' has a wide variety of options (the "-A &lt;n&gt;" switch that I
+used above determines the number of lines of context after the matched
+line that will be printed; the "-i" switch means "ignore case") that allow
+precise searches within a single file or a group of files, as well as specifying
+the type of output when a match is found (or conversely, when no match
+is found). I've used 'grep' in several of the "example" scripts so far,
+and use it, on the average, about a dozen times a day, command line and
+script usage together: the search for the above Kipling quote (including
+my muttered comments) happened just a few minutes before I sharpened my
+cursor and scribbled this paragraph.
+
+<p> You can also use it to search binary files, by using the '-a' option;
+an occasionally useful "last-ditch" procedure for those programs where the
+author has hidden the help/syntax info behind some obscure switch, and
+'man', 'info', and the '/usr/doc/' directory come up empty.
+
+<p> Often, there is a requirement for performing some task the same number
+of times as there are 'useful' lines in a given file, e.g., reading in each
+line of a configuration file and parsing it. 'grep' helps us here, too:
+
+<pre class="code"> 
+...
+for n in $(egrep -v '^[ 	   ]*(#|$)' ~/.scheduler)
+do
+	...
+	...
+done
+</pre>
+
+<p> This is a snippet from a scheduling program I wrote some time ago;
+whenever I log in, it reminds me of appointments, etc. for that day.
+'egrep', in this instance, finds all the lines that are not comments or
+blanks, by ignoring (via the '-v' option) all lines that either start with
+a '#' or with any number of spaces or tabs preceding a '#' or an
+end-of-line (represented by the '$' metacharacter.) Note that the square
+brackets above, which define a <em>character class</em> or a range of
+characters to match, actually contain a space and a tab - both of which are
+annoyingly invisible. Incidentally, the reason I used e(xtended) grep here
+is that most versions of simple 'grep' don't know how to parse the '(a|b)'
+alternation construct - and a character class won't work for that, since
+metacharacters lose their special meaning in character classes and are
+simply treated as characters.
+
+<p> The result of the above is that we only loop over "the beef" in the
+config file, ignoring all non-programmatic input; the "working" lines are
+parsed, within the body of the "for" loop (details not shown in this
+snippet) into the date and text variables, and the script executes an
+"alarm and display" routine if the appointment date matches today's date.
+
+
+<h3>Wrapping It Up</h3>
+
+<p> In order to produce good shell scripts, you need to be very familiar
+with how all of these tools work - or, at the very least, have a good idea
+what a given tool can and cannot do (you can always look up the exact
+syntax via 'man'). There are many other, more complex and powerful tools
+available to us - but these six programs will get you started and keep you
+going for a long time, as well as giving you a broad field of possibilities
+for script experimentation of your own.
+
+<p>  Until next month - Happy Linuxing!
+
+<hr width="100%">
+ "Script Quote" Of The Month:
+
+<pre>
+"I used to program my IBM PC to make hideous noises to wake me up. I
+also made the conscious decision to hard-code the alarm time into the
+program, so as to make it more difficult for me to reset it. After I
+realised that I was routinely getting up, editing the source file,
+recompiling the program and rerunning it for 15 minutes extra sleep before
+going back to bed, I gave up and made the alarm time a command-line
+option."
+ -- B.M. Buck
+
+</pre>
+
+<h3>References</h3>
+
+<p>  The "man" pages for 'bash', 'builtins', 'cat', 'head', 'tail', 'cut',
+'paste', 'grep', 'strings'
+
+<p>
+"Introduction to Shell Scripting - The Basics" by Ben Okopnik, LG #52<br>
+"Introduction to Shell Scripting - Part I" by Ben Okopnik, LG #53
+
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<P>
+<IMG ALT="picture" SRC="../gx/authors/okopnik.jpg" align="left"  hspace="10" vspace="10" class="bio">
+Ben is the Editor-in-Chief for Linux Gazette and a member of The Answer Gang.
+
+<em>
+<p>
+Ben was born in Moscow, Russia in 1962. He became interested in electricity
+at the tender age of six, promptly demonstrated it by sticking a fork into
+a socket and starting a fire, and has been falling down technological
+mineshafts ever since. He has been working with computers since the Elder
+Days, when they had to be built by soldering parts onto printed circuit
+boards and programs had to fit into 4k of memory. He would gladly pay good
+money to any psychologist who can cure him of the recurrent nightmares.
+
+<p>His subsequent experiences include creating software in nearly a dozen
+languages, network and database maintenance during the approach of a
+hurricane, and writing articles for publications ranging from sailing
+magazines to technological journals. After a seven-year Atlantic/Caribbean
+cruise under sail and passages up and down the East coast of the US, he is
+currently anchored in St. Augustine, Florida. He works as a technical
+instructor for Sun Microsystems and a private Open Source consultant/Web
+developer. His current set of hobbies includes flying, yoga, martial arts,
+motorcycles, writing, and Roman history; his Palm Pilot is crammed full of
+alarms, many of which contain exclamation points.
+
+<p>He has been working with Linux since 1997, and credits it with his complete
+loss of interest in waging nuclear warfare on parts of the Pacific Northwest.
+</em>
+<br CLEAR="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2005, Ben Okopnik. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 113 of Linux Gazette, April 2005
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="lodato.html" >&lt;-- prev</A> | <A HREF="oregan.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">April 2005 (#113)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/2003/sit3-shine.7-2.gif" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

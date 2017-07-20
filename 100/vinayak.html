@@ -1,0 +1,366 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Programmer's Toolkit: Profiling programs using gprof LG #100</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="pramode.html" >&lt;-- prev</A> | <A HREF="ecol.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Programmer's Toolkit: Profiling programs using gprof</h1>
+<p id="by"><b>By <A HREF="../authors/vinayak.html">Vinayak Hegde</A></b></p>
+
+<p>
+<h2> Introduction to the series </h2>
+<p>
+Linux ( and other Unices ) have lots of nifty small utilities which can be combined together to do interesting things. There is
+ a certain joy in creating these software or using them to tweak your programs. In this series we shall look at some such tools 
+which are useful for a programmer. This tools will help you to code better and make your life easy.
+</p>
+
+<h2> What is Profiling ?? Why you need it ?? </h2>
+<p>
+After we have designed and coded a software comes the stage of optimizing the program. Before we talk about profiling and 
+optimization in general I would like to draw your attention to two quotes regarding optimization.
+<ul>
+	<li> 
+	More computing sins are committed in the name of efficiency (without necessarily achieving it) than for any other single reason - including blind stupidity. <br>
+	<b> -- William A. Wulf </b>
+	</li>
+	<li>
+	We should forget about small efficiencies, say about 97% of the time: premature optimization is the root of all evil. <br>
+	<b> -- Donald E. Knuth </b>
+	</li>
+</ul>
+Most programs roughly follow what is known as the 80:20 rule. You will be executing 20% of the code 80% of the time. As is 
+implied by the quotes above programmer time is more valuable than machine time. So we have seen the rise of languages such as 
+Java and C# which reduce time needed to program giving programmers more time to concentrate on the logic rather than the
+nitty-gritties of the underlying machine architecture. This has increased the running time of the programs but saved programmer
+ time. However we need to optimize to make a program run faster. Many time compilers do this automatically. For example the GCC
+compiler has the -O (note the upper case) flags to specify the level of optimization. Profiling is a method which can help us
+ to find which sections of code/function we need to optimize to increase the performance of a program. You will agree that it 
+makes a lot more sense to optimize a function which is called thousand times when a program runs rather than one which is 
+called ten times in a program. When we profile a program we will come to know which parts of the code are frequently used and
+ which functions take up the most CPU time. Both of these are good candidates for optimization. Since this data is collected
+ using an actual execution trace, it is also a good method for finding hidden bugs. You may not expect a certain function to
+be called 1000 times during the execution so this might be defect in the design and a potential bug. This is almost as useful 
+as code reviews in large and complex projects. 
+</p>
+
+<p>
+There are mainly 2 types of profiling information we can get :-
+<ul>
+	<li> <b> Flat Profile </b> <br>
+	The flat profile details how much CPU time each function used up and the number of times it was called. This is the 
+brief summary of the profiling information gathered. This will give an idea of which functions can be rewritten or tweaked to
+get performance benefits.
+	</li>
+	<li> <b> Call Graph </b> <br>
+	The call graph shows for every function in the code the number of times it was called by different functions including itself. This can suggest which function calls can be eliminated or replaced by other efficient functions. This information 
+reveals the interrelations between different functions and can be used to uncover bugs in the code. Also you may want to
+optimize certain code paths after looking at the call graphs.
+	</li>
+</ul>
+</p>
+
+<h2> How to gather profiling information ?? </h2>
+<p>
+The source code has to be compiled with the -pg option ( also with -g if you want line-by-line profiling ). If the number of 
+lines in the Make file is small you can append these options to each compilation command. However if the number of compilation
+commands is large then you can define/redefine the CFLAGS/CXXFLAGS parameter in the makefile and add this to every compilation
+ command in the makefile. I will demonstrate the use of gprof using the gnu make utility.
+<pre>
+Unpack the gzipped tarball
+$ tar zxf make-3.80.tar.gz
+$ cd make-3.80
+
+Run the configure script to create the makefiles
+$ ./configure
+[configure output snipped]
+</pre>
+
+Edit the CFLAGS parameter in the makefile generated to remove optimization flags and add -pg to CFLAGS. GCC optimization flags
+are removed as compiler optimization can sometimes cause problems while profiling. Especially if you are doing line-by-line
+profiling, certain lines may be removed while optimizing source code.
+
+<pre>
+Build the source code
+$ make
+[build output snipped]
+</pre>
+
+We can use this make to build other software such as Apache, lynx and cvs.
+We build apache using this make as an example.
+When we untar, configure and run make on the source of Apache , a file called gmon.out containing profiling information is 
+generated. You may observe that make may run slower than expected as it is logging the profile data. An important thing to be
+remembered while collecting profile data is that we have to run the program giving it the inputs we give it normally and then
+ exiting when it is all done. This way you would have simulated a real-world scenario to collect data.
+</p>
+
+<h2> Analyzing profiling output </h2>
+<p>
+In the last step we have got a binary output file called "gmon.out". Unfortunately there is no way currently to specify the 
+name for the profiling data file. This "gmon.out" file can be interpreted by gprof to generate human readable output. The
+syntax for the same is :
+<pre>
+
+gprof options [Executable file [profile data files ... ] ] [ &gt; human-readable-output-file]
+
+$ gprof make gmon.out &gt; profile-make-with-Apache.txt
+</pre>
+you can find the whole file <a href=misc/vinayak/profile-make-with-Apache.txt> here </a>
+</p>
+
+<p>
+A section of the flat profile is shown below - 
+<pre>
+ Flat profile:
+
+Each sample counts as 0.01 seconds.
+  %   cumulative   self              self     total           
+ time   seconds   seconds    calls  ms/call  ms/call  name    
+ 33.33      0.01     0.01      207     0.05     0.05  file_hash_2
+ 33.33      0.02     0.01       38     0.26     0.26  new_pattern_rule
+ 33.33      0.03     0.01        6     1.67     2.81  pattern_search
+  0.00      0.03     0.00     2881     0.00     0.00  hash_find_slot
+  0.00      0.03     0.00     2529     0.00     0.00  xmalloc
+  0.00      0.03     0.00     1327     0.00     0.00  hash_find_item
+  0.00      0.03     0.00     1015     0.00     0.00  directory_hash_cmp
+  0.00      0.03     0.00      963     0.00     0.00  find_char_unquote
+  0.00      0.03     0.00      881     0.00     0.00  file_hash_1
+  0.00      0.03     0.00      870     0.00     0.00  variable_buffer_output
+</pre>
+From the above data we can draw the following conclusions : 
+<ol>
+	<li> 3 functions (file_hash_2, new_pattern_rule and pattern_search) take almost all of the time. </li>
+	<li> There are 6 function calls to pattern_search but takes up an average of 2.81 milliseconds for each call.</li>
+</ol>
+</p>
+
+<p>
+This is however insufficient data for gathering information. So this specially compiled make was used for building lynx, cvs,
+ make and patch. All the renamed gmon.out files were gathered and profiling data was compiled using the following commands.
+
+<pre>
+$ gprof make gmon-*.out &gt; overall-profile.txt
+</pre>
+
+This file can be found <a href=misc/vinayak/overall-profile.txt> here </a> <br>
+A section of the flat profile section is shown below.
+<pre>
+
+Flat profile:
+
+Each sample counts as 0.01 seconds.
+  %   cumulative   self              self     total           
+ time   seconds   seconds    calls  ms/call  ms/call  name    
+ 18.18      0.06     0.06    23480     0.00     0.00  find_char_unquote
+ 12.12      0.10     0.04      120     0.33     0.73  pattern_search
+  9.09      0.13     0.03     5120     0.01     0.01  collapse_continuations
+  9.09      0.16     0.03      148     0.20     0.88  update_file_1
+  9.09      0.19     0.03       37     0.81     4.76  eval
+  6.06      0.21     0.02    12484     0.00     0.00  file_hash_1
+  6.06      0.23     0.02     6596     0.00     0.00  get_next_mword
+  3.03      0.24     0.01    29981     0.00     0.00  hash_find_slot
+  3.03      0.25     0.01    14769     0.00     0.00  next_token
+  3.03      0.26     0.01     5800     0.00     0.00  variable_expand_string
+</pre>
+
+As we can see, the picture has changed a bit from the make profile we got from compiling apache.
+<ol>
+	<li> There are 23480 calls to the function find_char_unquote and it makes up more than 1/6th of the program execution time. </li>
+	<li> However the function eval has only 37 invocations o it's credit still it takes up about 1/11th of the program
+execution time. There is a possibility that this function is doing a lot of work and is a candidate for splitting up into
+different functions. Also notice that each call to eval eats up an average of 4.76 milliseconds which is quite huge compared 
+to any of the other functions </li>
+	<li> Also the functions pattern_search and update_file_1 take up nearly 1/4th of the execution time but share only 268
+calls between them. Maybe these functions can also be split into smaller functions. </li>
+</ol>
+</p>
+
+<p>
+Let us now have a look at a snippet of the call graph profile from compiling Apache.
+<pre>
+index % time    self  children    called     	name
+-----------------------------------------------
+                                   6             eval_makefile <cycle 2> [49]
+[25]     3.7    0.00    0.00       6         eval <cycle 2> [25]
+                0.00    0.00     219/219         try_variable_definition [28]
+                0.00    0.00      48/48          record_files [40]
+                0.00    0.00     122/314         variable_expand_string <cycle 1> [59]
+                0.00    0.00       5/314         allocated_variable_expand_for_file <cycle 1> [85]
+                0.00    0.00     490/490         readline [76]
+                0.00    0.00     403/403         collapse_continuations [79]
+                0.00    0.00     355/355         remove_comments [80]
+                0.00    0.00     321/963         find_char_unquote [66]
+                0.00    0.00     170/170         get_next_mword [88]
+                0.00    0.00     101/111         parse_file_seq [93]
+                0.00    0.00     101/111         multi_glob [92]
+                0.00    0.00      48/767         next_token [70]
+                0.00    0.00      19/870         variable_buffer_output [68]
+                0.00    0.00      13/2529        xmalloc [64]
+                0.00    0.00       2/25          xrealloc [99]
+                                   5             eval_makefile <cycle 2> [49]
+-----------------------------------------------
+</pre>
+We can make the following observations from the snippet above : <br>
+<ol>
+	<li> The first column gives an index into the function index which is printed at the end of gprof's output. </li>
+	<li> The second column gives the total amount of time spent in the function eval including it's calls to other 
+functions. </li>
+	<li> The third and the fourth column give the total amount of time which is spent in the function itself and call to 
+other functions </li>
+	<li> The first number in the fifth column gives the number of calls to the function from eval and the second number in
+the column gives the total number of non-recursive calls to that function from all callers. </li>
+	<li> If there are recursive calls from the function to itself or to a mutually recursive function, then the name of the
+ function is appended with cycle ( as in eval_makefile and eval above ). </li>
+	<li> Some of the functions are called always from eval. It might be advantages in some cases if the overhead of the 
+function call itself is eliminated. </li>
+</ol>
+</pre>
+</p>
+
+<h2> Other gprof facilities </h2>
+<p>
+Using gprof you can also get annotated source list and line-by-line profiling. These might be useful once you have identified the
+ the sections of code that need to be optimized. These options will help you drill down in the source code to find 
+inefficiencies. Line-by-line profiling along with flat profile can be used to check which are the code paths which are
+ frequently traversed. The annotated source listing can be used to drill down within function calls themselves up to the basic
+block (loops and branching statements), to find out which loops are executed most and which branches are taken most frequently
+. This is useful in fine tuning the code for optimum performance. There are some other options which are not covered here. 
+Refer to the info documentation of gprof for more details. There is a KDE front end which is available for gprof called kprof.
+See the reference section for the URL.
+</p>
+
+<h2> Conclusion </h2>
+<p>
+Profiling tools such as gprof can be a big help in optimizing programs. Profiling is one of the first steps for manual 
+optimization of programs to know where the bottlenecks and remove them.
+</p>
+
+<h2> Resources </h2>
+<p>
+<ul>
+	<li> The GNU Info document for gprof </li>
+	<li> The KDE front end for gprof <a href=http://kprof.sourceforge.net> KProf </a> </li>
+	<li> Function Check - another profiling tool This overcomes some deficiencies of gprof </li> 
+</ul>
+</p>
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<P>
+<img ALIGN="LEFT" ALT="[BIO]" SRC="../gx/2002/note.png" class="bio">
+<em>
+Vinayak is currently pursuing the APGDST course
+at NCST. His areas of interest are networking, parallel
+computing systems and programming languages. He
+believes that Linux will do to the software industry
+what the invention of printing press did to the world
+of science and literature. In his non-existent free
+time he likes listening to music and reading books. He
+is currently working on Project LIberatioN-UX where he
+makes affordable computing on Linux accessible for
+academia/corporates by configuring remote boot stations
+(Thin Clients).
+</em>
+<br CLEAR="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2004, Vinayak Hegde. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 100 of Linux Gazette, March 2004
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="pramode.html" >&lt;-- prev</A> | <A HREF="ecol.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">March 2004 (#100)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/2003/sit3-shine.7-2.gif" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

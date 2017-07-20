@@ -1,0 +1,662 @@
+<!DOCTYPE html
+	PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+	 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="utf-8" xml:lang="utf-8">
+<head>
+<title>Understanding Full Text Search in PostgreSQL LG #164</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link rel="stylesheet" href="../lg.css" type="text/css" media="screen, projection"  />
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<!-- link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" / -->
+<link rel="shortcut icon" href="../favicon.ico" />
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+</head>
+<body>
+
+<a href="../">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+<div id="navigation">
+<table summary="masthead" width="100%">
+<tr>
+<td align="center" colspan="3" style="font-size: 10px; font-weight: bold">
+<a href="../index.html">Home</a>
+<a href="http://linuxgazette.net">Main Site</a>
+<a href="../faq/index.html">FAQ</a>
+
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/mailman/listinfo/">Mailing Lists</a>
+<a href="../jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+<hr width="99%" style="border: 1px inset #000033">
+</td>
+</tr>
+<tr>
+<td width="40%" align="left" style="font-size: 10px; font-weight: bold">
+The Free International Online Linux Monthly
+</td>
+<td width="20%" align="center" style="font-size: 10px; font-weight: bold">
+ISSN: 1934-371X
+</td>
+<td width="40%" align="right" style="font-size: 10px; font-weight: bold">
+Main site: <a href="http://linuxgazette.net">http://linuxgazette.net</a> 
+</td>
+</table>
+</div>
+
+
+<div id="breadcrumbs1">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">July 2009 (#164)</a> &gt; 
+Article
+
+</div>
+
+<div class="articlecontent1">
+<div class="content">
+
+<div id="previousnexttop">
+<A HREF="prestia.html" >&lt;-- prev</A> | <A HREF="silva.html" >next --&gt;</A>
+</div>
+
+<h1>Understanding Full Text Search in PostgreSQL</h1>
+<p id="by"><b>By <a href="../authors/sephton.html">Paul Sephton</a></b></p>
+
+
+<P>Those who have yet to enter their first search query in Google,
+Yahoo, or any of the myriad of other search engines available to the
+web, or have no interest in the use of PostgreSQL as a database
+engine to implement their own text search facility will find little
+use in reading further.</P>
+<P>Although PostgreSQL coverage on the topic of Free Text Search is
+as good as the rest of their excellent documentation, the following
+might serve as an introduction to those who would further persue the
+topic.  In the interest of conciseness, this article skips quite a
+lot of detail and depends on the ability of the reader to infer what
+is not explicitly stated.</P>
+<h3>Introduction</h3>
+<P>Full Text Search (or FTS) is not a new technology. The earliest
+recorded patents related to the search for documents about a given
+topic were filed in the year 1963, more than forty-five years ago.
+These patents include &quot;<I>CONTENT ADDRESSABLE MEMORY APPARATUS</I>&quot;
+(US Pat. 3290659 - Filed Dec 30, 1963), &quot;<I>SCAN CONTROL, AND
+NORMALIZATION FOR A CHARACTER RECOGNITION SYSTEM</I>&quot; (US Pat.
+3295105 - Filed Aug 27, 1964) and &quot;<I>INFORMATION RETRIEVAL SYSTEM
+AND METHOD</I>&quot; (US Pat. RE26429 - Filed Dec 8, 1964).</P>
+<P>To this day, the ability to impose structure upon the dearth of
+what is known as &quot;Unstructured Data&quot;, in order to turn this
+haystack into an information system, continues to challenge the
+finest minds.</P>
+<P>The long list of granted patents persists through 2006 and 2007,
+namely &quot;<I>Device and system for information management</I>&quot; (US
+Pat. 7376273 - Filed Jun 1, 2007 - Silverbrook Research Pty Ltd),
+&quot;<I>Metasearching by sending a plurality of queries to a plurality
+of servers</I>&quot; (US Pat. 7277918 - Filed Jan 16, 2007) and
+&quot;<I>Distributed internet based speech recognition system with
+natural language ...</I>&quot; (US Pat. 7203646 - Filed May 22, 2006 -
+Phoenix Solutions, Inc.)</P>
+<P>Of course, we know today that &quot;Full Text Search&quot; is far from
+the only way to organise documents. A close runner up, though unable
+to reproduce the exact features of FTS, is the Bayesean search; a
+statistical means of indexing documents which determines the
+probabability that two documents are similar. Bayesean search has an
+almost uncanny knack of deriving the essence of documents rather than
+depending on a literal text match. The most common use of Bayesean
+search technology today is in spam filters, although engines such as
+<A HREF="http://www.altsearchengines.com/2009/05/06/hope-dyves-deep-in-her-review-of-deepdyve/">DeepDyve</A>
+demonstrates a more ambitious use.</P>
+<P>Several SQL databases already have a built-in implementation of
+FTS, notably servers such as Oracle, SQL Server, and the free MySQL
+and PostgreSQL servers. 
+</P>
+<P>MySQL native FTS is currently only available against the MyISAM
+database back-end, and is not yet available for the more popular
+InnoDB back-end. For Postgres, the earliest implementation of FTS was
+the TSearch module, replaced in version 7.4 with Tsearch2, and
+finally included in the core PostgreSQL engine in version 8.3. 
+</P>
+<P>There are many implementations of external FTS engines which may
+be used in conjunction with SQL database engines, or individually.
+These include <A HREF="http://lucene.apache.org/">Lucene</A>, which
+is a very powerful and popular engine implemented as part of the
+Apache project, <A HREF="http://swish-e.org/">Swish-E</A>, and the
+<A HREF="http://sphinxsearch.com/">Sphynx</A> search engine, which
+has been steadily gaining in popularity.</P>
+<P>Lucene is really a library against which programmers may develop
+search products. Their site has many links to generic products
+already developed against the library, including interfaces for Java
+(the original interface), PHP and DotNet. Sphynx is particularly
+popular amongst MySQL developers, as this engine supports both MyISAM
+as well as InnoDB database back-ends.</P>
+<h3>PostgreSQL Full Text Search</h3>
+<P>In a nutshell, Full Text Search is implemented by indexing the
+words contained in a document, and associated the indexed words with
+a reference to the document. Subsequently, searches for a 
+<A HREF="http://www.iqlue.com/prosearch/topics/Boolean Phrase.htm"><I>boolean
+phrase</I></A> using operators <I>and</I>, <I>or</I>, <I>not</I> and
+braces may be matched against the index to locate documents
+containing the words in the phrase.  PostgreSQL does not currently
+support the fuzzy logic operators <I>near</I>, <I>far</I> or <I>strip</I>.</P>
+<H3>Eliminating redundancy</H3>
+<P>Clearly, indexing every single word in a document would result in
+a very large index. This is neither required, nor is it particularly
+useful. For example, one might convert all text to lower case prior
+to indexing the words, making your searches insensitive to case, and
+simultaneously achieving a smaller index. Then one might eliminate
+words from the text which carry no real meaning (like 'and', 'or',
+'the', 'for', etc.) as these words would be likely found in most
+documents already. The first approach is called <I>normalisation</I>,
+and the second process is called <I>stop word elimination</I>.</P>
+<P>Finally, one might further reduce the size of the index by
+replacing words with others which have an identical or similar
+meaning. Thus one may replace instances of 'hungrily' and 'hungry'
+with 'hunger'. This process is called <I>dictionary substitution</I>.
+</P>
+<P>Further algorithmic measures (see <A HREF="http://snowball.tartarus.org/">Snoball</A>)[Ref.
+4] may be performed to further reduce words to their essential
+meaning prior to the article being indexed. The replacement of colour
+names with their hexadecimal equivalents and the reduction of numeric
+values by reducing precision are other ways of <I>normalising</I> the
+text.</P>
+<P>All of these measures are to eliminate <I>redundancy</I> from the
+indexed text, thereby reducing index size and resulting in less
+storage requirement, less disk I/O, faster indexing and a
+consequently faster search.</P>
+<H3>PostgreSQL Dictionaries</H3>
+<P>To aid in the process of normalisation and elimination of
+redundancy from text, PostgreSQL provides templates for several types
+of dictionary for use in a text search configuration. These are the
+Simple Dictionary, the Synonym Dictionary, the Thesaurus Dictionary,
+the iSpell Dictionary and the Snoball [Ref.4] Dictionary.</P>
+<P>The Simple Dictionary eliminates stop words, and performs case
+normalisation. The Synonym Dictionary replaces one word with another,
+Thesaurus Dictionaries provide for industry specific phrase
+recognition, and the iSpell template may be used to embed any of the
+standard iSpell dictionaries available from <A HREF="http://www.openoffice.org/">OpenOffice.Org</A>.
+The Snoball[Ref.4] dictionaries, which perform algorithmic stemming
+and stop word elimination are included by default for a variety of
+languages in the PostgreSQL installation.</P>
+<P>With PostgreSQL, all dictionaries are functionally equivalent,
+with the possible exception of the thesaurus type. Effectively, they
+consume a word (or token), and return an array of <I>lexemes</I>, or
+NULL. When a dictionary returns NULL, the token is considered to be
+unrecognised. This allows dictionaries to be strung together, with
+the most general dictionary at the end of the list. Thus, if a
+dictionary earlier in the list returns a word, further dictionaries
+in the list are ignored. However, where an earlier dictionary returns
+NULL, the token is processed by subsequent dictionaries in the list.</P>
+<P>A <I>lexeme</I> is the equivalent of a token which has been
+converted to it's base form. Before being passed to the dictionary,
+PostgreSQL converts the <I>document text</I> into an array of tokens
+through means of a simple parser. The parser is able to identify
+various types of tokens from the text, such as XML or HTML tags,
+integer or floating point numbers, version numbers, URL's, host names
+and so forth. PostgreSQL provides the ability to process different
+token types specifically, by mapping a given token type to different
+dictionary lists.</P>
+<H3>Text Search Configuration</H3>
+<P>Note that although PostgreSQL provides a lot of configurability,
+the base installation already provides a workable configuration.
+Unless there is a specific reason, it is probably not necessary to
+mess with it. Even so, an example text search configuration would be
+the following:</P>
+<PRE STYLE="margin-bottom: 0.5cm">CREATE TEXT SEARCH CONFIGURATION public.my_config (COPY=pg_catalog.english );</PRE><P>
+Now, having a new text search configuration, we can create a new
+dictionary:</P>
+<PRE>CREATE TEXT SEARCH DICTIONARY english_ispell (
+    TEMPLATE = ispell,
+    DictFile = english,
+    AffFile = english,
+    StopWords = english
+);</PRE><P>
+In the above, we created a dictionary based on the iSpell template,
+where DictFile, AffFile and StopWords refer to files in the
+<I>`pg_config –share`\tsearch_data\</I> directory, called
+<I>english.dict</I>, <I>english.affix</I>, and <I>english.stop</I>
+respectively.</P>
+<P>We can then add this dictionary into a configuration like this:</P>
+<PRE>ALTER TEXT SEARCH CONFIGURATION my_config
+    ALTER MAPPING FOR asciiword, asciihword, hword_asciipart,
+                      word, hword, hword_part
+    WITH english_ispell, english_stem;</PRE><P>
+This adds our new dictionary to our new text search configuration,
+overriding the default <I>lexeme</I> types (asciiword etc.) to ensure
+that they are processed through both the <I>english_ispell</I> and
+<I>english_stem</I> dictionaries. We can then start using our new
+text search configuration by changing the global parameter
+<I>default_text_search_config</I>:</P>
+<PRE STYLE="margin-bottom: 0.5cm">SET default_text_search_config = 'public.my_config';</PRE><P>
+The above parameter will apply for the duration of the session, or
+until it is changed. To make the configuration permanent, one would
+need to set it in the <I>data/postgresql.conf</I> file.</P>
+<H3>Search Vectors</H3>
+<P>All of this is very impressive, but how does one turn document
+content into an array of lexemes using the parser and dictionaries?
+How does one match a search criterion ti body text?  PostgreSQL
+provides a number of functions to do this. The first one we will look
+at is <I>to_tsvector()</I>.</P>
+<P>A <I>tsvector</I> is an internal data type containing an array of
+lexemes with position information. The lexeme positions are used when
+searching, to <I>rank</I> the search result based on proximity and
+other information. One may control the ranking by labelling the
+different portions which make up the search document content, for
+example the title, body and abstract may be weighted differently
+during search by labelling these sections differently. The section
+labels, quite simply A,B,C &amp; D, are associated with the <I>tsvector</I>
+at the time it is created, but the weight modifiers associated with
+those labels may be controlled after the fact.</P>
+<P>We can create a tsvector for text like this:</P>
+<PRE>bob=# select to_tsvector('Free text seaRCh is a wonderful Thing');
+                     to_tsvector                      
+------------------------------------------------------
+ 'free':1 'text':2 'thing':7 'search':3 'wonderful':6
+(1 row)</PRE><H3>
+Assigning Weight Labels</H3>
+<P>As may be seen, the tsvector is just a list of <I>lexemes</I> with
+associated positions. The stop words such as 'a' and 'is' have been
+eliminated, and we have everything in lower case. Another example,
+adding labels:</P>
+<PRE>bob=# select setweight(to_tsvector('Free text seaRCh is a wonderful Thing'),'A');
+                         setweight                         
+-----------------------------------------------------------
+ 'free':1A 'text':2A 'thing':7A 'search':3A 'wonderful':6A
+(1 row)</PRE><P>
+<BR><BR>
+</P>
+<P>In essence, one may create a new tsvector with lexemes labeled for
+different sections of the text using setweight for the various
+sections:</P>
+<PRE>bob=# select                                                                  
+bob-# setweight(to_tsvector('All about search'), 'B') ||
+bob-# setweight(to_tsvector('Free text seaRCh is a wonderful Thing'),'A');
+                           ?column?                            
+---------------------------------------------------------------
+ 'free':4A 'text':5A 'thing':10A 'search':3B,6A 'wonderful':9A
+(1 row)</PRE><P>
+Assuming &quot;All about search&quot; was the title, and &quot;Free text
+seaRCh is a wonderful Thing&quot; was the body, we have now labelled the
+lexemes from the title, together with those from the body. Note that
+the word 'All' and 'About' in the title were both considered to be
+stop words. Subsequently, one may use the labels to rank the results
+depending on weight labelss associated with the title and body. We
+will visit this in more detail later.</P>
+<H3>Matching Boolean Search Phrases</H3>
+<P>But first, how does one go about matching a boolean search phrase
+to the tsvector? This is done using the @@ operator. For example:</P>
+<PRE>bob=# select to_tsvector('Free text seaRCh is a wonderful Thing') @@ 'wonderful';
+ ?column? 
+----------
+ t
+(1 row)</PRE><P>
+On the other hand 'wonderful' is not exactly a <I>wonderful</I>
+example of a boolean phrase, now is it? Nope. It's just ordinary
+text. If that text is in the wrong format, for example contains other
+words, the query will in fact fail. PostgreSQL provides two functions
+which may be used to turn text into a query, represented as the built
+in <I>tsquery</I> data type, for subsequent matching against
+<I>tsvectors</I>. These are the <I>plainto_tsquery()</I> and
+<I>to_tsquery()</I> functions.</P>
+<P>The rather limited <I>plainto_tsquery() </I>function simply turns
+the text into a <I>tsquery</I> with all the <I>lexemes</I> in that
+text qualified by the '&amp;' (or <I>AND</I>) operator:</P>
+<PRE>bob=# select plainto_tsquery('wonderful text');   plainto_tsquery    
+----------------------
+ 'wonderful' &amp; 'text'
+bob=# select to_tsvector('Free text seaRCh is a wonderful Thing') @@ plainto_tsquery('wonderful text');
+ ?column? 
+----------
+ t
+(1 row)</PRE><P>
+Where this might be useful, <I>plainto_tsquery()</I> does not provide
+for boolean operators other than '&amp;'. <I>to_tsquery()</I> goes a
+lot further toward providing a decent boolean phrase. Unfortunately,
+it is also rather finicky about the text you throw at it. It will not
+accept text which is not separated by '&amp;', '|' or '!'. It does
+accept braces, which are used to indicate operator precidence, but
+two tokens which translate to different lexemes directly after one
+another will cause <I>to_tsquery()</I> to fail.</P>
+<PRE>bob=# select to_tsquery('wonderful text');
+ERROR:  syntax error in tsquery: &quot;wonderful text&quot;
+bob=# select to_tsquery('wonderful | text');
+      to_tsquery      
+----------------------
+ 'wonderful' | 'text'</PRE><H3>
+Ranking Search Results</H3>
+<P>Nevertheless, we may use a <I>tsquery</I> boolean search phrase to
+match against any <I>tsvector</I>, or use a <I>tsquery</I> and a
+<I>tsvector</I> to produce a ranking by use of either the <I>ts_rank()</I>
+or <I>ts_rank_cd()</I> functions. These two functions behave slightly
+differently. <I>ts_rank()</I> is considered the 'standard' ranking
+function, whilst <I>ts_rank_cd()</I> uses the <I>Cover Density
+Ranking</I> algorithm[ref.6], which is more interested in phrases
+than in the actual terms of the query itself.</P>
+<P>To rank a match, one would use:</P>
+<PRE>bob=# select ts_rank(to_tsvector('Free text seaRCh is a wonderful Thing'), to_tsquery('wonderful | thing'));
+  ts_rank  
+-----------
+ 0.0607927
+(1 row)
+
+bob=# select ts_rank(to_tsvector('Free text seaRCh is a wonderful Thing'), to_tsquery('wonderful &amp; thing'));
+  ts_rank  
+-----------
+ 0.0991032
+(1 row)
+
+bob=# select ts_rank_cd(to_tsvector('Free text seaRCh is a wonderful Thing'), to_tsquery('wonderful &amp; thing'));
+ ts_rank_cd 
+------------
+        0.1
+(1 row)</PRE><P>
+Relating this ranking ability back to the subject of tsvector
+weights, you will recall</P>
+<PRE>bob=# select                                                                  
+bob-# setweight(to_tsvector('All about search'), 'B') ||
+bob-# setweight(to_tsvector('Free text seaRCh is a wonderful Thing'),'A');
+                           ?column?                            
+---------------------------------------------------------------
+ 'free':4A 'text':5A 'thing':10A 'search':3B,6A 'wonderful':9A
+(1 row)</PRE><P>
+where we labelled the text sections of our document? Now we can do
+the following:</P>
+<PRE>bob=# select ts_rank(
+bob-#  array[0.1,0.1,0.9,0.1],
+bob-#  setweight(to_tsvector('All about search'), 'B') || 
+bob-#  setweight(to_tsvector('Free text seaRCh is a wonderful Thing'),'A'),
+bob-#  to_tsquery('wonderful &amp; search'));
+ ts_rank  
+----------
+ 0.328337
+(1 row)
+
+bob=# select ts_rank(
+bob-#  array[0.1,0.1,0.1,0.9],
+bob-#  setweight(to_tsvector('All about search'), 'B') ||
+bob-#  setweight(to_tsvector('Free text seaRCh is a wonderful Thing'),'A'),
+bob-#  to_tsquery('wonderful &amp; search'));
+ ts_rank  
+----------
+ 0.907899
+(1 row)</PRE><P>
+The <I>array[0.1,0.1,0.9,0.1]</I> which is passed as the initial
+argument to ts_rank() takes arguments in order {D,C,B,A}. Since we
+labelled our sections A (for the body) and B (for the title), we
+first assigned B=0.9, A=0.1 and later B=0.1,A=0.9 in the statements
+above. Results of the ranking function differ accordingly.  If not
+specified, the optional weights array defaults to {0.1, 0.2, 0.4,
+1.0}.</P>
+<H3>Indexing TSVectors: The GIST &amp; Gin</H3>
+<P>Until now, we have used only the <I>select</I> statement in our
+examples to demonstrate the matching between <I>tsvector</I> and
+<I>tsquery</I>, and subsequent ranking capabilities of PostgreSQL.
+Moving forward we will consider the use of <I>indexes</I> to speed up
+searches, and later tackle the real showstopper which we have glossed
+over until now: why is <I>to_tsquery</I> so pedantic, and how do we
+deal with that?</P>
+<P>The two index types supported by PostgreSQL for full text search,
+are the <I>GIST</I> index, which is based on hash tables, and the <I>Gin</I>
+index which is based upon the Btree.</P>
+<P>GIST is really fast in creating indexes. It really stores a hash
+table of the terms in the tsvector, and uses a hash of the terms in
+the tsquery to find the associated documents. Unfortunately, since
+the hash search result is non-deterministic, PostgreSQL has to check
+the results of the search, reading all of the articles located and
+double check the match before returning the result. For smaller sets
+of lexemes, and smaller databases, this works quite well. However,
+for really large datasets, the overheads in re-reading the data (or
+index) tend to make this approach quite slow.</P>
+<P>Gin indexes are deterministic, and there is no implied overhead
+after a search using the index, but the downside to Gin is that index
+creation slows down logarithmically (thankfully not exponentially) as
+the number of entries grows. Whichever index method is chosen should
+therefore take the nature of the database and it's size into account.</P>
+<P>There are two approaches to using an index. The first of these
+creates an index against a function of the data field, and the second
+approach is to store a tsvector in an additional field in the table;
+this tsvector field is then indexed. For example,</P>
+<PRE>CREATE INDEX pgweb_idx ON pgweb 
+  USING gin(to_tsvector('english', title || ' ' || body));</PRE><P>
+would create a Gin index using the combination of the title and body
+fields. This method is simple, but has an implied overhead: Index
+creation has to do additional work, and your search is more complex.
+The second approach uses a trigger to populate the dedicated tsvector
+field whenever a record is added or deleted from the table:</P>
+<PRE>ALTER TABLE pgweb ADD COLUMN tsv tsvector;
+UPDATE pgweb SET tsv =
+     to_tsvector('english', coalesce(title,'') || ' ' || coalesce(body,''));
+CREATE TRIGGER tsvectorupdate BEFORE INSERT OR UPDATE
+  ON pgweb FOR EACH ROW EXECUTE PROCEDURE
+  tsvector_update_trigger(tsv, 'pg_catalog.english', title, body);</PRE><P>
+Now we simply add, update or remove table rows as normal, and the
+trigger populates the <I>tsvector</I> field in the table row, which
+in turn updates the index appropriately. Subsequent queries may be
+against the <I>tsvector</I> field, and that simplifies the query.</P>
+<H3>Search result Markup</H3>
+<P>We should mention at this point, before proceeding any further, a
+rather useful feature related to text search. PostgreSQL provides the
+ability to mark up text based upon the result of a text search. The
+function here, is <I>pg_headline()</I>. This function returns text as
+a result, with all matching words in the text enclosed in <I>&lt;b&gt;&lt;/b&gt;</I>
+HTML tags. It is really easy to use:</P>
+<PRE>bob=# select ts_headline('Free text seaRCh is a wonderful Thing',
+        to_tsquery('wonderful &amp; thing'));
+                 ts_headline                     
+-----------------------------------------------------
+ Free text seaRCh is a &lt;b&gt;wonderful&lt;/b&gt; &lt;b&gt;Thing&lt;/b&gt;
+(1 row)</PRE><P>
+To apply highlights to a matching abstract, one might issue the
+command:</P>
+<PRE>select ts_headline(abstract, query)
+  from pgweb, to_tsquery('wonderful &amp; thing') query, 
+  where query @@ tsv;</PRE><H3>
+Phrase Search</H3>
+<P>Speaking of features, one allegedly missing feature which some
+people, particularly users of external text engines continuously
+complain about PostgreSQL not having, is <I>phrase search</I>. Here
+we refer to the apparent non-existent ability of PostgreSQL's full
+text search engine to support the match of indexed <I>literal</I>
+phrases in the text.</P>
+<P>Just stop to think about it for a moment. What exactly are we
+expecting here? How many <I>literal phrases</I> are there in a
+document of say 10 words? Let's assume for the moment that the words
+are single character words: a,b,c...j. All the possible phrases in
+this document are:</P>
+<P STYLE="margin-left: 2cm; margin-bottom: 0cm">a,ab,abc,abcd...  (10
+phrases)</P>
+<P STYLE="margin-left: 2cm; margin-bottom: 0cm">b,bc,bcd,bcde... (  9
+phrases)</P>
+<P STYLE="margin-left: 2cm; margin-bottom: 0cm">etc...</P>
+<P STYLE="margin-bottom: 0cm"><BR>
+</P>
+<P>Put differently, for a document consisting of (n) words, there are
+(n) phrases starting with the first word, n-1 starting with the
+second word, n-3 starting with the third word, etc. This translates
+to 
+</P>
+<P STYLE="margin-left: 2cm"><I>number of phrases = n/2 * (n+1) =
+10/2*(10+1) = 55</I> 
+</P>
+<P>phrases in a document with just 10 words. For a document of 100
+words, we have 5050 phrases! Are we seriously suggesting a literal
+phrase index is a good thing? Remember, such an index would have to
+contain all words, and could not afford to eliminate redundancy from
+the text (eg. Stop words). Not really a practical approach.</P>
+<P>How then, do external text search engines support index assisted
+literal phrase search? Why, in exactly the same way PostgreSQL does
+it! Quite simply, the algorithm goes:</P>
+<OL>
+	<LI><P>Turn the text phrase into a boolean search phrase, using the
+	'&amp;' operator</P>
+	<LI><P>Use the full text search engine to locate the matching
+	documents</P>
+	<LI><P>For only those documents found, and using the <I>original</I>
+	text phrase do a case insensitive text match, eliminating false
+	positives</P>
+</OL>
+<P>For PostgreSQL, case sensitive phrase matching is supported using
+the LIKE operator, and case insensitive matching through the ILIKE
+operator. Searching for the text 
+</P>
+<P STYLE="margin-left: 2cm"><BR><SPAN STYLE="text-decoration: none"><I>free
+text and 'Postgres text search'</I></SPAN></P>
+<P><BR>the query would go something like this:</P>
+<PRE>select headline, ts_rank(tsv, query) 
+  from pgweb, to_tsquery('free &amp; text &amp; postgres &amp; search') query
+    where tsv @@ query and body ilike '%Postgres text search%';</PRE><P>
+... which uses the FTS index to find articles with body text matching
+a query, and then for those items finds the intersection matching the
+literal text.</P>
+<P>Simple, eh?</P>
+<H3>Parsing Human Query Strings</H3>
+<P>Not quite so simple. How, pray, is a poor developer supposed to
+turn the 'human' phrase above into the SQL statement below? This is a
+non-trivial task and mores the pity, well beyond the abilities of
+some developers. Indeed, this is considered to be a 'show-stopper'
+for many people. It involves building a pre-parser to parse the
+entered search phrase, the execution of which translates the natural
+language search phrase into a SQL statement formatted similarly to
+the above.</P>
+<P>To end off this article, we include with apologies to YACCers, the
+listing of a <a href="misc/sephton/parser.cpp">pre-parser which does
+precisely that</a>. The general logic is generic enough to be translated to
+almost any language, but the listing shown here is in standard C++. This is
+a priority biassed recursive descent parser with no external dependencies.
+Feel free to use the code in any way you wish (hereby BSD license).</P>
+
+<p class="editorial">
+[ 'parser.cpp' requires either "g++" or "gcc -lstdc++" to compile cleanly. --
+Ben ]
+</p>
+
+<br>
+
+<h2>Other Linux Gazette Articles about PostgreSQL</h3>
+<UL>
+	<LI><P><A HREF="/../139/peterson.html">Writing PostgreSQL Functions
+	in C</A></P>
+	<LI><P><A HREF="/../142/peterson.html">Writing PostgreSQL Functions
+	in C, Part Two</A></P>
+	<LI><P><A HREF="/../067/nielsen.html">Combining Perl and PostgreSQL</A></P>
+	<LI><P><A HREF="/../FTS-Doc.odt/.../068/mitchell.html">The Opening
+	of the Field: PostgreSQL's Multi-Version Concurrency Control</A></P>
+	<LI><P><A HREF="/../069/nielsen.html">Combining Perl and PostgreSQL,
+	Part 2: Procedures with PL/pgSQL</A></P>
+	<LI><P><A HREF="/../070/williams.html">Using Aggregate Functions and
+	Operators in PostgreSQL</A></P>
+	<LI><P><A HREF="/../072/nielsen.html">Standard Database Setup with
+	Perl and PostgreSQL: Part 3</A></P>
+	<LI><P><A HREF="/../080/nielsen.html">Pl/Python and Cursors in
+	Pl/Pgsql for PostgreSQL</A></P>
+</UL>
+<h3>References</h3>
+<OL>
+	<LI><P><A HREF="http://en.wikipedia.org/wiki/Full_text_search">http://en.wikipedia.org/wiki/Full_text_search</A></P>
+	<LI><P><A HREF="http://en.wikipedia.org/wiki/Search_engines">http://en.wikipedia.org/wiki/Search_engines</A></P>
+	<LI><P><A HREF="http://www.postgresql.org/docs/8.4/static/textsearch.html">http://www.postgresql.org/docs/8.4/static/textsearch.html</A></P>
+	<LI><P><A HREF="http://snowball.tartarus.org/">http://snowball.tartarus.org/</A></P>
+	<LI><P><A HREF="http://www.google.com/patents">http://www.google.com/patents</A></P>
+	<LI><P><A HREF="http://books.google.co.za/books?id=9s-xuraeZCkC&amp;pg=PA29&amp;lpg=PA29&amp;dq=cover+density+ranking&amp;source=bl&amp;ots=aThCVT5Yee&amp;sig=WUFk-lNJY1PgPuXty18JA91mLAE&amp;hl=en&amp;ei=GV0qSpXED4_4MZvC4d8J&amp;sa=X&amp;oi=book_result&amp;ct=result&amp;resnum=4#PPA29,M1">Web
+	Communities By Yanchun Zhang, Jeffrey Xu Yu, Jingyu Hou</A></P>
+</OL>
+<P><BR><BR>
+</P>
+
+<br clear="all" />
+
+<script type='text/javascript'>
+digg_url = 'http://linuxgazette.net/164/sephton.html';
+digg_title = 'Understanding Full Text Search in PostgreSQL';
+digg_bodytext = '<P>Those who have yet to enter their first search query in Google, Yahoo, or any of the myriad of other search engines available to the web, or have no interest in the use of PostgreSQL as a database engine to implement their own text search facility will find little use in reading further.</P> ';
+digg_topic = 'linux_unix';
+</script>
+<script src="http://digg.com/tools/diggthis.js" type="text/javascript"></script>
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:164/sephton.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/2002/note.png" class="bio">
+</p>
+
+<em>
+<p>
+Paul works as a Software Architect and Technology Officer for a
+ financial information vendor. After abandoning a career in nuclear
+ chemistry, during which he developed an interest in hardware and
+ software, he joined a firm of brokers as a developer. He first started
+ using Linux in 1994 with version 1.18 of Slackware. His first passion
+ will always be writing software. Other interests are composing music,
+ playing computer games, Neural network simulations and reading.
+</p>
+
+
+
+</em>
+
+<br clear="all">
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2009, Paul Sephton. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication License</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 164 of Linux Gazette, July 2009
+</p>
+
+</div>
+
+<div id="previousnextbottom">
+<A HREF="prestia.html" >&lt;-- prev</A> | <A HREF="silva.html" >next --&gt;</A>
+</div>
+
+</div>
+</div>
+
+<script src="http://www.google-analytics.com/urchin.js"
+type="text/javascript">
+</script>
+<script type="text/javascript">
+_uacct = "UA-1204316-1";
+urchinTracker();
+</script>
+
+
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+</body>
+</html>
+

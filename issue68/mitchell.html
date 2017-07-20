@@ -1,0 +1,138 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>The Opening of the Field: PostgreSQL's Multi-Version Concurrency Control LG #68</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<CENTER>
+<A HREF="http://www.linuxgazette.net/">
+<IMG ALT="LINUX GAZETTE" SRC="../gx/lglogo.png" 
+	WIDTH="600" HEIGHT="124" border="0"></A> 
+<BR>
+
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="jenkins.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../faq/index.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="nazario.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+<P>
+</CENTER>
+
+<!--endcut ============================================================-->
+
+<H4 ALIGN="center">
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H1><font color="maroon">The Opening of the Field: PostgreSQL's Multi-Version Concurrency Control</font></H1>
+<H4>By <a href="mailto:jmitchell@greatbridge.com">Joseph Mitchell</a></H4>
+</center>
+<P> <HR> <P>  
+
+<!-- END header -->
+
+
+
+
+<ALIGN=CENTER>
+<H2><I>PostgreSQL's Multi-Version Concurrency Control feature 
+frees data tables for simultaneous use by readers and writers.</I></H2>
+</CENTER>
+<p>
+<ALIGN=LEFT>
+<h3>Introduction</h3>
+<p>
+Question of the day: what's the single most annoying thing about most large multi-user databases? As anyone who's worked with one knows, it's waiting. And waiting. Whether the database system is using table-level, page-level, column-level, or row-level locking, the same annoying problem persists: readers (SELECTs) wait for writers (UPDATEs) to finish, and writers (UPDATEs) wait for readers (SELECTs) to finish. If I could only find a
+database that doesn't require locking.  Will it ever be?  Well, the answer is yes".
+
+<P>
+<h3>PostgreSQL's no-locking feature</h3>
+For PostgreSQL , "no-locking" is already a reality. Readers never wait for writers, and writers never wait for readers. I can already hear the objections to the claim that there is no "no-locking" in PostgreSQL, so let me explain PostgreSQL's advanced technique called Multi-Version Concurrency Control (MVCC).
+
+<P>
+<h3>MVCC</h3>
+<P>
+In other database systems, locks are the only mechanism used to maintain concurrency control and data consistency. PostgreSQL, however, uses a multi-version model instead of locks. In PostgreSQL, a version is like a snapshot of the data at a distinct point in time. The current version of the data appears whenever users query a table. Naturally, a new version appears if they run the same query again on the table and any data has changed. Such changes happen in a database through UPDATE, INSERT, or DELETE statements.
+
+<P>
+<h3>Example: Row locking vs. MVCC</h3>
+<P>
+The essential difference between traditional row-level locking and PostgreSQL's MVCC lies in when users can see the data they selected from a particular table. In traditional row-level locking, users may wait to see the data, whereas PostgreSQL's MVCC ensures that users NEVER wait to see the data. Let's look at the following example to illustrate more clearly. 
+
+<P>
+<PRE>
+SELECT <I>headlines</I> FROM <I>news_items</I>
+</PRE>
+<p>
+In this example, the statement reads data from a table called news_items and displays all the rows in the column called headlines. In data systems that use row-level locking, the SELECT statement will block and the user will have to wait if another user is concurrently inserting (INSERT) or updating (UPDATE) data in the table news items. The transaction that modifies the data holds a lock on the row(s) and therefore all rows from the table cannot be displayed, forcing users to wait until the lock releases. Users who have encountered frequent locks when trying to read data know all too well the frustration this locking scheme can cause. 
+
+<P>
+
+In contrast, PostgreSQL would allow all users to view the news_items table concurrently, eliminating the need to wait for a lock to be released. This is always the case, even if multiple users are inserting and updating data in the table at the same time. When a user issues the SELECT query, PostgreSQL displays a snapshot - a version, actually - of all the data that users have committed before the query began. Any data updates or inserts that are part of open transactions or that were committed after the query began will not be displayed. Makes a lot of sense, doesn't it?
+
+<P>
+
+<h3>A Deeper Look at MVCC</h3>
+<P>
+Database systems that use row-level locking do not retain old versions of the data, hence the need for locks to maintain data consistency. But a deeper look into how "no-locking" through MVCC works in PostgreSQL reveals how PostrgreSQL gets around this limitation. Each row in PostgreSQL has two transaction IDs. It has a creation transaction ID for the transaction that created the row, and an expiration transaction ID for the transaction that expired the row. When someone performs an UPDATE, PostgreSQL creates a new row and expires the old one. It's the same row, but in different versions. Unlike database systems that don't hold on to the old version, when PostgreSQL creates a new version of the row it also retains the old or expired version. (Note: Old versions are retained until a process called VACUUM is run on the database.) 
+
+<P>
+
+That's how PostgreSQL creates versions of the data, but how does it know which version to display? It bases its display on several criteria. At the start of a query, PostgreSQL records two things: 1) the current transaction ID and 2) all in-process transaction IDs. When someone accesses data, Postgres issues a query to display all the row versions that match the following criteria: the row's creation transaction ID is a committed transaction and is less than the current transaction counter, and the row lacks an expiration transaction ID or its expiration transaction ID was in process at query start.
+
+<P>
+
+And this is where MVCC's power resides. It enables PostgreSQL to keep track of transaction IDs to determine the version of the data, and thereby avoid having to issue any locks. It's a very logical and efficient way of handling transactions. New PostgreSQL users are often pleasantly surprise by the performance boost of MVCC over row-level locking, especially in a large multi-user environment. 
+
+<P>
+
+MVCC also offers another advantage: hot backups. Many other databases require users to shutdown the database or lock all tables to get a consistent snapshot - not so with PostgreSQL. MVCC allows PostgreSQL to make a full database backup while the database is live. It simply takes a snapshot of the entire database at a point in time and dumps the output even while data is being inserted, updated or deleted. 
+<P>
+<h3>CONCLUSION</h3>
+<P>
+MVCC ensures that readers never wait for writers and writers never wait for readers. It is a logical and efficient version management mechanism that delivers better database performance than traditional row-level locking.  
+
+<P>
+<i>PostgreSQL is available for download at the Great Bridge Web site 
+(<A HREF="http://www.greatbridge.com/download">www.greatbridge.com/download</A>).</i>
+
+
+
+
+
+<!-- *** BEGIN bio *** -->
+<SPACER TYPE="vertical" SIZE="30">
+<P> 
+<H4><IMG ALIGN=BOTTOM ALT="" SRC="../gx/note.gif">Joseph Mitchell</H4>
+<CITE>Joseph is a knowledge engineer for Great Bridge LLC, a company formed to
+promote, market and provide professional support services for PostgreSQL, the
+open source database, and other open source business solutions. He can be
+reached at <A
+HREF="mailto:jmitchell@greatbridge.com">jmitchell@greatbridge.com</A>.</CITE>
+
+<!-- *** END bio *** -->
+
+<!-- *** BEGIN copyright *** -->
+<P> <hr> <!-- P --> 
+<H5 ALIGN=center>
+
+Copyright &copy; 2001, Joseph Mitchell.<BR>
+Copying license <A HREF="../copying.html">http://www.linuxgazette.net/copying.html</A><BR> 
+Published in Issue 68 of <i>Linux Gazette</i>, July 2001</H5>
+<!-- *** END copyright *** -->
+
+<!--startcut ==========================================================-->
+<HR><P>
+<CENTER>
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="jenkins.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../faq/index.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="nazario.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+</CENTER>
+</BODY></HTML>
+<!--endcut ============================================================-->

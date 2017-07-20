@@ -1,0 +1,516 @@
+#! /usr/bin/gawk -f
+#
+# spirolang.awk - Translates a description of a spirographic-like plot
+# into the appropriate gnuplot orders. This awk script understands and
+# translates a collection of instructions, forming a minilanguage for a
+# subset of spirographic-like drawings.
+#
+# PROGRAM USE:  spirolang.awk <plot_description.s>
+# where <plot_description> is a file containing the description of the
+# spirographic curves. The suffix ".spr" is customary for the input file.
+#
+#-----------------------------------------------------------------------
+#
+# CopyRight (c): Victor Lua~na, Sept. 22, 2006
+#                Departamento de Quimica Fisica y Analitica
+#                Universidad de Oviedo, 33007-Oviedo, Spain
+#                victor@carbono.quimica.uniovi.es
+#
+# This script is distributed as an Open Source code protected by the
+# GNU General Public License version 2 (GPL2) as published by the
+# Free Software Foundation (http://www.gnu.org).
+# In short: you can make and distribute copies of this script; you can
+# also make changes in the code and distribute the modified files; but
+# you should always document the introduced changes and you must distribute
+# or make available to others the source codes.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+#-----------------------------------------------------------------------
+#
+# Language description:
+# + Orders are written in capitals: LIKE THIS.
+# + Obligatory variables are written withing <angular brackets> and have
+#   a suffix according to the expected type of data:
+#    <variable.s> ..... string data: like_this.
+#    <variable.i> ..... an integer: -413.
+#    <variable.r> ..... a real value: -27.2e-4.
+#    <variable.re> .... a real expression (containing no blanks):
+#                       2*pi/14.
+#    <variable.c> ..... a complex value: {-1.4,0.85}.
+#    <variable.ce> .... a complex expression: pi*{0,1}.
+# + Optional data are written withing [square brackets].
+#
+#-----------------------------------------------------------------------
+#
+# Orders recognized by this script:
+#
+# * PROJECT <projectname.s>
+#      The project name serves as root for the names of all the files,
+#      temporary or final, that the drawing process requires.
+#      Default: projectname = "tmp"
+#
+# * TERMINAL [parameters.s]
+#      Select a gnuplot terminal type. Typical elections would be PNG or
+#      EPS, but any type accepted by gnuplot will serve. This order will
+#      be translated into the next gnuplot instruction:
+#                   set terminal [parameter.s]
+#      Default: png size 600,600 x000000 xffffff x404040 ...
+#
+# * CURVE [samples.i]
+#      Start a new curve. A plot is formed by one or more curves. Each
+#      curve is made by one or more terms. Each curve is computed
+#      independently and written to a temporary file. All curves are
+#      plotted together at the end to form the final image.
+#      The default number of sample points (2001) can be changed
+#      independently for each curve. Some special term types (like
+#      TROCHOID) may take control of this and ignore the <samples.i>
+#      value.
+#
+#      The general form of a curve is:
+#
+#          z(t) = z1(t) + z2(t) + ...
+#
+#      where t is the independent parameter, zk(t) = xk(t) + i yk(t) is a
+#      complex term contribution to the curve.
+#
+# * STYLE <style.s>
+#      Take control of the gnuplot style for this curve. The <style.s>
+#      must follow gnuplot syntax. For instance:
+#         + use same color on all lines --->   style lt 1   
+#         + use points instead of lines --->   style with points pt -1
+#      Default: style = ""
+#      (The default style is to use lines for the curves, increasing
+#      the line style for each successive curve, including those implied
+#      by the loops)
+#
+# * LOOP <var.s> <var_ini.r> <var_end.r> [var_inc.r]
+#      Repeat the current curve according to the next implicit loop:
+#          var = var_ini
+#          while (var does not reach var_end) do
+#             compute and draw a new installment of the current curve
+#             var = var_ini + (var_inc)
+#          end
+#      The <var.s> string can be used in the definition of the curve
+#      terms (see the examples below).
+#      The <var_inc.r> value can be negative.
+#      The curve must be repeated less that 1000 times.
+#      Defaults: no loop, var_inc = 1
+#
+# * ADDTERM LINE <z0.ce> <z1.ce>
+#      A linear term contribution to the current curve:
+#               zk(t) = z0 + (z1-z0) * t
+#      The line passes through z0 and z1, two arbitrary points in the
+#      complex plane. Remember than complex values are entered using the
+#      gnuplot notation: {x,y} means "x+i*y". Blank character must be
+#      avoid within each number.
+#
+# * ADDTERM SPIRAL1 <a.re> [n.i]
+#      Generalized Archimedes spiral:
+#               zk(t) = a * (2*pi*t)**n * exp(i*2*pi*t)
+#      Default: n = 1.
+#
+# * ADDTERM SPIRAL2 <a.re> <b.re>
+#      Equiangular spiral:
+#               zk(t) = a * exp(t/tan(b)) * exp(i*2*pi*t)
+#      Maximize the number of spiral rolls by choosing b close to plus
+#      or minus pi/2 (approx. 1.570796).
+#
+# * ADDTERM TROCHOID <R.re> <r.re> <p.re> [samples.i]
+#      A trochoid term:
+#               zk(t) = (R-r)*exp(i*2*pi*t) + p*exp(-i*2*pi*(R-r)*t/r)
+#      If samples is given, the number of sampling points and the number
+#      of curve rollings is internally computed.
+#
+# * ADDTERM WHEEL <a.re> <n.re> <s.re>
+#      A Farris rolling wheel term:
+#               zk(t) = a * exp(i*2*pi*(n*t+s))
+#      The meaning of the parameters is:
+#      + a .......... wheel radius.
+#      + n .......... rolling frequency, i.e. number of rolls of the
+#                     wheel when t goes from 0 to 1.
+#      + s .......... initial phase angle.
+#
+# * TRANGE <t0.r> <t1.r> 
+#      Range for the t variable. Notice that the presence of a trochoid
+#      term may take control for t and ignore this input.
+#      Default: t0 = 0, t1 = 1.
+#
+# * GFACTORS <freal.re> <fimag.re>
+#      Multiplicative factors for the real and imaginary parts of the
+#      drawn functions. In other words, the image finally drawn is:
+#              plot freal*real(z(t)), fimag*imag(z(t))
+#      Default: freal = fimag = 1.0
+#
+# * LABEL <x.r> <y.r> <text.s>
+#      Add a gnuplot label at the indicated position. The plot center
+#      has coordinates (0,0). The label is centered on the (x,y) point.
+#      The plot can contain any number of labels, but the program makes
+#      no attempt to avoid the collision between labels.
+#      Default: no labels.
+#
+#-----------------------------------------------------------------------
+#
+# Example 1:
+#
+# project plot01
+# curve 10
+#    addterm trochoid 100 -49 76
+#
+#-----------------------------------------------------------------------
+#
+# Example 2:
+#
+# project plot02
+# terminal png size 600,600 x000000
+# curve
+#    loop kkk 0 20 1
+#    addterm wheel 4*0.98**kkk  -3   kkk/200.
+#    addterm wheel 5*1.02**kkk   2   kkk/200.
+#
+#-----------------------------------------------------------------------
+#
+# Example 3:
+#
+# project plot03
+# terminal png size 600,600 x000000
+# curve
+#    style lt 1
+#    loop kkk 0 20 1
+#    addterm wheel 4  -5   -kkk/60.
+#    addterm wheel 3   2    kkk/60.
+#    addterm wheel 2   9    0.
+#
+#-----------------------------------------------------------------------
+#
+# Example 4:
+#
+# project plot04
+# terminal postscript eps enhanced color "Helvetica" 48
+# gfactors 1.4 0.7
+# curve
+#    # All lines with the same color and type
+#    style lt 1
+#    # Several copies of the curve, each smaller than the previous one.
+#    loop kkk 0 10 1
+#    addterm wheel 200*0.96**kkk   1   0.
+#    addterm wheel  10*0.96**kkk   9   0.
+#    addterm wheel   9*0.96**kkk  23   0.
+# # Add a message in the central hole.
+# label 0 0 G_nuplot rules!
+#
+#-----------------------------------------------------------------------
+
+function sign (x) {
+   return ( x >= 0.0 ? +1.0 : -1.0 )
+   }
+
+BEGIN {
+   ########################################################################
+   ###--------CHECK THE NAMES OF THE NEXT PROGRAMS ON YOUR SYSTEM-------###
+   ###----------You may want to add viewers for other terminals---------###
+   ########################################################################
+   program_gnuplot = "gnuplot4"
+   program_png_viewer = "xv"
+   program_eps_viewer = "gv"
+   program_pdf_viewer = "gv"
+   program_fixbb      = "fixbb"
+   program_epstopdf   = "epstopdf"
+   ########################################################################
+   ###--------CHECK THE "set terminal pgn" SINTAX ON YOUR GNUPLOT-------###
+   ########################################################################
+   term_type = "png"
+   #term_param = "png size 600,600 x000000 xffffff x404040 xff0000 xffa500 x66cdaa xcdb5cd xadd8e6 x0000ff xdda0dd x9500d3"
+   term_param = "png picsize 600 600 x000000 xffffff x404040 xff0000 xffa500 x66cdaa xcdb5cd xadd8e6 x0000ff xdda0dd x9500d3"
+   term_suffix = ".png"
+   ########################################################################
+   projectname = "tmp"
+   def_samples = 2001
+   trange0 = 0.0
+   trange1 = 1.0
+   freal = 1.0
+   fimag = 1.0
+   ncurve = 0
+   nlabel = 0
+   #
+   type_line = 101
+   type_wheel = 102
+   type_trochoid = 103
+   type_spiral1 = 104
+   type_spiral2 = 105
+   }
+
+/^#/ { next }  # Skip commentaries
+
+toupper($1) == "PROJECT"  {
+   projectname = $2
+   next
+   }
+
+toupper($1) == "TERMINAL" {
+   #for (k=1; k<=2; k++) { $(k) = "" }
+   $1 = ""
+   sub("^  *", "", $0)
+   term_param = $0
+   if (toupper(term_param) ~ /PNG/) {
+      term_type = "png"
+      term_suffix = ".png"
+      }
+   else if (toupper(term_param) ~ /EPS/) {
+      term_type = "eps"
+      term_suffix = ".eps"
+      }
+   else if (toupper(term_param) ~ /PDF/) {
+      term_type = "pdf"
+      term_suffix = ".pdf"
+      }
+   else {
+      print "Warning: Unknown terminal type -> ", $0
+      term_type = "unk"
+      term_suffix = ".unk"
+      }
+   next
+   }
+
+toupper($1) == "CURVE" {
+   ncurve++
+   curve_nterm[ncurve] = 0
+   curve_samp[ncurve] = def_samples
+   if ($2+0 > 0) { curve_samp[ncurve] = $2 }
+   curve_loop[ncurve] = 0
+   curve_loop_var[ncurve] = "none"
+   curve_loop_vini[ncurve] = 0.0
+   curve_loop_vfin[ncurve] = 0.0
+   curve_loop_vinc[ncurve] = 1.0
+   curve_loop_nl[ncurve] = 1
+   curve_style[ncurve] = ""
+   next
+   }
+
+toupper($1) == "LOOP" {
+   curve_loop[ncurve] = 1
+   curve_loop_var[ncurve] = $2
+   curve_loop_vini[ncurve] = $3+0
+   curve_loop_vfin[ncurve] = $4+0
+   curve_loop_vinc[ncurve] = 1.0
+   if ($5+0 > 0) { curve_loop_vinc[ncurve] = $5+0 }
+   nloop = 0
+   vact = curve_loop_vini[ncurve]
+   sig = sign(curve_loop_vinc[ncurve])
+   l = 0
+   while (sig*vact <= sig*curve_loop_vfin[ncurve]) {
+      l++
+      vact += curve_loop_vinc[ncurve]
+      if (l>=1000) {
+         print "ERROR: Curve loops should not exceed the count of 1000"
+         print "The error happened on curve ", ncurve
+         print "Offending line -> ", $0
+         exit (-1)
+         }
+      }
+   curve_loop_nl[ncurve] = l
+   next
+   }
+
+toupper($1) == "STYLE" {
+   $1 = ""
+   curve_style[ncurve] = $0
+   next
+   }
+
+toupper($1) == "ADDTERM" && toupper($2) == "LINE" {
+   k = ++curve_nterm[ncurve]
+   curve_termtype[ncurve,k] = type_line
+   curve_termparam[ncurve,k,1] = $3  # z0
+   curve_termparam[ncurve,k,2] = $4  # z1
+   next
+   }
+
+toupper($1) == "ADDTERM" && toupper($2) == "SPIRAL1" {
+   k = ++curve_nterm[ncurve]
+   curve_termtype[ncurve,k] = type_spiral1
+   curve_termparam[ncurve,k,1] = $3  # a
+   if ($4+0 > 0) { curve_termparam[ncurve,k,2] = $4 }  # n
+   else { curve_termparam[ncurve,k,2] = 1 }  # n
+   next
+   }
+
+toupper($1) == "ADDTERM" && toupper($2) == "SPIRAL2" {
+   k = ++curve_nterm[ncurve]
+   curve_termtype[ncurve,k] = type_spiral1
+   curve_termparam[ncurve,k,1] = $3  # a
+   curve_termparam[ncurve,k,2] = $4  # b
+   next
+   }
+
+toupper($1) == "ADDTERM" && toupper($2) == "WHEEL" {
+   k = ++curve_nterm[ncurve]
+   curve_termtype[ncurve,k] = type_wheel
+   curve_termparam[ncurve,k,1] = $3  # a
+   curve_termparam[ncurve,k,2] = $4  # n
+   curve_termparam[ncurve,k,3] = $5  # s
+   next
+   }
+
+toupper($1) == "ADDTERM" && toupper($2) == "TROCHOID" {
+   k = ++curve_nterm[ncurve]
+   curve_termtype[ncurve,k] = type_trochoid
+   curve_termparam[ncurve,k,1] = $3  # R
+   curve_termparam[ncurve,k,2] = $4  # r
+   curve_termparam[ncurve,k,3] = $5  # p
+   if ($6+0 > 0) { curve_termparam[ncurve,k,4] = $6 } # sampling
+   else { curve_termparam[ncurve,k,4] = curve_samp[ncurve] }
+   next
+   }
+
+toupper($1) == "ADDTERM" {
+   print "Warning: Unknown term type --> ", $0
+   next
+   }
+
+toupper($1) == "TRANGE" {
+   trange0 = $2+0
+   trange1 = $3+0
+   next
+   }
+
+toupper($1) == "GFACTORS" {
+   freal = $2+0
+   fimag = $3+0
+   next
+   }
+
+toupper($1) == "LABEL" {
+   nlabel++
+   lab_x[nlabel] = $2
+   lab_y[nlabel] = $3
+   $1 = ""; $2 = ""; $3 = ""
+   sub("^  *", "", $0)
+   lab_text[nlabel] = $0
+   next
+   }
+
+END {
+   #DEBUG-START
+   #print "Curves: ", ncurve
+   #for (j=1; j<=ncurve; j++) {
+   #   print "Curve:", j, " Loop:", curve_loop_nl[j], " Terms:", curve_nterm[j]
+   #   }
+   #DEBUG_END
+   outfile = projectname term_suffix
+   gnufile = projectname ".gnu"
+   #
+   # HEADINGS: plot conditions and auxiliary functions:
+   #
+   print "set size ratio -1"                                       > gnufile
+   print "set nokey"                                              >> gnufile
+   print "set noxtics"                                            >> gnufile
+   print "set noytics"                                            >> gnufile
+   print "set noborder"                                           >> gnufile
+   print "set parametric"                                         >> gnufile
+   print "i2p = {0,1}*2*pi"                                       >> gnufile
+   print "gcd(x,y) = (x%y==0 ? y : gcd(y,x%y))"                   >> gnufile
+   print "min(x,y) = (x<y ? x : y)"                               >> gnufile
+   print "max(x,y) = (x>y ? x : y)"                               >> gnufile
+   #
+   # A function name and a data file is created for each curve to be plot:
+   #
+   for (j=1; j<=ncurve; j++) {
+      for (l=1; l<=curve_loop_nl[j]; l++) {
+         istrochoid = 0
+         vact = curve_loop_vini[j] + (l-1) * curve_loop_vinc[j]
+         printf "%s = %f\n", curve_loop_var[j], vact              >> gnufile
+         curve_name[j,l] = sprintf ("z%03d%03d", j, l)
+         curve_file[j,l] = sprintf ("%s%03d%03d%s", projectname, j, l, ".dat")
+         printf "%s(t) = ", curve_name[j,l]                       >> gnufile
+         for (k=1; k<=curve_nterm[j]; k++) {
+            if (curve_termtype[j,k] == type_line) {
+               printf "+ %s + (%s-%s)*t ", curve_termparam[j,k,1] \
+                      , curve_termparam[j,k,2], curve_termparam[j,k,1] \
+                                                                  >> gnufile
+               }
+            else if (curve_termtype[j,k] == type_spiral1) {
+               printf "+ %s * (2*pi*t)**%s * exp(i2p*t) "\
+                      , curve_termparam[j,k,1], curve_termparam[j,k,2] \
+                                                                  >> gnufile
+               }
+            else if (curve_termtype[j,k] == type_spiral2) {
+               printf "+ %s * exp(t/tan(%s)) * exp(i2p*t) "\
+                      , curve_termparam[j,k,1], curve_termparam[j,k,2] \
+                                                                  >> gnufile
+               }
+            else if (curve_termtype[j,k] == type_wheel) {
+               printf "+ %s * exp(i2p*(%s*t+%s)) "\
+                      , curve_termparam[j,k,1], curve_termparam[j,k,2] \
+                      , curve_termparam[j,k,3] \
+                                                                  >> gnufile
+               }
+            else if (curve_termtype[j,k] == type_trochoid) {
+               istrochoid = 1
+               resolution = curve_termparam[j,k,4]
+               Rbig   = curve_termparam[j,k,1]
+               rsmall = curve_termparam[j,k,2]
+               printf "+ (%s-%s)*exp(i2p*t) + %s*exp(-i2p*(%s-%s)*t/%s) "\
+                      , curve_termparam[j,k,1], curve_termparam[j,k,2] \
+                      , curve_termparam[j,k,3], curve_termparam[j,k,1] \
+                      , curve_termparam[j,k,2], curve_termparam[j,k,2] \
+                                                                  >> gnufile
+               }
+            }
+         printf "\n"                                              >> gnufile
+         printf "set terminal table\n"                            >> gnufile
+         printf "set output \"%s\"\n", curve_file[j,l]            >> gnufile
+         if (istrochoid == 1) {
+            printf "res = %s\n", resolution                       >> gnufile
+            printf "rr = int(abs(%s))\n", rsmall                  >> gnufile
+            printf "nturns = rr/gcd(int(%s),rr)\n", Rbig          >> gnufile
+            printf "set samples (1+res*nturns)\n"                 >> gnufile
+            printf "t0 = %s\n", trange0                           >> gnufile
+            printf "t1 = nturns*%s\n", trange1                    >> gnufile
+            }
+         else {
+            printf "set samples %d\n", curve_samp[j]              >> gnufile
+            printf "t0 = %s\n", trange0                           >> gnufile
+            printf "t1 = %s\n", trange1                           >> gnufile
+            }
+         printf "plot [t=t0:t1] %s*real(%s(t)),%s*imag(%s(t))\n" \
+                , freal, curve_name[j,l], fimag, curve_name[j,l]  >> gnufile
+         }
+      }
+   printf "set terminal %s\n", term_param                         >> gnufile
+   printf "set output \"%s\"\n", outfile                          >> gnufile
+   printf "set data style lines\n"                                >> gnufile
+   printf "set noparametric\n"                                    >> gnufile
+   for (i = 1; i <= nlabel; i++) {
+      printf "set label \"%s\" at %s,%s center\n" \
+             , lab_text[i], lab_x[i], lab_y[i]                    >> gnufile
+      }
+   printf "plot"                                                  >> gnufile
+   comma = ""
+   for (j=1; j<=ncurve; j++) {
+      for (l=1; l<=curve_loop_nl[j]; l++) {
+         printf "%s \"%s\" %s", comma, curve_file[j,l], curve_style[j] \
+                                                                  >> gnufile
+         comma = ","
+         }
+      }
+   printf "\n"                                                    >> gnufile
+   #
+   # FINAL STEP: run gnuplot and view the result.
+   #
+   order = sprintf ("%s %s", program_gnuplot, gnufile)
+   system (order)
+   if (tolower(term_type) == "png") {
+      order = sprintf ("%s %s", program_png_viewer, outfile)
+      }
+   else if (tolower(term_type) == "eps") {
+      order = sprintf ("%s %s", program_eps_viewer, outfile)
+      }
+   else {
+      order = sprintf ("echo 'Final plot of unknown type ->' %s", outfile)
+      }
+   system (order)
+   }

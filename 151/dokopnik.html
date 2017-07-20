@@ -1,0 +1,347 @@
+<!DOCTYPE html
+	PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+	 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="utf-8" xml:lang="utf-8">
+<head>
+<title>Deividson on Databases: Triggers LG #151</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link rel="stylesheet" href="../lg.css" type="text/css" media="screen, projection"  />
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<!-- link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" / -->
+<link rel="shortcut icon" href="../favicon.ico" />
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+</head>
+<body>
+
+<a href="../">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+<div id="navigation">
+<table summary="masthead" width="100%">
+<tr>
+<td align="center" colspan="3" style="font-size: 10px; font-weight: bold">
+<a href="../index.html">Home</a>
+<a href="http://linuxgazette.net">Main Site</a>
+<a href="../faq/index.html">FAQ</a>
+
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/mailman/listinfo/">Mailing Lists</a>
+<a href="../jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+<hr width="99%" style="border: 1px inset #000033">
+</td>
+</tr>
+<tr>
+<td width="40%" align="left" style="font-size: 10px; font-weight: bold">
+The Free International Online Linux Monthly
+</td>
+<td width="20%" align="center" style="font-size: 10px; font-weight: bold">
+ISSN: 1934-371X
+</td>
+<td width="40%" align="right" style="font-size: 10px; font-weight: bold">
+Main site: <a href="http://linuxgazette.net">http://linuxgazette.net</a> 
+</td>
+</table>
+</div>
+
+
+<div id="breadcrumbs1">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">June 2008 (#151)</a> &gt; 
+Article
+
+</div>
+
+<div class="articlecontent1">
+<div class="content">
+
+<div id="previousnexttop">
+<A HREF="lg_bytes.html" >&lt;-- prev</A> | <A HREF="john.html" >next --&gt;</A>
+</div>
+
+<h1>Deividson on Databases: Triggers</h1>
+<p id="by"><b>By <a href="../authors/dokopnik.html">Deividson Luiz Okopnik</a></b></p>
+
+<h3>Triggers</h3>
+
+<p>Triggers are pieces of code executed automatically when a certain
+action happens. That action can be any kind of data manipulation
+(insertion, update, or deletion). It can also be executed before or after
+the actual data manipulation, having different options and uses
+(validating data, allowing or disallowing data manipulations, changing
+other data, etc.).</p>
+
+<p>In PostgreSQL, triggers are special <a
+href="../150/dokopnik.html"><em>stored procedures</em></a> - so everything
+we saw on the last article can be used here, too. Let's go down to an
+example:</p>
+
+<h3>Example 1: Hit Counting</h3>
+
+<p>This can be used on a web page, or something similar. We will have
+a table to store the ID and IP of each access (you can store any
+information you want here, such as referrer, time and date, etc.), and
+another table with a single row to store the actual page views (this can be
+extended to have an ID for each page on your site, storing individual
+hits.) Here is the SQL to create these tables:</p>
+
+<pre class="code">CREATE TABLE access
+(
+  access_id serial NOT NULL PRIMARY KEY,
+  access_ip text
+);
+
+CREATE TABLE hit
+(
+  hit_id serial NOT NULL PRIMARY KEY,
+  hit_value integer
+);
+insert into hit values(0, 0);</pre>
+
+<p>We'll want to increment the "hit_value" of ID 0 every time an access is
+recorded. We could use a simple "select count()" to count accesses, but
+that would mean losing the count when you do a clean up on the access
+table. (We will not want all that data there forever, will we?) To do it
+right, first we need to create a procedure that increments the "hit"
+table when "hit_id" = 0. This is the SQL to create this procedure:</p>
+
+<pre class="code">create or replace function add_hit()
+returns TRIGGER as $$
+begin
+	if(TG_OP='INSERT') then
+		update hit set hit_value = (select hit_value from hit where hit_id = 0) +1 where hit_id = 0;
+	end if;
+	return new;
+end; 
+$$ Language PLPGSQL;</pre>
+
+<p>Here, we see three new commands/features in addition to what we used in
+the last article in this series: the first one is "returns TRIGGER as $$".
+This is a trigger-specific return type to hold the changed data that will
+be stored/updated/deleted from the database, useful when you need to add or
+change the data before inserting into the database. The other new command
+is "if(TG_OP='INSERT')". TG_OP will store the operation being executed in
+the database - useful when you use the same trigger on more than one event
+(insert/update/delete). And finally, we have "return new". "New" is an
+internal variable that stores the data after the changes. (In an insert,
+<tt>new</tt> is the data being inserted; on an update, <tt>new</tt> is the
+existing data after the update; on a delete, <tt>new</tt> does not exist.)
+Along with "new", there is also "old", which stores the data before the
+changes: on delete, <tt>old</tt> is the data that will be deleted; on an
+update, <tt>old</tt> is the data that will be changed, before the change;
+on an insert, <tt>old</tt> does not exist.</p>
+
+<p>Now, we will turn our stored procedure into a trigger and activate it.
+Here is the SQL to do that:</p>
+
+<pre class="code">
+create TRIGGER tg_add_hit before insert on access for each row execute procedure add_hit();
+</pre>
+
+<p>The syntax is pretty simple - "create TRIGGER &lt;trigger name&gt;
+&lt;before/after&gt; &lt;event(s)&gt; for each &lt;row/statement&gt;
+execute procedure &lt;procedure name&gt;([parameters])". <tt>trigger name</tt> is
+a unique name to identify the trigger, <tt>before/after</tt> defines if the
+procedure will be executed before or after the actual data change,
+<tt>events</tt> are the events when the trigger will be executed - 'insert',
+'update', 'delete', or a mix of them ("on insert or update"). <tt>for each row</tt>
+means that the trigger will be executed for each row of data that gets
+changed, while the <tt>for each</tt> statement means it will only be executed once,
+no matter how many rows a single statement modifies. In the end, there's
+the procedure name and its parameters, if it takes any.</p>
+
+<p>Now, to test this trigger, we'll run "select * from hit" to check the
+current count (should be 0). Then, insert an access with "insert into
+access(access_ip) values('111');". Then, do a "select * from hit" again,
+and you will notice that the count changed.</p>
+
+<h3>Example 2: Stock/Inventory Control</h3>
+
+<p>A classic use of triggers is stock/inventory control - keeping a
+record of how many of each product you have in stock, and using triggers
+to change the number of remaining items when some are sold. We will use
+the following tables in this example:</p>
+
+<pre class="code">create table product(
+pro_id serial primary key,
+pro_name varchar(50),
+pro_quant integer);
+
+create table sale(
+sale_id serial primary key,
+sale_value date default current_date);
+
+create table sale_product(
+sp_id serial primary key, 
+sale_id integer references sale(sale_id),
+pro_id integer references product(pro_id), 
+sp_quant integer);
+
+insert into product(pro_name, pro_quant) values ('Computer', 10);
+insert into product(pro_name, pro_quant) values ('Printer', 15);
+insert into product(pro_name, pro_quant) values ('Monitor', 10);
+insert into sale(sale_id) values (0);</pre>
+
+<p>Pretty simple - although I left some "details" (prices, clients, etc.)
+out of it so we could focus on the quantities and on our trigger. I've also
+created some basic test data for the products and sales tables. Now, let's
+create the stored procedure to remove products when they are sold, and
+activate the trigger for it. Here's the SQL to do that:</p>
+
+<pre class="code">create or replace function upd_stock()
+returns TRIGGER as $$
+begin
+	if((TG_OP='DELETE') OR (TG_OP='UPDATE')) then
+	  update product set pro_quant = pro_quant + OLD.sp_quant where pro_id = OLD.pro_id;
+	end if;
+	if((TG_OP='UPDATE') OR (TG_OP='INSERT')) then
+  	  update product set pro_quant = pro_quant - NEW.sp_quant where pro_id = NEW.pro_id;
+	end if;
+
+	if(TG_OP='DELETE') then
+		return old;
+	else
+		return new;
+	end if;
+end; 
+$$ Language PLPGSQL;
+
+create TRIGGER tg_upd_stock before insert or update or delete on sale_product for each row execute procedure upd_stock();</pre>
+
+<p>OK, this one is a bit more complex, so let's go through it slowly.
+First, it's a trigger that runs on every event ("on insert or update or
+delete"). If the user is deleting data, it will only give the amount
+sold back to the stock. If it's an insert, then it will remove only the
+products being sold from the stock. Finally, if it's updating
+(changing), then the trigger will first add the old amount back into the
+product table, then it will remove the new quantity. This is done to
+prevent data corruption. Even if your system does not support data
+deletion, for example, this ensures that your database will remain
+correct, no matter what happens.</p>
+
+<p>Now, if you do want to practice stored procedures and triggers, there
+are two additions you need to make to this last example. The first one will
+add a table to store data when you buy stuff and a trigger to add the
+products to the stock; the second one will add a total to the sales table,
+add the price of the product to the products table and the price of the
+product when it was sold to the sale_product table, and create a trigger
+to add the price of the sold products to the sale total.</p>
+
+<h3>Conclusion</h3>
+
+<p>PostgreSQL is a very advanced database system, and some of its features
+can aid you greatly in developing systems, eliminate the need for a
+considerable amount of external code, and usually result in a faster
+solution, reduced bandwidth requirements, etc. The options we saw in this
+series of articles are very powerful but are usually under-used - so it's
+good to remember that they exist. Who knows - next time you are developing
+something, they might be exactly what you need. </p>
+
+<p>I hope you enjoyed these articles. In case of any questions or
+suggestions, make sure to send a Talkback message by clicking the link
+below.</p>
+
+
+
+<script type='text/javascript'>
+digg_url = 'http://linuxgazette.net/151/dokopnik.html';
+digg_title = 'Deividson on Databases: Triggers';
+digg_bodytext = '<p>Triggers are pieces of code executed automatically when a certain action happens. That action can be any kind of data manipulation (insertion, update, or deletion). It can also be executed before or after the actual data manipulation, having different options and uses (validating data, allowing or disallowing data manipulations, changing other data, etc.).</p> ';
+digg_topic = 'linux_unix';
+</script>
+<script src="http://digg.com/tools/diggthis.js" type="text/javascript"></script>
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:151/dokopnik.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/authors/dokopnik.jpg" class="bio">
+</p>
+
+<em>
+<p>
+Deividson was born in Uni&atilde;o da Vit&oacute;ria, PR, Brazil, on
+ 14/04/1984. He became interested in computing when he was still a kid,
+ and started to code when he was 12 years old. He is a graduate in
+ Information Systems and is finishing his specialization in Networks and
+ Web Development. He codes in several languages, including C/C++/C#, PHP,
+ Visual Basic, Object Pascal and others.
+</p>
+
+<p>
+Deividson works in Porto Uni&atilde;o's Town Hall as a Computer
+ Technician, and specializes in Web and Desktop system development, and
+ Database/Network Maintenance.
+</p>
+
+
+
+</em>
+
+<br clear="all">
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2008, Deividson Luiz Okopnik. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication License</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 151 of Linux Gazette, June 2008
+</p>
+
+</div>
+
+<div id="previousnextbottom">
+<A HREF="lg_bytes.html" >&lt;-- prev</A> | <A HREF="john.html" >next --&gt;</A>
+</div>
+
+</div>
+</div>
+
+<script src="http://www.google-analytics.com/urchin.js"
+type="text/javascript">
+</script>
+<script type="text/javascript">
+_uacct = "UA-1204316-1";
+urchinTracker();
+</script>
+
+
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+</body>
+</html>
+

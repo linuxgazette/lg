@@ -1,0 +1,403 @@
+<!DOCTYPE html
+	PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+	 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="utf-8" xml:lang="utf-8">
+<head>
+<title>Virtualizing without Virtualizing LG #150</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link rel="stylesheet" href="../lg.css" type="text/css" media="screen, projection"  />
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<!-- link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" / -->
+<link rel="shortcut icon" href="../favicon.ico" />
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+</head>
+<body>
+
+<a href="../">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+<div id="navigation">
+<table summary="masthead" width="100%">
+<tr>
+<td align="center" colspan="3" style="font-size: 10px; font-weight: bold">
+<a href="../index.html">Home</a>
+<a href="http://linuxgazette.net">Main Site</a>
+<a href="../faq/index.html">FAQ</a>
+
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/mailman/listinfo/">Mailing Lists</a>
+<a href="../jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+<hr width="99%" style="border: 1px inset #000033">
+</td>
+</tr>
+<tr>
+<td width="40%" align="left" style="font-size: 10px; font-weight: bold">
+The Free International Online Linux Monthly
+</td>
+<td width="20%" align="center" style="font-size: 10px; font-weight: bold">
+ISSN: 1934-371X
+</td>
+<td width="40%" align="right" style="font-size: 10px; font-weight: bold">
+Main site: <a href="http://linuxgazette.net">http://linuxgazette.net</a> 
+</td>
+</table>
+</div>
+
+
+<div id="breadcrumbs1">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">May 2008 (#150)</a> &gt; 
+Article
+
+</div>
+
+<div class="articlecontent1">
+<div class="content">
+
+<div id="previousnexttop">
+<A HREF="howell.html" >&lt;-- prev</A> | <A HREF="melinte.html" >next --&gt;</A>
+</div>
+
+<h1>Virtualizing without Virtualizing</h1>
+<p id="by"><b>By <a href="../authors/kapil.html">Kapil Hari Paranjape</a></b></p>
+
+<h3>Introduction</h3>
+
+<p> Nowadays one <a href="../142/lg_bytes.html">reads</a> <A href="../143/lg_bytes.html">a lot</a> about
+<a href="../145/lg_bytes.html">virtualization</a>.
+The Gazette even ran an <a href="../144/howell.html">article</a> on it. Most
+of these reports talk about Xen, Vserver, OpenVZ, Qemu, User Mode
+Linux or co-Linux. Each of those modern technologies has its
+place no doubt, but this article will concentrate on the humble
+<code>chroot</code> way of running programs in a virtual
+environment.</p>
+
+<p> Here is the <b>EULA</b><sup><a name="text1" href="#note1">1</a></sup> that you must agree to if you want to read
+further:</p>
+
+<ul>
+<li>The software you want to run
+&ldquo;virtually&rdquo; <em>can</em> run with your currently
+running kernel.</li>
+
+<li>Your super-user avatar trusts that the
+software you want to run is no less trustworthy than the
+software that is currently running on the system.</li>
+
+<li>You have enough disk-space to replicate
+a complete installation.</li>
+
+<li>You use Debian or a derived
+distribution. (These days that last line probably reads:
+&ldquo;You run Ubuntu!&rdquo;)</li>
+</ul>
+
+<p> Here some possible scenarios where one might want to run
+programs in a virtual context in spite of these (admittedly
+rather stringent) conditions:</p>
+
+<ul>
+<li>You have installed the
+<code>amd64</code> flavour of Debian but you need to compile
+and/or use 32-bit programs. (Read as: You want to see those
+<code>flash</code> thingies that everyone is talking
+about!).</li>
+
+<li>You have installed Debian
+<em>stable</em> but you want to &ldquo;try out&rdquo; some
+packages from <em>testing</em> or <em>unstable</em>; and you
+don&rsquo;t really want to mess up your stable installation.
+(<code>apt-get</code> is great for resolving dependencies for
+<em>upgrades</em>; those who tried a <em>downgrade</em> have
+not lived to tell the tale).</li>
+
+<li>You really like Debian but the <b>BDFL</b><sup><a name="text2"
+href="#note2">2</a></sup> has waltzed into town looking for new employees
+for Canonical and you want to impress him by running the Hardy Heron.</li>
+
+<li>&ldquo;Girls<sup><a name="text3" href="#note3">3</a></sup> just want to
+have fun!&rdquo;.  This is often the best reason of all &mdash; after all
+LG stands for Fun with Linux!</li>
+</ul>
+
+<h3>Ask the super</h3>
+
+<p> Your super-user avatar (SU) must carry out the following steps
+for you to enter the virtual context.</p>
+
+
+<h4>Allocate disk space</h4>
+
+
+<p> Either there is already enough disk space on some mounted
+partition or you have an unused partition. You will need this
+empty space to appear in some fixed location like
+<code>/srv/schroot</code>. SU can use <code>mount</code> (with
+the <code>--bind</code> option in the former case) to set this
+up.</p>
+
+<h4>Create a new Debian installation</h4>
+
+<p> Do <em>not</em> reach for that Debian boot CD! Here is a way
+that does not destroy your uptime record. SU should install
+<code>debootstrap</code>:</p>
+<pre>
+apt-get install debootstrap
+</pre>
+
+<p> and run it:</p>
+<pre>
+debootstrap --include=iceweasel,mozplugger lenny /srv/schroot
+</pre>
+
+<p> SU can of course replace <code>iceweasel</code> and
+<code>mozplugger</code> by any comma-separated list of programs
+which need to be installed. It is nice to add a local mirror at
+the tail end of the <code>debootstrap</code> invocation so as to
+get a faster download.</p>
+
+<h4>The main program</h4>
+
+<p> Since you run Debian, installing <code>schroot</code> is as
+easy as SU running:</p>
+<pre>
+apt-get install schroot
+</pre>
+
+<p> You also need to configure <code>schroot</code>; there are a
+number of rather interesting options. The following configuration
+stanza seemed to be just right:</p>
+<pre class="code">
+[lenny]
+description=Debian lenny (testing)
+location=/srv/schroot
+type=directory
+users=luser
+root-groups=root
+root-users=root
+aliases=testing,default
+run-setup-scripts=true
+run-exec-scripts=true
+</pre>
+
+<p> If you are planning to use a 32-bit chroot under a 64-bit
+system then you need to have <code>personality=linux32</code> as
+part of this configuration. The above stanza is placed in the
+file <code>schroot.conf</code> in the configuration directory
+<code>/etc/schroot/</code>. It says that SU allows the user
+<code>luser</code> to use <code>schroot</code> to run under the
+directory <code>/src/schroot</code> after various standard setup
+and startup scripts have been executed.</p>
+
+<p> You should also look through the setup script
+<code>10mount</code> in the <code>setup.d</code> sub-directory of
+the above directory as you may need to create some additional
+mounts. For example, adding the line</p>
+<pre>
+do_mount "-o rw,bind" "/dev/snd"    "${CHROOT_PATH}/dev/snd"
+</pre>
+
+<p> to <code>10mount</code> together with the creation of the
+<code>dev/snd</code> subdirectory of <code>/srv/schroot</code>
+ensures that the (ALSA) sound devices are accessible in the
+chroot. This is extremely important for <code>flash</code>!</p>
+
+<p> That completes the setup that the super-user needs to do.
+After this, <code>luser</code> can go ahead and play in this newly
+created &ldquo;sand-box&rdquo;.</p>
+
+
+<h3>All play and no work</h3>
+
+<p> The authorized user <code>luser</code> can execute a shell by
+running</p>
+<pre>
+schroot -p -c lenny
+</pre>
+
+<p> The shell will normally run in an environment where the users
+home directories, <code>/tmp</code> and <code>/dev</code> will be
+mounted from the base system. Hence it should be possible to
+execute commands with need the X window environment as well. (The
+<code>-p</code> option given above is required to preserve the
+environment that includes the <code>DISPLAY</code> variable).</p>
+
+<p> Another way to run a command like <code>iceweasel</code>
+directly is</p>
+<pre>
+schroot -p -c lenny iceweasel
+</pre>
+
+<p> Note that each such command creates a new schroot
+&ldquo;session&rdquo;. To re-use an already created session, you
+must save the session identifier and use it. For example, you can
+start a new session, without any command:</p>
+<pre>
+SCHROOT_SESSION=$(schroot -b -c lenny)
+</pre>
+
+<p> If you then issue the command</p>
+<pre>
+schroot -p --chroot $(SCHROOT_SESSION) iceweasel
+</pre>
+
+<p> the weasel will start up and run in that session. If you run
+this command another time, you will not create a new session.</p>
+
+
+<h3>Philosophy</h3>
+
+<p> The <code>chroot</code> command has existed for
+&ldquo;eons&rdquo;, but it was often felt that it is &ldquo;for
+the super-user only&rdquo;. By using <code>schroot</code> it
+becomes quite safely accessible to the regular user of the
+system. Using this kind of minimal virtualisation is certainly
+not in the same league security-wise as the &ldquo;real&rdquo;
+virtualisation techniques but has no overhead (except
+disk-usage); I hope the article demonstrates that
+<code>schroot</code> is at least as easy to set up.</p>
+
+<p> Using <code>schroot</code> is a good solution to the
+frequently asked question:</p>
+
+<blockquote>
+How do I run the <em>late-esht</em> version of &lt;name your
+favourite rapidly developing application&gt; on Debian?
+</blockquote>
+
+<p> In my opinion, the above solution is to be preferred over
+running a mixed <em>stable/testing</em> version of Debian. Even
+<em>backports</em> are slightly worse, as a mixed
+<em>stable/backports</em> environment is not what the packages
+are being tested in by most developers.</p>
+
+<p> The motivation to write this article came from a discussion I
+saw in the <a href="http://lwn.net/Articles/277799/">letters</a>
+to <a href="http://lwn.net">Linux Weekly News</a> where people
+said that Debian was hindering those who want to run 32-bit
+programs on a 64-bit system. If indeed mixed library setups are
+well packaged and maintained, then that is easier than the
+solution herein. All the same, Debian does have <em>this</em>
+solution!</p>
+
+<p> The title of this article is inspired by John Archibald
+Wheeler, one of the most fascinating physicists of the 20th
+century, who passed away recently.</p>
+<hr>
+
+<dl>
+<dt><a name="note1" href="#text1">1</a></dt>
+
+<dd>This is a dyslexic acronym for
+&ldquo;Lookout &mdash; Advanced Experimental Usage&rdquo;</dd>
+
+<dt><a name="note2" href="#text2">2</a></dt>
+
+<dd>Mark Shuttleworth: Benevolent
+Dictator For Life for Ubuntu</dd>
+
+<dt><a name="note3" href="#text3">3</a></dt>
+
+<dd>or boys as the case may be</dd>
+</dl>
+
+
+
+<script type='text/javascript'>
+digg_url = 'http://linuxgazette.net/150/kapil.html';
+digg_title = 'Virtualizing without Virtualizing';
+digg_bodytext = '<p> Nowadays one <a href="../142/lg_bytes.html">reads</a> <A href="../143/lg_bytes.html">a lot</a> about <a href="../145/lg_bytes.html">virtualization</a>. The Gazette even ran an <a href="../144/howell.html">article</a> on it. Most of these reports talk about Xen, Vserver, OpenVZ, Qemu, User Mode Linux or co-Linux. Each of those modern technologies has its place no doubt, but this article will concentrate on the humble <code>chroot</code> way of running programs in a virtual environment.</p> ';
+digg_topic = 'linux_unix';
+</script>
+<script src="http://digg.com/tools/diggthis.js" type="text/javascript"></script>
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:150/kapil.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<!-- *** BEGIN bio *** -->
+<hr>
+<p>
+<img align="left" alt="Bio picture" src="../gx/authors/kapil.jpg" class="bio">
+<em>
+
+Kapil Hari Paranjape has been a ``hack''-er since his punch-card days.
+Specifically, this means that he has never written a ``real'' program.
+He has merely tinkered with programs written by others. After playing
+with Minix in 1990-91 he thought of writing his first program---a
+``genuine'' *nix kernel for the x86 class of machines. Luckily for him a
+certain L. Torvalds got there first---thereby saving him the trouble
+(once again) of actually writing code. In eternal gratitude he has spent
+a lot of time tinkering with and promoting Linux and GNU since those
+days---much to the dismay of many around him who think he should
+concentrate on mathematical research---which is his paying job. The
+interplay between actual running programs, what can be computed in
+principle and what can be shown to exist continues to fascinate him.
+
+</em>
+<br clear="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2008, Kapil Hari Paranjape. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication License</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 150 of Linux Gazette, May 2008
+</p>
+
+</div>
+
+<div id="previousnextbottom">
+<A HREF="howell.html" >&lt;-- prev</A> | <A HREF="melinte.html" >next --&gt;</A>
+</div>
+
+</div>
+</div>
+
+<script src="http://www.google-analytics.com/urchin.js"
+type="text/javascript">
+</script>
+<script type="text/javascript">
+_uacct = "UA-1204316-1";
+urchinTracker();
+</script>
+
+
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+</body>
+</html>
+

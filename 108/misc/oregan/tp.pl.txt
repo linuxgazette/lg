@@ -1,0 +1,64 @@
+#!/usr/bin/perl -w
+
+use strict;
+use LWP::UserAgent;
+use XML::RSS;
+use HTML::Entities;
+
+my $ie="Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.1)";
+
+my $ua = LWP::UserAgent->new;
+$ua->agent($ie);
+my $url = "http://groups.google.com/groups?safe=images&as_uauthors=Terry%20Pratchett&lr=lang_en&hl=en";
+my $response = $ua->get ($url);
+my $content;
+
+my $rss = new XML::RSS (version => '1.0');
+
+$rss->channel(title       => 'Terry Pratchett on Usenet',
+	      link        => $url,
+	      description => 'Terry Pratchett\'s Usenet posts, courtesy of Google Groups');
+
+if ($response->is_success) 
+{
+	my @chunks = (split ("</?div>", $response->content));
+	foreach (split "</font></font>", $chunks[1])
+	{
+		if (/<p><a\shref="?
+			(\/groups[^">]*)   # Link
+			"?>
+			([^<]*)            # Title
+			<\/a><font\ssize="?[^>"]*"?>
+			(.*)               # Quote
+			<b>...<\/b>\s*
+			<br><font\scolor="?green"?><a\shref="?
+			([^">\s]*)         # Group link
+			"?\sclass="?a"?>
+			([^<]*)            # Group name
+			<\/a>
+			([^<]*)            # Date & author
+			<a\shref="?
+			(\/groups[^">\s]*) # Thread link
+			"?\sclass="?a"?>
+			(View\sThread\s\([^\s]*\sarticles?\)) # Thread title
+			/six)
+		{
+			$content = $3;
+			$content .= "<br><br>";
+			$content .= "<a href='http://groups.google.com$4'>";
+			$content .= "$5</a>$6";
+			$content .= "<a href='http://groups.google.com$7'>";
+			$content .= "$8</a>";
+#			print $content;
+			$rss->add_item(title       => $2,
+				       link        => "http://groups.google.com$1",
+				       description => encode_entities($content));
+		}
+	}
+	print $rss->as_string;	
+}
+else 
+{
+	die $response->status_line;
+}
+								

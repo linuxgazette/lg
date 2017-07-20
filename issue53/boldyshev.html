@@ -1,0 +1,391 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>Introduction to UNIX Assembly Programming LG #53</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<IMG ALT="LINUX GAZETTE" SRC="../gx/lglogo.jpg" 
+	WIDTH="600" HEIGHT="124" border="0"><BR CLEAR="all">
+<!-- *** BEGIN navbar *** -->
+<A HREF="baptista.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A>
+<IMG ALT="" 
+	SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom" >
+<A HREF="index.html"><IMG ALT="[ Table of Contents ]" 
+	SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A>
+<A HREF="../index.html"><IMG ALT="[ Front Page ]" 
+	SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A>
+<A HREF="../faq/index.html"><IMG ALT="[ FAQ ]" 
+	SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A>
+<IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  >
+<IMG ALT="" 
+	SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom" >
+<A HREF="collinge.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A>
+<!-- *** END navbar *** -->
+<P>
+
+<FONT SIZE="+2"><EM>Talkback:</EM> Discuss this article with peers</FONT></A -->
+
+<!--endcut ============================================================-->
+
+<H4>
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H1><font color="maroon">Introduction to UNIX Assembly Programming</font></H1>
+<H4>By <a href="mailto:konst@linuxassembly.org">Konstantin Boldyshev</H4>
+</center>
+<P> <HR> <P>  
+
+<!-- END header -->
+
+
+
+
+
+<P>
+<EM>This document is intended to be a tutorial, showing how to write
+a simple assembly program in
+several UNIX operating systems on IA32 (i386) platform.
+Included material may or may not be applicable
+to other hardware and/or software platforms.
+Document explains program layout, system call convention,
+and build process.
+It accompanies Linux Assembly HOWTO, which may be of your interest as well,
+though is more Linux specific.</EM>
+<P>
+v0.3, April 09, 2000
+<HR>
+
+<H2><A NAME="s1">1. Introduction</A></H2>
+
+<H2><A NAME="ss1.1">1.1 Legal blurb</A>
+</H2>
+
+<P>Copyright &copy; 1999-2000 Konstantin Boldyshev.
+Permission is granted to copy, distribute and/or modify
+this document under the terms of the GNU
+<A HREF="http://www.gnu.org/copyleft/fdl.html">Free Documentation License</A>,
+Version 1.1 or any later version published by the Free Software Foundation.
+<P>
+<H2><A NAME="ss1.2">1.2 Obtatining this document</A>
+</H2>
+
+<P>The latest version of this document is available from
+<A HREF="http://linuxassembly.org/intro.html">http://linuxassembly.org/intro.html</A>.
+If you are reading a few-months-old copy,
+please check the url above for a new version.
+<P>
+<H2><A NAME="ss1.3">1.3 Tools you need</A>
+</H2>
+
+<P>You will need several tools to play with programs included in this tutorial.
+<P>First of all you need assembler (compiler).
+As a rule modern UNIX distribution includes <CODE>gas</CODE> (GNU Assembler),
+but all examples specified here use another assembler -- <CODE>nasm</CODE> (Netwide Assembler).
+You can download it from the 
+<A HREF="http://www.cryogen.com/Nasm/">nasm page</A>,
+it comes with full source code.
+Compile it, or try to find precompiled binary for your OS;
+note that several distributions (at least Linux ones)
+already have <CODE>nasm</CODE>, check first.
+<P>Second, you need linker -- <CODE>ld</CODE>, since <CODE>nasm</CODE> produces only object code.
+Any distribution should embrace <CODE>ld</CODE>.
+<P>If you're going to dig in, you should also install include files for your OS,
+and if possible, kernel source.
+<P>Now you should be ready to start, welcome.. 
+<P>
+<HR>
+<H2><A NAME="s2">2. Hello, world!</A></H2>
+
+<P>
+<P>Now we will write our program, classical &quot;Hello, world&quot; (hello.asm). 
+You can download its sources and binaries 
+<A HREF="http://linuxassembly.org/intro/hello.tgz">here</A>.
+But before let me explain several basics.
+<P>
+<H2><A NAME="ss2.1">2.1 System call</A>
+</H2>
+
+<P>Unless program is just implementing some math algorithms in assembly,
+it will deal with such things as getting input, producing output,
+and exiting. Here comes a need to call some OS service.
+In fact, programming in assembly language is quite the same in different OSes,
+unless OS services are touched.
+<P>There are two common ways of performing a system call in UNIX OS:
+trough the C library (libc) wrapper, or directly.
+<P>Using or not using libc in assembly programming is more a question
+of taste/belief than something practical.
+Libc wrappers are made to protect program from possible system call convention change,
+and to provide POSIX compatible interface, if kernel lacks it for some call.
+However usually UNIX kernel is more or less POSIX compliant,
+this means that syntax of most libc &quot;system calls&quot; exactly
+matches syntax of real kernel system calls (and vice versa).
+But main drawback of throwing libc away is that are loosing several functions
+that are not just syscall wrappers, like printf(), malloc() and similar.
+<P>This tutorial will show how to use <B>direct</B> kernel calls,
+since this is the fastest way to call kernel service;
+our code is not linked to any library,
+it communicates with kernel directly.
+<P>Things that differ in different UNIX kernels
+are set of system calls and system call convention
+(however as they strive for POSIX compliance, there's a lot of common between them).
+<P><EM>Note for (former) DOS programmers: so, what is that system call?
+Better to explain it in such a way:
+if you ever wrote a DOS assembly program (and most IA32 assembly programmers did),
+you remember DOS services <CODE>int 0x21, int 0x25, int 0x26</CODE> etc..
+This is what can be designated as system call.
+However the actual implementation is absolutely different,
+and this doesn't mean that system calls necessary are done via some interrupt.
+Also, quite often DOS programmers mix OS services with BIOS services
+like <CODE>int 0x10</CODE> or <CODE>int 0x16</CODE>, and are very surprised when they fail
+to perform them in UNIX, since these are not OS services).</EM>
+<P>
+<H2><A NAME="ss2.2">2.2 Program layout</A>
+</H2>
+
+<P>As a rule, modern IA32 UNIXes are 32bit (*grin*), run in protected mode,
+have flat memory model, and use ELF format for binaries.
+<P>Program can be divided into sections (or segments):
+<CODE>.text</CODE> for your code (read-only),
+<CODE>.data</CODE> for your data (read-write),
+<CODE>.bss</CODE> for uninitialized data (read-write);
+actually there can be few other, as well as user-defined sections,
+but there's rare need to use them and they are out of our interest here.
+Program must have at least <CODE>.text</CODE> section.
+<P>Ok, now we'll dive into OS specific details.
+<P>
+<H2><A NAME="ss2.3">2.3 Linux</A>
+</H2>
+
+<P>System calls in Linux are done through int 0x80.
+(actually there's a kernel patch allowing system calls to be done
+via <EM>syscall (sysenter)</EM> instruction on newer CPUs, but this
+thing is still experimental).
+<P>Linux differs from usual UNIX calling convention,
+and features &quot;fastcall&quot; convention
+for system calls (it resembles DOS).
+System function number is passed in <CODE>eax</CODE>,
+and arguments are passed through registers, not the stack.
+There can be up to five arguments in <CODE>ebx, ecx, edx, esi, edi</CODE> consequently.
+If there's more than five arguments, they are simply passed though the
+structure as first argument.
+Result is returned in <CODE>eax</CODE>, stack is not touched at all.
+<P>System call function numbers are in sys/syscall.h,
+but actually in asm/unistd.h,
+some documentation is in the 2nd section of manual
+(f.e. to find info on <CODE>write</CODE> system call, issue <CODE>man 2 write</CODE>).
+<P>There are several attempts to made up-to-date documentation of Linux system calls,
+examine URLs in the 
+<A HREF="boldyshev.html#references">references</A>.
+<P>So, our Linux program will look like:
+<P>
+<BLOCKQUOTE><CODE>
+<HR>
+<PRE>
+section .text
+    global _start                       ;must be declared for linker (ld)
+
+msg     db      'Hello, world!',0xa     ;our dear string
+len     equ     $ - msg                 ;length of our dear string
+
+_start:                 ;we tell linker where is entry point
+
+        mov     edx,len ;message length
+        mov     ecx,msg ;message to write
+        mov     ebx,1   ;file descriptor (stdout)
+        mov     eax,4   ;system call number (sys_write)
+        int     0x80    ;call kernel
+
+        mov     eax,1   ;system call number (sys_exit)
+        int     0x80    ;call kernel
+</PRE>
+<HR>
+</CODE></BLOCKQUOTE>
+<P>As you will see futther, Linux syscall convention is the most compact one.
+<P>Kernel source references: 
+<UL>
+<LI>arch/i386/kernel/entry.S</LI>
+<LI>include/asm-i386/unistd.h</LI>
+<LI>include/linux/sys.h</LI>
+</UL>
+<P>
+<P>
+<H2><A NAME="ss2.4">2.4 FreeBSD</A>
+</H2>
+
+<P>FreeBSD has &quot;usual&quot; calling convention,
+when syscall number is in eax, and parameters are on the stack
+(the first argument is pushed the last).
+System call is to be performed through the <B>function call</B> to a
+function containing <CODE>int 0x80</CODE> and <CODE>ret</CODE>, not just <CODE>int 0x80</CODE> itself
+(return address MUST be on the stack before <CODE>int 0x80</CODE> is issued!).
+Caller must clean up the stack after call.
+Result is returned as usual in <CODE>eax</CODE>.
+<P>Also there's an alternate way of using <CODE>call 7:0</CODE> gate instead of <CODE>int 0x80</CODE>.
+End-result is the same, not counting increase of program size,
+since you will also need to <CODE>push eax</CODE> before,
+and these two instructions occupy more bytes.
+<P>System call function numbers are in sys/syscall.h,
+documentation is in the 2nd section of man.
+<P>Ok, I think the source will explain this better:
+<P><EM>Note: Included code may run on other *BSD as well, I think.</EM>
+<P>
+<BLOCKQUOTE><CODE>
+<HR>
+<PRE>
+section .text
+    global _start                       ;must be declared for linker (ld)
+
+msg     db      "Hello, world!",0xa     ;our dear string
+len     equ     $ - msg                 ;length of our dear string
+
+_syscall:               
+        int     0x80            ;system call
+        ret
+
+_start:                         ;tell linker entry point
+
+        push    dword len       ;message length
+        push    dword msg       ;message to write
+        push    dword 1         ;file descriptor (stdout)
+        mov     eax,0x4         ;system call number (sys_write)
+        call    _syscall        ;call kernel
+
+                                ;actually there's an alternate
+                                ;way to call kernel:
+                                ;push   eax
+                                ;call   7:0
+
+        add     esp,12          ;clean stack (3 arguments * 4)
+
+        push    dword 0         ;exit code
+        mov     eax,0x1         ;system call number (sys_exit)
+        call    _syscall        ;call kernel
+
+                                ;we do not return from sys_exit,
+                                ;there's no need to clean stack
+</PRE>
+<HR>
+</CODE></BLOCKQUOTE>
+<P>Kernel source references:
+<UL>
+<LI>i386/i386/exception.s</LI>
+<LI>i386/i386/trap.c</LI>
+<LI>sys/syscall.h</LI>
+</UL>
+<P>
+<H2><A NAME="ss2.5">2.5 BeOS</A>
+</H2>
+
+<P>BeOS kernel is using &quot;usual&quot; UNIX calling convention too.
+The difference from FreeBSD example is that you call <CODE>int 0x25</CODE>.
+<P>On information where to find system call function numbers and other
+interesting details, examine 
+<A HREF="boldyshev.html#references">asmutils</A>,
+especially os_beos.inc file.
+<P><EM>Note: to make <CODE>nasm</CODE> compile correctly on BeOS you need
+to insert <CODE>#include &quot;nasm.h&quot;</CODE> into <CODE>float.h</CODE>,
+and <CODE>#include &lt;stdio.h&gt;</CODE> into <CODE>nasm.h</CODE>.</EM>
+<P>
+<BLOCKQUOTE><CODE>
+<HR>
+<PRE>
+section .text
+    global _start                       ;must be declared for linker (ld)
+
+msg     db      "Hello, world!",0xa     ;our dear string
+len     equ     $ - msg                 ;length of our dear string
+
+_syscall:                       ;system call
+        int     0x25
+        ret
+
+_start:                         ;tell linker entry point
+
+        push    dword len       ;message length
+        push    dword msg       ;message to write
+        push    dword 1         ;file descriptor (stdout)
+        mov     eax,0x3         ;system call number (sys_write)
+        call    _syscall        ;call kernel
+        add     esp,12          ;clean stack (3 * 4)
+
+        push    dword 0         ;exit code
+        mov     eax,0x3f        ;system call number (sys_exit)
+        call    _syscall        ;call kernel
+                                ;no need to clean stack
+</PRE>
+<HR>
+</CODE></BLOCKQUOTE>
+<P>
+<H2><A NAME="ss2.6">2.6 Building binary</A>
+</H2>
+
+<P>
+<P>Building binary is usual two-step process of compiling and linking.
+To make binary from our hello.asm we must do the following:
+<P>
+<HR>
+<PRE>
+$ nasm -f elf hello.asm         # this will produce hello.o object file
+$ ld -s -o hello hello.o        # this will produce hello executable
+</PRE>
+<HR>
+<P>That's it. Simple.
+Now you can launch hello program by entering <CODE>./hello</CODE>, it should work.
+Look at the binary size -- surprised?
+<P>
+<HR>
+<H2><A NAME="references"></A> <A NAME="s3">3. References</A></H2>
+
+<P>I hope you enjoyed the journey. If you get interested in assembly
+programming for UNIX, I strongly encourage you to visit
+<A HREF="http://linuxassembly.org">Linux Assembly</A>
+for more information, and download
+<A HREF="http://linuxassembly.org/asmutils.html">asmutils</A> package,
+it contains a lot of sample code.
+For comprehensive overview of Linux/UNIX assembly programming refer to the 
+<A HREF="http://linuxassembly.org/howto.html">Linux Assembly HOWTO</A>.
+<P>Thank you for your interest!
+
+
+
+
+
+<!-- *** BEGIN copyright *** -->
+<P> <hr> <!-- P --> 
+<H5 ALIGN=center>
+
+Copyright &copy; 2000, Konstantin Boldyshev<BR> 
+Published in Issue 53 of <i>Linux Gazette</i>, May 2000</H5>
+<!-- *** END copyright *** -->
+
+<!--startcut ==========================================================-->
+<!-- P --> <HR> <!-- P -->
+
+<FONT SIZE="+2"><EM>Talkback:</EM> Discuss this article with peers</FONT></A -->
+<P>
+<!-- *** BEGIN navbar *** -->
+<A HREF="baptista.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom">
+<IMG ALT="" 
+	SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom" >
+<A HREF="index.html"><IMG ALT="[ Table of Contents ]" 
+	SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A>
+<A HREF="../index.html"><IMG ALT="[ Front Page ]" 
+	SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A>
+<A HREF="../faq/index.html"><IMG ALT="[ FAQ ]" 
+	SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A>
+<IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  >
+<IMG ALT="" 
+	SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom" >
+<A HREF="collinge.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A>
+<!-- *** END navbar *** -->
+</BODY></HTML>
+<!--endcut ============================================================-->

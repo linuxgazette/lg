@@ -1,0 +1,102 @@
+#!/usr/bin/python
+#
+# Copyright 2002 Specialized Systems Consultants
+#
+# You are licensed to use this software under the provisions
+# of the Gnu General Public License, version 2 or later.
+#
+# Suggestions and patches to: Dan Wilder <dan@ssc.com>
+#
+# Tue Oct 29 09:24:35 PST 2002 dhw
+
+"""
+dup.py -- Filter a piece of email, inserting an
+
+X-Duplicate: yes
+
+header if we've seen this thing before.
+
+Usage: dup.py dbfilename <inputmail >outputmail
+"""
+
+import fcntl
+import shelve
+import md5
+from sys import stdin, argv, exit
+
+if len(argv) < 2:
+    print("""
+Usage: dup.py dbfilename <inputmail >outputmail
+""")
+    exit(1)
+
+# Get db file name and related lock file name,
+# /some/place/a/dbfile
+# /some/place/a/.dbfile.lock
+
+dupdb = argv[1]
+
+parts = dupdb.split("/")
+
+duplock = parts[:-1]
+duplock.append("." + parts[-1:][0] + ".lock")
+duplock = "/".join(duplock)
+
+# Grab the email message
+# Break up the mail into head and body.
+# Omit X-Duplicate header, if found.
+# Thanks, we'll add our own if we want one.
+
+head = []
+body = []
+
+for line in stdin.readlines():
+    if body:
+        body.append(line)
+        continue
+    if line == "\n":
+        body.append(line)
+        continue
+    if line.find("X-Duplicate: yes") == 0:
+        continue
+    head.append(line)
+
+# calculate body md5sum
+
+sum = md5.new("".join(body)).hexdigest()
+
+# Open a shelve under lock.
+# If it doesn't exist create it.
+
+lockfd = open(duplock, "w")
+fcntl.lockf(lockfd, fcntl.LOCK_EX)
+
+try:
+    dupfd = shelve.open(dupdb, "w")
+except:
+    dupfd = shelve.open(dupdb, "c")
+
+# If we've seen this sum before we'll add the header,
+# if not, write this sum to the shelve file.
+
+if dupfd.has_key(sum):
+    duphdr = "X-Duplicate: yes\n"
+else:
+    duphdr = None
+    dupfd[sum] = 1
+
+dupfd.close()
+
+fcntl.lockf(lockfd, fcntl.LOCK_UN)
+lockfd.close()
+
+for line in head:
+    print line,
+
+if duphdr:
+    print duphdr,
+
+for line in body:
+    print line,
+
+exit(0)

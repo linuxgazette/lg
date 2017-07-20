@@ -1,0 +1,86 @@
+//
+//
+// Copyright 2002 Rob Tougher <robt@robtougher.com>
+//
+// This file is part of xmlrpc.
+//
+// xmlrpc is free software; you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation; either version 2 of the License, or
+// (at your option) any later version.
+//
+// xmlrpc is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with xmlrpc; if not, write to the Free Software
+// Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+//
+//
+
+#include "client.hpp"
+#include "client_socket.hpp"
+#include "socket_exceptions.hpp"
+#include "xmlrpc_exceptions.hpp"
+
+namespace xmlrpc
+{
+  reply client::send_request ( const request& r ) const
+  {
+    reply rp;
+
+    try
+      {
+	sockets::client_socket sock ( m_host, m_port );
+
+	sock << r.get_xml()
+	     << r.terminator();
+
+	std::string data, tmp;
+
+	sock >> tmp;
+	data += tmp;
+
+	try
+	  {
+	    // Keep reading until we get to the terminator.
+	    while ( data.find ( reply().terminator(), 0 ) == data.npos )
+	      {
+		tmp = "";
+		sock >> tmp;
+		data += tmp;
+	      }
+	  }
+	catch ( sockets::socket_exception& ) {}
+
+
+	if ( data.find ( reply().terminator(), 0 ) == data.npos )
+	  {
+	    // problem!
+	    throw xmlrpc::exception
+	      ( "We did not receive a terminator from the server." );
+	  }
+	else
+	  {
+	    // Cut the terminator out of the reply string.
+	    data = data.substr ( 0,
+				 data.find ( reply().terminator(), 0 ) );
+
+	    //
+	    // This will throw an exception
+	    //
+	    rp.load_xml ( data );
+	  }
+      }
+    catch ( sockets::exception& e )
+      {
+	std::string msg = "Error while connecting to the server: ";
+	msg += e.description();
+	throw xmlrpc::exception ( msg );
+      }
+
+    return rp;
+  }
+};

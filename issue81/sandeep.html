@@ -1,0 +1,366 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>Process Tracing Using Ptrace LG #81</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<CENTER>
+<A HREF="http://www.linuxgazette.net/">
+<IMG ALT="LINUX GAZETTE" SRC="../gx/lglogo.png" 
+	WIDTH="600" HEIGHT="124" border="0"></A> 
+<BR>
+
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="ramankutty.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../lg_faq.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="sevenich.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+<P>
+</CENTER>
+
+<!--endcut ============================================================-->
+
+<H4 ALIGN="center">
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H1><font color="maroon">Process Tracing Using Ptrace</font></H1>
+<H4>By <a href="mailto:sk_nellayi@rediffmail.com">Sandeep S</a></H4>
+</center>
+<P> <HR> <P>  
+
+<!-- END header -->
+
+
+
+
+<EM><B>The ptrace system call is crucial to the working of debugger programs like gdb - yet its behaviour is not very well documented - unless you believe that the best documentation is  kernel source itself! I shall attempt to demonstrate how ptrace can be used to implement some of the functionality available in tools like gdb.</B></EM>
+
+<H2><A NAME="s1">1. Introduction</A></H2>
+
+<P><B>ptrace()</B> is a system call that enables one process to control the execution
+of another. It also enables a process to change the core image of 
+another process. The traced process behaves normally until a signal is caught. 
+When that occurs the process enters stopped state and informs the 
+tracing process by a <B>wait()</B> call.  Then tracing process decides how the 
+traced process should respond. The only exception is SIGKILL which surely kills 
+the process.
+<P>The traced process may also enter the stopped state in response to some 
+specific events during its course of execution. This happens only if the 
+tracing process has set any event flags in the context of the traced process.
+The tracing process can even <B>kill</B> the traced one by setting the exit code 
+of the traced process. After tracing, the tracer process may kill the traced 
+one or leave to continue with its execution.
+<P>
+<P><B>Note:</B> Ptrace() is highly dependent on the architecture of the 
+underlying hardware. Applications using ptrace are not easily portable across 
+different architectures and implementations.
+<P>
+<H2><A NAME="s2">2. More Details </A></H2>
+
+<P>The prototype of ptrace() is as follows.
+<BLOCKQUOTE><CODE>
+<HR>
+<PRE>
+        #include &lt;sys/ptrace.h&gt;
+        long  int ptrace(enum __ptrace_request request, pid_t pid,
+                void * addr, void * data)
+</PRE>
+<HR>
+</CODE></BLOCKQUOTE>
+<P>
+<P>Of the four arguments, the value of <B>request</B> decides what to be 
+done. <B>Pid</B> is the ID of the process to be traced. <B>Addr</B> is the 
+offset in the user space of the traced process to where the <B>data</B> is 
+written when instructed to do so. It is the offset in user space of the traced 
+process from where a word is read and returned as the result of the call.
+<P>
+<P>The parent can fork a child process and trace it by calling ptrace with 
+<B>request</B> as PTRACE_TRACEME. Parent can also trace an existing process using 
+PTRACE_ATTACH. The different values of <B>request</B> are discussed below.
+<P>
+<H2>2.1 How does ptrace() work.</H2>
+
+<P>Whenever ptrace is called, what it first does is to lock the kernel. Just 
+before returning it unlocks the kernel. Let's see its working in between 
+this for different values of <B>request</B>.
+<P>
+<H3><B>PTRACE_TRACEME</B>:</H3>
+
+<P>This is called when the child is to be traced by the 
+parent. As said above, any signals (except SIGKILL), either delivered from 
+outside or from the <B>exec</B> calls made by the process, causes it to stop and 
+lets the parent decide how to proceed. Inside ptrace(), the only thing that is checked is 
+whether the ptrace flag of the current process is set. If not, permission 
+is granted and the flag is set. All the parameters other than <B>request</B> are 
+ignored.
+<P>
+<H3><B>PTRACE_ATTACH</B>:</H3>
+
+<P>Here a process wants to control another. One thing to 
+remember is that nobody is allowed to trace/control the <B>init</B> process. 
+A process is not allowed to control itself. The current process (caller) becomes 
+the parent of the process with process ID <B>pid</B>. But a <B>getpid()</B> by the 
+child (the one being traced) returns the process ID of the real parent.
+<P>
+<P>What goes behind the scenes is that when a call is made, the usual permission 
+checks are made along with whether the process is init or current or it is 
+already traced. If there is no problem, permission is given and the flag 
+is set. Now the links of the child process are rearranged; e.g., the child is 
+removed from the task queue and its parent process field is changed (the 
+original parent remains the same). It is put to the queue again in such a 
+position that <B>init</B> comes next to it. Finally a SIGSTOP signal is delivered 
+to it. Here <B>addr</B> and <B>data</B> are ignored.
+<P>
+<H3><B>PTRACE_DETACH</B>:</H3>
+
+<P>Stop tracing a process. The tracer may decide whether the child should continue 
+to live. This undoes all the effects made by PTRACE_ATTACH/PTRACE_TRACEME. The 
+parent sends the exit code for the child in <B>data</B>. Ptrace flag of the child 
+is reset. Then the child is moved to its original position in the task queue. 
+The pid of real parent is written to the parent field. The single-step bit 
+which might have been set is reset. Finally the child is woken up as nothing 
+had happened to it; <B>addr</B> is ignored.
+<P>
+<P>
+<H3><B>PTRACE_PEEKTEXT, PTRACE_PEEKDATA, PTRACE_PEEKUSER</B>:</H3>
+
+<P>These options read data from child's memory and user space. PTRACE_PEEKTEXT
+and PTRACE_PEEKDATA read data from memory and both these options have the same
+effect. PTRACE_PEEKUSER reads from the user space of child. A word is read and 
+placed into a temporary data structure, and with the help of put_user()
+(which copies a string from the kernel's memory segment to  the
+process' memory segment) the required data is written to <B>data</B> and returns 
+0 on success.
+<P>
+<P>In the case of PTRACE_PEEKTEXT/PTRACE_PEEKDATA, <B>addr</B> is the address of 
+the location to be read from child's memory. In PTRACE_PEEKUSER <B>addr</B> is 
+the offset of the word in child's user space; <B>data</B> is ignored.
+<P>
+<H3><B>PTRACE_POKETEXT, PTRACE_POKEDATA, PTRACE_POKEUSER</B>:</H3>
+
+<P>These options are analogous to the three explained above. The difference is 
+that these are used to write the <B>data</B> to the memory/user space of the 
+process being traced. In PTRACE_POKETEXT and PTRACE_POKEDATA a word from 
+location <B>data</B> is copied to the child's memory location <B>addr</B>. 
+<P>
+<P>In PTRACE_POKEUSER we are trying to modify some locations in the 
+<CODE>task_struct</CODE> of the process. As the integrity of the kernel has to be 
+maintained, we need to be very careful. After a lot of security checks made 
+by ptrace, only certain portions of the task_struct is allowed to change. Here
+<B>addr</B> is the offset in child's user area.
+<P>
+<H3><B>PTRACE_SYSCALL, PTRACE_CONT</B>:</H3>
+
+<P>Both these wakes up the stopped process. PTRACE_SYSCALL makes the child to 
+stop after the next system call. PTRACE_CONT just allows the child to continue.
+In both, the exit code of the child process is set by the ptrace() where the 
+exit code is contained in <B>data</B>. All this happens only if the 
+signal/exit code is a valid one. Ptrace() resets the single step bit of the 
+child, sets/resets the syscall trace bit, and wakes up the process; <B>addr</B> is ignored.
+<P>
+<H3><B>PTRACE_SINGLESTEP</B>;</H3>
+
+<P>Does the same as PTRACE_SYSCALL except that the child is stopped after 
+every instruction. The single step bit of the child is set. As above <B>data</B> 
+contains the exit code for the child; <B>addr</B> is ignored.
+<P>
+<H3><B>PTRACE_KILL</B>:</H3>
+
+<P>When the child is to be terminated, PTRACE_KILL may be used. How the murder
+occurs is as follows. Ptrace() checks whether the child is already dead or not.
+If alive, the exit code of the child is set to <B>sigkill</B>. The single step bit
+of the child is reset. Now the child is woken up and when it starts to work it 
+gets killed as per the exit code.
+<P>
+<H2>2.2 More machine-dependent calls</H2>
+
+<P>The values of <B>request</B> discussed above were independent on the
+architecture and implementation of the system. The values discussed below are
+those that allow the tracing process to get/set (i.e., to read/write) the
+registers of child process. These register fetching/setting options are more
+directly dependent on the architecture of the system. The set of registers
+include general purpose registers, floating point registers and extended
+floating point registers. These more machine-dependent options are discussed
+below.  When these options are given, a direct interaction between the
+registers/segments of the system is required.  
+
+<P> <H3><B>PTRACE_GETREGS,
+PTRACE_GETFPREGS, PTRACE_GETFPXREGS</B>:</H3>
+
+<P>These values give the value of general purpose, floating point, extended
+floating point registers of the child process. The registers are 
+read to the location <B>data</B> in the parent. The usual checks for access on the
+registers are made. Then the register values are copied to the location 
+specified by <B>data</B> with the help of getreg() and __put_user() functions; 
+<B>addr</B> is ignored.
+<P>
+<H3><B>PTRACE_SETREGS, PTRACE_SETFPREGS, PTRACE_SETFPXREGS</B>:</H3>
+
+<P>These are values of <B>request</B> that allow the tracing process to set the 
+general purpose, floating point, extended floating point registers of the child 
+respectively. There are some restrictions in the case of setting the registers.
+Some are not allowed to be changed. The data to be copied to the registers will 
+be taken from the location <B>data</B> of the parent. Here also <B>addr</B> is 
+ignored.
+<P>
+<H2>2.3 Return values of ptrace()</H2>
+
+<P>A successful ptrace() returns zero. Errors make it return -1 and set 
+<B>errno</B>. Since the return value of a successful PEEKDATA/PEEKTEXT may 
+be -1, it is better to check the <B>errno</B>. The errors are 
+<P>
+<P>EPERM : The requested process couldn't be traced. Permission denied.
+<P>
+<P>ESRCH : The requested process doesn't exist or is being traced.
+<P>
+<P>EIO   : The request was invalid or read/write was made from/to invalid area
+of memory. 
+<P>
+<P>EFAULT: Read/write was made from/to memory which was not really mapped. 
+<P>
+<P>It is really hard to distinguish between the reasons of EIO and EFAULT. 
+These are returned for almost identical errors.
+<P>
+<H2><A NAME="s3">3. A small example.</A></H2>
+
+<P> 
+If you found the parameter description to be a bit dry, don't
+despair. I shall not attempt anything of that sort again. I will
+try to write simple programs which illustrate many of the
+points discussed above.
+<P>
+<P>Here is the first one. The parent process counts
+the number of instructions  executed by the test program run by the child.
+<P>Here the test program is listing the entries of the current directory.
+<P>
+<BLOCKQUOTE><CODE>
+<HR>
+<PRE>
+
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;signal.h&gt;
+#include &lt;syscall.h&gt;
+#include &lt;sys/ptrace.h&gt;
+#include &lt;sys/types.h&gt;
+#include &lt;sys/wait.h&gt;
+#include &lt;unistd.h&gt;
+#include &lt;errno.h&gt;
+
+
+int main(void)
+{
+        long long counter = 0;  /*  machine instruction counter */
+        int wait_val;           /*  child's return value        */
+        int pid;                /*  child's process id          */
+
+        puts("Please wait");
+
+        switch (pid = fork()) {
+        case -1:
+                perror("fork");
+                break;
+        case 0: /*  child process starts        */
+                ptrace(PTRACE_TRACEME, 0, 0, 0);
+                /* 
+                 *  must be called in order to allow the
+                 *  control over the child process
+                 */ 
+                execl("/bin/ls", "ls", NULL);
+                /*
+                 *  executes the program and causes
+                 *  the child to stop and send a signal 
+                 *  to the parent, the parent can now
+                 *  switch to PTRACE_SINGLESTEP   
+                 */ 
+                break;
+                /*  child process ends  */
+        default:/*  parent process starts       */
+                wait(&amp;wait_val); 
+                /*   
+                 *   parent waits for child to stop at next 
+                 *   instruction (execl()) 
+                 */
+                while (wait_val == 1407 ) {
+                        counter++;
+                        if (ptrace(PTRACE_SINGLESTEP, pid, 0, 0) != 0)
+                                perror("ptrace");
+                        /* 
+                         *   switch to singlestep tracing and 
+                         *   release child
+                         *   if unable call error.
+                         */
+                        wait(&amp;wait_val);
+                        /*   wait for next instruction to complete  */
+                }
+                /*
+                 * continue to stop, wait and release until
+                 * the child is finished; wait_val != 1407
+                 * Low=0177L and High=05 (SIGTRAP)
+                 */
+        }
+        printf("Number of machine instructions : %lld\n", counter);
+        return 0;
+}
+</PRE>
+<HR>
+</CODE></BLOCKQUOTE>
+<P>
+<P>open your favourite editor and write the program. Then run it by typing
+<P><CODE>cc file.c</CODE>
+<P><CODE>a.out</CODE>
+<P>You can see the number of instructions needed for listing of your current 
+directory. <CODE>cd</CODE> to some other directory and run the program from there 
+and see whether there is any difference. (note that it may take some time
+for the output to appear, if you are using a slow machine). 
+<P>
+<H2><A NAME="s4">4. Conclusion</A></H2>
+
+<P>
+<P>Ptrace() is heavily used for debugging. It is also used for system call
+tracing. The debugger forks and the
+child process created is traced by the parent. The program which is to
+be debugged is exec'd by the child (in the above program it was
+"ls") and after each instruction the parent can examine the register
+values of the program being run. I shall demonstrate programs which
+exploit ptrace's versatility in the next part of this series. Good
+bye till then.
+
+
+
+
+<!-- *** BEGIN bio *** -->
+<SPACER TYPE="vertical" SIZE="30">
+<P> 
+<H4><IMG ALIGN=BOTTOM ALT="" SRC="../gx/note.gif">Sandeep S</H4>
+<EM>I am a final year student of Government Engineering College in Thrissur,
+Kerala, India.  My areas of interests include FreeBSD, Networking and also
+Theoretical Computer Science.</EM>
+
+<!-- *** END bio *** -->
+
+<!-- *** BEGIN copyright *** -->
+<P> <hr> <!-- P --> 
+<H5 ALIGN=center>
+
+Copyright &copy; 2002, Sandeep S.<BR>
+Copying license <A HREF="../copying.html">http://www.linuxgazette.net/copying.html</A><BR> 
+Published in Issue 81 of <i>Linux Gazette</i>, August 2002</H5>
+<!-- *** END copyright *** -->
+
+<!--startcut ==========================================================-->
+<HR><P>
+<CENTER>
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="ramankutty.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../lg_faq.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="sevenich.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+</CENTER>
+</BODY></HTML>
+<!--endcut ============================================================-->

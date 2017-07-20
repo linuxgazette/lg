@@ -1,0 +1,38 @@
+#!/bin/sh
+
+# Cleans out any left over files and makes the necessary directories
+rm -r -f dvd video dvd.iso
+mkdir dvd
+mkdir dvd/VIDEO_TS
+mkdir video
+
+# Changes the channel on the TV tuner card
+v4lctl setstation 3
+# Records the video stream
+streamer -n ntsc -t 60:00 -s 720x480 -r 30 -o video/stream.avi -f mjpeg -F stereo -c /dev/video0
+
+# Encodes the video stream
+lav2wav +p video/stream.avi | mp2enc -V -o video/audio.mp2
+lav2yuv +p video/stream.avi | mpeg2enc -n n -f 8 -s -r 16 -o video/video.m1v
+mplex -f 8 video/audio.mp2 video/video.m1v -o video/complete.mpg
+
+# Builds DVD image from the encoded video
+# This portion of the script was lifted directly from
+# the writedvd script which comes with the dvdauthor tools
+tocgen > dvd/VIDEO_TS/VIDEO_TS.IFO
+cp video/complete.mpg dvd/VIDEO_TS/VTS_01_1.VOB
+chmod u+w dvd/VIDEO_TS/*.VOB
+ifogen -f dvd/VIDEO_TS/VTS_01_1.VOB > dvd/VIDEO_TS/VTS_01_0.IFO
+(cd dvd/VIDEO_TS; for i in *.IFO; do cp $i `basename $i .IFO`.BUP; done)
+mkisofs -dvd-video -udf -o dvd.iso dvd/
+
+# Burns the DVD for 1st Generation DVD+RW
+# Comment out the dvd+rw-format line if the disc is already formated and
+# contains no data. 
+# Comment these two lines out if you are using a newer drive
+dvd+rw-format -f /dev/srcd0
+growisofs -Z /dev/srcd0=dvd.iso
+
+# Burns DVD for more modern DVD formats like DVD-R or DVD-RW
+# Uncomment this line if you are using a newer drive
+#dvdrecord -dao speed=2 dev=0,0,0 dvd.iso

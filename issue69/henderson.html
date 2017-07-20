@@ -1,0 +1,470 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>Make Your Virtual Console Log In Automatically LG #69</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<CENTER>
+<A HREF="http://www.linuxgazette.net/">
+<IMG ALT="LINUX GAZETTE" SRC="../gx/lglogo.png" 
+	WIDTH="600" HEIGHT="124" border="0"></A> 
+<BR>
+
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="collinge.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../faq/index.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="mathew.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+<P>
+</CENTER>
+
+<!--endcut ============================================================-->
+
+<H4 ALIGN="center">
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H1><font color="maroon">Make Your Virtual Console Log In Automatically</font></H1>
+<H4>By <a href="mailto:bryanh@giraffe-data.com">Bryan Henderson</a></H4>
+</center>
+<P> <HR> <P>  
+
+<!-- END header -->
+
+
+
+
+<p>When you boot Linux, do you get a "login:" prompt on a bunch of
+virtual consoles and have to type in your username and password on
+each of them?  Even though you're the only one who uses the system?
+Well, stop it.  You can make these consoles come up all logged on and
+at a command prompt at every boot.
+
+<p>In case you're thinking that password prompt is necessary for
+security, think again.  Chances are that if someone has access to your
+console keyboard, he also has access to your floppy disk drive and
+could easily insert his own system disk in there and be logged in as
+you in three minutes anyway.  That password prompt is about as useful
+as an umbrella for fish.
+
+<h2>Introduction</h2>
+
+<p>The method I'm going to describe for getting your virtual consoles
+logged in automatically consists of installing some software and
+changing a few lines in <strong>/etc/inittab</strong>.  Before I do
+that, I'll take you on a mind-expanding journey through the land of
+getties and logins to see just how a Unix user gets logged in.
+
+<p>First, I must clarify that I'm talking about virtual consoles --
+those are text consoles that you ordinarily switch between by pressing
+ALT-F2 or CTL-ALT-F2 and such.  Shells that you see in windows on a
+graphical desktop are something else entirely.  You can make those
+windows come up automatically at boot time too, but the process is
+quite a bit different and not covered by this article.
+
+<p>Also, consider serial terminals:  The same technique discussed in
+this article for virtual consoles works for serial terminals, but may
+need some tweaking because the terminal may need some things such as
+baud rate and parity set.
+
+<h2>How Logging In Works</h2>
+
+<h3>Historical Background</h3>
+
+<p>In the traditional Unix system of old, the computer was in a
+locked room and users accessed the system via terminals in another
+room.  The terminals were connected to serial ports.  When the system
+first came up, it printed (we're back before CRT terminals -- they
+really did print) some identification information and then a "login:"
+prompt.  Whoever wanted to use the computer would walk up to one of
+these terminals and type in his username, then his password, and then
+he would get a shell prompt and be "logged in."
+
+<p>Today, you see the same thing on Linux virtual consoles, though it
+doesn't make as much sense if you don't think about the history.
+
+<h3>Getty</h3>
+
+<p>Let's go through the Linux boot process now and see how that login
+prompt gets up there.
+
+<p>When you first boot Linux, the kernel creates the
+<strong>init</strong> process.  It is the first and last process to
+exist in any Linux system.  All other processes in a Linux system are
+created either by <strong>init</strong> or by a descendant of
+<strong>init</strong>.
+
+<p>The <strong>init</strong> process normally runs a program called
+Sysvinit or something like it.  It's worth pointing out that you can
+really run any program you like as <strong>init</strong>, naming the
+executable in Linux boot parameters.  But the default is the
+executable <strong>/sbin/init</strong>, which is usually Sysvinit.
+Sysvinit takes its instructions from the file
+</strong>/etc/inittab</strong>.
+
+<p> To see how <strong>init</strong> works, do a <kbd>man init</kbd> and
+<kbd>man inittab</kbd>.
+
+<p>If you look in <strong>/etc/inittab</strong>, you will see the
+instructions that tell it to start a bunch of processes running a
+getty program, one process for each virtual console.  Here is an
+example of a line from <strong>/etc/inittab</strong> that tells
+<strong>init</strong> to start a process running a getty on the
+virtual console <strong>/dev/tty5</strong>:
+
+<xmp>
+   c5:235:respawn:/sbin/agetty 38400 tty5 
+</xmp>
+
+<p> In this case, the particular getty program is
+<strong>/sbin/agetty</strong>.  On your system, you may be using
+<strong>/sbin/mingetty</strong> or any of a bunch of other programs.
+(Whatever the program, it's a good bet it has "getty" in its name.  We
+call these getties because the very first one was simply called
+"getty," derived from "get teletype".)
+
+<p>Getty opens the specified terminal as the standard input, standard
+output, and standard error files for its process.  It also assigns
+that terminal as the process' "controlling terminal" and sets the
+ownership and permissions on the terminal device to something safe
+(resetting whatever may have been set by the user of a previous login
+session).
+
+<p>So now you can see how the login prompt gets up on virtual console
+<strong>/dev/tty5</strong>.  The kernel creates the
+<strong>init</strong> process, running Sysvinit.  Sysvinit, as
+instructed by its <strong>/etc/inittab</strong> file, starts another
+process running a getty program, with parameters identifying
+<strong>/dev/tty5</strong>.  The getty program prints "login:" on
+<strong>/dev/tty5</strong> and waits for someone to type something.
+
+<h3>Login</h3>
+
+<p> After you respond to getty's login prompt, getty execs the program
+<strong>login</strong>.  (Actually, you can usually tell getty to execute
+any program of your choice, but <strong>/bin/login</strong> is normal);
+i.e. <strong>getty</strong> replaces itself with <strong>login</strong>.  It's
+still the same process, though.
+
+<p> Bear in mind that this process was created by <strong>init</strong>,
+which is owned by the superuser.  So this process, which is now
+running login, is also owned by the superuser.
+
+<p> The first thing <strong>login</strong> does is ask for your password.
+When you type it in, <strong>login</strong> determines if it's right or
+not.  Assuming it is, login then proceeds to do the following things:
+
+<ul>
+<li>
+Set the owning user id of the process to you.
+<li>
+Set the owning group id of the process to your group.
+<li>
+Put a record in the user accounting database (the "utmp" file)
+showing that you are logged in.  This database is technically
+unnecessary today, but it is still used by old programs such as
+<strong>who</strong> to tell who is logged on and at what terminal.
+<li>
+Set the process' supplemental groups to all the groups to which
+you belong.
+<li>
+Set the process' current working directory to your home directory.
+<li>
+Make you the owner of the terminal device and set its permissions
+appropriately.
+</ul>
+
+<p> The next thing <strong>login</strong> does is exec your shell program
+(which can really be any program, but is normally a command shell,
+e.g. <strong>/bin/bash</strong>).  I.e.  it replaces itself with the shell
+program.
+
+<p> Login looks up your username in the file <strong>/etc/passwd</strong>
+to find all the information it needs, such as your password, uid, and
+shell program.
+
+<h3>The Shell</h3>
+
+<p> The shell proceeds to run the system shell profile
+(<strong>/etc/profile</strong>) and your personal profile (typically the
+file <strong>.profile</strong> in your home directory), and ultimately
+display a command prompt (<code>$</code> or <code>%</code>) on the terminal.  
+This is the point at which
+you consider yourself logged in, and our journey is complete.
+
+<h2>Automating Login</h2>
+
+<p>Ok, that was fun, but our purpose in this article is to explore a
+new kind of login -- an automated one.
+
+<p>Our goal is to do all those things that <strong>init</strong>,
+<strong>getty</strong>, <strong>login</strong>, and the shell do except
+<em>without the username and password prompt</em>.
+
+<p> There are a bunch of ways to do that, but I wrote the program
+<strong>qlogin</strong> to do it all very simply.
+<strong>qlogin</strong> performs the functions of
+<strong>getty</strong> and <strong>login</strong>.  It gets called by
+<strong>init</strong>, like getty, and its last act is to call the
+shell program, like <strong>login</strong>.
+
+<p> So to set this up, all you have to do is replace the
+<strong>/etc/inittab</strong> line shown above with one something like
+this:
+
+<xmp>
+   c4:235:respawn:/sbin/qlogin /dev/tty5 bryanh 
+</xmp>
+
+This logs in username <strong>bryanh</strong> to virtual console
+<strong>/dev/tty5</strong> at boot time instead of going through the
+username and password prompt business.
+
+<p>Note that the "respawn" in the line above means that when the
+process ends, <strong>init</strong> will create a new one to take its
+place.  In the traditional Unix system, that means when you log out of
+your shell, which causes the process to end, a new getty runs and the
+terminal gets a login prompt for the next user.  In the
+<strong>qlogin</strong> case, it means when you log out of your shell,
+a new one comes up immediately to take its place.  So if you want to
+reset a bunch of stuff in your login session, typing <kbd>logout</kbd>
+is a good way to do it.
+
+<h2>Starting Slowly</h2>
+
+<p>You probably shouldn't install <strong>qlogin</strong> and then
+just dive right into changing all your getty's to qlogin's in
+<strong>/etc/inittab</strong> and reboot and see if it works.  That
+would be pretty optimistic.
+
+<h3>Diversity Is Good</h3>
+
+<p>First of all, I recommend that you not convert <em>all</em> your
+virtual consoles to <strong>qlogin</strong> ever.  Use the tried and
+true getty/login system on at least one virtual console so that if you
+mess up something with <strong>qlogin</strong>, you can get into
+another virtual console and fix it.  And if you mess up something with
+<strong>getty</strong> or <strong>login</strong>, you can get into
+another virtual console via <strong>qlogin</strong> and fix that!
+
+<h3>Run It From A Shell</h3>
+
+<p>Before you go editing <strong>/etc/inittab</strong> and messing
+around with the <strong>init</strong> task, you should convince
+yourself you know what you're doing by running <strong>qlogin</strong>
+from a shell.  Watch <strong>qlogin</strong> work with your own eyes.
+The problem with <strong>init</strong>, besides the fact that it's a
+very important process you don't want to break, is that it doesn't
+have a standard error file -- no way to give you error messages to
+tell you why it can't do what you thought you told it to do.
+
+<p>Usually, the indication from <strong>init</strong> that something is
+wrong is "id X spawning too fast.  Disabled for 5 minutes."  What that
+means is that the program (e.g. <strong>qlogin</strong>) that you told
+<strong>init</strong> to run runs into trouble and terminates immediately.
+Because it's a "respawn" entry, <strong>init</strong> simply generates a
+new process running the same program.  And these processes start and
+crash repeatedly.  <strong>init</strong> notices this and suspends the
+"respawn" procedure for 5 minutes in hopes that someone fixes the
+problem.  But why is the program immediately crashing?  Nobody knows
+except that program, and it's not telling.
+
+<p>So just invoke <strong>qlogin</strong> from a shell prompt, with
+the same arguments with which you would have <strong>init</strong>
+invoke it.  Now <strong>qlogin</strong> will issue error messages if
+it crashes.
+
+<p>Of course, the shell from which you invoke <strong>qlogin</strong>
+had better be a superuser shell.  Otherwise, I can tell you right now
+what your error message will be.
+
+<h4>One Difference - Controlling Terminal</h4>
+
+<p>One tricky aspect of running <strong>qlogin</strong> from a shell is
+the matter of the controlling terminal.  The login process you
+generate with <strong>qlogin</strong> will use the terminal you specify as
+its input and output terminal, but its controlling terminal will be
+the terminal where you typed "<strong>qlogin</strong>."
+
+<p>The reason for the difference is this: If you're a Linux process,
+when you open a terminal for input and you don't already have a
+controlling terminal, that terminal becomes your controlling terminal.
+But if you already have a controlling terminal, you just keep it.
+<strong>init</strong> does not have a controlling terminal, so neither
+does the <strong>qlogin</strong> child process it creates.  But login
+shells have controlling terminals, and therefore the child processes
+you create by typing commands (such as <strong>qlogin</strong>) at
+shell prompts do too.
+
+<p>Where you will see the difference is when you type Control-C:  It
+won't do anything.  Control-C typed on a standard input device has no
+effect other than to include a Control-C character in the input
+stream.  But Control-C on a controlling terminal causes the foreground
+processes associated with that terminal to get a SIGINT signal, which
+has the familiar effect of terminating the program.
+
+<p>All I'm saying is that if you log yourself on to
+<strong>/dev/tty5</strong> by typing <kbd>qlogin /dev/tty5 ...</kbd> on
+<strong>/dev/tty1</strong>, then Control-C on <strong>/dev/tty5</strong> will
+have no effect.  Put the same <kbd>qlogin /dev/tty5 ... </kbd> command
+in <strong>/etc/inittab</strong>, and Control-C on <strong>/dev/tty5</strong>
+will work fine.
+
+<p> Note: to be pedantic, I must admit that in saying Control-C, I am
+assuming that the terminal's TTY properties are set such that
+Control-C is the "interrupt character."  You could use
+<strong>stty</strong> to make the interrupt character something else or
+not have one at all.
+
+<h2>About Qlogin</h2>
+
+<p> <Strong>qlogin</Strong> isn't on your system, so you'll have to
+install it.  Get it from <a
+href=ftp://ibiblio.org/pub/Linux/system/misc>ibiblio.org</a> and
+follow the simple installation instructions.  As you will find, a
+prerequisite is the Perl extension called <strong>User::Utmp</strong>,
+which probably also is not on your system, so you'll have to follow
+the instructions to get and install that too.
+
+<p><Strong>qlogin</Strong> is written in Perl and is quite simple.  So
+you can see for yourself the steps involved in logging in a user.  And
+you can modify it to suit your particular needs.
+
+<p>One of the nice things about <Strong>qlogin</Strong> is that it's so
+basic that it doesn't even rely on configuration files.  You can tell
+it everything it needs to know to log you in just with command line
+parameters.  You can override your <strong>/etc/passwd</strong> file or
+log in a user that isn't even in <strong>/etc/passwd</strong>.  You're in
+control.
+
+<p>
+Let's look at <strong>qlogin</strong>'s options:
+<dl>
+<dt>--command
+<dd>the "command" (a kind of sloppy way to say a program plus
+its arguments) to run after <strong>qlogin</strong> exits.  <strong>/bin/bash</strong>
+is typical.
+<dt>--arg0
+<dd>the Argument Zero value for the program that runs after
+<strong>qlogin</strong> exits, which is what shows up in a <strong>ps</strong> display.
+<dt>--uid
+<dd>the numeric user id for the process.
+<dt>--gid
+<dd>the numeric group id for the process.
+<dt>--homedir
+<dd>the home directory and initial current working directory
+for the process.
+<dt>--utmp/--noutmp
+<dd>determines whether <strong>qlogin</strong> logs the session in the user
+accounting database (utmp file).
+</dl>
+
+<p> And <strong>qlogin</strong> arguments specify the terminal device to
+use for the process.
+
+<p> All the details of using <strong>qlogin</strong> are in the
+documentation that comes with it.
+
+<h2>Other Things You Can Do With Qlogin</h2>
+
+<p> So now you know how to make logged in shells come up automatically
+on the various virtual consoles.  But with a simple change to the
+procedure, you can make other programs run automatically on certain
+virtual consoles or on serial terminals.  Imagine a virtual console
+that runs the <strong>top</strong> system monitor program all the time.
+Just say
+
+<xmp>
+  qlogin /dev/tty5 root --command=/bin/top --noutmp
+</xmp>
+
+<p> Maybe your system is a point of sale system for a store.  The
+terminals are serial terminals at the cashier stations.  Cashiers
+don't want to log in to Linux and don't want to see a shell.  If the
+POS program is <strong>/usr/local/bin/pos</strong>, you could do this:
+
+<xmp>
+  qlogin /dev/ttyS1 cashier --uid=500 --gid=500 --command=/usr/local/bin/pos
+      --arg0=POS --homedir=/
+</xmp>
+
+In this case, the <strong>pos</strong> program probably needs to do some
+initialization of the serial port, such as setting its baud rate.  In
+the traditional Unix login model, <strong>getty</strong> does that before
+it puts up the login prompt.
+
+<h1>Foreground Processes</H1>
+
+<blockquote><em>[Your Editor asked Bryan, "I thought the system didn't have a
+concept of a foreground process; that's a fiction of the shell."  Here's his
+response.  --Iron]</em></blockquote>
+
+<P>  I used to think that too; probably because of something I read in Bash
+documentation.  However, the Linux kernel defines a "foreground
+process group."  Every controlling terminal has a foreground process
+group.  By default, it is the process group of the process that
+originally opened the terminal.  But a process can set the foreground
+process group to any process group in its session with an ioctl.
+
+<P> I took a slight liberty in the article in referring to "foreground
+processes," which I think can easily be interpreted as "processes in
+the foreground process group."
+
+<P> I believe the only significance of the foreground process group (the
+kernel entity) is that the processes in that process group get the
+control-C and hangup signals.
+
+<P> Bash's job control uses that ioctl to make whatever your "foreground
+job" is the foreground process group for your terminal.  That's why
+when you put something in the background, like "grep abc * &",
+control-C does not kill it.  If you want to kill it, you have to "fg",
+causing Bash to ioctl it to the foreground, then Control-C.
+
+<P> Many years ago, before the Web when terminals mattered a lot more, I
+spent many hours combing through kernel code and experimenting to
+figure out process groups, sessions, controlling terminals, job
+control, SIGINT, SIGHUP, and the like.  I could write a long article
+on it, but I think it's really arcane information.
+
+<blockquote><em>[Readers: if you want to take him up on his offer for
+such "arcane information", ask in the Mailbag.  Also remember that the
+Mailbag is where you can ask for articles on any other topic. --Iron]
+</em></blockquote>
+
+
+<!-- *** BEGIN bio *** -->
+<SPACER TYPE="vertical" SIZE="30">
+<P> 
+<H4><IMG ALIGN=BOTTOM ALT="" SRC="../gx/note.gif">Bryan Henderson</H4>
+<EM>Bryan Henderson is an operating systems programmer from way back,
+working mostly on large scale computing systems.  Bryan's love of
+computers began with a 110 baud connection to a local college for a
+high school class, but Bryan had little interest in home computers
+until Linux came out.</EM>
+
+<!-- *** END bio *** -->
+
+<!-- *** BEGIN copyright *** -->
+<P> <hr> <!-- P --> 
+<H5 ALIGN=center>
+
+Copyright &copy; 2001, Bryan Henderson.<BR>
+Copying license <A HREF="../copying.html">http://www.linuxgazette.net/copying.html</A><BR> 
+Published in Issue 69 of <i>Linux Gazette</i>, August 2001</H5>
+<!-- *** END copyright *** -->
+
+<!--startcut ==========================================================-->
+<HR><P>
+<CENTER>
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="collinge.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../faq/index.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="mathew.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+</CENTER>
+</BODY></HTML>
+<!--endcut ============================================================-->

@@ -1,0 +1,376 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Using the GNU Compiler Collection (Part2) LG #121</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="anonymous.html" >&lt;-- prev</A> | <A HREF="howell.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Using the GNU Compiler Collection (Part2)</h1>
+<p id="by"><b>By <A HREF="../authors/vinayak.html">Vinayak Hegde</A></b></p>
+
+<p>
+<p>In the <a href="http://linuxgazette.net/120/vinayak.html">last
+article</a> we saw some of the basic GCC options, and noted that it
+supports several CPU architectures. One of the topics we will cover
+in this article is how to turn on optimizations for different
+architectures and what happens when they are turned on. We will
+also look at some other nifty tricks which we can do with GCC.</p>
+
+<h3>Adding symbols for profiling and debugging</h3>
+
+<p>Profiling is a method of identifying sections of code that
+consume large portions of execution time. Profiling basically works
+by inserting monitoring code at specific points in the program.
+This code can be inserted by using the <tt>-pg</tt> option of
+GCC.</p>
+
+<p>When debugging we need extra information added to the binaries.
+Programs compiled with the <tt>-g</tt> flag additional information
+which can be used by gdb (or other debuggers) is added to the
+binary. This increases the size of the binaries but is necessary
+for debugging. When compiling debugging binaries we should turn off
+all optimization flags. GCC can add debugging information in
+several different formats such as stabs, dwarf-2 or coff
+format.</p>
+
+<pre class="code">
+$ gcc -g -o helloworld helloworld.c #for adding debugging information
+$ gcc -pg -o helloworld helloworld.c #for profiling
+</pre>
+
+<p>Programs compiled with profiling and/or debugging turned on are
+usually referred to as <em>debug</em> binaries, as opposed to
+<em>production</em> binaries which are compiled with optimization
+flags.</p>
+
+<h3>Monitoring compilation times</h3>
+
+<p>We previously saw that the compilation of the program to get an
+executable binary consists of different phases. 
+<!-- Some of these phases are preprocessing, parsing, lexical analysis,
+assembling and linking. --> Each of the main compile stages
+(compiling to assembly language, assembling and linking) is done by
+different executables (e.g. cc1, as and collect2). We use the
+<tt>-time</tt> option to GCC to get a breakdown of the time
+required for each stage.</p>
+
+<pre class="code">
+$ gcc -time helloworld.c
+# cc1 0.02 0.00
+# as 0.00 0.00
+# collect2 0.04 0.01
+</pre>
+
+<p>We can also gather more fine-grained statistics about the
+various stages of the compiler cc1 using the <tt>-Q</tt> option.
+This shows the real time spent as well as time spent in userspace
+and kernel modes.</p>
+
+<pre class="code">
+$ gcc -Q helloworld.c
+ main
+Execution times (seconds)
+ preprocessing         :   0.00 ( 0%) usr   0.00 ( 0%) sys   0.24 (38%) wall
+ parser                :   0.01 (50%) usr   0.00 ( 0%) sys   0.02 ( 3%) wall
+ expand                :   0.00 ( 0%) usr   0.00 ( 0%) sys   0.03 ( 5%) wall
+ global alloc          :   0.00 ( 0%) usr   0.00 ( 0%) sys   0.03 ( 5%) wall
+ shorten branches      :   0.00 ( 0%) usr   0.00 ( 0%) sys   0.04 ( 6%) wall
+ symout                :   0.00 ( 0%) usr   0.00 ( 0%) sys   0.01 ( 2%) wall
+ rest of compilation   :   0.01 (50%) usr   0.00 ( 0%) sys   0.00 ( 0%) wall
+ TOTAL                 :   0.02             0.00             0.64
+</pre>
+
+<h3>GCC Optimizations</h3>
+
+<p>Before we move on to optimizations, we need to look at how a
+compiler is able to generate code for different platforms and
+different languages. The process of compilation has three
+components:</p>
+
+<ul>
+<li><b>The Front End</b>: This is responsible for interpreting the
+text and converting into an efficient form for manipulation by the
+computer. This efficient form is generally a specialized form of
+the tree data structure. There are hardly any optimizations done at
+this stage. This stage will be different for each language
+supported by GCC.</li>
+
+<li><b>The Middle End</b>: In this phase, the tree data structure
+is manipulated and pruned to improve the structure for the code
+generation phase. The optimizations that are performed in this
+phase are common to all languages and platforms. These include
+constant folding, strength reduction, algebraic simplification and
+common sub-expression elimination. Discussion of these
+optimizations is beyond the scope of this article, but you can
+refer to the "Compilers" book by Aho, Sethi and Ullman (ISBN
+0201100886, also called the "Dragon Book") for more detailed
+information.</li>
+
+<li><b>The Back End</b>: This is the final phase before emitting
+binary code for a particular platform. This is the phase in which
+platform specific optimizations are done. The compiler can use
+platform-specific information such as extended/specialized
+instruction sets such as MMX/SSE2/3DNow!. Different CPUs have
+different number of registers/internal caches/pipeline structures.
+Optimizations can also be directed towards these architectural
+differences to exploit them and maximize the speed of the binary
+code emitted by the final code generation phase. The types of
+optimization which can be done in this phase can mainly divided
+into two categories - Register Allocation and Code Scheduling.</li>
+</ul>
+
+<p>There are two kinds of optimizations possible - optimizations
+for speed and optimizations for space. In an ideal world, both
+would be possible at the same time, (Actually some optimizations do
+both - such as common sub-expression elimination). More often than
+not optimizing for speed increases the memory footprint (the size
+of the program loaded in memory) and vice versa. Expanding
+functions inline is a good example of this case. Inlining functions
+reduces the overhead of a function call but ends up replicating
+code wherever the inline function has been called, thus increasing
+the size of the executable. Turning on optimizations will increase
+the compilation time as the compiler has to analyze the code
+more.</p>
+
+<p>GCC offers four optimization levels. These are specified by the
+-O&lt;Optimization Level&gt; flag. The default is no optimization
+or -O0 (notice the capital O). Various optimizations are turned on
+by the each of the different levels (-O1, -O2 and -O3). Even if we
+give higher optimization levels such as -O25, they have the net
+effect of enabling the highest level of optimizations (-O3). In
+addition to these four optimization level there is another
+optimization level -Os which enables all the optimizations for
+space as well as those optimizations which do not increase the size
+of the code but give speed improvements. In -O1 optimization level,
+only those optimizations are done which reduce code size and
+execution time without increasing compilation times significantly.
+In -O2 optimization level, those optimizations which do have a
+space-execution time tradeoff are done. Almost all optimizations
+are turned on by -O3 optimization level but compilation time might
+increase significantly by turning it on.</p>
+
+<pre class="code">
+$ gcc -O3 -o hello3 helloworld.c
+$ gcc -O0 -o hello0 helloworld.c
+
+$ ls -l
+-rwxr-xr-x  1 vinayak users    8722 2005-03-24 17:59 hello3
+-rwxr-xr-x  1 vinayak users    8738 2005-03-24 17:59 hello0
+
+$ time ./hello3 &gt; /dev/null
+real    0m0.002s
+user    0m0.001s
+sys     0m0.000s
+
+$ time ./hello0 &gt; /dev/null
+real    0m0.002s
+user    0m0.000s
+sys     0m0.003s
+</pre>
+
+<p>As seen above, compiling the program with -O3 optimization level
+reduces the size of the executable compared to the compiling with
+-O0 optimization level (no optimization)</p>
+
+<p>It is also possible to have CPU or architecture specific
+optimizations. For example a particular architecture may have
+numerous registers. These can be utilized by the register
+allocation algorithm intelligently so as to store temporary
+variable between calculation to minimize cache and memory accesses
+thus ensuring considerable speed ups in CPU-intensive operations.
+Some of the platform specific optimization flags can be done using
+-march=&lt;architecture type&gt; or -mcpu=&lt;CPU name&gt;. For the
+x86 and x86-64 family of processors, -march implicitly implies
+-mcpu. Some of the architecture types options in this family are
+ix86 (i386, i486, i586, i686), Pentiumx (pentium, pentium-mmx,
+pentiumpro, pentium2, pentium3 ,pentium4) and athlon (athlon,
+athlon-tbird, athlon-xp, opteron). But executables built with
+platform specific flags may not run on other CPUs. For example,
+executables generated with the -march=i386 will run on i686
+platform because of backward compliance of the platforms. However,
+executables generated with the -march=i686 may not run on the older
+platforms as some of the instructions (or extended instruction
+sets) do not exist on older CPUs. If you use the Gentoo Linux
+distribution, you might be already familiar with some of these
+flags.</p>
+
+<pre class="code">
+$ gcc -o matrixMult -O3 -march=pentium4 MatrixMultiplication.c #optimise for Pentium 4
+$ gcc -o matrixMult -O3 -march=athlon-xp MatrixMultiplication.c #optimise for Athlon-XP
+</pre>
+
+<p>Also you can give specific flags for optimizations at the
+command line such as -finline-functions (for integrating simple
+functions into their callers) and -floop-optimize (to optimize loop
+control structures). The important thing to remember is that the
+order of the flags on the command line matters. The option on the
+right will override ones on the left. This is a good way to choose
+particular options without cluttering the compilation command line.
+It is also possible to do it for platform-specific
+optimizations.</p>
+
+<pre class="code">
+$ gcc -o inlineDemo -O3 -fno-inline-functions InlineDemo.c
+$ gcc -o matrixMult -march=pentium4 -nosse2 MatrixMultiplication.c
+</pre>
+
+<p>In the example, the optimization level -O3 will enable inlining
+of functions - the effect is same as -O2 -finline-functions
+-frename-registers. So if you have the option -fno-inline-functions
+on the right on the command line, it will disable inlining of
+functions. This command will turn on all the Pentium4 specific
+optimizations but code generated will not contain any MMX, SSE and
+SSE2 instructions.</p>
+
+<h3>Supported options</h3>
+
+<p>All the options supported by GCC on your machine can be seen by
+giving the following command:</p>
+
+<pre class="code">
+$ gcc -v --help | less
+</pre>
+
+<p>This will list out all the different options that are supported
+by GCC and the processes invoked by GCC on your machine. This is a
+pretty huge list and should contains most of the options discussed
+by us in this article and the earlier one in this series and
+more.</p>
+
+<h3>Conclusion</h3>
+
+<p>In this article, we looked mainly at the various GCC
+optimizations options and how they work. In the next part of this
+series we will look at another development tool called make used
+for building big projects.</p>
+
+<h3>Resources</h3>
+
+<ul>
+<li><a href="http://gcc.gnu.org/">GCC homepage</a>
+</li>
+
+<li><a href="http://www.gnu.org/software/gcc/onlinedocs/">GCC
+Documentation</a>
+</li>
+
+<li><a href="http://www.network-theory.co.uk/gcc/intro/">GCC
+Introductory Tutorial</a> (book)</li>
+</ul>
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<P>
+<img ALIGN="LEFT" ALT="[BIO]" SRC="../gx/2002/note.png" class="bio">
+<em>
+
+Vinayak Hegde is currently working for Akamai Technologies Inc. He
+first stumbled upon Linux in 1997 and has never looked back since. He
+is interested in large-scale computer networks, distributed computing
+systems and programming languages. In his non-existent free time he
+likes trekking, listening to music and reading books. He also
+maintains an intermittently updated <a
+href="http://www.livejournal.com/users/vinayakh/">blog</a>.
+
+</em>
+<br CLEAR="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2005, Vinayak Hegde. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 121 of Linux Gazette, December 2005
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="anonymous.html" >&lt;-- prev</A> | <A HREF="howell.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">December 2005 (#121)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

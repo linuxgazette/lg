@@ -1,0 +1,377 @@
+<!DOCTYPE html
+	PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+	 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="utf-8" xml:lang="utf-8">
+<head>
+<title>Init Call Mechanism in the Linux Kernel LG #157</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link rel="stylesheet" href="../lg.css" type="text/css" media="screen, projection"  />
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<!-- link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" / -->
+<link rel="shortcut icon" href="../favicon.ico" />
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+</head>
+<body>
+
+<a href="../">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+<div id="navigation">
+<table summary="masthead" width="100%">
+<tr>
+<td align="center" colspan="3" style="font-size: 10px; font-weight: bold">
+<a href="../index.html">Home</a>
+<a href="http://linuxgazette.net">Main Site</a>
+<a href="../faq/index.html">FAQ</a>
+
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/mailman/listinfo/">Mailing Lists</a>
+<a href="../jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+<hr width="99%" style="border: 1px inset #000033">
+</td>
+</tr>
+<tr>
+<td width="40%" align="left" style="font-size: 10px; font-weight: bold">
+The Free International Online Linux Monthly
+</td>
+<td width="20%" align="center" style="font-size: 10px; font-weight: bold">
+ISSN: 1934-371X
+</td>
+<td width="40%" align="right" style="font-size: 10px; font-weight: bold">
+Main site: <a href="http://linuxgazette.net">http://linuxgazette.net</a> 
+</td>
+</table>
+</div>
+
+
+<div id="breadcrumbs1">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">December 2008 (#157)</a> &gt; 
+Article
+
+</div>
+
+<div class="articlecontent1">
+<div class="content">
+
+<div id="previousnexttop">
+<A HREF="lg_bytes.html" >&lt;-- prev</A> | <A HREF="anonymous.html" >next --&gt;</A>
+</div>
+
+<h1>Init Call Mechanism in the Linux Kernel</h1>
+<p id="by"><b>By <a href="../authors/amurray.html">Andrew Murray</a></b></p>
+
+<h3>Introduction</h3>
+
+<p>
+The Linux kernel has for a long time (at least since v2.1.23) contained a
+clever and well-optimised mechanism for calling initialisation code in
+drivers. It's clever because its functionality is largely abstracted from
+the driver developer, and it's well-optimised because after initialisation,
+memory containing the initialisation code is released. This article
+explores how this mechanism works. </p>
+
+<h3>Typical Usage</h3>
+
+<p>
+We'll start by seeing how driver developers make use of this functionality;
+the following code comes from linux-2.6.27.6/drivers/net/smc911x.c and is the
+driver for a common Ethernet chipset (smc911x).
+</p>
+
+<pre class="code">2206: static int __init smc911xinit(void)
+2207: {
+2208:     return platform_driver_register(&amp;smc911x_driver);
+2209: }
+...
+2216: module_init(smc911x_init);</pre>
+
+<p>
+The smc911xinit function can be considered as the entry point into the
+driver; of particular interest is the __init macro and the static
+declaration. The __init macro is used to describe the function as only
+being required during initialisation time: once initialisation is
+performed, the kernel will remove this function and release its memory. The
+module_init macro is used to tell the kernel where the initialisation entry
+point to the module lives, i.e. what function to call at 'start of day'. In
+a typical driver, you will often see many functions marked with the __init
+macro - these are used for initialisation - and a single module_init
+declaration.</p>
+
+<p>
+Even though we are expecting the kernel to call smc911x_init at 'start of
+day', we have marked it as static - but that's OK (later, we will see how
+the function is called). This is a particular strength of the init call
+mechanism: it reduces the amount of public symbols and reduces the
+coupling between driver modules and other parts of the kernel.</p>
+
+<p>
+The optimisation provided by the init call mechanism also provides a means
+for recovering memory used by the initialisation data. Such data can be
+'tagged' with the __initdata macro.</p>
+
+<p>
+With the above code in place, at an appropriate time during start-up, the
+kernel will call the smc911xinit function, and once it has been executed its
+memory will be released. You can see this in the output from kernel
+(e.g. dmesg); for example, an x86 machine may print the following:</p>
+
+<pre>Freeing unused kernel memory: 386k freed</pre>
+
+<p>
+This line is telling us that 386k of memory that previously contained
+initialisation code and data has now been freed.</p>
+
+<h3>Under the Hood</h3>
+
+<p>
+OK - So we've seen how the mechanism is used. Now, let's take a closer
+look and see how it works under the hood. A quick 'grep' reveals that the
+__init macro is defined in include/linux/init.h:</p>
+
+<pre class="code">43: #define __init      __section(.init.text) __cold</pre>
+
+<p>
+The __section and __cold macros are defined in the various
+include/linux/compiler*.h files:</p>
+
+<pre class="code">compiler.h: 182: #define __section(S)  __attribue__ ((__section__(#S)))
+compiler-gcc4.h: #define __cold        __attribue__ ((cold))</pre>
+
+<p>
+And when we expand it out we get:</p>
+
+<pre class="code">#define __init __attribute__((__section__(".init.text"))) __attribute__ ((cold))</pre>
+
+<p>
+Thus, when the __init macro is used, a number of GCC attributes are added
+to the function declaration - in the case of a different compiler, the
+compiler.h file will ensure the macros expand out to whatever is necessary
+for the relevant compiler. The <a
+href="http://gcc.gnu.org/onlinedocs/gcc/Function-Attributes.html">cold
+attribute</a> is a relatively new GCC attribute and has existed since
+GCC4.3 - its purpose is to mark the function as one that is rarely used,
+which results in the compiler optimising the function for size instead of
+speed. What we are really interested here is the 'section' attribute. The
+__init macro uses this attribute to inform the compiler to put the text for
+this function in a special section named ".init.text". The purpose here is
+to put all initialisation functions in a single ELF section such that the
+entire section can be removed after initialisation has been performed.</p>
+
+<p>
+So what does module_init do? Its exact functionality depends on whether the
+module in question is built-in or compiled as a loadable module. For the
+purposes of this article, we'll be looking at the built-in modules.  Back
+to include/linux/init.h:</p>
+
+<pre class="code">259: #define module_init(x) __initcall(x);
+204: #define __initcall(fn) device_initcall(fn)
+199: #define device_initcall __define_initcall("6", fn, 6)
+169: #define __define_initcall(level, fn, id) \
+170:            static initcall_t __initcall_##fn##id __used \
+171:            __attribute__ ((__section__(".initcall" level ".init"))) = fn</pre>
+
+<p>
+Yet another load of macros that result in even more GCC attributes being
+defined!</p>
+
+<pre class="code">#define module_init(x) static initcall_t __initcall_x6 __used \
+                       __attribute__ ((__section(".initcall6.init"))) = x;</pre>
+
+<p>
+And for clarity, let's expand our module_init macro as used in our
+ethernet driver:</p>
+
+<pre class="code">static initcall_t __initcall_smc911x_init6 __used \
+                  __attribute__ ((__section(".initcall6.init"))) = smc911x_init;</pre>
+
+<p>
+As you can see, module_init in the context of a built-in driver results in
+declaring a function pointer with a unique name to our point of entry. In
+addition, the macro ensures the function pointer is located in a special
+section of the ELF - we'll see why shortly.</p>
+
+<p>
+So at present, we have ensured that all our initialisation code and data is
+stored in the .init.text section, and that each module has a function
+pointer for its point of entry - which has a unique name and is also
+stored in a special section of the resulting ELF. In addition, during link
+time the include/asm-generic/vmlinux.lds.h and arch/*/kernel/vmlinux.lds.S
+scripts ensure that some labels/symbols surround the start and end of these
+sections. I.e. __early_initcall_end and __initcall_end mark the start and
+end of the function pointers and __init_begin and __init_end mark the start
+and end of the .init.text section.</p>
+
+<p>
+Finally we are in a position to see how these functions get called and how
+they are eventually freed. The function do_initcalls in init/main.c is
+called during kernel startup. This is shown below:
+</p>
+
+<pre class="code">749: static void __init do_initcalls(void)
+750: {
+751:      initcall_t *call;
+752:
+753:      for (call = __early_initcall_end; call &lt; __initcall_end; call++)
+754:           do_one_initcall(*call);
+755:</pre>
+
+<p>
+The purpose of this loop is to execute each of the init functions as set
+up by the module_init macros. This is achieved with a simple 'for' loop and a
+function pointer. Initially, the function pointer is pointed to the label at
+the start of our function pointer's ELF section, and is incremented (by the
+size of a function pointer (sizeof(initcall_t *)) until the end of the ELF
+section is reached. For each step, the pointer is invoked and the init
+function is thus executed.</p>
+
+<p>
+Once initialisation is complete, a function found in the architecture-
+specific code named free_initmem is used to release the memory pages taken
+up by the initialisation functions and data. The exact nature of the
+function varies between architectures.</p>
+
+<h3>Summary</h3>
+
+<p>
+In a nutshell, the kernel makes clever use of macros and <a
+href="http://gcc.gnu.org/onlinedocs/gcc/Function-Attributes.html">GCC
+attributes</a> to ensure that initialisation functions and pointers to them
+are stored in unique sections of the ELF. Initialisation code at kernel
+startup then iterates through these function pointers and executes them in
+turn. Finally, once all init code has been executed, the entire ELF section
+(.init.text) is freed for re-use! The best part of this mechanism is that
+the provided macros completely hide its underlying complexity, thus leaving
+more time for driver developers to focus on the job at hand.</p>
+
+<h3>Further Reading</h3>
+
+<p>
+ The best way to fully understand parts of the Linux kernel is to browse
+the source code - and that's exactly how I wrote this article. I did,
+however, make extensive use of <a href="http://lxr.linux.no/">the Linux Cross Reference</a>
+- this site and many like it allow you to explore the source code and
+easily find out where functions are called and defined.</p>
+
+<p>
+For more information on GCC attributes, read the GCC online documentation
+- in particular see section <a
+href="http://gcc.gnu.org/onlinedocs/gcc/Function-Attributes.html">5.2.7
+Declaring Attributes of Functions</a>.
+</p>
+
+<br clear="all" />
+
+<script type='text/javascript'>
+digg_url = 'http://linuxgazette.net/157/amurray.html';
+digg_title = 'Init Call Mechanism in the Linux Kernel';
+digg_bodytext = '<p> The Linux kernel has for a long time (at least since v2.1.23) contained a clever and well-optimised mechanism for calling initialisation code in drivers. It\'s clever because its functionality is largely abstracted from the driver developer, and it\'s well-optimised because after initialisation, memory containing the initialisation code is released. This article explores how this mechanism works. </p> ';
+digg_topic = 'linux_unix';
+</script>
+<script src="http://digg.com/tools/diggthis.js" type="text/javascript"></script>
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:157/amurray.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/authors/amurray.jpg" class="bio">
+</p>
+
+<em>
+<p>
+Andrew Murray is an embedded systems engineer at <a
+href="http://www.mpc-data.co.uk/">MPC Data Limited</a> - one of the UK's
+leading systems integrator. His day to day role fulfils his passion for
+learning and provides him with a wide range of experiences including
+embedded Linux such as driver and kernel development, embedded applications
+development and even Windows driver development. Working on a wide range of
+projects has allowed Andrew to explore a wide range of technologies such as
+the inter-workings of PCI Express and High Definition (HD) audio.
+</p>
+
+<p>
+Prior to his employment, Andrew graduated in 2007 from the University of
+Wales, Aberystwyth with a Masters degree in Software Engineering (MEng).
+His final year dissertation involved the creation of a 'black-box' for a
+sail plane glider that would assist in the automated marking of aerobatic
+gliding competitions. Making use of MEMS sensors, barometers, magnetometers
+and GPS along with Kalman filtering - the device was able to successfully
+record not only position but orientation in an aerobatic environment.
+</p>
+
+<p>
+Being a member of the Institute of Engineering and Technology, curator of
+<a href="http://www.embedded-bits.co.uk">http://www.embedded-bits.co.uk</a>
+and (currently) a 'one-time' kernel contributor, Andrew continually tries
+to contribute to the community more and more whenever possible.
+</p>
+</em>
+
+<br clear="all">
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2008, Andrew Murray. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication License</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 157 of Linux Gazette, December 2008
+</p>
+
+</div>
+
+<div id="previousnextbottom">
+<A HREF="lg_bytes.html" >&lt;-- prev</A> | <A HREF="anonymous.html" >next --&gt;</A>
+</div>
+
+</div>
+</div>
+
+<script src="http://www.google-analytics.com/urchin.js"
+type="text/javascript">
+</script>
+<script type="text/javascript">
+_uacct = "UA-1204316-1";
+urchinTracker();
+</script>
+
+
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+</body>
+</html>
+

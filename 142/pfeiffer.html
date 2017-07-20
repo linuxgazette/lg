@@ -1,0 +1,499 @@
+<!DOCTYPE html
+	PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+	 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="utf-8" xml:lang="utf-8">
+<head>
+<title>SMTP Authentication with Postfix LG #142</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link rel="stylesheet" href="../lg.css" type="text/css" media="screen, projection"  />
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+<link rel="shortcut icon" href="../favicon.ico" />
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+</head>
+<body>
+
+<a href="../">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+<div id="navigation">
+<table summary="masthead" width="100%">
+<tr>
+<td align="center" colspan="3" style="font-size: 10px; font-weight: bold">
+<a href="../index.html">Home</a>
+<a href="http://linuxgazette.net">Main Site</a>
+<a href="../faq/index.html">FAQ</a>
+
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/mailman/listinfo/">Mailing Lists</a>
+<a href="../jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+<hr width="99%" style="border: 1px inset #000033">
+</td>
+</tr>
+<tr>
+<td width="40%" align="left" style="font-size: 10px; font-weight: bold">
+The Free International Online Linux Monthly
+</td>
+<td width="20%" align="center" style="font-size: 10px; font-weight: bold">
+ISSN: 1934-371X
+</td>
+<td width="40%" align="right" style="font-size: 10px; font-weight: bold">
+Main site: <a href="http://linuxgazette.net">http://linuxgazette.net</a> 
+</td>
+</table>
+</div>
+
+
+<div id="breadcrumbs1">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">September 2007 (#142)</a> &gt; 
+Article
+
+</div>
+
+<div class="articlecontent1">
+<div class="content">
+
+<div id="previousnexttop">
+<A HREF="peterson.html" >&lt;-- prev</A> | <A HREF="collinge.html" >next --&gt;</A>
+</div>
+
+<h1>SMTP Authentication with Postfix</h1>
+<p id="by"><b>By <a href="../authors/pfeiffer.html">Ren&eacute; Pfeiffer</a></b></p>
+
+<p>
+Sending and receiving email is still one of the most important aspects
+of the Internet. Anyone who has ever worked in first level support knows
+this. Sending email is not a trivial task anymore, because a lot of
+Internet service providers fight against unsolicited email known as
+spam. For end users this means that you have to configure a fixed
+mail server that accepts email from you and relays it to other servers.
+This usually works fine as long as you aren't mobile. Laptop users with
+ever changing IP addresses sometimes need to change their relay
+mail server depending on their location. Accepting email from dynamically
+assigned addresses is best done by SMTP Authentication. I will show you
+how this works.
+</p>
+
+<h3>
+Prerequisites
+</h3>
+
+<h4>
+Who is Who
+</h4>
+
+<p>
+The configuration can be done with almost all GNU/Linux distributions. 
+Nevertheless I
+will focus on using Debian Etch together with Postfix. We will also use encryption, so
+you need to have OpenSSL and a suitable certificate at hand. The article
+<a href="http://linuxgazette.net/124/pfeiffer.html">"Migrating a Mail Server
+to Postfix/Cyrus/OpenLDAP"</a> in issue 
+#124 shows you how to prepare Postfix for encryption. Your Postfix
+installation will therefore need Transport Layer Security (TLS) support.
+On Debian you can enable TLS by installing the <tt>postfix-tls</tt>
+package.
+</p>
+
+<p>
+We will be speaking of two distinct components when dealing with email.
+</p>
+
+<ul>
+<li> Mail User Agent (MUA)<br>
+     This is the program for reading, writing and sending email. Typical
+     MUAs are Mozilla Thunderbird/Icedove, mutt, Sylpheed, Evolution,
+     KMail, and Pine. Some MUAs speak Simple Mail Transfer Protocol
+     (SMTP), some don't and submit the mail to a local program for
+     relaying. MUAs are mail clients.</li>
+<li> Mail Transport Agent (MTA)<br>
+     This is the software also known as a mail server. MTAs relay mail to
+     other mail servers by using SMTP/ESMTP. Any mail destined for local
+     users will be dispatched to a local mailbox by means of the Local
+     Delivery Agent (LDA). Typical MTAs include Exim, Postfix, Sendmail,
+     and qmail.</li>
+</ul>
+
+<p>
+I will focus on using mutt as a MUA. The confusing advantage of mutt is
+that it submits the email to a MTA on the local machine for delivery.
+</p>
+
+<h4>
+Authentication Software
+</h4>
+
+<p>
+We need a source for the authentication information. The easiest way is
+to use the Simple Authentication and Security Layer (SASL) framework,
+which allows us to use a variety of sources through a single
+mechanism. The packages <tt>sasl2-bin</tt> and <tt>libsasl2-modules</tt>
+are needed for our purposes. <tt>sasl2-bin</tt> contains the utilities
+to maintain and query the user database with the passwords and is only needed on
+the MTA that should use SMTP Authentication. The
+<tt>libsasl2-modules</tt> are needed on both sides. Some MUAs already
+provide code for SASL authentication.
+</p>
+
+<h3>
+Configuration
+</h3>
+
+<p>
+Now let's try to get everything to work together seamlessly.
+</p>
+
+<h4>
+Postfix as Inbound Mail Relay
+</h4>
+
+<p>
+Postfix will use the SASL Authentication daemon <tt>saslauthd</tt> in order to decide
+whether the authentication is correct or not. The query is done by using
+<tt>saslauthd</tt>'s UNIX socket, usually found in
+<tt>/var/run/saslauthd/mux</tt>. This is a problem since Postfix runs in
+its own chroot environment, <tt>/var/spool/postfix/</tt>, and can't see
+the socket. You now have two options - give up Postfix's chroot or move
+<tt>saslauthd</tt>'s socket to another place. Fortunately, the last
+option can be done easily by editing <tt>/etc/default/saslauthd</tt>:
+
+<pre>
+# This needs to be uncommented before saslauthd will be run
+# automatically
+START=yes
+
+# You must specify the authentication mechanisms you wish to use.
+# This defaults to "pam" for PAM support, but may also include
+# "shadow" or "sasldb", like this:
+# MECHANISMS="pam shadow"
+
+MECHANISMS="sasldb"
+PARAMS="-m /var/spool/postfix/var/run/saslauthd"
+</pre>
+
+<p>
+We changed the <tt>MECHANISMS</tt> to the SASL database (we don't want
+to use system accounts for SMTP AUTH) and we moved the socket into
+Postfix' chroot by using the <tt>-m</tt> option. We still have to make
+sure that the path to the socket exists.
+</p>
+
+<pre>
+antigone:~# mkdir -p /var/spool/postfix/var/run/saslauthd
+</pre>
+
+<p>
+Now we can turn our attention to the Postfix configuration. It needs to
+be told that it should use SASL for authentication and what options it
+should accept. First, we create a directory and a file with the options:
+</p>
+
+<pre>
+antigone:~# mkdir /etc/postfix/sasl/
+antigone:~# cat &gt; /etc/postfix/sasl/smtpd.conf
+pwcheck_method: saslauthd
+auxprop_plugin: sasldb
+saslauthd_path: /var/run/saslauthd/mux
+mech_list: PLAIN LOGIN CRAM-MD5 DIGEST-MD5
+^D
+antigone:~# 
+</pre>
+
+<p>
+<tt>smtpd.conf</tt> tells Postfix to ask <tt>saslauthd</tt>'s user
+database the path to the socket and the allowed authentication options.
+PLAIN and LOGIN are simple cleartext authentication methods. Leave them
+out in case your MTA doesn't support encryption. LOGIN is deprecated so
+you won't need it anyway; I just included it as example. CRAM-MD5 and
+DIGEST-MD5 based on challenge-response or digests respectively. Most
+modern MUAs know them, so it's good to allow them in this configuration.
+</p>
+
+<p>
+The last thing you need to do is to add the authentication directives to the
+Postfix main config file <tt>/etc/postfix/main.cf</tt>:
+
+<pre>
+smtpd_sasl_auth_enable      = yes
+smtpd_sasl_security_options = noanonymous,noplaintext
+smtpd_sasl_application_name = smtpd
+smtpd_sasl_local_domain     = $mydomain
+broken_sasl_auth_clients    = no
+</pre>
+
+<p>
+The first line enables SASL AUTH. The security options define what to
+accept. It is very important to include <em>noanonymous</em> or else the
+authentication allows <strong>any</strong> mail relaying, which is not what you and
+I want. Be careful to double-check that <em>noanonymous</em> is present!
+The application name tells Postfix the name that should be used when
+initiating the SASL server. It corresponds to our file
+<tt>smtpd.conf</tt>, which contains the options we wish to use. The SASL
+local domain defines the realm that should be used as the authentication
+realm. Every user has a login, a realm, and a password. Usually the realm
+corresponds to the domain your server is part of. The last option deals
+with the special needs of some MUAs. Set this option to <em>yes</em> if
+a Microsoft Outlook Express Version 4 and Microsoft Exchange server
+Version 5.0 use your Postfix as authentication mail relay. Otherwise, it
+is safe to use <em>no</em>.
+</p>
+
+<p>
+We still need to tell Postfix that authenticated clients are ok. You can
+configure this with the <tt>smtpd_recipient_restrictions</tt> directive.
+</p>
+
+<pre>
+smtpd_recipient_restrictions =
+    permit_mynetworks,
+    reject_unlisted_recipient,
+    check_recipient_access hash:/etc/postfix/rcpt_blacklist,
+    check_helo_access hash:/etc/postfix/helo,
+    reject_non_fqdn_sender,
+    reject_unknown_sender_domain,
+    permit_sasl_authenticated,
+    reject_unauth_destination,
+    reject_rbl_client realtimeblacklist.example.net,
+    check_policy_service inet:127.0.0.1:60000,
+    permit
+</pre>
+
+<p>
+We added a <tt>permit_sasl_authenticated</tt> right before the blacklist
+and greylist check. Make sure you accept the authenticated
+connection as soon as possible, but don't skip important checks in case
+the MUA gets something wrong. The files <tt>rcpt_blacklist</tt> and
+<tt>helo</tt> are custom hash files with blacklisted addresses and faked
+name in the HELO/EHLO dialog. You can skip them if you don't have
+them yourself. The same is true for the real time blacklist. You don't
+have to use one.
+</p>
+
+<p>
+We're almost done. We only need the account with username and password.
+You can add users by using the <tt>saslpasswd2</tt> command.
+
+<pre>
+antigone:~# saslpasswd2 -u your.realm username
+</pre>
+
+<p>
+The tool will prompt twice for the password. Now you are all set. Reload
+or restart <tt>saslauthd</tt> and Postfix. Make sure the UNIX socket in
+Postfix's chroot environment was created. Check with <tt>telnet</tt> for
+the SMTP AUTH banner.
+</p>
+
+<pre>
+lynx@agamemnon:~ $ telnet antigone.luchs.at 25
+Trying 127.0.0.1...
+Connected to antigone.luchs.at.
+Escape character is '^]'.
+220 antigone.luchs.at ESMTP ready
+EHLO client.example.net
+250-antigone.luchs.at
+250-PIPELINING
+250-SIZE 10380902
+250-ETRN
+250-STARTTLS
+250-AUTH DIGEST-MD5 CRAM-MD5
+250 8BITMIME
+QUIT
+221 Bye
+Connection closed by foreign host.
+lynx@agamemnon:~ $ 
+</pre>
+
+<p>
+If everything works you should see the string <em>250-AUTH DIGEST-MD5
+CRAM-MD5</em> after the <em>HELO/EHLO</em> command.
+</p>
+
+<h4>
+Postfix as Outbound Mail Relay with Authentication
+</h4>
+
+<p>
+Since I use mutt, the component that deals with SMTP is my local Postfix.
+It doesn't know about SMTP AUTH yet, but we only need two additional
+options in <tt>main.cf</tt>
+</p>
+
+<pre>
+smtp_sasl_auth_enable   = yes
+smtp_sasl_password_maps = hash:/etc/postfix/sasl_passwd
+</pre>
+
+<p>
+The first directive enables SMTP AUTH in Postfix's SMTP client component.
+The second dictates which username and password to use when talking to
+each server. A sample <tt>sasl_passwd</tt> map looks like this:
+</p>
+
+<pre>
+smtp.example.net        username:seckrit
+192.168.1.1             username2:geheim
+</pre>
+
+<p>
+Don't forget to create the hash of the map by using <tt>postmap
+/etc/postfix/sasl_passwd</tt>. Now point your <tt>relayhost</tt> 
+variable to one of the servers listed in <tt>sasl_passwd</tt> and 
+reload the Postfix configuration. Mail relay should now be using SMTP
+AUTH. If the login fails, check for the presence of the
+<tt>libsasl2-modules</tt> package. Without it Postfix will try to use
+authentication, but will fail because no suitable authentication methods
+can be found.
+</p>
+
+<h3>
+One Word About Encryption
+</h3>
+
+<p>
+Although I didn't show how to configure encryption in this example, I
+strongly suggest using TLS with every MTA you run. The setup isn't too
+hard and having encrypted SMTP AUTH sessions is the best way to protect
+the passwords. 
+</p>
+
+<h3>
+Useful Resources
+</h3>
+
+<p>
+This is one of many articles written about this topic. You can find more
+details here:
+</p>
+
+<ul>
+<li> <a href="http://www.technoids.org/saslmech.html">Negotiating an
+SMTP AUTH Authentication Mechanism</a></li>
+<li> <a href="http://asg.web.cmu.edu/sasl/">Simple Authentication and Security Layer (SASL)</a>
+<li> <a
+href="http://postfix.state-of-mind.de/patrick.koetter/smtpauth/smtp_auth_mailservers.html">SMTP Authentication for Mail servers</a></li>
+<li> <a href="http://qmail.jms1.net/test-auth.shtml">Testing SMTP AUTH connections</a></li>
+<li> <a href="http://www.joreybump.com/code/howto/smtpauth.html">Using SMTP AUTH and STARTTLS with sendmail</a></li>
+</ul>
+
+<script type="text/javascript">
+digg_url = 'http://linuxgazette.net/142/pfeiffer.html';
+digg_title = 'SMTP Authentication with Postfix';
+digg_bodytext = 'Sending and receiving email is still one of the most important aspects of the Internet. Anyone who has ever worked in first level support knows this. Sending email is not a trivial task anymore because a lot of Internet service providers fight against unsolicited email known as spam. For end users this means that you have to configure a fixed mail server that accepts email from you and relays it to other servers. This usually works fine as long as you aren\'t mobile. Laptop users with ever changing IP addresses sometimes need to change their relay mail server depending on their location. Accepting email from dynamically assigned addresses is best done by SMTP Authentication. I will show you how this works.';
+digg_topic = 'linux_unix';
+</script>
+<script src="http://digg.com/tools/diggthis.js" type="text/javascript"></script> 
+
+
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:142/pfeiffer.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<!-- *** BEGIN bio *** -->
+<hr>
+<p>
+
+<img align="left" alt="Bio picture" src="../gx/authors/pfeiffer.jpg" class="bio">
+
+</p>
+<em>
+
+<p>
+Ren&eacute; was born in the year of Atari's founding and the release of the game Pong.
+Since his early youth he started taking things apart to see how they work. He
+couldn't even pass construction sites without looking for electrical wires that
+might seem interesting. The interest in computing began when his grandfather
+bought him a 4-bit microcontroller with 256 byte RAM and a 4096 byte operating
+system, forcing him to learn assembler before any other language.
+</p>
+
+<p>
+After finishing school he went to university in order to study physics. He then
+collected experiences with a C64, a C128, two Amigas, DEC's Ultrix, OpenVMS and
+finally GNU/Linux on a PC in 1997. He is using Linux since this day and still
+likes to take things apart und put them together again. Freedom of tinkering
+brought him close to the Free Software movement, where he puts some effort into
+the right to understand how things work. He is also involved with civil liberty
+groups focusing on digital rights.
+</p>
+
+<p>
+Since 1999 he is offering his skills as a freelancer. His main activities
+include system/network administration, scripting and consulting. In 2001 he
+started to give lectures on computer security at the Technikum Wien. Apart from
+staring into computer monitors, inspecting hardware and talking to network
+equipment he is fond of scuba diving, writing, or photographing with his digital
+camera. He would like to have a go at storytelling and roleplaying again as soon
+as he finds some more spare time on his backup devices.
+</p>
+
+</em>
+</p>
+<br clear="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2007, Ren&eacute; Pfeiffer. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication License</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 142 of Linux Gazette, September 2007
+</p>
+
+</div>
+
+<div id="previousnextbottom">
+<A HREF="peterson.html" >&lt;-- prev</A> | <A HREF="collinge.html" >next --&gt;</A>
+</div>
+
+</div>
+</div>
+
+<script src="http://www.google-analytics.com/urchin.js"
+type="text/javascript">
+</script>
+<script type="text/javascript">
+_uacct = "UA-1204316-1";
+urchinTracker();
+</script>
+
+
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+</body>
+</html>
+

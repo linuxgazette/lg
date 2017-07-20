@@ -1,0 +1,237 @@
+"""HTML table builders
+
+This module builds HTML tables from a list of lists.  Each outer list is a row; 
+each inner list the cells in the row.  Actually, any iterable of iterables may
+be used.  Here's the simplest usage:
+    from table import Table
+    headers = ('Husband', 'Wife', 'Pet')
+    data = [('Fred', 'Wilma', 'Dino'), ('Barney', 'Betty', None)]
+    html = Table.build(data, headers)
+This returns an HTML table with a header row and gridlines.  The 'headers'
+argument is optional if you don't want a header row.  Note that .build
+is a *class method*.  All None or '' values are converted to an HTML space
+('&nbsp;') to prevent some browsers from drawing a null cell.
+
+If you don't like the default style you can override the tags:
+    from quixote.html import htmltag
+    class MyTable(Table):
+        # The default table tag is '<table border="1" cellspacing="4">'
+        table = '<table border="2">'
+        table = htmltag('table', border=2)  # Does the same thing.
+        # You can also override tr, td and th.  (Their end-tag counterarts are
+        # ntable, ntr, ntd and nth, but there's no reason to override those.)
+    html = MyTable.build(data, headers)
+
+If you have more complex needs you can build the table manually:
+    t = table.Table()
+    ths = [t.th] * len(headers)
+    t.row(headers, ths)
+    for row in data:
+        t.row(row)
+    html = t.finish()
+The second argument to .row() is a list of '<td>' or '<th>' tags to apply, one
+for each cell in the row.  The default is '[self.td] * len(row)'.  You'll
+have to supply your own list if you want any '<th>'s, or if you want to use
+different '<td>' styles for different cells.  (Actually, there is a method
+.headers_row that behaves like .row but uses '<th>'.)
+
+One use for this flexibility is to insert periodic "group header" rows that
+span all columns:
+   td_colspan = '<td colspan="3">'
+   t.row(["Group Header Text"], [td_colspan])
+
+Table is a subclass of PlainTable, which has completely unadorned tags
+(e.g., '<table>').  PlainTable is useful for subclassing but not very useful as
+is, since an unadorned table has no gridlines.
+
+HorizontalTable applies a special '<th>' style to the first column, useful when
+you want the headers on the left rather than the top.  
+    data = [('Flintstone', 'Fred', 'Wilma'), ('Rubble', 'Barney', 'Betty')]
+    html = HorizontalTable.build(data)
+The left column is right-justified by default.  You can specify otherwise via
+the .th_first_column attribute.
+
+You can have headers both on the left and on the top by adding the 'headers'
+argument:
+    headers = (None, 'Husband', 'Wife')
+    html = HorizontalTable.build(data, headers)
+The top-left cell is formatted as a header-row cell, not as a left-column cell.
+Normally you'll just want it blank.
+
+This class (only) has a method to display a mapping as a table:
+    html = HorizontalTable.build_from_dict(os.environ)
+The keys are rendered in alphabetical order.
+
+ReportTable is like HorizontalTable without gridlines.  It's useful for
+presenting two-column data in a way that doesn't look like a table, such as the
+details of a database record.
+
+SortedTable is a standard (vertical) table with one column in a special style.
+By convention this indicates the data is sorted by that column, and the other column
+headers are hyperlinks to re-sort the data by that column.  This build method
+takes three arguments:
+    html = SortedTable.build(data, headers, 2)
+The first column is zero, so this highlights the third column.  The style is 
+determined by the .key_th and .key_td attributes; the default '<th>' has a
+light green background and the default '<td>' is normal.  Note how easy it is
+to structure your calling code:
+    - Assume a certain column by default, say the first.
+    - The first column's header is plain text.
+    - The other columns' headers are hyperlinks like "page?sort=2", where
+      'page' is the relative URL and '2' is the column number to sort by.
+    - The table renders with the first column highlighted.
+    - The user clicks on the third column (the one numbered 2).
+    - Your program finds a GET parameter of '2', converts it to an integer,
+      sorts by that field, and passes it as the third argument to
+      SortedTable.build().
+    - The table renders with the third column highlighted....
+
+PlainTable.columnize(list_, delim=BR) converts a list (each column) of lists
+(the items in the column) to a one-row table.  Each cell contains the items
+concatenated with 'delim' in between.  This method is inherited by all the
+other classes, although since it depends on .build() it'll fail for classes
+like SortedTable where the .build() signature is different.
+
+This module depends on Quixote
+(http://www.mems-exchange.org/software/quixote/)
+but uses only its utility functions, not its publishing loop.
+It has been tested with Quixote 2.0a4, but not with Quixote 1.x.
+
+Author: Mike Orr <mso@oz.net>  
+"""
+from quixote.html import TemplateIO, htmlescape, htmltag, htmltext
+
+# Returned by the .build() methods if a table has no rows.
+_nulltable = htmltag('')
+
+NBSP = htmltext('&nbsp;')
+BR = htmltag('br', True) + '\n'
+
+class PlainTable(object):
+    """Build an HTML table.
+       The default tag style is a plain table with no gridlines.  You can
+       override the tags if you want something fancier.
+    """
+    table  = htmltag('table')
+    ntable = htmltag('/table')
+    tr     = htmltag('tr')
+    ntr    = htmltag('/tr')
+    td     = htmltag('td')
+    ntd    = htmltag('/td')
+    th     = htmltag('th')
+    nth    = htmltag('/th')
+
+    def __init__(self):
+        self.sio = TemplateIO(html=True)
+        self.has_rows = False
+
+    def row(self, row, tds=None):
+        self.has_rows = True
+        cols = len(row)
+        if tds is None:
+            tds = self.make_tds(row)
+        elif len(tds) != cols:
+            raise ValueError("args 'row' and 'tds' are different lengths")
+        ntds = self.make_ntds(tds)
+        self.sio += self.tr
+        self.sio += '\n'
+        for cell, td, ntd in zip(row, tds, ntds):
+            self.sio += td
+            if cell is None or cell == '':
+                self.sio += NBSP
+            else:
+                self.sio += cell
+            self.sio += ntd
+        self.sio += '\n'
+        self.sio += self.ntr
+        self.sio += '\n'
+
+    def headers_row(self, row):
+        tds = self.make_tds_first_row(row)
+        self.row(row, tds)
+
+    def finish(self):
+        tup = self.table, self.sio.getvalue(), self.ntable
+        return htmltext("%s\n%s%s\n\n") % tup
+
+    getvalue = finish
+
+    def make_tds(self, row):
+        return [self.td] * len(row)
+
+    def make_tds_first_row(self, row):
+        return [self.th] * len(row)
+
+    def make_ntds(self, row):
+        return [x.lower().startswith('<th') and self.nth or self.ntd
+            for x in row]
+
+    def build(klass, rows, headers=None):
+        """Build a table in one step."""
+        if not rows:
+            return _nulltable
+        cols = len(rows[0])
+        t = klass()
+        if headers:
+            ths = t.make_tds_first_row(headers)
+            t.row(headers, ths)
+        tds = t.make_tds(rows[0])
+        for row in rows:
+            if len(row) != cols:
+                raise ValueError("table rows must all be the same length")
+            t.row(row, tds)
+        return t.finish()
+    build = classmethod(build)
+
+    def columnize(klass, lis, delim=BR):
+        """@param lis A list (each column) of lists (the items in the column).
+           @param delim Placed between each item in the column.
+           @return A one-row HTML table without borders.
+        """
+        cells = [htmlescape(delim).join(columnList) for columnList in lis]
+        rows = [cells]  # A one-row table.
+        return klass.build(rows)
+    columnize = classmethod(columnize)    
+
+class Table(PlainTable):
+    table  = htmltag('table', border=1, cellpadding=4)
+
+class SortedTable(Table):
+    """A table with the key column in a special style."""
+    key_th = htmltag('th', align='center', style="background-color:#90ee90")
+    key_td = Table.td
+
+    def build(klass, rows, headers, key_column):
+        if not rows:
+            return _nulltable
+        cols = len(rows[0])
+        t = klass()
+        if headers:
+            ths = t.make_tds_first_row(headers)
+            ths[key_column] = t.key_th
+            t.row(headers, ths)
+        tds = t.make_tds(rows[0])
+        tds[key_column] = t.key_td
+        for row in rows:
+            if len(row) != cols:
+                raise ValueError("table rows are inconsistent length")
+            t.row(row, tds)
+        return t.finish()
+    build = classmethod(build)
+
+class HorizontalTable(Table):
+    th_first_column = htmltag('th', style="text-align:right")
+
+    def make_tds(self, row):
+        tds = [self.td] * (len(row) - 1)
+        tds.insert(0, self.th_first_column)
+        return tds
+
+    def build_from_dict(klass, dic):
+        pairs = dic.items()
+        pairs.sort()
+        return klass.build(pairs)
+    build_from_dict = classmethod(build_from_dict)
+
+class ReportTable(HorizontalTable):
+    table  = htmltag('table', cellspacing=10)

@@ -1,0 +1,88 @@
+#!/usr/bin/perl
+# Change_Cylinders.pl
+# Change the geometry of a hard drive.  
+# Requires the Expect module.
+# DANGEROUS PROGRAM!!  RUN AT YOUR OWN RISK!!
+
+  ##3 Load the Perl module
+use Expect;
+
+  ## Get the IDE hard drive they want to delete from the command line
+my $Letter = shift @ARGV;
+my $Drive = "hd$Letter";
+
+  ## If the drive choosen isn't an IDE drive, abort
+if (!(grep($_ eq $Letter, ("a","b","c","d"))))
+   {
+   print "Please choose a,b,c, or d.\n";
+   exit;
+   }
+else
+  {
+  print "You entered \"$Letter\" to repartition /dev/hd$Letter\n";
+  print "Enter \"y\" if you want to do this.\n";
+  $R = <STDIN>; chomp $R;
+  if ($R ne "y") {exit;}
+  else {print "Okay dare devil, here we go.\n";}
+  }
+  
+  ## Initialize the fdisk program
+$Fdisk = Expect->spawn("/sbin/fdisk /dev/$Drive");
+
+  ## Get the geometry of the hard drive
+my $Geometry = `/sbin/sfdisk -g /dev/$Drive`;
+chomp $Geometry;
+
+  ## Chop up what is returned and get the heads, cylinders, and sectors
+my ($Junk,$Temp1) = split(/\: /,$Geometry,2);
+my ($Cyl,$Heads,$Sec) = split(/\, /,$Temp1,3);
+($Cyl,$Junk) = split(/ /,$Cyl,2);
+($Heads,$Junk) = split(/ /,$Heads,2);
+($Sec,$Junk) = split(/ /,$Sec,2);
+
+  ## Get the total, multiply them all
+my $Total1 = $Heads*$Sec*$Cyl;
+
+  ### If we didn't get any size, abort the script 
+if (grep($_ < 1, ($Heads,$Sec,$Cyl))) 
+  {
+  print "ERROR, $Hard_Drive $Heads,$Sec,$Cyl, no detection of hard drive\n";
+  print "sbin/sfdisk -g /dev/$Hard_Drive";
+  exit;
+  }
+
+  ## Calculate the cylinders and fix the heads to 255 and sectors to 63
+my $Cylinders = $Total1/255/63;
+if ($Cylinders =~ /\./)
+  {($Cylinders,$Junk) = split(/\./,$Cylinders,2);}
+
+  ### Go into expert mode
+print $Fdisk "x\n";
+$match=$Fdisk->expect(30,":");
+
+  ## Redefine the heads
+print $Fdisk "h\n";
+$match=$Fdisk->expect(30,":");
+print $Fdisk "255\n";
+$match=$Fdisk->expect(30,":");
+
+  ## Redefine the sectors
+print $Fdisk "s\n";
+$match=$Fdisk->expect(30,":");
+print $Fdisk "63\n";
+$match=$Fdisk->expect(30,":");
+
+  ## Redefine the cylinders
+print $Fdisk "c\n";
+$match=$Fdisk->expect(30,":");
+print $Fdisk "$Cylinders\n";
+$match=$Fdisk->expect(30,":");
+
+  ## Return to the regular menu
+print $Fdisk "r\n";
+$match=$Fdisk->expect(30,":");
+  
+  ### Now save the changes
+print $Fdisk "w\n";
+
+print "We changed the geometry to 255 heads, 63 sectors, and $Cylinders cylinders.\n";

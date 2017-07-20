@@ -1,0 +1,284 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>Adding Plugin Capabilities To Your Code LG #84</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="arndt.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../lg_faq.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="ecol.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+
+<!--endcut ============================================================-->
+
+<TABLE BORDER><TR><TD WIDTH="200">
+<A HREF="http://www.linuxgazette.net/">
+<IMG ALT="LINUX GAZETTE" SRC="../gx/2002/lglogo_200x41.png" 
+	WIDTH="200" HEIGHT="41" border="0"></A> 
+<BR CLEAR="all">
+<SMALL>...<I>making Linux just a little more fun!</I></SMALL>
+</TD><TD WIDTH="380">
+
+
+<CENTER>
+<BIG><BIG><STRONG><FONT COLOR="maroon">Adding Plugin Capabilities To Your Code</FONT></STRONG></BIG></BIG>
+<BR>
+<STRONG>By <A HREF="../authors/bradley.html">Tom Bradley</A></STRONG>
+</CENTER>
+
+</TD></TR>
+</TABLE>
+<P>
+
+<!-- END header -->
+
+
+
+<H2>0. Introduction</H2>
+The days of a program living as a single entity are all but gone. Today&#8217;s programs need to be more versatile and expandable. The simplest way to provide flexibility and expandability to your program is through the use of modules otherwise known as plugins. Web browsers and music players are two good examples of programs that allow plugins. Browsers use plugins to add support to web pages such as Java, Flash and QuickTime so that you can have a more enriched surfing experience. Music players such as XMMS use plugins to support different encodings as well as have visual plugins to watch your music dance on the screen. This article shows how to provide plugin support to your programs. Note: I use module and plugin interchangeably, for purposes of this article they are the same.<br>
+
+<H2>1. How To Work With Plugins</H2>
+There are only four functions needed to work with plugins. They are part of the dl (Dynamic Loader) library. I will give just a brief introduction to them here. You can view the info pages for each of these to get a more in-depth description.<br>
+
+<DL>
+<DT><STRONG>dlopen</STRONG>
+<DD>This function is used to load a module into memory.
+<DT><STRONG>dlclose</STRONG>
+<DD>This function is used to unload the module from memory.
+<DT><STRONG>dlsym</STRONG>
+<DD>This function is used to look up and return the address of a function inside a module
+<DT><STRONG>dlerror</STRONG>
+<DD>This function returns an error message to you.
+</DL>
+
+<H2>2. A Simple Loader Program for Plugins</H2>
+Here is the code for a simple loader program that takes the plugin name as a command line argument.<br>
+<br>
+<div align="center">main.c<br><A HREF="misc/bradley/main.c.txt">text version of this listing</A></div>
+<table cellpadding="2" cellspacing="2" border="1" width="60%"
+ align="center">
+  <tbody>
+    <tr>
+      <td valign="top" bgcolor="#cccccc">
+<pre>
+  #include &lt;unistd.h&gt;
+  #include &lt;string.h&gt;
+  #include &lt;errno.h&gt;
+  #include &lt;dlfcn.h&gt;
+      
+  #define PATH_LENGTH 256
+      
+  int main(int argc, char * argv[])
+  {
+      char path[PATH_LENGTH], * msg = NULL;
+      int (*my_entry)();
+      void * module;
+      
+      /* build the pathname for the module */
+      getcwd(path, PATH_LENGTH);
+      strcat(path, "/");
+      strcat(path, argv[1]);
+      
+      /* load the module, and resolve symbols now */
+      module = dlopen(path, RTLD_NOW);
+      if(!module) {
+          msg = dlerror();
+          if(msg != NULL) {
+              dlclose(module);
+              exit(1);
+          }
+      }
+      
+      /* retrieve address of entry point */
+      my_entry = dlsym(module, "entry");
+      msg = dlerror();
+      if(msg != NULL) {
+          perror(msg);
+          dlclose(module);
+          exit(1);
+      }
+      
+      /* call module entry point */
+      my_entry();
+      
+      /* close module */
+      if(dlclose(module)) {
+          perror("error");
+          exit(1);
+      }
+      
+      return 0;
+  }                
+</pre>
+      </td>
+    </tr>
+  </tbody>
+</table>
+<br>
+The code is pretty simple. After the loader loads the plugin it looks inside
+the plugins symbol table using the dlsym command to get the address of the
+function `entry.&#8217; <span style=""> </span>Once I have the address of
+this function I can call the function, I assign it to the function pointer
+that I created. Then the plugin is unloaded. The function pointer line may
+need some explaining. <br>
+&nbsp;&nbsp;&nbsp;int (*my_entry)() <br>
+is used as a pointer to a function that takes no arguments and returns an
+int. Which I can use to point to the function `entry&#8217; in the plugin.<br>
+&nbsp;&nbsp;&nbsp;int entry()<br>
+
+The following command is used to compile the loader program:<br>
+</p>
+<table cellpadding="2" cellspacing="2" border="1" width="60%"
+ align="center">
+  <tbody>
+    <tr>
+      <td valign="top" bgcolor="#cccccc">
+<pre>
+$ gcc -o loader main.c &#8211;ldl
+</pre>
+      </td>
+    </tr>
+  </tbody>
+</table>
+<br>
+
+<H2>3. Two Simple Plugins</H2>
+Now that we have a loader we need some plugins for it to load. There is no defined prototype for a modules entry point; you may use whatever you like. In my examples I have the entry point return an int and take no arguments. You can set up your entry points to take whatever arguments they need and return whatever you want. It does not need to be called `entry' either. I simply use this to make it easier to understand the purpose of the function. In addition, you may have more than one entry point into a plugin. Below are two samples of a modules, each with the same entry point:<br>
+<div align="center">module1.c<br><A HREF="misc/bradley/module1.c.txt">text version of this listing</A></div>
+<table cellpadding="2" cellspacing="2" border="1" width="60%"
+ align="center">
+  <tbody>
+    <tr>
+      <td valign="top" bgcolor="#cccccc">
+<pre>
+int entry()
+{
+    printf("I am module one!\n");
+    return 0;
+}
+</pre>
+               
+      </td>
+    </tr>
+  </tbody>
+</table>
+<br>
+<div align="center">module2.c<br><A HREF="misc/bradley/module2.c.txt">text version of this listing</A></div>
+<table cellpadding="2" cellspacing="2" border="1" width="60%"
+ align="center">
+  <tbody>
+    <tr>
+      <td valign="top" bgcolor="#cccccc">
+<pre>
+int entry()
+{
+    printf("I am module two!\n");
+    return 0;
+}
+</pre>
+      </td>
+    </tr>
+  </tbody>
+</table>
+<br>
+To compile the plugins:<br>
+<table cellpadding="2" cellspacing="2" border="1" width="60%"
+ align="center">
+  <tbody>
+    <tr>
+      <td valign="top" bgcolor="#cccccc">
+<pre>
+$ gcc -fPIC -c module1.c
+$ gcc -shared -o module1.so module1.o
+$ gcc -fPIC -c module2.c
+$ gcc -shared -o module2.so module2.o
+</pre>
+      </td>
+    </tr>
+  </tbody>
+</table>
+
+A couple of things are worth noting about the way these are compiled. First,
+the `-fPIC' flag. PIC stands for "Position Independent Code", this tells
+the compiler that this code should be set up to use a `relative' address
+space. Meaning that the code can be placed anywhere in memory and the loader
+takes care redefining the addresses at load time. The `-shared' flag tells
+the compiler that this code should be compiled in a way that allows it to
+linked by another executable. In other words the .so (shared object) will
+act in a similar fashion as library does; however, your .so is not a library
+and cannot be linked using the `-l' with gcc.<br>
+<br>
+<H2>4. Using the Loader</H2>
+Here are the commands for using the two different plugins and there output:
+<table cellpadding="2" cellspacing="2" border="1" width="60%"
+ align="center">
+  <tbody>
+    <tr>
+      <td valign="top" bgcolor="#cccccc">
+<pre>
+$ ./loader module1.so
+I am module one!
+
+$ ./loader module2.so
+I am module two!  
+</pre>
+      </td>
+    </tr>
+  </tbody>
+</table>
+<br>
+
+<H2>5. Adding Bookkeeping Functions for Plugins</H2>
+This section assumes you are using the gcc compiler do to the fact that the commands used are specific to gcc, other compilers may have similar features, you may check you documentation for compatibility. Gcc provides an `__attribute__' flag to be used with functions. This flag offers many useful features to functions; however, I will only discuss two of them here, see the info page on gcc for other descriptions of the other attributes. The two I wish to discuss are `constructor' and `destructor'. The ELF (Executable and Linkable Format) binary&nbsp; provides two sections .init and .fini which can contain code that is executed before and after a module is loaded (in a regular program these would be run before and after main() is executed.) Placing code in these sections can allow you to initialize variables or do other bookkeeping responsibilities your module may require. For example you could have the module read variables from the main program that it will need to get started or have the plugin set variables inside the main program such as the interface type of the plugin. The interface type of a plugin is the set of commands that the plugin in question provides. In my example it provided only one function 'entry'; yours may provide others. Below is a sample of using these attributes:<br><br>
+<table cellpadding="2" cellspacing="2" border="1" width="60%"
+ align="center">
+  <tbody>
+    <tr>
+      <td valign="top" bgcolor="#cccccc">
+<pre>
+__attribute__ ((constructor)) void init() 
+{
+  /* code here is executed after dlopen() has loaded the module */
+}
+      
+      
+__attribute__ ((destructor)) void fini() 
+{
+  /* code here is executed just before dlclose() unloads the module */
+}    
+</pre>
+      </td>
+    </tr>
+  </tbody>
+</table>
+<br>
+The names init() and fini() are not necessary, I use them to clarify where these functions to be placed for easier reading. There are several function names that you must avoid because gcc uses these names. Some of which are _init, _fini, _start and _end. To see a full listing of functions and variables that gcc creates you can run `nm&#8217; on the binary file. The `constructor' and `destructor' attributes are what tell the compiler where to place the code inside the binary file. Simply put, `constructor' tells the compiler that the corresponding function goes in the .init section of the and likewise the `destructor' attribute tells the compiler the place the corresponding function in the .fini section.<br>
+
+<H2>6. Conclusion</H2>
+With the use of the dl library it a simple task to provide plugin support to your program. Allowing for easy expandability and flexibility. Although this example only demonstrates grabbing one function from a plugin it is easy to grab multiple functions from a plugin and use them as if they were part of the original program.
+
+
+
+
+
+<!-- *** BEGIN copyright *** -->
+<hr>
+<CENTER><SMALL><STRONG>
+Copyright &copy; 2002, Tom Bradley.
+Copying license <A HREF="../copying.html">http://www.linuxgazette.net/copying.html</A><BR> 
+Published in Issue 84 of <i>Linux Gazette</i>, November 2002
+</STRONG></SMALL></CENTER>
+<!-- *** END copyright *** -->
+<HR>
+
+<!--startcut ==========================================================-->
+<CENTER>
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="arndt.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../lg_faq.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="ecol.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+</CENTER>
+</BODY></HTML>
+<!--endcut ============================================================-->

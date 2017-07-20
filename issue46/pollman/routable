@@ -1,0 +1,307 @@
+#!/bin/sh
+#
+# IPCHAINS-FIREWALL V1.6-ROUTABLE
+#
+# -------------------------------------------------- Ipchains Firewall Script -
+#
+# Original script by Ian Hall-Beyer (manuka@nerdherd.net)
+#
+# Contributors:
+# terminus (cpm@dotquad.com) (ICQ & DHCP, @home testing)
+
+# ---------------------------------------------------------------- Interfaces -
+
+# Internal Interface
+# This is the interface for your local network
+# NOTE: INTERNALNET is a *network* address. All host bits should be 0
+
+INTERNALNET="xxx.xxx.xxx.xxx/yy"
+
+# ------------------------------------------------------- Variable definition -
+#
+# Set the location of ipchains.
+
+IPCHAINS="/sbin/ipchains"
+
+# You shouldn't need to change anything in the rest of this section
+
+echo "Internal: $INTERNALNET"
+
+REMOTENET="0/0"
+
+# -------------------------------------- Flush everything, start from scratch -
+
+echo -n "Flushing rulesets.."
+
+# Incoming packets from the outside network
+$IPCHAINS -F input
+echo -n "."
+
+# Outgoing packets from the internal network
+$IPCHAINS -F output   
+echo -n "."
+
+# Forwarding/masquerading
+$IPCHAINS -F forward
+echo -n "."
+
+echo "Done!"
+
+# ---------------------------------- Allow all connections within the network -
+
+echo -n "Internal.."
+
+#$IPCHAINS -A input -s $INTERNALNET -d $INTERNALNET -j ACCEPT
+#$IPCHAINS -A output -s $INTERNALNET -d $INTERNALNET -j ACCEPT
+echo -n ".."
+
+# -------------------------------------------------- Allow loopback interface -
+
+echo -n "Loopback.."
+
+$IPCHAINS -A input -i lo -s 0/0 -d 0/0 -j ACCEPT
+$IPCHAINS -A output -i lo -s 0/0 -d 0/0 -j ACCEPT
+echo -n ".."
+
+# --------------------- Allow all connections from the network to the outside -
+
+$IPCHAINS -A input -s $INTERNALNET -d $REMOTENET -j ACCEPT   
+$IPCHAINS -A output -s $INTERNALNET -d $REMOTENET -j ACCEPT
+echo -n ".."
+
+echo "Done!"
+
+# ----------------------------------Set telnet, www and FTP for minimum delay -
+# This section manipulates the Type Of Service (TOS) bits of the 
+# packet. For this to work, you must have CONFIG_IP_ROUTE_TOS enabled
+# in your kernel
+
+echo -n "TOS flags.."
+
+$IPCHAINS -A output -p tcp -d 0/0 www -t 0x01 0x10
+$IPCHAINS -A output -p tcp -d 0/0 telnet -t 0x01 0x10   
+$IPCHAINS -A output -p tcp -d 0/0 ftp -t 0x01 0x10
+echo -n "..."
+
+# Set ftp-data for maximum throughput
+$IPCHAINS -A output -p tcp -d 0/0 ftp-data -t 0x01 0x08
+echo -n "."
+
+echo "Done!"
+
+# ---------------------------------------------------------- Trusted Networks -
+# Add in any rules to specifically allow connections from hosts/nets that
+# would otherwise be blocked.
+
+# echo -n "Trusted Networks.."
+
+# $IPCHAINS -A input -s [trusted host/net] -d $INTERNALNET <ports> -j ACCEPT 
+# echo -n "."
+
+# echo "Done!"
+
+# ----------------------------------------------------------- Banned Networks -
+# Add in any rules to specifically block connections from hosts/nets that
+# have been known to cause you problems. These packets are logged.
+
+# echo -n "Banned Networks.."
+
+# This one is generic
+# $IPCHAINS -A input -l -s [banned host/net] -d $INTERNALNET <ports> -j DENY
+# echo -n "."
+
+# This one blocks ICMP attacks
+# $IPCHAINS -A input -l -b -p icmp -s [host/net] -d $INTERNALNET -j DENY
+# echo -n "."
+
+# echo "Done!"
+
+# ------------------------------------------------------ @home-specific rules -
+# This @home stuff is pretty specific to me (terminus).  I get massive port
+# scans from my neighbors and from pokey admins at @home, so I just got harsh
+# and blocked all their stuff, with a few exceptions, listed below.
+#
+# Note: in this version, this could apply to @Work.
+#
+# If someone out there finds out the ip ranges of JUST tci@home, let me know
+# so i don't end up blocking ALL cablemodems like it's doing now.
+
+echo -n "Cable Modem Nets.."
+
+# so we can check mail, use the proxy server, hit @home's webpage.
+# you will want to set these to your local servers, and uncomment them
+
+# $IPCHAINS -A input -p tcp -s ha1.rdc1.wa.home.com -d $INTERNALNET 1023:65535 -j ACCEPT
+# $IPCHAINS -A input -p tcp -s mail.tcma1.wa.home.com -d $INTERNALNET 1023:65535 -j ACCEPT
+# $IPCHAINS -A input -p tcp -s www.tcma1.wa.home.com -d $INTERNALNET 1023:65355 -j ACCEPT
+# $IPCHAINS -A input -p tcp -s proxy.tcma1.wa.home.com -d $INTERNALNET 1023:65535  -j ACCEPT
+# echo -n "...."
+
+# so we can resolve the above hostnames, allow dns queries back to us
+# $IPCHAINS -A input -p tcp -s ns1.home.net -d $INTERNALNET 1023:65535 -j ACCEPT
+# $IPCHAINS -A input -p tcp -s ns2.home.net -d $INTERNALNET 1023:65535 -j ACCEPT
+# $IPCHAINS -A input -p udp -s ns1.home.net -d $INTERNALNET 1023:65535 -j ACCEPT
+# $IPCHAINS -A input -p udp -s ns2.home.net -d $INTERNALNET 1023:65535 -j ACCEPT
+# echo -n ".."
+
+# linux ipchains building script page (I think)
+# $IPCHAINS -A input -p tcp -s 24.128.61.117 -d $INTERNALNET 1023:65535 -j  ACCEPT
+# echo -n "."
+
+# Non-@home users may want to leave this uncommented, just to block all
+# the wannabe crackers. Add any @home hosts you want to allow BEFORE this line.
+
+# Blast all other @home connections into infinity and log them.
+$IPCHAINS -A input -l -s 24.0.0.0/8 -d $INTERNALNET -j DENY
+echo -n "."
+
+echo "Done!"
+
+# ---------------------------- Specific port blocks on the external interface -
+# This section blocks off ports/services to the outside that have
+# vulnerabilities. This will not affect the ability to use these services
+# within your network. 
+
+echo -n "Port Blocks.."
+ 
+# NetBEUI/Samba
+$IPCHAINS -A input -p tcp -s $REMOTENET -d $INTERNALNET 139 -j DENY
+$IPCHAINS -A input -p udp -s $REMOTENET -d $INTERNALNET 139 -j DENY
+echo -n "."
+
+# Microsoft SQL
+$IPCHAINS -A input -p tcp -s $REMOTENET -d $INTERNALNET 1433 -j DENY
+$IPCHAINS -A input -p udp -s $REMOTENET -d $INTERNALNET 1433 -j DENY
+echo -n "."
+
+# Postgres SQL
+
+$IPCHAINS -A input -p tcp -s $REMOTENET -d $INTERNALNET 5432 -j DENY
+$IPCHAINS -A input -p udp -s $REMOTENET -d $INTERNALNET 5432 -j DENY
+echo -n "."
+
+# Network File System
+$IPCHAINS -A input -p tcp -s $REMOTENET -d $INTERNALNET 2049 -j DENY
+$IPCHAINS -A input -p udp -s $REMOTENET -d $INTERNALNET 2049 -j DENY
+echo -n "."
+
+# X Displays :0-:2-
+$IPCHAINS -A input -p tcp -s $REMOTENET -d $INTERNALNET 5999:6003 -j DENY
+$IPCHAINS -A input -p udp -s $REMOTENET -d $INTERNALNET 5999:6003 -j DENY
+echo -n "."
+
+# X Font Server :0-:2-
+$IPCHAINS -A input -p tcp -s $REMOTENET -d $INTERNALNET 7100 -j DENY
+$IPCHAINS -A input -p udp -s $REMOTENET -d $INTERNALNET 7100 -j DENY
+echo -n "."
+
+# Back Orifice (logged)
+$IPCHAINS -A input -l -p tcp -s $REMOTENET -d $INTERNALNET 31337 -j DENY
+$IPCHAINS -A input -l -p udp -s $REMOTENET -d $INTERNALNET 31337 -j DENY
+echo -n "."
+
+# NetBus (logged)
+$IPCHAINS -A input -l -p tcp -s $REMOTENET -d $INTERNALNET 12345:12346 -j DENY
+$IPCHAINS -A input -l -p udp -s $REMOTENET -d $INTERNALNET 12345:12346 -j DENY
+echo -n "."
+
+echo "Done!"
+
+# --------------------------------------------------- High Unprivileged ports -
+# These are opened up to allow sockets created by connections allowed by 
+# ipchains
+
+echo -n "High Ports.."
+
+$IPCHAINS -A input -p tcp -s $REMOTENET -d $INTERNALNET 1023:65535 -j ACCEPT
+$IPCHAINS -A input -p udp -s $REMOTENET -d $INTERNALNET 1023:65535 -j ACCEPT
+echo -n "."
+
+echo "Done!"
+
+# ------------------------------------------------------------ Basic Services -
+
+echo -n "Services.."
+
+# ftp-data (20) and ftp (21)
+# $IPCHAINS -A input -p tcp -s $REMOTENET -d $INTERNALNET 20 -j ACCEPT
+# $IPCHAINS -A input -p tcp -s $REMOTENET -d $INTERNALNET 21 -j ACCEPT
+# echo -n ".."
+
+# ssh (22)
+# $IPCHAINS -A input -p tcp -s $REMOTENET -d $INTERNALNET 22 -j ACCEPT
+# echo -n "."
+
+# telnet (23)
+# $IPCHAINS -A input -p tcp -s $REMOTENET -d $INTERNALNET 23 -j ACCEPT
+# echo -n "."
+
+# smtp (25)
+# $IPCHAINS -A input -p tcp -s $REMOTENET -d $INTERNALNET 25 -j ACCEPT
+# echo -n "."
+
+# DNS (53)
+$IPCHAINS -A input -p tcp -s $REMOTENET -d $INTERNALNET 53 -j ACCEPT
+$IPCHAINS -A input -p udp -s $REMOTENET -d $INTERNALNET 53 -j ACCEPT
+echo -n ".."
+
+# DHCP on LAN side (to make @Home DHCP work) (67/68)
+# $IPCHAINS -A input -i $INTERNALIF -p udp -s $REMOTENET -d 255.255.255.255/24 67 -j ACCEPT
+# $IPCHAINS -A output -i $INTERNALIF -p udp -s $REMOTENET -d 255.255.255.255/24 68 -j ACCEPT
+# echo -n ".."
+
+# http (80)
+# $IPCHAINS -A input -p tcp -s $REMOTENET -d $INTERNALNET 80 -j ACCEPT
+# echo -n "."
+
+# POP-3 (110)
+# $IPCHAINS -A input -p tcp -s $REMOTENET -d $INTERNALNET 110 -j ACCEPT
+# echo -n "."
+
+# identd (113)
+# $IPCHAINS -A input -p tcp -s $REMOTENET -d $INTERNALNET 113 -j ACCEPT
+# echo -n "."
+
+# nntp (119)
+# $IPCHAINS -A input -p tcp -s $REMOTENET -d $INTERNALNET 119 -j ACCEPT
+# echo -n "."
+
+# https (443)
+# $IPCHAINS -A input -p tcp -s $REMOTENET -d $INTERNALNET 443 -j ACCEPT
+# echo -n "."
+
+# ICQ Services (it's a server service) (4000)
+# $IPCHAINS -A input -p tcp -s $REMOTENET -d $INTERNALNET 4000 -j ACCEPT
+# echo -n "."
+
+echo "Done!"
+
+# ---------------------------------------------------------------------- ICMP -
+
+echo -n "ICMP Rules.."
+
+# Use this to deny ICMP attacks from specific addresses
+# $IPCHAINS -A input -b -i $EXTERNALIF -p icmp -s <address> -d 0/0 -j DENY
+# echo -n "."
+
+# Allow incoming ICMP
+$IPCHAINS -A input -p icmp -s $REMOTENET -d $INTERNALNET -j ACCEPT
+$IPCHAINS -A input -p icmp -s $REMOTENET -d $INTERNALNET -j ACCEPT
+echo -n ".."
+
+# Allow outgoing ICMP
+$IPCHAINS -A output -p icmp -s $INTERNALNET -d $REMOTENET -j ACCEPT
+$IPCHAINS -A output -p icmp -s $INTERNALNET -d $REMOTENET -j ACCEPT
+$IPCHAINS -A output -p icmp -s $INTERNALNET -d $REMOTENET -j ACCEPT
+$IPCHAINS -A output -p icmp -s $INTERNALNET -d $REMOTENET -j ACCEPT
+echo -n "...."
+
+echo "Done!"
+
+# -------------------------------------------------------- set default policy -
+
+$IPCHAINS -A input -j DENY
+$IPCHAINS -A output -j ACCEPT
+
+echo ""
+echo "Finished Establishing Firewall."

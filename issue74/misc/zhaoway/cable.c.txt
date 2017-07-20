@@ -1,0 +1,190 @@
+/* -*- C -*-
+ * lullaby internetworks lab: (client alike) cable
+ *
+ * Copyright (C) 2001  zhaoway <zw@debian.org>
+ *
+ * $Id: cable.c.txt,v 1.1.1.1 2002/08/14 22:28:21 dan Exp $
+ *
+ * Compile with: gcc -Wall -g -o cable cable.c
+ */
+
+#include <stdio.h>
+#include <errno.h>
+#include <unistd.h>
+#include <signal.h>
+#include <stdlib.h>
+#include <string.h>
+#include <arpa/inet.h>
+#include <sys/select.h>
+#include <sys/socket.h>
+
+void banner(void)
+{
+  printf("lullaby internetworks lab: (client alike) cable $Revision: 1.1.1.1 $\n"
+	 "Copyright (C) 2001  zhaoway <zw@debian.org>\n\n");
+}
+
+void usage(void)
+{
+  banner();
+  printf("Usage: cable [cable buffer size] [1st ip] [1st port] [2nd ip] [2nd port] ..\n\n"
+	 "o cable buffer size is in bytes. for example 10240.\n"
+	 "o ports should be listening or connection attempts will fail.\n"
+	 "o number of ip addr and port pairs is at least 2.\n");
+}
+
+/* Return value -1 is a failure .*/
+int make_socket(struct sockaddr_in *servaddr)
+{
+  int sockfd;
+
+  sockfd = socket(AF_INET, SOCK_STREAM, 0);
+  if (connect(sockfd, (struct sockaddr *) servaddr, sizeof(struct sockaddr_in)) == -1)
+    {
+      perror("connect");
+      return -1;
+    }
+  return sockfd;
+}
+
+/* Return the number of ports open, < 2 is a failure. */
+int cmdline(int argc, char *argv[], int *sockfd[], int *maxline)
+{
+  struct sockaddr_in *servaddr, tmpaddr;
+  int ports = 2, i;
+  
+  /* We have at least 2 connections. */
+  servaddr = malloc(ports * sizeof(struct sockaddr_in));
+  if (servaddr == NULL)
+    {
+      fprintf(stderr, "not enough memory!\n");
+      return 1;
+    }
+  memset(servaddr, 0, sizeof(servaddr));
+  for (i = 0; i < ports; i++) servaddr[i].sin_family = AF_INET;
+  if (argc < 6
+      || (*maxline = strtol(argv[1], NULL, 10)) == 0
+      || (inet_pton(AF_INET, argv[2], &servaddr[0].sin_addr)) <= 0
+      || (servaddr[0].sin_port = htons(strtol(argv[3], NULL, 10))) == 0
+      || (inet_pton(AF_INET, argv[4], &servaddr[1].sin_addr)) <= 0
+      || (servaddr[1].sin_port = htons(strtol(argv[5], NULL, 10))) == 0)
+    {
+      usage();
+      return 0;
+    }
+  banner();
+  for ( ; ; )
+    {
+      if ((argc -= 2) < 6) break;
+      memset(&tmpaddr, 0, sizeof(struct sockaddr_in));
+      if ((inet_pton(AF_INET, argv[ports * 2 + 2], &tmpaddr.sin_addr)) <= 0)
+	break;
+      if ((tmpaddr.sin_port = htons(strtol(argv[ports * 2 + 3], NULL, 10))) == 0)
+	break;
+      servaddr = realloc(servaddr, (ports + 1) * sizeof(struct sockaddr_in));
+      servaddr[ports].sin_addr = tmpaddr.sin_addr;
+      servaddr[ports].sin_port = tmpaddr.sin_port;
+      ports++;
+    }
+  *sockfd = malloc(ports * sizeof(int));
+  if (*sockfd == NULL)
+    {
+      fprintf(stderr, "not enough memory!\n");
+      return 1;
+    }
+  for (i = 0; i < ports; i++)
+    {
+      if (((*sockfd)[i] = make_socket(&servaddr[i])) == -1)
+	{
+	  if (i >= --ports) break;
+	  servaddr[i] = servaddr[ports];
+	  i--;			/* retry */
+	}
+    }
+  return ports;
+}
+
+int main(int argc, char *argv[])
+{
+  int *sockfd, ports, size, maxline, i, j;
+  char *buff;
+  fd_set rset, rset_memo, wset, wset_memo;
+  struct timeval nowait = { 0, 0 };
+
+  if ((ports = cmdline(argc, argv, &sockfd, &maxline)) < 2) return 1;
+  buff = (char *) malloc(maxline * sizeof(char));
+  if (buff == NULL)
+    {
+      fprintf(stderr, "not enough memory!\n");
+      return 1;
+    }
+  FD_ZERO(&rset_memo);
+  FD_ZERO(&wset_memo);
+  for (i = 0; i < ports; i++)
+    {
+      FD_SET(sockfd[i], &rset_memo);
+      FD_SET(sockfd[i], &wset_memo);
+    }
+  /* Ignore this to receive EPIPE. */
+  signal(SIGPIPE, SIG_IGN);
+  /* Main loop. */
+  for ( ; ; )
+    {
+      if (ports < 2)
+	{
+	  fprintf(stderr,
+		  "cable is broken, only %i connection(s) still open\n", ports);
+	  return 1;
+	}
+      /* Prepare for reading. */
+      rset = rset_memo;
+      /* See if there is any port sending anything. */
+      if ((select(FD_SETSIZE, &rset, NULL, NULL, &nowait)) <= 0) continue;
+      /* Search the one which is readable. */
+      for (i = 0; i < ports; i++)
+	{
+	  /* See if there is anything to be read from this port. */
+	  if (! FD_ISSET(sockfd[i], &rset)) continue;
+	  /* What if we have trouble reading? */
+	  else if ((size = recv(sockfd[i], buff, maxline, 0)) == -1)
+	    {
+	      perror("recv err");
+	      return errno;
+	    }
+	  /* What if we did read exactly nothing? */
+	  else if (size == 0) continue;
+	  /* Read something, prepare for writing. */
+	  wset = wset_memo;
+	  /* What if we can't write? */
+	  if ((select(FD_SETSIZE, NULL, &wset, NULL, &nowait)) <= 0)
+	    {
+	      fprintf(stderr, "cable is broken, can't write!\n");
+	      return 2;
+	    }
+	  /* Write. */
+	  for (j = 0; j < ports; j++)
+	    {
+	      /* Do not write back to the sending port. */
+	      if (j != i && FD_ISSET(sockfd[j], &wset))
+		{
+		  /* See if we have trouble writing. */
+		  if ((send(sockfd[j], buff, size, 0)) == -1)
+		    {
+		      if (errno == EPIPE)
+			{
+			  FD_CLR(sockfd[j], &wset);
+			  FD_CLR(sockfd[j], &rset);
+			  close(sockfd[j]);
+			  sockfd[j] = sockfd[--ports];
+			}
+		      else
+			{
+			  perror("send err");
+			  return errno;
+			}
+		    }
+		}
+	    }
+	} /* The loop searching the one which is readable. */
+    } /* Main loop. */
+}

@@ -1,0 +1,764 @@
+<!DOCTYPE html
+	PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+	 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="utf-8" xml:lang="utf-8">
+<head>
+<title>synCRONicity: A riff on perceived limitations of cron LG #185</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link rel="stylesheet" href="../lg.css" type="text/css" media="screen, projection"  />
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="../lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="../lg.rdf" />
+<!-- link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" / -->
+<link rel="shortcut icon" href="../favicon.ico" />
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+</head>
+<body>
+
+<a href="../">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+<div id="navigation">
+<table summary="masthead" width="100%">
+<tr>
+<td align="center" colspan="3" style="font-size: 10px; font-weight: bold">
+<a href="../index.html">Home</a>
+<a href="http://linuxgazette.net">Main Site</a>
+<a href="../faq/index.html">FAQ</a>
+
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/listinfo/">Mailing Lists</a>
+<a href="../jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+<hr width="99%" style="border: 1px inset #000033">
+</td>
+</tr>
+<tr>
+<td width="40%" align="left" style="font-size: 10px; font-weight: bold">
+The Free International Online Linux Monthly
+</td>
+<td width="20%" align="center" style="font-size: 10px; font-weight: bold">
+ISSN: 1934-371X
+</td>
+<td width="40%" align="right" style="font-size: 10px; font-weight: bold">
+Main site: <a href="http://linuxgazette.net">http://linuxgazette.net</a> 
+</td>
+</table>
+</div>
+
+
+<div id="breadcrumbs1">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">April 2011 (#185)</a> &gt; 
+Article
+
+</div>
+
+<div class="articlecontent1">
+<div class="content">
+
+<div id="previousnexttop">
+<A HREF="grebler.html" >&lt;-- prev</A> | <A HREF="ikuya.html" >next --&gt;</A>
+</div>
+
+<h1>synCRONicity: A riff on perceived limitations of cron</h1>
+<p id="by"><b>By <a href="../authors/grebler.html">Henry Grebler</a></b></p>
+
+
+<pre>
+	Insanity is hereditary; you get it from your children.
+	    Sam Levenson
+</pre>
+
+<p>
+My younger son (Rob, 22 soon) wants more Internet. Of course. 20GB a
+month is not enough for him. While he was away, my wife and I were
+pushing to use 20% of that.
+</p>
+
+<p>
+Over the years, I have developed zillions of mechanisms to monitor our
+Internet usage. Well, perhaps 5. Or maybe just one, which I refined 4
+times. And what do I mean by <b>our</b> Internet usage?! Not
+<b>our</b> usage; not mine, not my wife's; we're well behaved. Just
+Rob's. If not for him, we wouldn't need to monitor anything.
+</p>
+
+<p>
+So, if I'm going to monitor Internet usage at all, I may as well
+monitor everyone's.
+</p>
+
+<p>
+He has returned from 5 months studying in Malaysia. He comes to me
+with ISP plans that provide 100 GB per month (with a catch or two).
+Since the subject is on the table, I check what our usage is so far
+this month.
+</p>
+
+<p>
+Anyone who knows me knows I prefer to live in an xterm. I could go to
+Firefox and navigate half-a-dozen screens to get the information I
+want, but long ago I wrote an expect script, get_optus_usage.exp,
+wrapped in a shell script, get_optus_usage.sh, to do the job for me.
+</p>
+
+<p>
+I get back something like:
+</p>
+
+<pre>
+   Plan Data Limit = 20000MB
+   Data Used 17% (3517 MB)
+   Days Elapsed 7% (2 days)
+</pre>
+
+<p>
+Am I surprised? No. Annoyed? Sure; but surprised - never.
+</p>
+
+<p>
+I decide it's time to run get_optus_usage.sh more frequently. I will
+run it as a cron job every night at 23:55. Why that particular time?
+Well, for most days, it will make no difference. As long as it runs
+every 24 hours (more or less) I'll get an idea of the usage on each
+day. But on the last day of the month, I'll know the usage for the
+month. Shortly thereafter, my ISP will reset its counters.
+</p>
+
+<p>
+Here's my problem. I know my script works: I just ran it. (I also know
+that it doesn't always work. Whenever my ISP gets, um, creative and
+starts rearranging the furniture, the script breaks. I then tweak it,
+and it works until next time. But that's not my problem <i>du
+jour</i>.) Will it work when invoked from cron?
+</p>
+
+<p>
+My first answer is: not in a way that is useful. When run
+interactively, it displays its answers on the xterm (stdout). If run
+from cron, that output will be emailed to me. (Actually, it won't: I
+don't run a mail daemon. Nevertheless, an attempt will be made to
+email me.) I don't want the output in an email; I want it in a log
+file.
+</p>
+
+<p>
+Ok, so I will need to redirect stdout. I could do that in the crontab
+entry, something like this:
+</p>
+
+<pre class="code">
+55 23 * * * get_optus_usage.sh &gt;&gt; /var/CableUsage/optus_usage.log
+</pre>
+
+<p>
+(I already have /var/CableUsage from all the other monitoring I've
+been doing - see above.)
+</p>
+
+<p>
+But, in many years of writing cron jobs, I've learnt that it ain't that
+simple. Jobs that work fine during development become quite
+recalcitrant when run from cron.
+</p>
+
+<p>
+I'm sure I'm not the only one who has this problem. I'll look it up
+on the Internet. What am I looking for? "cron", of course. Maybe
+"testing".
+</p>
+
+<p>
+I am not alone! "About 1,450,000 results," says Google. But, wait.
+They're not answers. They're zillions of befuddled folk like me
+looking for answers.
+</p>
+
+<pre>
+	How can I test my crontab?
+	How can I test a new cron script ?
+	is crontab working? how to test run scripts with crontab
+	How do I test a cron for functionality?
+</pre>
+
+<p>
+I spent quite a while reading the questions and the answers. The best
+that people could come up with is to create a crontab entry to run
+every minute (or in a few minutes - but you might need a lot of
+repeats on that idea) and then tweak your job, wait until the next
+minute, check the answer, etc.
+</p>
+
+<p>
+There are just so many things that are wrong with that approach.
+</p>
+
+<p>
+So I gave up. I wrote a wrapper script, cron_get_optus_usage.sh:
+</p>
+
+<pre class="code">
+#! /bin/sh
+#       cron_get_optus_usage.sh - interlude for when running from cron
+
+        dir=/home/henryg/projects/TECH/web_capture
+        $dir/get_optus_usage.sh &gt;&gt; /var/CableUsage/optus_usage.log
+</pre>
+
+<p>
+It didn't work.
+</p>
+
+<pre class="code">
+'...  Your Terminal type is unknown!....  Enter a terminal type: [vt100] '
+</pre>
+
+<p>
+I added
+</p> 
+
+<pre class="code">
+        TERM=xterm
+        export TERM
+</pre>
+
+<p>
+and then it worked. Pretty lucky. Only took two days.
+</p>
+
+<pre>
+	synchronicity
+
+	the simultaneous occurrence of events with no discernible causal connection 
+	 -- Concise Oxford English Dictionary &copy; 2008 Oxford University Press
+</pre>
+</p>
+
+<p>
+Next day, I get an email from my other son, Mark:
+</p>
+
+<pre>
+	I have a script that when I run from the shell, it works fine
+	but when it's run from cron it doesn't work properly.
+</pre>
+
+
+<p>
+My response contained all the advice I had acquired over many years of
+dealing with cron; and it helped him to solve his problems.
+</p>
+
+<p>
+But, clearly, the need is there.
+</p> 
+
+
+<h3>The Trouble with Cron</h3>
+
+
+<p>
+The main trouble with cron is that it is, in effect, a part of
+production. Even if you are using your personal crontab, reporting
+still uses the system logging facility, syslog; entries go into log
+files in /var/log or similar; and communication with the user is
+typically via the official mail system. So you would like to proceed
+with caution.
+</p>
+
+<p>
+If you're like me, you don't like your system logs filled with dross.
+At some future date, it may interfere with the diagnosis of real
+problems.
+</p>
+
+<p>
+So you would expect to find a suitable test mechanism. Dream on.
+</p>
+
+<p>
+With the default cron program, the degrees of freedom are: running in
+the foreground, using a non-default mail program, and a couple of
+other options which are not helpful for testing.
+</p>
+
+<p>
+One thing you can't do is specify a different crontab from the
+default. So if you add entries of your own and get distracted, you may
+leave the crontab in an undesirable state.
+</p>
+
+<p>
+You might try to run as a user other than root and only affect a
+test-user's crontab. But, if your job needs to run as root (or some
+other privileged user), that's going to create more problems.
+</p>
+
+<p>
+There are two very important requirements for testing: the ability to
+run the job now (ie on demand); the ability to run in a test
+environment identical to the environment when run from cron.
+</p>
+
+
+<h3>Real Sysadmins</h3>
+
+<p>
+Just to be clear: I reject any macho notion of the sort that claims that
+"real sysadmins" don't need this testing nonsense. <em>We get it right the
+first time. What's wrong with you? Are you a pussy?</em>
+</p>
+
+<p>
+My credo is to minimise risk.
+</p>
+
+<p>
+I'm not saying that the use of test features should be made
+compulsory. If you don't want to test, don't. I hope that you are
+particularly brilliant or particularly lucky, because, to my mind,
+your behaviour is unnecessarily risky.
+</p>
+
+
+<h3>Other cron programs</h3>
+
+<p>
+I investigated a few other cron programs.
+</p>
+
+<p>
+Anacron(8) looked promising because you can use -t to specify an
+alternate anacrontab. There is also the option -f to force immediate
+invocation of all jobs in the anacrontab. There is also option -n to
+run jobs now. No, I don't understand the difference between -f and -n
+either; I just use both. You can run it in the foreground which has
+the happy effect of displaying "informational messages to standard
+error". But that's "as well as to syslog."
+</p>
+
+<p>
+Sounds pretty good. Unfortunately, anacron reproduces the environment
+of the interactive user.
+</p>
+
+<p>
+I also tried fcron (http://fcron.free.fr/). It turned out to be no
+more promising than anacron.
+</p>
+
+<p>
+In fairness, anacron and fcron don't claim to be useful for testing.
+As far as I could tell, they do what they are intended to do. They
+just didn't help me.
+</p>
+
+<p>
+So there is no assistance when it comes to testing cron jobs.
+</p>
+
+
+<h3>Refined</h3>
+
+<p>
+I've refined my script. It now looks like this:
+</p>
+
+<pre class="code">
+        dir=/home/henryg/projects/TECH/web_capture
+        {
+                cat &lt;&lt;EOF
+------------------------------------------------------------------------
+EOF
+                date
+                $dir/get_optus_usage.sh
+        } &gt;&gt; /var/CableUsage/optus_usage.log 2&gt;&amp;1
+</pre>
+
+<p>
+It draws a line to separate entries, displays the date and time and
+runs the real program (get_optus_usage.sh); and redirects all the
+output to the log file.
+</p>
+
+<p>
+And here is an edited log entry:
+</p>
+
+<pre class="code">
+------------------------------------------------------------------------
+Wed Feb 23 23:55:01 EST 2011
+Billing Period:           01 Feb 11 - 28 Feb 11
+Last Update:           23 Feb 11 11:45 PM AET/AEDT
+   Plan Data Limit = 20000MB
+   Data Used 65% (13142 MB)
+   Days Elapsed 79% (22 days)
+</pre>
+
+<p>
+All very satisfactory for this particular task. But what about an
+ability to test cron?
+</p>
+
+
+<h3>A Sufficient Solution</h3>
+
+<p>
+I have a solution of sorts. You could actually invoke it from cron. I
+might be inclined to do so for the last run before considering a task
+ready for production.
+</p>
+
+<p>
+But I'm reasonably sure that the last step is not necessary.
+</p>
+
+<p>
+Here's the script; I call it cronsim.sh:
+</p>
+
+<pre class="code">
+#! /bin/sh
+#       cronsim.sh - simulate the behaviour of invoking a job from cron
+
+#----------------------------------------------------------------------#
+# To customise, modify
+#
+#       CRONHOME
+#       LOGDIR          (if required)
+#
+# for example
+#
+#       CRONHOME=/usr/local/cronsim
+#----------------------------------------------------------------------#
+
+        CRONHOME=/home/henryg/projects/TECH/cronsim
+
+        if [ $# -eq 0 ]
+        then
+                TGT=$CRONHOME/TEST
+        else
+                TGT=$1
+                if [ ! -e $TGT ]
+                then
+                        cat &lt;&lt;EOF
+Specified target script ($TGT) not found.
+EOF
+                        exit 1
+                fi
+        fi
+
+        TODAY=`date '+%Y%b%d'`
+        LOGDIR=$CRONHOME/logs
+        [ -d $LOGDIR ] || mkdir $LOGDIR || {
+                cat &lt;&lt;EOF
+Unable to create log directory $LOGDIR
+EOF
+                exit 1
+        }
+        LOG=$LOGDIR/log.$TODAY
+
+        {
+                cat &lt;&lt;EOF
+------------------------------------------------------------------------
+EOF
+                date
+                echo 'Calling args &lt;&lt;&lt;'"$@"'&gt;&gt;&gt;'
+                ls -la $TGT
+                [ -e $TGT ] &amp;&amp; env -i $TGT
+
+                cat &lt;&lt;EOF
+------------------------------------------------------------------------
+EOF
+        } &gt;&gt; $LOG 2&gt;&amp;1
+</pre>
+
+<p>
+It's not rocket science.
+</p>
+
+<p>
+Typically, to invoke it, you provide it with the path to your proposed
+cron script, for example:
+</p>
+
+<pre>
+	cronsim.sh get_optus_usage.sh
+</pre>
+
+<p>
+If cronsim.sh is unable to find or access the script being tested, you'll
+get an error message.
+</p>
+
+<p>
+Basically, it invokes the requested script, logs all output to a
+date-stamped log file, records its input args, and does a bit of
+prettifying.
+</p>
+
+<p>
+The key fragment is
+</p>
+
+<pre>
+	env -i $TGT
+</pre>
+
+<pre class="code">
+ENV(1)                           User Commands                          ENV(1)
+
+       env - run a program in a modified environment
+
+       -i, --ignore-environment
+              start with an empty environment
+</pre>
+
+<p>
+Running your cron script with an empty environment is overkill. There
+are probably some environment variables that are set when a cron job
+is invoked. But it is sufficient: if your cron job runs (or can be
+modified to run) from cronsim.sh, I'm pretty sure it will run under
+any invoking conditions.
+</p>
+
+<p>
+You can start with a script (or even part of a script) and satisfy
+yourself that it does what you want when run interactively (ie like a
+normal script) - even as a non-root user, if that makes sense. If
+appropriate, you can then run it under cronsim.sh, still without root
+privileges to ensure that it still works or to understand the sort of
+adjustments that will be needed.
+</p>
+
+<p>
+Almost certainly you will need to set your PATH variable.
+</p>
+
+<p>
+I expect that as you get nearer to the final version of your script,
+it will only make sense to run it with root privileges. You can still
+invoke it from cronsim.sh (as long as you invoke cronsim.sh with the
+relevant privileges).
+</p>
+
+<p>
+Does that mean that by the time you put it into production your script
+will be perfect? Of course not. But I would expect it to be much
+nearer than if you just set it up to run from cron without testing.
+</p>
+
+
+<h3>Other Problems with cron</h3>
+
+<p>
+My Internet search indicated that people have other problems with
+cron. They can't seem to get their jobs to run when they want them to.
+I've never had that problem. It has been stated that cron syntax is
+difficult. I suppose there are difficulties.
+</p>
+
+<p>
+One difficulty I encountered came in monitoring our Internet usage. I
+alluded to this earlier. Back then I wanted to run on the last day of
+the month. There's no way to achieve that with cron. I settled for:
+</p>
+
+<pre>
+55 23 28-31 * * get_optus_usage.sh
+</pre>
+
+<p>
+If memory serves, in the past I have written scripts to expect to
+get invoked as above, but to first perform the calculation as to
+whether today is the last day of the month. If not, just exit;
+otherwise, do the work.
+</p>
+
+<p>
+There may be a solid argument for a better cron with a better
+mechanism for specifying when jobs should run, but that's beyond the
+scope of this article.
+</p>
+
+<h3>Wish List</h3>
+
+<p>
+What are the elements of a variant of cron that would make testing
+more convenient?
+</p>
+
+<p>
+I would like these abilities:
+</p>
+
+<ul>
+<li>select an alternate crontab</li>
+<li>run the job on demand</li>
+<li>avoid sending messages to system logs</li>
+<li>avoid sending emails</li>
+<li>run a job under the same conditions as when run normally</li>
+<li>nominate the user to run as</li>
+</ul>
+
+
+
+<h3>Summary</h3>
+
+<p>
+I cannot claim thousands of hours of flying time with cronsim.sh (not
+yet, anyway). But I have used it a few times, not so much because I
+needed to, but to try to give it some testing.
+</p>
+
+<p>
+I'm sure that it will undergo refinement.
+</p>
+
+<p>
+Eventually I might decide it's a lost cause and go back to the drawing
+board. That might mean modifying the real cron to do what I want.
+</p>
+
+<p>
+I like my script because limited testing has shown it to be
+platform-independent. I've run it on Linux and FreeBSD. If I start
+modifying cron, that means C and compiling - and a different
+executable for different platforms.
+</p>
+
+<p>
+I am interested to see whether this is an item with a market of one
+(me) or whether I strike a responsive chord.
+</p>
+
+<p>
+And, of course, if anyone has any suggestions, I'm interested. In
+particular, if, out in the badlands of the Internet, there is a
+variant of cron that I've missed and ought to consider, a variant that
+is a good fit for my criteria above, I would like to hear about it.
+</p>
+
+
+<br clear="all" />
+
+<table align='center' cellspacing='10'>
+<tr>
+<td>
+<script type='text/javascript'>
+digg_url = 'http://linuxgazette.net/185/grebler1.html';
+digg_title = 'synCRONicity: A riff on perceived limitations of cron';
+digg_bodytext = '<p> My younger son (Rob, 22 soon) wants more Internet. Of course. 20GB a month is not enough for him. While he was away, my wife and I were pushing to use 20% of that. </p> ';
+digg_topic = 'linux_unix';
+</script>
+<script src="http://digg.com/tools/diggthis.js" type="text/javascript"></script>
+</td>
+<td>
+<a name="fb_share" type="box_count" href="http://www.facebook.com/sharer.php">Share</a>
+<script src="http://static.ak.fbcdn.net/connect.php/js/FB.Share" type="text/javascript"></script>
+</td>
+<td>
+<a href="http://twitter.com/home?status=Currently%20reading:%20http://linuxgazette.net/185/grebler1.html%20at%20Linux%20Gazette%20%23linuxgazette" title="Click to share this post on Twitter"><img src="../gx/twitter.png" width="50" height="85" border="0"></a>
+</td>
+</tr>
+</table>
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:185/grebler1.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/authors/grebler.jpg" class="bio">
+</p>
+
+<em>
+<p>
+Henry has spent his days working with computers, mostly for computer
+ manufacturers or software developers. His early computer experience
+ includes relics such as punch cards, paper tape and mag tape. It is
+ his darkest secret that he has been paid to do the sorts of things he
+ would have paid money to be allowed to do. Just don't tell any of his
+ employers. 
+</p>
+
+<p>
+He has used Linux as his personal home desktop since the family got its
+ first PC in 1996. Back then, when the family shared the one PC, it was a
+ dual-boot Windows/Slackware setup. Now that each member has his/her own
+ computer, Henry somehow survives in a purely Linux world.
+</p>
+
+<p>
+He lives in a suburb of Melbourne, Australia.
+</p>
+
+
+
+</em>
+
+<br clear="all">
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2011, Henry Grebler. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication License</a>
+unless otherwise noted in the body of the article.
+<!-- Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc. -->
+</p>
+
+<p>
+Published in Issue 185 of Linux Gazette, April 2011
+</p>
+
+</div>
+
+<div id="previousnextbottom">
+<A HREF="grebler.html" >&lt;-- prev</A> | <A HREF="ikuya.html" >next --&gt;</A>
+</div>
+
+</div>
+</div>
+
+<script src="http://www.google-analytics.com/urchin.js"
+type="text/javascript">
+</script>
+<script type="text/javascript">
+_uacct = "UA-1204316-1";
+urchinTracker();
+</script>
+
+
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+</body>
+</html>
+

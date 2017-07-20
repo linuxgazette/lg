@@ -1,0 +1,1027 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>Journal File Systems LG #55</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<CENTER>
+<A HREF="http://www.linuxgazette.net/">
+<H1><IMG ALT="LINUX GAZETTE" SRC="../gx/lglogo.jpg" 
+	WIDTH="600" HEIGHT="124" border="0"></H1></A> 
+
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="correa.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../faq/index.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="henderson.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+<P>
+</CENTER>
+
+<!--endcut ============================================================-->
+
+<H4 ALIGN="center">
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H1><font color="maroon">Journal File Systems</font></H1>
+<H4>By <a href="mailto:krypto@elrancho.com">Juan I. Santos Florido</a></H4>
+</center>
+<P> <HR> <P>  
+
+<!-- END header -->
+
+
+
+
+<!-- H2>Contents</H2>
+<UL>
+	<LI><a href="#introduction">Introduction</a>
+	<LI><a href="#glossary">Glossary</a>
+	<LI><a href="#THE_JOURNAL">The Journal</a>
+	<LI><a href="#Extents">Extents</a>
+	<LI><a href="#BTrees">The BTrees</a>
+	<LI><a href="#Problems">Known Problems</a>
+	<LI><a href="#Free_blocks_management">Free Blocks Management</a>
+	<LI><a href="#Large_directories">Large Directories</a>
+	<LI><a href="#Large_files">Large Files</a>
+	<LI><a href="#Sparse_files">Sparse Files Support</a>
+	<LI><a href="#Dynamic_i_node">Dynamic I-node Allocation</a>
+</UL -->
+
+<A NAME="introduction"><H2>INTRODUCTION</H2></A>
+As Linux grows up, it aims to satisfy different users and potential
+situations' needs. During recent years, we have seen Linux acquire different
+capabilities and be used in many heterogeneous situations. We have Linux
+inside micro-controllers, Linux router projects, one floppy Linux distribution,
+partial 3-D hardware speedup support, multi-head Xfree support, Linux
+games and a bunch of new window managers as well. Those are important features 
+for end users. There has also been a huge step forward for Linux
+server needs &#151; mainly as a result of the 2.2.x Linux kernel switch. Furthermore,
+sometimes as a consequence of industry support and others leveraged by
+Open Source community efforts, Linux is being provided with the most important
+commercial UNIX and large server's features. One of these features is the
+support of new file systems able to deal with large hard-disk partitions,
+scale up easily with thousands of files, recover quickly from crash, increase
+I/O performance, behave well with both small and large files, decrease the
+internal and external fragmentation and even implement new file system
+abilities not supported yet by the former ones.
+<p>
+This article is the first in a series of two, where the reader
+will be introduced to the Journal File Systems:&nbsp; JFS, XFS, Ext3, and
+ReiserFs. Also we will explain different features and concepts related
+to the new file systems above. The second article is intended to review
+the Journal File Systems behaviour and performance through the use of
+tests and benchmarks.</td>
+
+
+<A NAME="glossary"></A>
+<H2 align="center">GLOSSARY</H2>
+
+<H3>Internal fragmentation</H3>
+<p>The logical block is the minimum allocation unit presented by the file
+system through the system calls. That means that, storing fewer bytes than
+the logical block's within a file, would take a logical block's size of
+disk space to appear allocated. Therefore, if our block size doesn't divide
+a particular file (file size MOD block size != 0), the
+file system would allocate a new block that won't be completely full, causing
+a waste of space. That waste of space is internal fragmentation. Notice
+that the bigger the logical block is, the bigger the internal fragmentation
+should be.
+
+<H3>External fragmentation</H3>
+<p>External fragmentation is a situation in which logical blocks
+of a particular file are scattered all over the disk, causing operations
+over that file to be slower, since more hard-disk header movements are
+needed.
+
+<a NAME="Extents"></a>
+<H3>Extents</H3>
+<p>Extents are sets of contiguous logical blocks used by several file systems
+and even database engines. An extent descriptor is something like <tt>beginning, extent size, offset</tt>, where beginning is the block address where the
+extent begins, the extent size is the size in blocks, and offset is the
+offset that the first byte of the extent occupies within the file.
+<center>
+<p><img SRC="misc/florido/Image18.jpg" height=159 width=388></center>
+
+<p>Extents enhance spatial locality, since the blocks within an extent
+are all contiguous. That increase will lead to better scan times, as
+fewer header movements need to be performed. Realise that using extents
+reduces the external fragmentation drawback, since more blocks are kept
+spatially together. But notice that extents usage isn't always a benefit.&nbsp;
+In case our applications request extents near in size to logical block's,
+we would lose the extents benefits, resulting in many small extents that would
+merely appear as logical blocks. To close the performance increase benefits,
+extents improve multi-sector transfer chances and reduce the amount of
+hard disk cache misses.
+<p>
+Finally, I would like you to realise that extents also provide for a
+way to organise large amounts of free contiguous space efficiently. Using
+extents will help us reduce the amount of disk space required to track
+free blocks, and will even enhance performance.
+<p>
+
+<a NAME="BTrees"></a>
+<H3>B+Trees</H3>
+<center>
+<p><img SRC="misc/florido/btreetexto.png" height=400 width=600></center>
+
+<center><table BORDER CELLPADDING=4 WIDTH="519" >
+<tr>
+<td VALIGN=TOP><i><font size=-1>B+Tree diagram: the leaf node's keys are
+ordered within the tree improving scan times, since the scan is no longer
+sequential. Leaf nodes are chained using pointers to each other.</font></i></td>
+</tr>
+</table></center>
+
+<p>The B+tree structure has been used on databases indexing structures
+for a long time. This structure provided databases with a scalable and fast manner
+to access their records. B+tree stands for Balanced Tree. The + sign means
+that the Btree is a modified version of the original Btree, or more precisely,
+consists of maintaining pointers from each leaf node to the next, in order
+not to sacrifice sequential accesses.
+As Btrees and B+Trees have been inherited from database technology,
+we are going to use a database analogy to explain them.
+<p>
+The B+trees have two different types of nodes: the internal nodes and
+the leaf nodes. Both of them consist of sets of pairs like (key, pointer), 
+ordered by the key value in an ascending manner and a final pointer
+which does not have a corresponding key. Whereas the internal node pointers
+are used to point to others' internal or leaf nodes, the leaf node pointers
+point to the final information directly. Every single pair's key is used 
+to organise the information within the B+Tree. In databases, each
+record has a key field, a field where the value is used to distinguish
+that record from the same kind of records. Btrees take advantage
+of that key to index database records for better access times.
+<p>
+<BLOCKQUOTE> <EM>
+[In the diagram, the keys are file names.  The bottom row above the
+red boxes contains a key for every file in the directory: these are the leaf
+nodes.  Above these are the internal nodes, keys that have been chosen by the
+system to make finding other keys faster. -Ed.]
+</EM> </BLOCKQUOTE>
+<p>
+As we said earlier, an internal node pair (key, pointer) is used
+to point out either another internal node or a final leaf node. In both
+cases, the key that comes with the pointer will be greater than all the
+keys stored in the target node. Therefore, records with an equal key value
+to a certain pair's should be addressed by the next pair within the
+node. This is the main reason for a final pointer with no corresponding
+key to exist. Notice that once a key is used within a pair, there should
+be another pointer to address the records with that key value. That final
+pointer, is used in the leaf nodes to point to the next. That way, we can
+still visit the contents organised sequentially.
+<p>
+B+Trees also have to be balanced. That means the length of the
+path taking us from the tree's root to any leaf node should always be the
+same.
+Moreover, the nodes within a BTree must contain a minimum number
+of pairs in order to exist. Whenever a node's content gets below that minimum, the
+pairs contained would be shifted to another existing node.
+<p>In order to locate a specific record, we would do the following. Let's
+suppose we are looking for a record with a certain key, &quot;K&quot;. 
+We would begin
+at the root node, and then begin sequentially scanning the keys stored
+within. We scan throughout that node until we found a key that was
+greater than &quot;K&quot;. Then we go to the node (internal or leaf; we
+don't know yet) pointed by the accompanying pointer. Once 
+there, if we were taken to another internal node, we repeat the same
+operation. Finally, we get directed to a leaf node, where we 
+scan sequentially until we found the desired key &quot;K&quot;. As fewer blocks have
+to be retrieved to get the desired one, this technique is of lower
+complexity than sequential scanning, where in the worst case, we should
+visit all the entries.
+
+<H3>UNIX File System (UFS)</H3>
+<P> The name of the file system SCO, System V and some other UNIXes used at
+the beginning.  The Linux kernel includes optional support for UFS.  Most UNIXes
+continue to use UFS, although now with custom minor enhancements.
+
+<H3>Virtual File System (VFS)</H3>
+<P> A kernel layer that provides a unified application programming interface
+for file system services, irrespective of which file system a file resides in.
+All file system implementations (vfat, ext2fs, jfs, etc) must therefore provide
+certain VFS routines in order to be usable under Linux.  VFS is the kernel
+layer that makes user applications able to understand so many different file
+systems, even file systems that are comercial.
+
+<a NAME="THE_JOURNAL"><H2 ALIGN="center">THE JOURNAL</H2></a>
+
+<H3>What is a Journal File System?</H3>
+<P>
+I think we all know what a write cache is; a buffer allocated
+in the main memory intended to speed I/O operations up. This kind of buffer
+is commonly used in file systems &#151; the disk cache &#151; and databases to increase
+overall performance. The problem appears if there is a system crash, before
+the buffers have been written to disk, that would cause the system to behave
+in an inconsistent way after system reboot. Think of a file deleted in
+the cache, but remaining in the hard disk. That's why databases and file
+systems have the ability to recover the system back to a consistent state.
+Although databases have recovered quickly for years, the file systems and
+more precisely UFS-like ones tend to increase their recover time as file
+system size grows. The fsck recover tool for ext2fs has to scan through
+the entire disk partition in order to take the file system back to a consistent
+state. This time-consuming task often creates a lack of availability for
+large servers with hundreds of gigabytes or sometimes terabytes. This is
+the main reason for the file systems to inherit database recover technology, 
+and thus the appearance of Journal File Systems.
+
+<H3>How does it work?</H3>
+<p>
+Most serious database engines use what is called a transaction. A transaction
+is a set of single operations that satisfy several properties. The so-called
+ACID properties of transactions stands for Atomicity, Consistency, Isolation
+and Durability. The most important feature for our explanation is the Atomicity.
+This property implies that all operations belonging to a single transaction
+are completed without errors or cancelled, producing no changes. This feature,
+together with Isolation, make the transactions look as if they were
+atomic operations that can't be partially performed. This transaction
+properties are held on databases, due to the problems related to keeping
+consistency while exploiting concurrency. Databases take advantage of this,
+logging every single operation within the transaction into a log file.
+Not only the operation names are logged in, but also the operation argument's
+content before the operation's execution. After every single transaction, there
+must be a commit operation, making the buffers be written to disk. Therefore,
+if there is a system crash, we could trace the log back to the first commit
+statement, writing the argument's previous content back to its position
+in the disk.
+<p>Journal file systems use the same technique above to log file system
+operations, causing the file system to be recoverable in a small period
+of time.
+<p>One major difference between databases and file systems journaling
+is that databases log users and control data, while file systems tend to
+log metadata only. Metadata are the control structures inside a file
+system: i-nodes, free block allocation maps, i-nodes maps, etc.
+
+<a NAME="Problems"></a>
+<H2 ALIGN="center">KNOWN PROBLEMS--SATISFYING THE SCALABILITY NEEDS</H2>
+
+<p><br>UNIX File System (UFS) and ext2fs were designed when hard disks
+and other storage media weren't as big in capacity. The growth in storage media capacity
+led to bigger files, directories and partition sizes, causing several
+file-system-related problems. These problems are a consequence of the internal
+structures those file systems laid over. Yet, although those structures were adequate
+for old files and directories' average sizes, they have proven inefficient
+for new ones.
+<p>There are two major problems with old structures:
+<ul>
+<li>
+They are unable to cope with new storage capacities: as we said above, old fs
+were designed with certain file, directory and partition sizes in mind.  File
+system structures have a fixed number of bits to store file size information, a
+fixed number of bits to store the logical block number, etc. As a consequence
+of that fixed number of bits, file sizes, partition sizes and the number of
+directory entries are limited. Old structures often lack the number of bits
+required to manage certain object sizes.</li> 
+<li>
+They are inadequate to manage with new storage capacities: although old
+structures are sometimes able to manage with new object sizes, they are
+sometimes inadequate to manage with them for performance reasons. The main
+reason is that certain structures behave well with old sizes, but with the new
+ones lead to performance losses.</li>
+</ul>
+New-generation file systems have been designed to overcome those problems,
+keeping scalability in mind. Several new structures and techniques have
+been included in those fs. Therefore, we are going to explain deeper the
+problems described above and the file system techniques used to
+overcome them.
+
+<H2 ALIGN="center">Solving the inability</H2>
+
+<p>Most new file systems have widened their number of bits for some fields,
+in order to overcome previous limitations. The new limits for those file
+systems are:
+<br>&nbsp;
+<center><table BORDER CELLPADDING=4 WIDTH="632" >
+<tr>
+<td VALIGN=TOP WIDTH="20%" BGCOLOR="#00FFFF">&nbsp;</td>
+
+<td VALIGN=TOP COLSPAN="2" WIDTH="22%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">Max. file system size</font></center>
+</td>
+
+<td VALIGN=TOP COLSPAN="3" WIDTH="40%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">Block sizes</font></center>
+</td>
+
+<td VALIGN=TOP COLSPAN="2" WIDTH="18%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">Max. file size</font></center>
+</td>
+</tr>
+
+<tr>
+<td VALIGN=CENTER WIDTH="20%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">XFS</font></center>
+</td>
+
+<td VALIGN=CENTER COLSPAN="2" WIDTH="22%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">18 thousand petabytes</font></center>
+</td>
+
+<td VALIGN=TOP COLSPAN="3" WIDTH="40%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">512 bytes to 64KB</font></center>
+</td>
+
+<td VALIGN=TOP COLSPAN="2" WIDTH="18%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">9 thousand petabytes</font></center>
+</td>
+</tr>
+
+<tr>
+<td VALIGN=CENTER ROWSPAN="2" WIDTH="20%" HEIGHT="52" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">JFS</font></center>
+</td>
+
+<td VALIGN=TOP COLSPAN="2" WIDTH="22%" HEIGHT="52" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">512 bytes blocks / 4 petabytes</font></center>
+</td>
+
+<td VALIGN=CENTER COLSPAN="3" ROWSPAN="2" WIDTH="40%" HEIGHT="52" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">512, 1024, 2048, 4096 bytes</font></center>
+</td>
+
+<td VALIGN=TOP COLSPAN="2" WIDTH="18%" HEIGHT="52" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">512 Tb with 512 bytes blocks</font></center>
+</td>
+</tr>
+
+<tr>
+<td VALIGN=CENTER COLSPAN="2" WIDTH="22%" HEIGHT="17" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">4KB blocks / 32 petabytes</font></center>
+</td>
+
+<td VALIGN=TOP COLSPAN="2" WIDTH="18%" HEIGHT="17" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">4 petabytes with 4KB blocks</font></center>
+</td>
+</tr>
+
+<tr>
+<td VALIGN=CENTER WIDTH="20%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">ReiserFS</font></center>
+</td>
+
+<td VALIGN=CENTER COLSPAN="2" WIDTH="22%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">4GB of blocks, 16 Tb</font></center>
+</td>
+
+<td VALIGN=CENTER COLSPAN="3" WIDTH="40%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">Up to 64KB</font>
+<br><font color="#0000FF">Currently fixed 4KB</font></center>
+</td>
+
+<td VALIGN=TOP COLSPAN="2" WIDTH="18%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">4GB, 2^10 petabytes in ReiserFS (3.6.xx)</font></center>
+</td>
+</tr>
+
+<tr>
+<td VALIGN=CENTER WIDTH="20%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">Ext3FS</font></center>
+</td>
+
+<td VALIGN=CENTER COLSPAN="2" WIDTH="22%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">4Tb</font></center>
+</td>
+
+<td VALIGN=CENTER COLSPAN="3" WIDTH="40%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">&nbsp;1KB-4KB</font></center>
+</td>
+
+<td VALIGN=TOP COLSPAN="2" WIDTH="18%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">2GB</font></center>
+</td>
+</tr>
+</table></center>
+
+<p><i>Actually, the maximum block device size limits the file system
+size to 2Tb, and there is also a VFS limit of 2GB for file sizes. The good
+news is that we now have file systems able to scale up, and once the 2.4
+kernels come out, I am sure the limits will be extended. Notice also that
+JFS and XFS are commercial file systems ports; they were designed for other
+operating systems where these limitations didn't exist.</i>
+
+<H2 ALIGN="center">Avoiding inadequate use</H2>
+<p>
+<a NAME="Free_blocks_management"></a>
+<H3>The free blocks structure</H3>
+<p>
+Most file systems maintain structures where free blocks are tracked.
+The structures often consist of a list, where all the free blocks' numbers
+are kept. That way, the file system is able to satisfy the applications
+storage requests. UFS and ext2fs use what is called a bitmap, for free
+blocks tracking. The bitmap consists of an array of bits, where each bit
+corresponds to a logical block within the file system's partition. Each
+block's allocation state would be reflected in its related bit. Therefore,
+a logical &quot;1&quot; value could mean the logical block is being used, 
+and a &quot;0&quot; could mean the block is free. The main problem with this 
+kind of structure is that as the file system size grows, the bitmap would 
+grow in size as well, since every single block within the file system must 
+have a corresponding bit within the bitmap. As long as we use 
+a &quot;sequential scan algorithm&quot; for free blocks, we would notice a 
+performance decrease, since the time
+needed to locate a free block would grow as well (worst-case complexity
+O(n), where n is the bitmap's size). Notice that this bitmap approach isn't
+that bad when the file system size is moderate, but as size grows, the
+structure behaves worse.
+
+<p>
+<STRONG>The solution</STRONG> provided by the new-generation file systems is
+the use of extents together with B+Tree organization. The extents approach is
+useful since it can be used to locate several free blocks at a same time. Also,
+extents use provide a way to reduce the structure's size, since more logical
+blocks are tracked with fewer information. Therefore, a bit for each block is
+no longer needed. Furthermore, with extents use, the free block's structure
+size no longer depends on the file system size (structure size would depend on
+the number of extents maintained). Nevertheless, if the file system were so
+fragmented that an extent existed for every single block in the file system,
+the structure would be bigger than the bitmap approach's.  Notice that the
+performance should be significantly increased if our structure kept the free
+blocks only, since fewer items had to be visited. Also, with extents use, even
+when they were organised into a list and sequential scan algorithms were used,
+the performance would be increased, since the structure would pack several
+blocks within an extent, reducing the time to locate a certain number of free
+blocks.
+<p>
+The second approach to overcome the free blocks problem is the use
+of complex structures that lead to lower-complexity scan algorithms. We
+all know there are better ways of organising a set of items that will need 
+to be located later than the use of lists with sequential scan algorithms.
+The B+Trees are used since they are able to locate objects quickly. Thus,
+the free blocks are organised into B+Trees instead of lists, in order to
+take advantage of better scan algorithms. When several free blocks are
+requested by the applications, the file system would traverse the main
+&quot;free blocks B+Tree&quot; in order to locate the free space required. Also,
+there is a &quot;B+Trees + Extents&quot; approach, where not blocks but extents
+are organised within the tree. This approach makes different indexing
+techniques possible. Indexing by extent size, and also by extent position, are implemented
+techniques that make the file system able to locate several free blocks,
+either by size or by their location, quickly.
+
+<a NAME="Large_directories"></a>
+<H3>Large number of directory entries</H3>
+<p>All file systems use a special fs object called directory. The directories, 
+from the file system view, is a set of directory entries. These directory
+entries are pairs (i-node number, file name), where the &quot;i-node number&quot;
+is the number of the i-node &#151; fs internal structure &#151; used to 
+maintain file-relevant information. Once an application wants to look for a certain
+file within a directory, given its file name, the &quot;directory entries structure&quot;
+needs to be traversed. Old file systems organised the directory entries
+within a directory into a list, leading then to sequential scan algorithms.
+As a consequence, with large directories where thousands of files and other
+directories are stored, the performance would be really low. This problem,
+as the one described with the free blocks, is tightly related to the structure
+used. New-generation fs need better structures and algorithms to locate
+files within a directory quickly.
+
+<P> <STRONG>Solution provided: </STRONG>
+The file systems being reviewed use B+Trees to organise the directory
+entries within a directory, leading to better scan times. In those fs,
+the directory entries for every single directory are organised into a B+Tree,
+indexing the directory entries by name. Thus, when a certain file under
+a given directory is requested, the directory B+Tree would be traversed
+to locate the file's i-node quickly. Also, new fs usage of B+Trees is file
+system dependent. There are file systems that maintain a B+Tree for each
+single directory, while others maintain a single file system B+Tree for
+the whole file system directory tree.
+
+<a NAME="Large_files"></a>
+<H3>Large files</H3>
+<p>Some old file systems were designed with certain patterns of file usage
+in mind. Ext2fs and UFS were designed with the idea that the file
+systems would contain small files mainly. That's why the ext2fs and UFS
+i-nodes look as they do. For those of you who still don't know what an
+i-node is, we are going to explain the i-node structure briefly.
+<p>
+An i-node is the structure used by UFS and ext2fs to maintain file-dependent information. The i-node is where the file permissions, file type,
+number of links, and pointers to the fs blocks used by the file are maintained.
+An i-node contains some direct pointers that are pointers (block addresses)
+to a file system's logical blocks used by the file it belongs to. i-nodes
+also contain indirect pointers, double-indirect pointers and even a triple-indirect pointer. Indirect pointers are pointers (addresses) to blocks
+where other pointers to logical blocks are stored. Thus, double-indirect
+pointers are pointers to blocks that contain indirect pointers, and triple-indirect pointers are pointers to blocks containing double-indirect pointers.
+The problem with this addressing technique is that as the file size grows,
+indirect, double-indirect and even triple-indirect pointers are used.
+Notice that the use of indirect pointers leads to a higher number of disk
+accesses, since more blocks have to be retrieved in order to get the block
+required. This would lead to an increasing retrieval time as file sizes
+grow. You could be wondering why ext2fs designers didn't use direct pointers
+only, as they have been proven faster. The main reason is that i-nodes
+have a fixed size, and the use of only direct pointers would take i-nodes
+to be as big in size as the number of direct pointers that could be used,
+wasting much space for small files.
+<center>
+<img SRC="misc/florido/inodo.gif" height=300 width=400></center>
+
+<center><table BORDER CELLPADDING=4 WIDTH="519" >
+<tr>
+<td VALIGN=TOP>
+<center><i><font size=-1>i-node diagram (ext2fs): bigger file sizes require
+more disk accesses, since more indirect, double-indirect and even triple-indirect blocks need to be accessed to retrieve the data.</font></i></center>
+</td>
+</tr>
+</table></center>
+
+<STRONG>Solution provided:</STRONG>
+New file systems must then keep using space efficiently, and provide
+better addressing techniques for bigger files. The main difference with
+old fs is, once more, the use of B+Trees. The file systems we are studying
+contain B+Trees to organise the file blocks. The blocks are indexed by
+the offset within the file; then, when a certain offset within the file
+is requested, the file system routines would traverse the B+Tree to locate
+the block required. The techniques provided to overcome the problem described
+above are file system dependent, too.
+<p>In order to minimise the use of indirect pointers, we could think of
+using bigger logical blocks. This would lead to a higher information per
+block ratio, resulting in fewer indirect pointers usage. But, bigger
+logical blocks increase the internal fragmentation, so other techniques
+are used. The use of extents to collect several logical blocks together
+is one of those techniques. Using extents instead of block pointers would
+cause the same effect as bigger blocks, since more &quot;information per addressed
+unit&quot; ratio is achieved. Some of the reviewed file systems use extents
+to overcome the large file addressing problems. Moreover, extents can
+be organised within a B+Tree indexing by their offset within the file,
+leading to better scan times. New i-nodes usually maintain some direct
+pointers to extents, and in case the file needs more extents, those would
+be organised within a B+Tree. In order to keep performance high when accessing
+small files, the new-generation file systems store file data within the
+i-node itself. Consequently, whenever we get a file's i-node, we would also
+get its data. This is an especially useful technique for symbolic links,
+where the data within the file is really small.
+<br>&nbsp;
+<br>&nbsp;
+<br>&nbsp;
+<center><table BORDER CELLPADDING=4 WIDTH="770" >
+<tr>
+<td VALIGN=CENTER WIDTH="11%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF"><font size=-1>Techniques/file system</font></font></center>
+</td>
+
+<td VALIGN=CENTER WIDTH="12%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">free blocks management</font></center>
+</td>
+
+<td VALIGN=CENTER WIDTH="11%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">Extents for free space</font></center>
+</td>
+
+<td VALIGN=CENTER WIDTH="12%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">Btrees for directory entries</font></center>
+</td>
+
+<td VALIGN=CENTER WIDTH="16%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">Btrees for file's blocks addressing</font></center>
+</td>
+
+<td VALIGN=CENTER BGCOLOR="#00FFFF">
+<center><font color="#0000FF">Extents for file's blocks addressing</font></center>
+</td>
+
+<td VALIGN=CENTER WIDTH="15%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">Data within inode&nbsp;</font>
+<br><font color="#0000FF">(small files)</font></center>
+</td>
+
+<td VALIGN=CENTER WIDTH="11%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">Symbolic links data within the i-node</font></center>
+</td>
+
+<td VALIGN=CENTER WIDTH="16%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">Directory entries within&nbsp; i-node <font size=-1>(small
+directories)</font></font></center>
+</td>
+</tr>
+
+<tr>
+<td VALIGN=CENTER WIDTH="11%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">XFS</font></center>
+</td>
+
+<td VALIGN=TOP WIDTH="12%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">B+Trees, indexed by offset and indexed by
+size</font></center>
+</td>
+
+<td VALIGN=CENTER WIDTH="11%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">YES</font></center>
+</td>
+
+<td VALIGN=CENTER WIDTH="12%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">YES</font></center>
+</td>
+
+<td VALIGN=CENTER WIDTH="16%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">YES</font></center>
+</td>
+
+<td VALIGN=CENTER BGCOLOR="#00FFFF">
+<center><font color="#0000FF">YES</font></center>
+</td>
+
+<td VALIGN=CENTER WIDTH="15%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">YES</font></center>
+</td>
+
+<td VALIGN=CENTER WIDTH="11%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">YES</font></center>
+</td>
+
+<td VALIGN=CENTER WIDTH="16%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">YES</font></center>
+</td>
+</tr>
+
+<tr>
+<td VALIGN=CENTER WIDTH="11%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">JFS</font></center>
+</td>
+
+<td VALIGN=TOP WIDTH="12%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">Tree + Binary Buddy. *(1)</font></center>
+</td>
+
+<td VALIGN=CENTER WIDTH="11%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">NO</font></center>
+</td>
+
+<td VALIGN=CENTER WIDTH="12%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">YES</font></center>
+</td>
+
+<td VALIGN=CENTER WIDTH="16%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">YES</font></center>
+</td>
+
+<td VALIGN=CENTER BGCOLOR="#00FFFF">
+<center><font color="#0000FF">YES</font></center>
+</td>
+
+<td VALIGN=CENTER WIDTH="15%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">NO</font></center>
+</td>
+
+<td VALIGN=CENTER WIDTH="11%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">YES</font></center>
+</td>
+
+<td VALIGN=CENTER WIDTH="16%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">Up to 8</font></center>
+</td>
+</tr>
+
+<tr>
+<td VALIGN=CENTER WIDTH="11%" HEIGHT="44" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">ReiserFS *(2)</font></center>
+</td>
+
+<td VALIGN=CENTER WIDTH="12%" HEIGHT="44" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">Bitmap based</font></center>
+</td>
+
+<td VALIGN=CENTER WIDTH="11%" HEIGHT="44" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">Not supported yet</font></center>
+</td>
+
+<td VALIGN=CENTER WIDTH="12%" HEIGHT="44" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">As a subtree of the main fs tree</font></center>
+</td>
+
+<td VALIGN=CENTER WIDTH="16%" HEIGHT="44" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">Within the file system main tree</font></center>
+</td>
+
+<td VALIGN=CENTER HEIGHT="44" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">To come with release 4</font></center>
+</td>
+
+<td VALIGN=CENTER WIDTH="15%" HEIGHT="44" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">*(3)</font></center>
+</td>
+
+<td VALIGN=CENTER WIDTH="11%" HEIGHT="44" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">*(3)</font></center>
+</td>
+
+<td VALIGN=CENTER WIDTH="16%" HEIGHT="44" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">*(3)</font></center>
+</td>
+</tr>
+
+<tr>
+<td VALIGN=CENTER WIDTH="11%" HEIGHT="44" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">Ext3fs</font></center>
+</td>
+
+<td VALIGN=CENTER COLSPAN="8" WIDTH="94%" HEIGHT="44" BGCOLOR="#00FFFF"><font color="#0000FF">Ext3fs
+isn't a file system designed from scratch; it lies over ext2fs, so it doesn't
+support any of the techniques above. The point is that Ext3fs provides
+ext2fs with journaling support, while preserving backwards compatibility.</font></td>
+</tr>
+</table></center>
+
+<br>&nbsp;
+<br>&nbsp;
+<p><i>(1) JFS uses a different approach to organise the free blocks. The
+structure is a tree, where the leaf nodes are pieces of bitmap instead of
+extents. Actually the leaf nodes are the representation of the binary buddy
+technique for that specific partition (Binary Buddy is the technique used
+to track and then collect together contiguous groups of free logical blocks,
+in order to achieve a bigger group). As we said when discussing the bitmap-based technique, every single bit on the bitmap corresponds to a logical
+block on disk. The value of a single bit could then be &quot;1&quot;, meaning 
+the block is allocated, or it could be &quot;0&quot;, meaning the block is 
+free. The pieces of bitmap, each of which contains 32 bits, could be understood
+as a hex number. Therefore, a value of &quot;FFFFFFFF&quot; would mean that the
+blocks corresponding to the bits on that sub-bitmap are all allocated.
+Finally, making use of that allocation number and other information, JFS
+builds a tree where a group of contiguous blocks of a certain size can be
+located quickly.</i>
+<p>
+(2)<i>This file system's core is based on B*Trees (an enhanced version
+of B+tree).The main difference is that every file system object is placed
+within a single B*Tree. That means there aren't different trees for
+each directory, but each directory has a sub-tree of the main file
+system one. That sort of use requires Reiserfs to have more complex indexing
+techniques. Another major difference is that Reiserfs does not use extents,
+though they are planned to be supported.</i>
+<p>
+(3)<i>ReiserFS organizes every file system object within a B*Tree.
+Those objects, directories, file blocks, file attributes, links, etc.
+are all organised within the same tree. Hashing techniques are used
+to obtain the key field needed to organise items within a BTree. The best
+of it is that by changing the hashing method applied, we are changing the
+way the fs organises the items, and their relative position within the
+tree. There are hashing techniques that help maintain spatial locality
+for items related (directory attributes with directory entries, file attributes
+with file data, etc.).</i>
+<br>&nbsp;
+
+<H2 ALIGN="center">OTHER IMPROVEMENTS</H2>
+
+<p><br>There are other limitations on "UFS-like" file systems. Amongst
+these are the inability to manage sparse files as a special
+case, and the fixed number of i-nodes problem.
+
+<a NAME="Sparse_files"></a>
+<H3>Sparse files support</H3>
+<P>Let's suppose we create a new file, and write a
+couple of bytes at the beginning. Everything is okay until then. What about if
+we now write at offset &quot;10000&quot; within that file? The file system 
+should now look for as many blocks as needed to cover the gap between offset 2
+and offset 10000. That could take a while. The question now is,
+why should the fs allocate those blocks in the middle, if we were not interested
+in them? The answer to that question is the sparse file support provided
+by the new file systems.
+<p>
+The sparse file support is tightly related to the extent addressing
+technique for the file's blocks. The sparse file support takes advantage of
+the field &quot;offset within the file&quot; of extent descriptors. Thus, whenever
+the file system must look for free blocks just to fill the gap opened by
+a situation like the one described above, the file system just sets up
+a new extent with the corresponding &quot;offset within the file&quot; field. Thereafter,
+whenever an application tries to read one of the bytes within the gap,
+a &quot;null&quot; value should be returned, as there is no information there. Finally,
+the gap would be filled in by other applications that wrote at offsets
+within the gap.&nbsp;
+<br>&nbsp;</td>
+
+<CENTER><IMG SRC="misc/florido/sparse.gif" height=262 width=384></CENTER>
+<BR CLEAR="all">
+
+<H3>The ReiserFS internal fragmentation solution</H3>
+<p>
+When we discussed the internal fragmentation and file system performance, 
+we said administrators often have to choose between performance
+and space waste. If we now look at the first table, we would see that new
+fs are able to manage blocks up to 64KB in size. That size of block and
+even smaller would produce a significant waste of space due to internal
+fragmentation. In order to make the use of big block sizes feasible, ReiserFS
+implements a technique that solves the problem.
+<p>
+As we said earlier, ReiserFS uses a B*Tree to organise the file
+system objects. These objects are the structures used to maintain file
+information &#151; access time, file permissions, etc. In other words, the
+information contained within an i-node-,&nbsp; directories and the file's
+data. ReiserFS calls those objects, stat data items, directory items and
+direct/indirect items, respectively. The indirect items consist of pointers
+to unformatted nodes. Unformatted nodes are logical blocks with no given
+format, used to store file data, and the direct items consist
+of file data itself. Also, those items are of variable size and stored
+within the leaf nodes of the tree, sometimes with others in case there
+is enough space within the node. This is why we said before that file
+information is stored close to file data, since the file system always
+tries to put stat data items and the direct/indirect items of the same
+file together. Realise that opposed to direct items, the file data pointed
+by indirect items is not stored within the tree. This special management
+of direct items is due to small file support.
+<p>
+The direct items are intended
+to keep small file data and even the tails of the files. Therefore, several
+tails could be kept within the same leaf node, producing an important decrease
+of wasted space. The problem is that using this technique of keeping
+the file's tails together would increase external fragmentation, since
+the file data is now further from the file tail. Moreover, the task of
+packing tails is time-consuming and leads to performance decrease. This
+is a consequence of the memory shifts needed when someone appends data
+to a file. Anyway, the tails packing technique can be disabled if the administrator
+wants to do so. Consequently, it's once again an administrator choice.
+
+<a NAME="Dynamic_i_node"></a>
+<H3>Dynamic i-node allocation</H3>
+<p>
+One major problem of &quot;UFS-like&quot; file systems is the use of a fixed number
+of i-nodes. As we explained before, the i-nodes contain the information
+related to every file system object. Thus, a fixed number of i-nodes constrains
+the maximum number of objects that can be maintained within the file system.
+In case we used all the i-nodes of the file system, we would have to back up
+the partition, and then reformat with a higher number of i-nodes. The
+reason for this fixed number is that &quot;UFS&quot; uses fixed-size structures to
+track i-nodes state &#151; the same manner as free blocks. Also, &quot;UFS&quot; allocates
+i-nodes at well-known positions for the file system, so no i-node to logical
+blocks mapping is needed. The problem appears when system administrators
+have to guess the maximum number of objects their file systems should manage.
+Notice that it is not always a good policy to create the biggest number
+of i-nodes possible, since the disk space needed for the i-nodes is reserved
+(can't be used for other purposes), and this would waste much space.
+<p>
+To overcome that problem, dynamic i-node allocation appeared. The dynamic
+allocation of i-nodes avoids the need for system administrators to guess
+the maximum number of objects at format time. But the use of dynamic techniques
+leads to other problems: i-node to logical block mapping structures, i-node
+tracking structures, etc. The file systems reviewed use B+Trees to organise
+the allocated i-nodes of the file system. Furthermore, JFS uses &quot;i-node
+extents&quot; that form the leaf nodes of the B+Tree and keep up to 32 i-nodes
+together. There are also structures that help allocate i-nodes close
+to other file system objects. Consequently, the use of dynamic i-node is
+complex and time-consuming, but helps broaden old file systems' limits.
+<br>&nbsp;
+<br>&nbsp;
+<center><table BORDER CELLPADDING=4 WIDTH="633" >
+<tr>
+<td VALIGN=CENTER WIDTH="33%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">Other techniques</font></center>
+</td>
+
+<td VALIGN=CENTER WIDTH="20%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">Dynamic i-node allocation</font></center>
+</td>
+
+<td VALIGN=CENTER WIDTH="25%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">Dynamic i-node tracking structures</font></center>
+</td>
+
+<td VALIGN=CENTER WIDTH="22%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">Support for sparse files</font></center>
+</td>
+</tr>
+
+<tr>
+<td VALIGN=CENTER WIDTH="33%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">XFS</font></center>
+</td>
+
+<td VALIGN=CENTER WIDTH="20%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">YES</font></center>
+</td>
+
+<td VALIGN=CENTER WIDTH="25%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">B+Tree</font></center>
+</td>
+
+<td VALIGN=CENTER WIDTH="22%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">YES</font></center>
+</td>
+</tr>
+
+<tr>
+<td VALIGN=CENTER WIDTH="33%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">JFS</font></center>
+</td>
+
+<td VALIGN=CENTER WIDTH="20%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">YES</font></center>
+</td>
+
+<td VALIGN=CENTER WIDTH="25%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">
+B+Tree with
+i-node extents</font></center>
+</td>
+
+<td VALIGN=CENTER WIDTH="22%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">YES</font></center>
+</td>
+</tr>
+
+<tr>
+<td VALIGN=CENTER WIDTH="33%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">ReiserFS</font></center>
+</td>
+
+<td VALIGN=CENTER WIDTH="20%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">YES</font></center>
+</td>
+
+<td VALIGN=CENTER WIDTH="25%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">its main B*tree*(4)</font></center>
+</td>
+
+<td VALIGN=CENTER WIDTH="22%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">YES*(5)</font></center>
+</td>
+</tr>
+
+<tr>
+<td VALIGN=CENTER WIDTH="33%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">Ext3FS</font></center>
+</td>
+
+<td VALIGN=CENTER WIDTH="20%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">NO</font></center>
+</td>
+
+<td VALIGN=CENTER WIDTH="25%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">NO</font></center>
+</td>
+
+<td VALIGN=CENTER WIDTH="22%" BGCOLOR="#00FFFF">
+<center><font color="#0000FF">NA</font></center>
+</td>
+</tr>
+</table></center>
+
+<p><i>*(4) As we explained in &quot;the ReiserFS internal fragmentation solution&quot;
+section, ReiserFS makes use of stat_data items to store file-dependent
+information. The number of hard links, the file owner id, the owner group
+id, file type, permissions, file size, etc, are all stored within a stat_data
+item for the corresponding file. The stat_data item then replaces the inode's
+usage, except for the pointer to file blocks. Furthermore, the ReiserFS
+items are created dynamically and organised within the main file system
+B*tree, which leads us to dynamic inode allocation. Finally, every single
+file system item has a related key field, which serves to locate the
+item within the B*tree. This key has a number of bits at the end,
+dedicated to item-type identification and to let us know if the item is
+an stat_data, direct, indirect, etc. Therefore, we could say that inode
+organisation is performed by the B*tree usage.</i>
+<p>
+<i>*(5) Currently, ReiserFS sparse files support is not as fast as
+it was intended to be. This problem is scheduled to be fixed with ReiserFS
+release 4.</i>
+
+<H2 ALIGN="center">REFERENCES</H2>
+
+<H3>File system home pages</H3>
+<UL>
+	<LI> <A HREF="http://web.mit.edu/tytso/www/linux/ext2.html">ext2fs</A>
+	<LI> <A HREF="http://devlinux.com/projects/reiserfs/">ReiserFS</A>
+	<LI> <A HREF="http://oss.sgi.com/projects/xfs/">xfs</A>
+	<LI> <A HREF="http://oss.software.ibm.com/developerworks/opensource/jfs/">jfs</A>
+</UL>
+
+
+<H3>Bibliography</H3>
+<UL>
+	<LI>JFS overview and layout white papers by Steve Best and Dave Kleikamp
+	<LI><i>XFS: A Next Generation Journalled 64-Bit Filesystem With Guaranteed
+Rate I/O</i> by Mike Holton and Raj Das. SGI, Inc.
+	<LI><i>Scalability in the XFS File System</i> by Adam Sweeney, Doug Doucette,
+Wei Hu, Curtis Anderson, Mike Nishimoto, and Geoff Peck. SGI, Inc.
+	<LI><i>Scalability and Performance in Modern File Systems</i> by Philip 
+Trautman and Jim Mostek; ReiserFS web site papers.
+	<LI><i>Design and Implementation of the Second Extended Filesystem</i> by 
+R&eacute;my Card, Theodore Ts'o, Stephen Tweedie
+	<LI>ReiserFS developers mailing list.  To join, send e-mail to
+<A HREF="mailto:reiserfs-subscribe@devlinux.com">reiserfs-subscribe@devlinux.com</A>.
+	<LI>JFS mailing list.  To subscribe, send e-mail to 
+<A HREF="mailto:majordomo@oss.software.ibm.com">majordomo@oss.software.ibm.com</A> with "subscribe" in the
+Subject: line and "subscribe jfs-discussion" in the body.
+	<LI><i>Fundamentos de Bases de Datos</i> by Henry F. Korth and Abraham Silberschatz.
+McGraw-Hill, 1993.
+</UL>
+
+<P> The author would like to thank Stephen C. Tweedie, Dave Kleikamp, 
+Steve Best, Hans Reiser, the JFS and the ReiserFS mailing list guys for 
+the fruitful conversations and answers.
+
+
+
+<!-- *** BEGIN copyright *** -->
+<P> <hr> <!-- P --> 
+<H5 ALIGN=center>
+
+Copyright &copy; 2000, Juan I. Santos Florido<BR> 
+Published in Issue 55 of <i>Linux Gazette</i>, July 2000</H5>
+<!-- *** END copyright *** -->
+
+<!--startcut ==========================================================-->
+<HR><P>
+<CENTER>
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="correa.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../faq/index.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="henderson.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+</CENTER>
+</BODY></HTML>
+<!--endcut ============================================================-->

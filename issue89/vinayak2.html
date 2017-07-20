@@ -1,0 +1,328 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>The Linux Scheduler LG #89</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<!-- *** BEGIN navbar *** -->
+<!-- *** END navbar *** -->
+
+<!--endcut ============================================================-->
+
+<TABLE BORDER><TR><TD WIDTH="200">
+<A HREF="http://www.linuxgazette.net/">
+<IMG ALT="LINUX GAZETTE" SRC="../gx/2002/lglogo_200x41.png" 
+	WIDTH="200" HEIGHT="41" border="0"></A> 
+<BR CLEAR="all">
+<SMALL>...<I>making Linux just a little more fun!</I></SMALL>
+</TD><TD WIDTH="380">
+
+
+<CENTER>
+<BIG><BIG><STRONG><FONT COLOR="maroon">The Linux Scheduler</FONT></STRONG></BIG></BIG>
+<BR>
+<STRONG>By <A HREF="../authors/vinayak.html">Vinayak Hegde</A></STRONG>
+</CENTER>
+
+</TD></TR>
+</TABLE>
+<P>
+
+<!-- END header -->
+
+
+
+
+
+
+<h2> Why the Design of Scheduler is critical </h2>
+<p>
+Two of the most critical parts of a kernel are the memory subsystem and 
+the scheduler. This is because they influence the design and affect the 
+performance of almost every other part of the kernel and the OS. That is
+also why you would want to get them absolutely right and optimize their 
+performance. The Linux kernel is used right from small embedded devices,
+scaling up to large mainframes. <!-- Though the kernel is not used as it is but some
+modifications are made to it, the core more or less remains the same.
+Hence it is imperative to get the scheduling policy and the design of the
+scheduler right. -->  Designing is scheduler is at best <i> a black art.</i> No matter
+how good the design is, some people will always feel that some categories
+of  processes have got a raw deal.
+</p>
+
+<p>
+In the article that follows, I have purposely tried to skip
+quoting any reference code because one can easily get it from the net (see the
+references).  The article also looks the challenges developers found when they
+redesigned the scheduler, how those challenges were met, and what could be the
+ the future direction the
+scheduler is likely 
+to follow. Having said that, there's nothing like reading the source code to get
+an understanding of what's going on under the hood. You will find the implementation
+of the scheduler in kernel/sched.c if you have the kernel source installed.
+</p>
+
+<h2> Scheduling Objectives </h2>
+<p>
+<b> The Linux scheduler strives to meet several objectives : </b> <br> <br>
+
+<ol>
+
+<li>
+<b> <u> Fairness </u> </b> : 
+<p> 
+
+The scheduler should give a fair amount of CPU share to every
+process. Quite a fair amount of work has been done in the new kernel to ensure
+fair sharing of CPU time among processes.
+
+</p> </li>
+
+<li> <b> <u> Throughput and CPU utilization </u> </b> : 
+<p>
+
+The scheduler should try to maximize both
+throughput and CPU utilization. The usual method of increasing CPU
+utilization is by increasing the amount of multi-programming. But this is only
+beneficial up to a point after which it becomes counterproductive and thrashing
+starts. 
+
+</p> </li>
+
+<li> <b> <u> Minimal Overhead </u> </b> : 
+<p>
+
+A scheduler itself should run for as small time as
+possible. The scheduler latency should be minimal. But this is the
+tricky part. It is generally seen that scheduling itself is <i> not useful work (??) </i>.
+But if the scheduling is done right even after expending some more time, it may
+be worth the effort. But how do we decide which is the optimal point? Most
+scheduler solve this problem by using some heuristic policies.
+</p> </li>
+
+<li> <b> <u> Enforce priority-based scheduling </u> </b> : 
+<p>
+
+Priority scheduling means that some processes get more preference over others. 
+At the very least the scheduler must differentiate between I/O-bound processes 
+and CPU-bound processes. Moreover, some kind of aging must be
+be implemented so that starvation of processes does not take place. Linux does
+enforce priorities as well as differentiates between different categories of
+processes. The Linux kernel differentiates between batch scheduled jobs and 
+interactive. They get a share of the CPU according to their priorities.
+Probably some people have used the nice command to change the priority of
+a process.
+
+</p> </li>
+
+<li> <b> <u> Turnaround time, waiting time </u> </b>: 
+<p>
+
+Turnaround time is the sum of the service time and amount of time wasted waiting 
+in the ready queue. The scheduler tries to reduce both.
+
+</p> </li>
+
+<li> <b> <u> Response time and Variance </u> </b> : 
+<p>
+
+The response from a program should be as fast
+as possible. Also another important factor which is often ignored is the variance
+between the response times. It is not acceptable if the average response time
+is low but some user occasionally experiences say, a 10-second delay from an interactive
+program.
+
+</p> </li>
+
+<li> <b> <u> Miscellaneous </u> </b> : 
+<p>
+
+The scheduler also tries to meet some other goals such as
+predictability. The behavior of the scheduler should be predictable for a given
+set of process with assigned priorities. The scheduler performance must
+degrade gracefully under heavy loads. This is particularly important because
+the Linux is very popular in the server market, and servers tend to get overloaded
+during peak traffic hours. 
+
+</p> </li> 
+</ol>
+
+<h2> Improvements in the scheduler </h2>
+<ul>
+
+<li> <b> <u> The O(1) complexity Scheduling algorithm </u> </b>
+<p>
+
+What's O(1) you may ask? Well, I am going to skim the surface on what the O (known as the Big-Oh) notation means.
+You will find references to the Big-Oh notation in any good algorithms book. What the Big Oh
+notation essentially does is that it tries to estimate the running time of any algorithm 
+independent of the machine-related implementation issues. It places a upper bound on the 
+running time of the algorithm - that is an upper bound on the algorithm's worst case. 
+It is an exceptional technique to compare the efficiency of an algorithm with respect to 
+running time.
+ 
+</p>
+<p>
+
+Take for example an algorithm which has two nested loops and both of whose
+limits range from 1 to n-1 where (n is number of inputs for the algorithm) then the upper 
+bound on it's running time is denoted by <b> <i> O(N<sup>2</sup>) </i></b>. Similarly,
+consider an algorithm to search for an element in an unordered linked list. The worst case
+is that we will have to traverse the list till the last element to get a match or worse still -
+to find out that the element is not in the list. Such an algorithm is said to have 
+<b> <i> O(N) </i> </b> complexity as it's running time is directly proportional to the number 
+of elements in the list - N.
+ 
+</p>
+<p>
+
+The Linux scheduler takes constant time to schedule the processes
+in the ready queue. Hence, it is said to have <b> <i> O(1) </i> </b> complexity. No matter 
+what is the number of processes active on the Linux system the scheduler will always take 
+constant time to schedule them. All the "parts" - wakeup , selection of the process to be run
+next, context switching and timer interrupt overhead - of the current Linux
+kernel (2.5.49 is the reference here - See resources for details) have O(1) complexity.
+Hence, the new scheduler has O(1) complexity in it's entirety.
+
+</p> </li>
+
+<li> <b> <u> Better Support for SMP and more scalable </u> </b>
+<p>
+
+As mentioned in the introduction, the Linux kernel runs on almost anything from wristwatches 
+to supercomputers. With the earlier schedulers there were some problems with the scalability.
+Some of these problems were solved by modifying the kernel for the application and the target architecture. However, the core design of the scheduler was
+not very scalable. The new scheduler is much more scalable 
+and SMP (Symmetric Multi-Processing) aware. The performance of the scheduler is much better for
+SMP systems now. One on the goals stated by Ingo Molnar who has written the O(1) scheduler is
+that in SMP, processors should not be idle when there is work to do. Also, care should be taken
+that processes do not get scheduled on different processors form time to time. This is to avoid 
+the overhead of filling in the cache with the required data every time.
+
+</p> </li>
+
+<li> <b> <u> Batch scheduling of jobs </u> </b>
+<p>
+
+This is not exactly a new feature, but there are some patches that can be applied to support 
+batch scheduling. Earlier kernels also had some support for batch scheduling. As of now, the 
+batch scheduling of task is done using priority levels. The Linux kernel uses about 40 nice 
+levels (though they are all mapped to about 5 levels of priority). Batch scheduled processes
+generally get the CPU when there are not many interactive and CPU-bound processes around, which have more priority. Batch scheduled processes get bigger time-slices to run than 
+normal processes. This also minimizes the effect of swapping data in and out of the cache 
+frequently, thus improving the performance of batch jobs.  
+
+</p> </li>
+
+<li> <b> <u> Better performance of Interactive Jobs </u> </b>
+<p>
+
+One of the major improvements in the new scheduler is detection and boosting the performance of
+interactive tasks. Tweaking the old scheduler code was a bit cumbersome. In the new scheduler, 
+detection of interactive jobs is decoupled from other scheduler tasks such as time-slice management.  
+Interactive jobs in the system are detected in the system with the help of usage-related statistics.
+That means interactive tasks have good response times under heavy loads, and CPU-hogging processes 
+cannot monopolize CPU time. The new scheduler actively detects interactive tasks and give them more
+precedence over other tasks. Even then, a interactive task is scheduled with other interactive tasks 
+by using Round-Robin scheduling. This makes a lot of sense for desktop users as they will not see 
+response time increase when they start a CPU intensive job such as encoding songs into the ogg format. 
+Plans are on to merge O(1) and pre-emption code to give better response times for interactive tasks. 
+
+</p> </li>
+
+<li> <b> <u> Better Scalability and support for more architectures </u> </b>
+<p>
+
+Because of the redesign of the new scheduler, it scales more easily to other architectures such
+as NUMA (Non-Uniform Memory Access) and SMT. NUMA architecture is used on some high-end servers
+and supercomputers. Also there is some ongoing work on the SMT (Symmetric Multi-Threading).
+SMT is also known by a more popular term: HyperThreading. One of the reasons is that
+now every CPU has it's own run queue. Only the load balancing sub-part has a "global" view of the 
+system. So any changes for some architecture are to be made mainly in the load balancing sub-part.
+Also recently a patch for NUMA was released. In fact it has been incorporated in Linux 2.5.59.
+SMT processors implement two (or more) virtual CPUs on the same physical processor - one "logical"
+processor can be running while the other waits for memory access. SMT can certainly be seen as a 
+sort of NUMA system, since the sibling processors share a cache and thus have faster access to 
+memory that either one has accessed recently. Some work is going also going on SMT, but the 
+new O(1) scheduler handles SMT pretty well even without any changes. Recently a patch was released
+for SMT. Though the NUMA architecture bears some resemblance to the SMT architecture, the Linux
+scheduler handles them differently.
+
+</p> </li>
+
+<li> <b> <u> Miscellaneous </u> </b>
+<p>
+
+The scheduler gives more priority to fork()ed children than to the parent itself. This could 
+potentially be useful for servers which use the fork call to service requests. It could also be 
+useful for GUI applications. There are also some real-time scheduling (based on priority)
+available in the kernel. 
+
+</p> </li> 
+</ul>
+
+<h2> Resources </h2>
+<ul> 
+<li> <a href="http://people.redhat.com/~mingo/O(1)-scheduler/"> Ingo Molnar's Homepage O(1) patches </a> </li>
+<li> <a href="http://www.tldp.org/LDP/lki/lki-2.html#ss2.3"> Linux Kernel Internals - Tigran Aivazian</a> </li>
+<li> Browse the Linux Kernel Source Code @ lxr.linux.no
+	<ol> 
+	<li> <a href="http://lxr.linux.no/source/Documentation/sched-design.txt?v=2.5.49"> Scheduler Design </a> </li>
+	<li> <a href="http://lxr.linux.no/source/Documentation/sched-coding.txt?v=2.5.49"> Some notes about scheduler functions </a> </li>
+	</ol>
+</li>
+</ul>
+
+
+
+
+
+
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<P>
+<img ALIGN="LEFT" ALT="[BIO]" SRC="../gx/2002/note.png">
+<em>
+Vinayak is currently pursuing the APGDST course
+at NCST. His areas of interest are networking, parallel
+computing systems and programming languages. He
+believes that Linux will do to the software industry
+what the invention of printing press did to the world
+of science and literature. In his non-existent free
+time he likes listening to music and reading books. He
+is currently working on Project LIberatioN-UX where he
+makes affordable computing on Linux accessible for
+academia/corporates by configuring remote boot stations
+(Thin Clients).
+</em>
+<br CLEAR="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+
+<!-- *** BEGIN copyright *** -->
+<hr>
+<CENTER><SMALL><STRONG>
+Copyright &copy; 2003, Vinayak Hegde.
+Copying license <A HREF="../copying.html">http://www.linuxgazette.net/copying.html</A><BR> 
+Published in Issue 89 of <i>Linux Gazette</i>, April 2003
+</STRONG></SMALL></CENTER>
+<!-- *** END copyright *** -->
+<HR>
+
+<!--startcut ==========================================================-->
+<CENTER>
+<!-- *** BEGIN navbar *** -->
+<!-- *** END navbar *** -->
+</CENTER>
+</BODY></HTML>
+<!--endcut ============================================================-->

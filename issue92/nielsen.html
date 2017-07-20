@@ -1,0 +1,345 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>My Open Radio LG #92</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<!-- *** BEGIN navbar *** -->
+<A HREF="lodato.html">&lt;&lt;&nbsp;Prev</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="index.html">TOC</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../index.html">Front Page</A>&nbsp;&nbsp;|&nbsp;&nbsp;Talkback&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../faq/index.html">FAQ</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="okopnik.html">Next&nbsp;&gt;&gt;</A>
+<!-- *** END navbar *** -->
+
+<!--endcut ============================================================-->
+
+<TABLE BORDER><TR><TD WIDTH="200">
+<A HREF="http://www.linuxgazette.net/">
+<IMG ALT="LINUX GAZETTE" SRC="../gx/2002/lglogo_200x41.png" 
+	WIDTH="200" HEIGHT="41" border="0"></A> 
+<BR CLEAR="all">
+<SMALL>...<I>making Linux just a little more fun!</I></SMALL>
+</TD><TD WIDTH="380">
+
+
+<CENTER>
+<BIG><BIG><STRONG><FONT COLOR="maroon">My Open Radio</FONT></STRONG></BIG></BIG>
+<BR>
+<STRONG>By <A HREF="../authors/nielsen.html">Mark Nielsen</A></STRONG>
+</CENTER>
+
+</TD></TR>
+</TABLE>
+<P>
+
+<!-- END header -->
+
+
+
+
+
+
+<ol>
+<li>
+<a href="#Introduction">Introduction</a></li>
+<li><a href="#apache">Setting up Apache</a></li>
+<li><a href="#grip">Using Grip to Rip</a></li>
+<li><a href="#python">The Python Script</a></li>
+<li><a href="#play">Play the List</a></li>
+<li><a href="#conclusion">Conclusion</a></li>
+<li><a href="#REF">References</a></li>
+</ol>
+
+<h3>
+<a NAME="Introduction"></a>Introduction</h3>
+I am sick of playing cds. Half the songs on a cd suck. I don't like switching
+cds in and out. I am sick of commercial radio with their stupid mid-life
+crisis hosts who try to appeal to teenagers by trying to act like them (grow
+up). I like to listen to music (from cds)
+ or shows on NPR as background noise while I
+program. I decided to develop a way to make my computer play songs and NPR 
+shows as though it were a radio. This will eliminate cds and commercial radio
+shows. 
+I want my computer to play this stuff in 
+a random order. The first thing I wanted to do was rip songs from my cds
+and play them in a random order. 
+The second thing (which is not in this article) was to download
+a playlist of all the shows I like to listen to on NPR
+(I hope someday NPR will accept my offer to develop playlists (as my donation) 
+for their listeners). 
+
+<p>For now, I am keeping things really really simple. In the future, I plan
+to add playlists, give songs weight, put stuff into a PostgreSQL databases,
+add accounts, etc. 
+
+<p>
+I am very lazy. So lazy, I didn't bother to look long at the various web-based 
+mpeg organizers of your favorite songs. I just wanted something to spit out
+200 songs in a random order so that it simulates a radio station. I first
+had to rip the songs and then write a simple 
+<a href="http://www.python.org/">Python</a> script to split out a playlist. 
+<p>
+
+<h3><a NAME="apache"></a>Configuring Apache</h3>
+On your Linux server, find your html root directory for your httpd server.
+On some systems, this is located at "/var/www/html". Assuming that it is,
+do this:
+<pre>
+cd /var/www/html
+mkdir audio
+</pre>
+
+Now copy all of your mp3, rm, wav, or other audio files into the directory
+"/var/www/html/audio". NOTE: Do you not use your web server for anybody
+but yourself. Only you may listen to these songs or you may get into
+copyright problems. Contact an attorney for issues regarding legal issues.
+<p>
+To start your webserver, usually you can do this "service httpd start".
+If that doesn't work, then look at the documentation that came with your
+Linux distribution to figure out how to start and stop the web service.
+Usually the default web server on most Linux systems with be Apache.
+
+<h3><a NAME="grip"></a>Using Grip to Rip</h3>
+After looking at many programs, Grip seemed to be the easiest to use to
+rip songs from a cd. It organizes the songs by author and album. Nice. 
+Here are the steps I used to configure Grip. 
+<ol>
+<li> Download and install "LAME" from http://www.mp3dev.org. Be aware of
+any patent issues. 
+<pre>
+cd /usr/local/src
+lynx --source http://twtelecom.dl.sourceforge.net/sourceforge/lame/lame-3.93.1.tar.gz > lame-3.93.1.tar.gz
+tar -zxvf lame-3.93.1.tar.gz
+cd lame-3.93.1
+./configure --prefix=/usr/local/lame
+make install
+ln -s /usr/local/lame/bin/lame /usr/bin/lame
+</pre>
+</li>
+
+<li>Start Grip.</li>
+<li>Configure Grip. Under the "Config" menu, do this.
+<br>Click on Encode, choose 'lame' as the encoder. Where is says "Encode
+File Format" make sure you specify the directory "/var/www/html/audio" as the
+base directory. Mine looked like this '/var/www/html/audio/%A/%d/%t_%n.mp3'.
+</li>
+
+<li>Click on "Tracks" in the top menu and select the tracks you want to rip.</li>
+<li>Click on "Rip" in the top menu and then click on "Rip + Encode". </li>
+
+</ol>
+
+
+<h3><a NAME="python"></a>The Python Script.</h3>
+Put this python script at "/var/www/cgi-bin/playlist.py". Execute this
+command after putting it there "chmod 755 /var/www/cgi-bin/playlist.py".
+After you have properly installed this python script (please use Python 2.2)
+and you know it works right, you might have to change the url from 127.0.0.1
+to the ip address of your computer for the network so that other computers
+in your house can play the music as well. 
+
+<pre>
+#!/usr/bin/python
+# Make sure this line above is the first line of this file.
+
+### Copyright under GPL 
+
+  ## import the python modules we need. 
+import os, re, time, random
+
+  ## Setup some variables. You can change these varaibles for your needs. 
+Home = "/var/www/html/audio"
+Url_Base = "http://127.0.0.1/audio"
+Song_Max = 200
+List_Type = "mpegurl"
+
+## DO NOT CHANGE ANYTHING BELOW HERE UNLESS YOU ARE A PYTHON GEEK.
+File_Match = re.compile('[{mp3}{rm}{wav}{ogg}{mpeg}]$')
+Home_Re = re.compile('^' + Home)
+List_Types = {'smil':'application/smil', 'mpegurl':'audio/x-mpegurl'}
+
+#---------------------------------------
+  ## This function will go through and get the absolute path of all files
+  ## that match. It is a recursive method. 
+def Dir_Contents(Item=""):
+  Final_List = []  
+  if Item == '': return ('')
+  elif os.path.isdir(Item):
+    List = os.listdir(Item)
+    for Item2 in List:
+      Item3 = Item + "/" + Item2
+      Temp_List = Dir_Contents(Item=Item3)
+      for Item4 in Temp_List: Final_List.append(Item4)
+  elif os.path.isfile(Item):
+    if File_Match.search(Item):   return([Item])
+    else:   return([])
+  return (Final_List)
+      
+#--------------------------
+
+List =  Dir_Contents(Home)
+List_Copy = List
+  ## Randomize how many times we call random. 
+Secs = int(time.strftime('%S')) * int(time.strftime('%H')) * int(time.strftime('%M'))
+for i in range(0,Secs): random.random()
+
+  ## Randomly get one file at a time until there is none left. 
+New_List = []
+while (len(List_Copy) &gt; 0):
+  Position = random.randint(0,len(List_Copy) - 1)
+  New_List.append(List_Copy[Position])
+  del List_Copy[Position]
+
+  ## Redo the urls in the list.
+Urls = []
+for Item in New_List:
+    ## For each item, strip the Home directory prefix and preappend the url.
+  Url = Url_Base + Home_Re.sub('', Item)
+  Urls.append(Url)    
+
+  ## If we are greater than the number of songs we want to listen to,
+  ## cap it off. Bonus points if you can figure out how many songs
+  ## are in this array when Song_Max = 200.
+if len(New_List) &gt; Song_Max:  New_List = New_List[0:Song_Max]
+
+  ## If the idiot who edited this file has an invalid list type.... 
+if not List_Types.has_key(List_Type): List_Type = 'mpegurl'
+Content_Type = List_Types[List_Type]
+
+  ### Now print out the content. 
+print "Content-Type: " + Content_Type + "\n\n"
+
+if List_Type == 'mpegurl':  
+  for Url in Urls: print Url
+elif List_Type == 'smil':
+  print "\n&lt;smil&gt;\n   &lt;body&gt;\n"
+  for Item in Urls:  print "      &lt;audio src='" + Url+ "'/&gt;"
+  print "   &lt;/body&gt;\n&lt;/smil&gt;\n"
+else:  
+  for Url in Urls: print Url
+    
+
+#------------------------------------------------------------------------
+#                          Open Radio version 1.0
+
+#                       Copyright 2003, Mark Nielsen
+#                            All rights reserved.
+#    This Copyright notice was copied and modified from the Perl
+#    Copyright notice.
+#    This program is free software; you can redistribute it and/or modify
+#    it under the terms of either:
+
+#        a) the GNU General Public License as published by the Free
+#        Software Foundation; either version 1, or (at your option) any
+#        later version, or
+
+#        b) the "Artistic License" which comes with this Kit.
+
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See either
+#    the GNU General Public License or the Artistic License for more details.
+
+#    You should have received a copy of the Artistic License with this
+#    Kit, in the file named "Artistic".  If not, I'll be glad to provide one.
+#    You can look at http://www.perl.com for the Artistic License.
+
+#    You should also have received a copy of the GNU General Public License
+#   along with this program in the file named "Copying". If not, write to the
+#   Free Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
+#    02111-1307, USA or visit their web page on the internet at
+#    http://www.gnu.org/copyleft/gpl.html.
+
+</pre>
+
+<h3><a NAME="play"></a>Play the List. </h3>
+Personally, I use Real Player. I tried to use xmms, but it didn't work for 
+some reason (with the mpegurl list). 
+Real Player accepts both smil and mpegurl, so I just use it. 
+I would like to switch to some free GPLed player instead someday. 
+<p>
+Just type this into your browser, Real Player, or whatever other player you
+are using "http://127.0.0.1/cgi-bin/playlist.py".
+
+<h3>
+<a NAME="conclusion"></a>Conclusion</h3>
+This little setup is perfect for me. In the future, I want to create
+accounts, playlists, keeping track of which songs haven't been played yet, 
+give a song weight, and a bunch of others things. For now, I am finished
+with this and will move onto making a playlist of my favorite NPR shows. 
+<p>
+I am big ideas of where this could lead. Since I have a lot of unfortunate
+experience with Flash, Real Player, Windows Media Player, and Javascript, 
+it seems like something could develop here. I heard a lot of stuff about
+internet radio stations, but it seems like none of them are really
+approaching the market right. They seem to be stuck in the old days of
+radio. They need to move forward and not be constrained by the media giants 
+(legally). It seems like the internet radio stations don't see the big
+picture. For now, I am just going to develop my own little radio for myself
+and maybe do something with it for real later. 
+
+<h3>
+<a NAME="REF"></a>References</h3>
+
+<ol>
+<li><a href="http://www.nostatic.org/grip/">http://www.nostatic.org/grip/</a></li>
+<li><a href="http://www.apache.org">http://www.apache.org</a></li>
+<li><a href="http://www.python.org">http://www.python.org</a></li>
+<li><a href="http://service.real.com/help/library/earlier.html">
+http://service.real.com/help/library/earlier.html</a></li>
+<li>
+If this article
+changes, it will be available here
+<a href="http://www.tcu-inc.com/Articles/34/open_radio.html">
+http://www.tcu-inc.com/Articles/34/open_radio.html</a></li>
+</ol>
+
+
+
+
+
+
+
+
+
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<P>
+<img ALIGN="LEFT" ALT="[BIO]" SRC="../gx/2002/note.png">
+<em>
+Mark Nielsen works at 
+<a href="http://www.crisphughesevans.net/">Crisp Hughes Evans</a>.
+In his spare time, he writes articles relating to Free Software (GPL) or 
+Free Literature (FDL)</i>. Please email him at articles@tcu-inc.com
+and put in the subject "ARTICLE:" or the message will be deleted and not
+even looked at -- to stop spammers.
+</em>
+<br CLEAR="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+
+<!-- *** BEGIN copyright *** -->
+<hr>
+<CENTER><SMALL><STRONG>
+Copyright &copy; 2003, Mark Nielsen.
+Copying license <A HREF="../copying.html">http://www.linuxgazette.net/copying.html</A><BR> 
+Published in Issue 92 of <i>Linux Gazette</i>, July 2003
+</STRONG></SMALL></CENTER>
+<!-- *** END copyright *** -->
+<HR>
+
+<!--startcut ==========================================================-->
+<CENTER>
+<!-- *** BEGIN navbar *** -->
+<A HREF="lodato.html">&lt;&lt;&nbsp;Prev</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="index.html">TOC</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../index.html">Front Page</A>&nbsp;&nbsp;|&nbsp;&nbsp;Talkback&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../faq/index.html">FAQ</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="okopnik.html">Next&nbsp;&gt;&gt;</A>
+<!-- *** END navbar *** -->
+</CENTER>
+</BODY></HTML>
+<!--endcut ============================================================-->

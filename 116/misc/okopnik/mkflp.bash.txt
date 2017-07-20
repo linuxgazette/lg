@@ -1,0 +1,118 @@
+#!/bin/bash
+# Created by Ben Okopnik on Thu Mar 17 23:56:31 EST 2005
+#
+# Many thanks to Fabian Franz, whose original script gave me the idea of
+# how it's all supposed to work.
+#
+# This script creates a boot floppy that passes control to a USB PenDrive
+# containing a Knoppix CD image. No CDROM, no problem!
+#
+
+############## User configuration section ###############################
+
+# Set this to the directory where the Knoppix image lives, or specify the
+# directory as a command-line argument.
+KNOPPIX_DIR=${1:-/home/ben/tmp2}
+
+############## End of user config section ###############################
+
+abort()
+{
+  printf "$@\n"
+  exit 1
+}
+
+clean_exit()
+{
+  [ -d "$TMPDIR" ] && rm -rf $TMPDIR
+}
+
+# Validation tests
+[ $UID -ne 0 ] && abort "Root privileges are required to run this script."
+[ -d "$KNOPPIX_DIR" ] || abort "$KNOPPIX_DIR is not a directory."
+[ -z "`ls $KNOPPIX_DIR|grep -i 'knoppix.*iso'`" ] && 
+	abort "Knoppix image not found in $KNOPPIX_DIR."
+
+# Create temp dir, get rid of it on exit
+TMPDIR=`mktemp -dp /tmp/ make_floppy.XXXXXX`
+trap "clean_exit" EXIT
+
+# Jump into TMPDIR and prepare it for the coming ops
+ORIG_DIR=$(pwd)
+cd $TMPDIR
+mkdir knoppix floppy miniroot old_miniroot
+
+# Choose and mount the Knoppix image
+printf "Please choose one of the following images:\n"
+select choice in $KNOPPIX_DIR/K*.iso; do break; done
+mount $choice knoppix -o loop
+
+# Decompress the miniroot from the mounted image's boot dir
+gunzip -c knoppix/boot/isolinux/minirt24.gz > minirt24
+
+# "Back up" and mount the miniroot
+mv minirt24 minirt24.old
+mount -o loop minirt24.old old_miniroot
+
+# Create the file which will contain the new miniroot; format it as a DOS
+# FS and mount it
+dd if=/dev/zero of=minirt24 bs=4M count=1
+mke2fs -L "KNOPPIX Miniroot" -b 1024 -N 8192 -O none -F -q -m 0 minirt24
+mount -o loop minirt24 miniroot
+
+# Copy the USB-related modules from the old miniroot to the new one
+mkdir -p miniroot/modules/scsi
+for n in `ls old_miniroot/modules/scsi|egrep 'usb|hci'`
+do
+	cp old_miniroot/modules/scsi/"$n" miniroot/modules/scsi
+done
+
+# Copy everything except the "scsi" dir from the old miniroot to the new
+# one
+rm -rf old_miniroot/modules/scsi
+cp -af old_miniroot/* miniroot/
+
+# Unmount both
+umount old_miniroot
+umount miniroot
+
+# Compress the miniroot again
+gzip -9 minirt24
+
+# Create a 1.44MB file which will contain the boot image, format it as a
+# DOS FS, and mount it.
+dd if=/dev/zero of=$TMPDIR/boot.img bs=1k count=1440
+mkdosfs $TMPDIR/boot.img
+mount -t msdos boot.img floppy -o loop
+
+# Grrr... "mount" weirdness requires waiting, then remounting in order to
+# have it read-writeable. Perhaps the 'mount' maintainer should get a bug
+# report?
+sleep 2
+mount floppy -o remount,rw
+
+# Copy the required files from Knoppix's boot dir to the image we're building
+FILES="boot.msg f2 f3 german.kbd isolinux.cfg linux24 logo.16"
+(cd knoppix/boot/isolinux/; cp -f $FILES $TMPDIR/floppy/)
+
+# Copy the new miniroot into it - we're almost done!
+cp minirt24.gz floppy/
+
+# Rename and tweak the config file to conform to the SYSLINUX usage
+mv floppy/isolinux.cfg floppy/syslinux.cfg
+[ -n "$LANGUAGE" ] && perl -pi -e "s/lang=de/lang=$LANGUAGE/g" floppy/syslinux.cfg
+[ -n "$LANGUAGE" ] && perl -pi -e "s/lang=us/lang=$LANGUAGE/g" floppy/syslinux.cfg
+
+# A little cleanup...
+umount knoppix
+umount floppy
+
+# Make the image bootable! Since it's not an actual device, 'syslinux' is
+# going to complain - but we're tough and can handle it.
+syslinux boot.img 2>/dev/null
+
+# Put the boot image back where we started
+cp -i boot.img $ORIG_DIR
+
+printf "The boot diskette can now be created with 'dd if=boot.img of=/dev/fd0'.\n"
+

@@ -1,0 +1,495 @@
+<!DOCTYPE html
+	PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+	 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="utf-8" xml:lang="utf-8">
+<head>
+<title>Joey's Notes: TCP Wrappers on Red Hat Enterprise Linux LG #162</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link rel="stylesheet" href="../lg.css" type="text/css" media="screen, projection"  />
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<!-- link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" / -->
+<link rel="shortcut icon" href="../favicon.ico" />
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+</head>
+<body>
+
+<a href="../">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+<div id="navigation">
+<table summary="masthead" width="100%">
+<tr>
+<td align="center" colspan="3" style="font-size: 10px; font-weight: bold">
+<a href="../index.html">Home</a>
+<a href="http://linuxgazette.net">Main Site</a>
+<a href="../faq/index.html">FAQ</a>
+
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/mailman/listinfo/">Mailing Lists</a>
+<a href="../jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+<hr width="99%" style="border: 1px inset #000033">
+</td>
+</tr>
+<tr>
+<td width="40%" align="left" style="font-size: 10px; font-weight: bold">
+The Free International Online Linux Monthly
+</td>
+<td width="20%" align="center" style="font-size: 10px; font-weight: bold">
+ISSN: 1934-371X
+</td>
+<td width="40%" align="right" style="font-size: 10px; font-weight: bold">
+Main site: <a href="http://linuxgazette.net">http://linuxgazette.net</a> 
+</td>
+</table>
+</div>
+
+
+<div id="breadcrumbs1">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">May 2009 (#162)</a> &gt; 
+Article
+
+</div>
+
+<div class="articlecontent1">
+<div class="content">
+
+<div id="previousnexttop">
+<A HREF="lindholm.html" >&lt;-- prev</A> | <A HREF="xkcd.html" >next --&gt;</A>
+</div>
+
+<h1>Joey's Notes: TCP Wrappers on Red Hat Enterprise Linux</h1>
+<p id="by"><b>By <a href="../authors/prestia.html">Joey Prestia</a></b></p>
+
+<img src="../gx/minilogos/joeys_notes.png" alt="Joey's Notes image" align="left" />
+
+
+<h3>Introduction</h3>
+
+<p>
+In information technology, security is never a result of "just one thing"; 
+in other words, there is not a panacea for digital security. The best security
+practices result from multiple applications and practices to protect your 
+system, such as iptables firewalling, Mandatory Access Controls such as SELinux, 
+and Discretionary Access Controls such as permissions and rights.  Last,
+consider coupling TCP Wrappers to complement your firewall rules.
+</p>
+
+<p class="editorial">[ As security guru <a
+href="http://www.schneier.com/">Bruce Schneier</a> often points out,
+"security is not a product; it's a process". The largest part of security
+is not even related to the tools you use; it's the awareness of the
+continual necessity of staying informed, updated, and at the top of the
+game. The tools are one of the means to that end. -- Ben ]
+</p>
+
+<h3>Description</h3>
+
+<p>
+TCP Wrappers work in the manner of a host-based Access Control List. They
+are used to filter out network access to Internet Protocol (IP) servers
+that are running Linux, Unix, or BSD. They will allow host or network
+addresses to be used as indicators to filter and implement a layer of
+access control. They additionally extend the capabilities of
+xinetd-controlled daemons. By using this technique, connection attempts can
+be logged, restricted, and messages returned. This can add an extra layer
+of security in your environment. TCP Wrappers also allow run-time
+reconfiguration without restarting or reloading the services they protect.
+</p>
+
+
+
+<h3>Advantages</h3>
+
+<p>
+Connections that are permitted are simply allowed; those that are denied
+will fail. Some services will report a particular error message, as do SSH
+and vsftpd. Here is an example of an exchange using TCP Wrappers to protect
+services.  
+</p>
+
+<p>
+An example of SSH being disallowed from the client's perspective:
+</p>
+
+<pre class="code">
+[root@alien ~] ssh root@192.168.0.15
+ssh_exchange_identification: Connection closed by remote host
+</pre>
+
+<p>
+An example of FTP being disallowed:
+</p>
+
+<pre class="code">
+[root@alien ~] ftp 192.168.0.15
+Connected to 192.168.0.15.
+421 Service not available.
+</pre>
+
+<h3>How TCP Wrappers Work</h3>
+
+<p>
+When connections are attempted to a service using TCP wrappers, the 
+following occurs (the following steps are important because order 
+matters, and rules are processed line-by-line):
+</p>
+
+<ol>
+<li>
+The process will check the file /etc/hosts.allow. Access will be granted 
+if a match is found in the /etc/hosts.allow file.</li>
+<li>
+The process will check the file /etc/hosts.deny. Access will be denied 
+if a match is found in the /etc/hosts.deny file.</li>
+<li>
+In the event no matching rules apply, access will be granted.</li>
+</ol>
+
+<p>
+To uncover what processes/daemons use TCP Wrappers, do the following:
+</p>
+
+<pre class="code">
+strings -f &lt;program_name&gt; | grep hosts_access
+</pre>
+
+<p>
+An example of output from this command:
+</p>
+
+<pre class="code">
+[root@alien ~] strings -f /usr/sbin/* | grep hosts_access
+/usr/sbin/in.tftpd: hosts_access
+/usr/sbin/sshd: hosts_access
+/usr/sbin/stunnel: hosts_access
+/usr/sbin/stunnel: See hosts_access(5) manual for details
+/usr/sbin/tcpd: hosts_access_verbose
+/usr/sbin/vsftpd: hosts_access
+/usr/sbin/xinetd: hosts_access
+
+[root@alien ~] strings -f /sbin/* | grep hosts_access
+/sbin/portmap: hosts_access_verbose
+</pre>
+
+<h3>Implementing TCP Wrappers</h3>  
+
+<p>
+When using TCP Wrappers, bear certain things in mind. First, order matters.
+Second, the search will stop with the first match. Any changes to
+/etc/hosts.allow or /etc/hosts.deny take effect immediately without having
+to restart any services. As with iptables, order is crucial in these rules.
+Let's take a look at the commands for setting rules. The basic formats of
+commands in /etc/hosts.allow and /etc/host.deny are:
+</p>
+
+<pre>
+daemon_list : client_list  : shell_command 
+
+<em>daemon_list</em> - This is a list of one or more daemon process names or wildcards
+	
+<em>client_list</em> - This is a list of one or more host names, host addresses, patterns or 
+              wildcards that will be matched against the client host name or address.
+</pre>
+
+<p>
+Examples of /etc/hosts.allow and /etc/hosts.deny rules:
+</p>
+
+<p>
+/etc/hosts.allow
+</p>
+
+<pre class="code">
+#
+# hosts.allow   This file describes the names of the hosts 
+#               allowed to use the local INET services, as decided
+#               by the '/usr/sbin/tcpd' server.
+#
+# My new rule below
+sshd : 192.168.0.14 
+</pre>
+	
+<p>
+/etc/hosts.deny
+</p>
+
+<pre class="code">
+#
+# hosts.deny    This file describes the names of the hosts 
+#               *not* allowed to use the local INET services, as decided
+#               by the '/usr/sbin/tcpd' server.
+#
+# The portmap line is redundant, but is left to remind you that
+# the new secure portmap uses hosts.deny and hosts.allow.  In particular,
+# you should know that NFS uses portmap!
+#
+# My new rule below
+ALL : ALL
+</pre>
+
+<p>
+Observe the results of my new rules:
+</p>
+
+<p>
+From station14.example.com (192.168.0.14)
+</p>
+
+<pre class="code">
+Last login: Tue Apr  7 06:45:09 2009 from station14
+[root@station15 ~]#	
+</pre>
+
+<p>
+From alien.example.com (192.168.0.247)
+</p>
+
+<pre class="code">
+[root@alien ~]# ssh 192.168.0.15
+ssh_exchange_identification: Connection closed by remote host
+[root@alien ~]#
+</pre>
+
+<h3>Commands</h3>
+
+<dl>
+<dt>ALL:<dd> This wildcard will match all services or hosts.
+<dt>LOCAL:<dd> This matches any host that does not contain a dot character.
+<dt>UNKNOWN:<dd> This matches any unknown user, and matches any host 
+whose name or addresses are unknown.  Remember that host names may be unavailable
+if name server problems are encountered. 
+<dt>KNOWN:<dd> This matches any known user, and matches any host 
+whose name and address are known. Remember that host names may be unavailable 
+if name server problems are encountered.
+<dt>PARANOID:<dd> This will match any host whose name does not match its address.  
+<dt>EXCEPT:<dd> This is intended to be used in the form: list_1 EXCEPT list_2.  This 
+operator matches anything that matches list_1 unless it matches list_2. 
+EXCEPT can be used in daemon_lists and in client_lists. 
+</dl>
+<p>
+(WARNING: Always leave a blank line containing an 'enter' character in both 
+/etc/hosts.allow and /etc/hosts.deny! Simply go to the end of your last 
+line in insert mode within the vi editor, and hit the carriage return 
+(&lt;enter&gt;) key. Failure to perform this step may cause unwanted consequences 
+with TCP Wrappers.)
+</p>
+
+<p>
+Here are some rule examples included below. Which file you 
+put the rule in determines how the rule works, unless you add an 
+'allow' or a 'deny' at the end of the rule.
+</p>
+
+<pre>
+sshd : .example.com
+vsftpd : 192.168. 
+ALL : 192.168.1.0/255.255.255
+sshd : station1.example.com : allow
+sshd : station15.example.com : deny
+vsftpd : ALL EXCEPT *.hacker.org
+</pre>
+
+<h3>Using Twist</h3>
+
+<p>
+The 'twist' directive is used to replace the service with a selected command.
+It is commonly used to set up honeypots. Another use for it is to send
+messages to connecting clients. The 'twist' command must be used at the end
+of a rule line.  Here is an example of using 'twist' in /etc/hosts.deny to
+send a message to a host that has abused FTP services, via the echo
+command:
+</p>
+
+<p>
+Example using twist in /etc/hosts.deny
+</p>
+
+<pre class="code">
+vsftpd : station6.example.com \
+: twist /bin/echo "Service suspended for abuse!"
+</pre>
+
+<h3>Using Spawn</h3>
+
+<p>
+The 'spawn' directive causes a child process to be launched. This can be very 
+handy when used to generate special access log files. You can also run custom 
+scripts in the background with this directive that will be unseen by the user. 
+In this example, we will create a timestamp in a custom log so we can monitor 
+FTP connections:
+</p>
+
+<p>
+Example in /etc/hosts.allow
+</p>
+
+<pre class="code">
+vsftpd : .example.com  \
+: spawn /bin/echo $(/bin/date) access granted to %h&gt;&gt;/var/log/ftp_access.log 
+</pre>
+
+<p>
+These are what character expansions you can take advantage of,
+when used in either /etc/hosts.allow or /etc/hosts.deny.
+</p>
+
+<pre>
+% EXPANSIONS
+
+       The following expansions are available within shell commands:
+
+       %a    The client host address
+
+       %A    The server's host address
+
+       %c    Client information: user@host, user@address,  a  host  name,  or just an address
+
+       %d    The daemon process name
+
+       %h    The client  host name or address, if the  host  name  is unavailable
+
+       %H    The server host name or address, if the  host  name  is unavailable
+
+       %n    The client host name (or "unknown" or "paranoid")
+
+       %N    The server host name (or "unknown" or "paranoid")
+
+       %p    The daemon process id
+
+       %s    Server  information: daemon@host, daemon@address, or just a daemon name
+
+       %u    The client user name (or "unknown")
+
+       %%    Expands to a single "%" character.
+
+       (Characters in % expansions that may confuse the shell are replaced by underscores)
+</pre>
+
+<h3>Conclusion</h3>
+
+<p>
+TCP Wrappers make a great complement to your current security measures.
+Remember: always thoroughly test any security implementation before moving
+to a production platform!
+</p>
+
+<h3>Resources</h3>
+
+<ul>
+<li>
+<a href="http://www.freebsd.org/doc/en/books/handbook/tcpwrappers.html">FreeBSD Handbook</a></li>
+</li>
+<li>
+<a href="http://www.redhat.com/docs/en-US/Red_Hat_Enterprise_Linux/5/html/Deployment_Guide/s1-services-tcp-wrappers.html">Red Hat Documentation</a>
+</li>
+<li>
+<a href="http://www.redhat.com/docs/manuals/linux/RHL-7.2-Manual/ref-guide/ch-tcpwrappers.html">Red Hat Manual</a>
+</li>
+</ul>
+
+<br clear="all" />
+
+<script type='text/javascript'>
+digg_url = 'http://linuxgazette.net/162/prestia.html';
+digg_title = 'Joey\'s Notes: TCP Wrappers on Red Hat Enterprise Linux';
+digg_bodytext = '<p> In information technology, security is never a result of "just one thing";  in other words, there is not a panacea for digital security. The best security practices result from multiple applications and practices to protect your  system, such as iptables firewalling, Mandatory Access Controls such as SELinux,  and Discretionary Access Controls such as permissions and rights.  Last, consider coupling TCP Wrappers to complement your firewall rules. </p> ';
+digg_topic = 'linux_unix';
+</script>
+<script src="http://digg.com/tools/diggthis.js" type="text/javascript"></script>
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:162/prestia.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/authors/prestia.jpg" class="bio">
+</p>
+
+<em>
+<p>
+Joey was born in Phoenix and started programming at the age fourteen on
+ a Timex Sinclair 1000. He was driven by hopes he might be able to do
+ something with this early model computer. He soon became proficient in
+ the BASIC and Assembly programming languages. Joey became a programmer
+ in 1990 and added COBOL, Fortran, and Pascal to his repertoire of
+ programming languages. Since then has become obsessed with just about
+ every aspect of computer science. He became enlightened and discovered
+ RedHat Linux in 2002 when someone gave him RedHat version six. This 
+ started off a new passion centered around Linux. Currently Joey is 
+ completing his degree in Linux Networking and working on campus
+ for the college's RedHat Academy in Arizona. He is also on the staff of
+ the Linux Gazette as the Mirror Coordinator.
+</p>
+
+
+
+</em>
+
+<br clear="all">
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2009, Joey Prestia. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication License</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 162 of Linux Gazette, May 2009
+</p>
+
+</div>
+
+<div id="previousnextbottom">
+<A HREF="lindholm.html" >&lt;-- prev</A> | <A HREF="xkcd.html" >next --&gt;</A>
+</div>
+
+</div>
+</div>
+
+<script src="http://www.google-analytics.com/urchin.js"
+type="text/javascript">
+</script>
+<script type="text/javascript">
+_uacct = "UA-1204316-1";
+urchinTracker();
+</script>
+
+
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+</body>
+</html>
+

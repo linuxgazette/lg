@@ -1,0 +1,276 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>Implementing a Bridging Firewall LG #76</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<CENTER>
+<A HREF="http://www.linuxgazette.net/">
+<IMG ALT="LINUX GAZETTE" SRC="../gx/lglogo.png" 
+	WIDTH="600" HEIGHT="124" border="0"></A> 
+<BR>
+
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="vermeer.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../faq/index.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="lg_backpage.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+<P>
+</CENTER>
+
+<!--endcut ============================================================-->
+
+<H4 ALIGN="center">
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H1><font color="maroon">Implementing a Bridging Firewall</font></H1>
+<H4>By <a href="mailto:david.whitmarsh@sparkle-consultancy.co.uk">David Whitmarsh</a></H4>
+</center>
+<P> <HR> <P>  
+
+<!-- END header -->
+
+
+
+
+What is the difference between a bridging firewall and a conventional firewall?
+Usually a firewall also acts as a router: systems on the inside are configured
+to see the firewall as a gateway to the network outside, and routers outside
+are configured to see the firewall as the gateway to the protected network. A
+bridge is piece of equipment that connects two (or more) network segments
+together and passes packets back and forth without the rest of the network
+being aware of its existence.  In other words, a router connects two networks
+together and translates between them; a bridge is like a patch cable,
+connecting two portions of one network together.  A bridging firewall acts as a
+bridge but also filters the packets it passes, while remaining unseen by either
+side.<p>
+
+Why might you want to so such a thing? A couple of reasons spring to mind:<p>
+
+<ul>
+<li>You can plug in a firewall without changing any of your existing network software configuration.
+<li>You may want to protect part of a network where you do not have control of the external routing into your network.
+</ul>
+
+<h2>My Problem</h2>
+
+In my office I had a shiny new ADSL connection from Demon Internet
+with an assigned 16 address subnet (less base, broadcast and router IP
+= 13 IP addresses). Because of the vagaries of the UK commercial and
+regulatory environment, the line and router were installed and owned by
+British Telecom plc. and there was no facility to configure the router
+to use an internal gateway.  This left me two choices:
+
+<ul>
+<li>Connect every host directly to the ADSL router and set up iptables separately for each one.
+<li>Use a firewall with ip masquerading to present a single ip address to the outside world.
+</ul>
+
+The first was untenable.  Multiplying the number of iptable configurations
+multiplied the chances of error and the administration overhead.
+The second had its own drawbacks. While most things can be set up to
+work quite happily with IP masquerading, there are exceptions, including
+some technologies that I wished to explore, such as VPNs. A bridging
+firewall would solve this problem. The firewall could stand between the
+ADSL router and the rest of the router and protect the network without
+reconfiguring the router. The one remaining obstacle was that the bridging
+code in the standard Linux kernel completely bypasses iptables, so you
+can have a box which is either a bridge, or a firewall, but not both.
+
+<h2>The Solution</h2>
+
+Fortunately, there is a <a href="http://bridge.sourceforge.net">project</a>
+to implement bridging in conjunction with iptables, so that any packets
+transmitted across the bridge can be subject to iptables rules. The
+result is a firewall that can be totally transparent to the network,
+requiring no special routing. As far as the Internet is concerned, the
+firewall does not exist, except that certain connections are blocked. The
+bridge software is a kernel patch to allow the existing bridge code to
+work inside iptables. Conveniently, the developers have made available
+a Redhat 7.2 kernel rpm with the patch installed. Less conveniently,
+documentation on how to use it is minimal, so I thought to document this
+implementation as an aid to anyone else following the same path.<p>
+
+<h2>Bridging and Routing - how it works</h2>
+
+Briefly. the linux bridge implementation works by tying together two
+or more network interfaces. By monitoring activity on all the attached
+network segments the bridge code learns which MAC addresses are accessible
+from each interface and uses this information to decide which packets to
+send out on each interface. The interfaces attached to the bridge to not
+normally have an IP address associated with them, but the entire bridge
+is configured as a single interface to the firewall.
+
+<img src="misc/whitmarsh/flows.png" alt="packet flows within the firewall"><p>
+
+<h2>Network topology</h2>
+
+My allocated static IP addresses are in the range xxx.xxx.xxx.48-63,
+i.e. a subnet mask of 255.255.255.240. I decided to split this range
+into two network segments,xx.xxx.xxx.48-56 would be used outside the
+firewall, and this includes the IP address of the ADSL router itself
+(xxx.xxx.xxx.49). xxx.xxx.xxx.57-62 would be the secure section behind
+the firewall. Note that these are not truly subnets as they are linked
+by a bridge rather than a router.<p>
+
+<img src="misc/whitmarsh/network.png" alt="network topology"><p>
+
+<h2>Firewall Rules</h2>
+
+The <a href="misc/whitmarsh/rc.firewall.sh.txt">sample firewall script</a>
+is broadly similar to a conventional firewall setup (cribbed from 
+<a href="http://www.boingworld.com/workshops/linux/iptables-tutorial/iptables-tutorial/iptables-tutorial.html">
+Oskar Andreasson's iptables tutorial</a>. The basic firewall policy is:
+
+<ol>
+<li>Block packets from unlikely IP addresses
+<li>Allow any outgoing connections from behind the firewall
+<li>Allow packets in that belong to established connections
+<li>Allow connections to specified ports and hosts from outside
+</ol>
+
+<h3>Variable definitions</h3>
+
+For clarity and maintainability it is a good idea to keep interface names
+and IP addresses as variables. The values used for these examples are:<p>
+
+<pre>
+BR_IP="xxx.xxx.xxx.57"
+BR_IFACE=br0
+
+LAN_BCAST_ADDRESS="xxx.xxx.xxx.63"
+INTERNAL_ADDRESS_RANGE="xxx.xxx.xxx.56/29"
+
+INET_IFACE="eth1"
+LAN_IFACE="eth0"
+
+LO_IFACE="lo"
+LO_IP="127.0.0.1"
+</pre>
+
+"xxx.xxx.xxx" represents the first three bytes of the network IP
+addresses. $INTERNAL_ADDRESS_RANGE is the secure network segment.<p>
+
+<h3>Setting up the bridge</h3>
+
+We have to do a some less conventional things to set up the bridge. First
+we shut down our two interfaces and remove any IP address from them.<p>
+
+<pre>
+ifdown $INET_IFACE
+ifdown $LAN_IFACE
+ifconfig $INET_IFACE 0.0.0.0
+ifconfig $LAN_IFACE 0.0.0.0
+</pre>
+
+If you just executed these commands from a telnet connection (or ssh
+as you are so security conscious), get up and cross the room to your
+firewall's console.<p>
+
+Next we create a bridge and assign the Ethernet interfaces to it.<p>
+<pre>
+brctl addbr $BR_IFACE
+
+brctl addif $BR_IFACE $INET_IFACE
+brctl addif $BR_IFACE $LAN_IFACE
+</pre>
+
+You can now bring up the bridge as an internal interface if you wish:
+
+<pre>
+ifconfig $BR_IFACE $BR_IP
+</pre>
+
+<h3>Blocking spoofs</h3>
+
+We can block spoofed packets in the mangle PREROUTING chain. By blocking
+here we can catch both INPUT and FORWARDED packets at the same time. We
+use mangle PREROUTING rather than nat PREROUTING because only the first
+packet of each stream is checked in the nat table.<p>
+
+This line ensures that only packets with valid internal addresses are
+accepted on the internal interface.<p>
+
+<pre>
+$IPTABLES -t mangle -A PREROUTING -i $LAN_IFACE -s $INTERNAL_ADDRESS_RANGE -j ACCEPT
+</pre>
+
+And this prevents packets with internal addresses being accepted on the
+external interface:<p>
+
+<pre>
+$IPTABLES -t mangle -A PREROUTING -i $INET_IFACE ! -s $INTERNAL_ADDRESS_RANGE -j ACCEPT
+</pre>
+
+<h3>Accessing the firewall from the internal network</h3>
+
+You may choose to leave your firewall completely invisible to the network,
+or you may wish for convenience to allow connections from within.  
+These commands will allow all connections to the firewall from the
+internal network only. You may wish to be more selective depending on
+your level of trust of your network systems and users.<p>
+
+<pre>
+$IPTABLES -A INPUT -p ALL -i $BR_IFACE -s $INTERNAL_ADDRESS_RANGE -d $LAN_BCAST_ADDRESS -j ACCEPT
+$IPTABLES -A INPUT -p ALL -i $BR_IFACE -s $INTERNAL_ADDRESS_RANGE -d $BR_IP -j ACCEPT
+</pre>
+
+Remember that we have already eliminated packets that claim to be from
+$INTERNAL_ADDRESS_RANGE that appear on the wrong interface.<p>
+
+<h2>More information</h2>
+
+<a href="http://bridge.soureforge.net">The kernel patch</a> without which all your iptables rules are in vain.<br>
+Oskar Andreasson's <a href="http://www.boingworld.com/workshops/linux/iptables-tutorial/iptables-tutorial/iptables-tutorial.html">iptables tutorial</a> is recommended reading.<br>
+Try <a href="http://netfilter.samba.org/unreliable-guides/">Rusty's Remarkably Unreliable Guides</a>
+for background on packet filtering and networking.<br>
+<p>
+<a href="http://www.sparkle-cc.co.uk/index.html" target=_parent>Sparkle Home Page</a>
+(the author's company)
+<p>
+
+<h2>Acknowledgments</h2>
+
+Thanks to <a href="mailto:buytenh@gnu.org">Lennert Buytenhek</a> for a
+really useful patch, and also for reviewing this article.<p>
+
+
+<!-- *** BEGIN bio *** -->
+<SPACER TYPE="vertical" SIZE="30">
+<P> 
+<H4><IMG ALIGN=BOTTOM ALT="" SRC="../gx/note.gif">David Whitmarsh</H4>
+<EM>David is an independent consultant working mostly for
+financial institutions in the City of London through his company, 
+<a href="http://www.sparkle-cc.co.uk/index.html" target=_parent>Sparkle Computer Co Ltd</a>.  With four young children,
+spare time is a precious commodity, so the daily commute from Sussex is
+his main opportunity for tinkering with Linux and open source software
+on his laptop.</EM>
+
+
+<!-- *** END bio *** -->
+
+<!-- *** BEGIN copyright *** -->
+<P> <hr> <!-- P --> 
+<H5 ALIGN=center>
+
+Copyright &copy; 2002, David Whitmarsh.<BR>
+Copying license <A HREF="../copying.html">http://www.linuxgazette.net/copying.html</A><BR> 
+Published in Issue 76 of <i>Linux Gazette</i>, March 2002</H5>
+<!-- *** END copyright *** -->
+
+<!--startcut ==========================================================-->
+<HR><P>
+<CENTER>
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="vermeer.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../faq/index.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="lg_backpage.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+</CENTER>
+</BODY></HTML>
+<!--endcut ============================================================-->

@@ -1,0 +1,139 @@
+#!/usr/bin/perl
+
+# xshowrgb --- show the RGB colors ... visually
+#
+# author:  Ryurick M. Hristev <r.hristev@phys.canterbury.ac.nz>
+# license: Public Domain
+
+#____________________________________________________________________
+# User Options
+
+$font = '-adobe-courier-bold-r-*-*-*-160-*-*-*-*-*-*';
+
+#____________________________________________________________________
+# Prereq
+
+use Tk;
+use Tk::ROText;
+
+#____________________________________________________________________
+# RGB Color Database
+
+# grab the color DB
+open(SHOWRGB, "showrgb |");
+
+# convert to hex, build the hash
+while (<SHOWRGB>){
+	$_ =~ m/(\d{1,3})\s+(\d{1,3})\s+(\d{1,3})\s+([A-Za-z0-9 ]*)/;
+
+	my $rgb = sprintf("%02x", $1) . sprintf("%02x", $2) . sprintf("%02x", $3);
+
+	if ( $db{"$rgb"} ){
+		$db{"$rgb"} .= ", $4"
+	} else {
+		$db{"$rgb"} = $4
+	}
+}
+
+#____________________________________________________________________
+# GUI
+
+$main = MainWindow -> new(-title => 'xcolorsel');
+
+$menu = $main -> Frame(-relief      => 'raised',
+                       -borderwidth => 2)
+              -> pack(-side => 'top',
+                      -fill => 'x');
+
+$menu_quit = $menu -> Button(-text    => 'Quit',
+                             -font    => $font,
+                             -relief  => 'flat',
+                             -command => \&exit)
+                   -> pack(-side => 'left');
+
+$text = $main -> Scrolled(ROText,
+                          -font       => $font,
+                          -scrollbars => 'e',
+                          -wrap       => 'none',
+                          -relief     => 'flat')
+              -> pack(-side   => 'bottom',
+                      -fill   => 'both',
+                      -expand => 'true');
+
+# create tags and display
+foreach my $key (sort keys %db){
+	$color = '#' . $key;
+
+	# force conversion to number ...
+	$a = hex($key);
+	# ... and complement of 0xffffff
+	$complement = $a ^ 16777215;
+
+	$c_color = sprintf("%06x", $complement);
+
+	# tag for background
+	$text -> tag('bind', "tag_bg_$key");
+	$text -> tag('configure', "tag_bg_$key",
+                     -background => $color);
+
+	# tag for foregrownd, white backgrownd
+	$text -> tag('bind', "tag_fgw_$key");
+	$text -> tag('configure', "tag_fgw_$key",
+                     -foreground => $color,
+                     -background => white);
+
+	# tag for foregrownd, black backgrownd
+	$text -> tag('bind', "tag_fgb_$key");
+	$text -> tag('configure', "tag_fgb_$key",
+                     -foreground => $color,
+                     -background => black);
+
+	# tag for backgrownd, white foreground
+	$text -> tag('bind', "tag_bgw_$key");
+	$text -> tag('configure', "tag_bgw_$key",
+                     -background => $color,
+                     -foreground => white);
+
+	# tag for backgrownd, black foreground
+	$text -> tag('bind', "tag_bgb_$key");
+	$text -> tag('configure', "tag_bgb_$key",
+                     -background => $color,
+                     -foreground => black);
+
+	# complement colors
+	$text -> tag('bind', "tag_cmpl_$key");
+	$text -> tag('configure', "tag_cmpl_$key",
+                     -foreground => $color,
+                     -background => "#$c_color");
+
+	# contents
+        # --- column 1: color
+	$text -> insert('end', '       ', "tag_bg_$key");
+	$text -> insert('end', "\t");
+        # --- column 2: color code on white
+	$text -> insert('end', "$key", "tag_fgw_$key");
+	$text -> insert('end', "\t");
+        # --- column 3: color code on black
+	$text -> insert('end', "$key", "tag_fgb_$key");
+	$text -> insert('end', "\t");
+        # --- column 4: white on color
+	$text -> insert('end', "$key", "tag_bgw_$key");
+	$text -> insert('end', "\t");
+        # --- column 5: black on color
+	$text -> insert('end', "$key", "tag_bgb_$key");
+	$text -> insert('end', "\t");
+        # --- column 6: color on complement
+	$text -> insert('end', "$c_color", "tag_cmpl_$key");
+	$text -> insert('end', "\t");
+	$text -> insert('end', "$db{$key}");
+	# --- show complement name if exists
+	if ($db{$c_color}){
+		$text -> insert('end', " --- $db{$c_color}")
+	}
+	$text -> insert('end', "\n");
+}
+
+$text -> configure(-state => 'disabled');
+
+MainLoop;
+

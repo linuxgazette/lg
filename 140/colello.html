@@ -1,0 +1,300 @@
+<!DOCTYPE html
+	PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+	 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="utf-8" xml:lang="utf-8">
+<head>
+<title>Custom Hobbit Monitoring Using SNMP LG #140</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link rel="stylesheet" href="../lg.css" type="text/css" media="screen, projection"  />
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+<link rel="shortcut icon" href="../favicon.ico" />
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+</head>
+<body>
+
+<a href="../">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+<div id="navigation">
+<table summary="masthead" width="100%">
+<tr>
+<td align="center" colspan="3" style="font-size: 10px; font-weight: bold">
+<a href="../index.html">Home</a>
+<a href="http://linuxgazette.net">Main Site</a>
+<a href="../faq/index.html">FAQ</a>
+
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/mailman/listinfo/">Mailing Lists</a>
+<a href="../jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+<hr width="99%" style="border: 1px inset #000033">
+</td>
+</tr>
+<tr>
+<td width="40%" align="left" style="font-size: 10px; font-weight: bold">
+The Free International Online Linux Monthly
+</td>
+<td width="20%" align="center" style="font-size: 10px; font-weight: bold">
+ISSN: 1934-371X
+</td>
+<td width="40%" align="right" style="font-size: 10px; font-weight: bold">
+Main site: <a href="http://linuxgazette.net">http://linuxgazette.net</a> 
+</td>
+</table>
+</div>
+
+
+<div id="breadcrumbs1">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">July 2007 (#140)</a> &gt; 
+Article
+
+</div>
+
+<div class="articlecontent1">
+<div class="content">
+
+<div id="previousnexttop">
+<A HREF="brownss.html" >&lt;-- prev</A> | <A HREF="dyckoff.html" >next --&gt;</A>
+</div>
+
+<h1>Custom Hobbit Monitoring Using SNMP</h1>
+<p id="by"><b>By <a href="../authors/colello.html">Martin Colello</a></b></p>
+
+
+<h3>Hobbit</h3>
+<p>
+Working as a Unix Engineer for a large manufacturing corporation puts me in
+contact with many types of systems and services, and one of the tools for
+system monitoring I employ is the open source application Hobbit.
+Monitoring applications make excellent early-warning systems, and can help
+prevent large-scale network and server problems. In many cases, they can
+warn you when things are <em>about</em> to go wrong, which is much better
+than getting panicked phone calls in the middle of the night. Hobbit is a
+great example of such a watchdog. Hobbit is a compiled binary replacement
+for Big Brother, and it offers more functionality and improved speed over
+the original. While Hobbit comes with many of the most common network and
+system tests right out of the box, it is also easy to extend it to monitor
+things that are specific to your environment.
+</p>
+
+<p>
+I will not describe the Hobbit installation procedure here, as this is well
+documented at the Hobbit <a
+href="http://hobbitmon.sourceforge.net">home</a> page, instead I will be
+describing one of the many custom extensions I am using in production.
+</p>
+
+<h3>Extensions</h3>
+<p>
+Hobbit extensions can range from simple shell scripts to full-blown
+compiled programs and anything in between.  As long as you have access to
+the Hobbit client you can create any test you need and have the results
+integrated into the Hobbit web page and alert system.  My scripting
+language of choice for writing Hobbit extensions is Perl.  There is a large
+repository of Hobbit/Big Brother extensions that have already been written
+and contributed back to the community at <a
+href="http://www.deadcat.net">http://www.deadcat.net</a>.
+</p>
+
+<h3>A Simple SNMP Monitor</h3>
+<p>
+Using a simple snmp command and some Perl code we can test many services
+and processes that are not natively available in Hobbit.  The first step is
+to determine the OID and password for the service you wish to check.  In
+this article I will describe how I used this method to get the cpu
+utilization from an iSeries server, which is functionality that was not
+included in Hobbit out of the box.  The same principles apply to nearly
+anything that can be grabbed via SNMP.  My Hobbit server runs on Solaris,
+but the commands are the same for linux.  The command to get the cpu
+utilization from an iseries box from the Solaris command line is "snmpget
+-v1 -c password servername 1.3.6.1.4.1.2.6.4.5.1.0".  With this command in
+hand, we can wrap it in a script that will report the results to the hobbit
+server.
+</p>
+
+<h3>The Script</h3>
+<p>
+<pre class="code">
+#!/usr/bin/perl -w
+use strict;
+
+# $test will be the name shown in the Hobbit web gui,
+# it should be as short as possible
+my $test = '400cpu';
+
+# $bbprog is simply the name of the script
+my $bbprog = '400cpu.pl';
+
+my ($color, $line, $machine, $warn, $end, $date, $currently);
+my $server='servername';
+
+# Issue the snmp command we discussed earlier and store the
+# results in $results
+my $results = `/usr/local/bin/snmpget -v1 -c public wc400 1.3.6.1.4.1.2.6.4.5.1.0`;
+
+# Split the results into an array, breaking up by spaces
+my @results = split / /, $results;
+
+# Grab just the piece we're looking for from the array, and store in $value
+my $value = $results[3];
+chomp($value);
+
+# If the value comes in at 3000, that means 30 percent, so do some quick
+# math on $value
+$value = $value/100;
+$value = int($value);
+
+# Initially set the test color to "green", we'll turn red if needed to alert
+$color = 'green';
+
+# Set some variables to present to the Hobbit server, the first in colon format
+my $percent = "\n\nPercentage : $value\n\n";
+$currently = "$percent\n\nCPU ok.\n\n\n\n";
+
+# Determine if cpu utilization is too high, if so, turn red
+if ( $value &gt; 80 ) {
+        $color = 'red';
+        $currently = "$percent\n\nCPU Utiliaztion is high.\n\n";
+                       }
+
+# Prepare line for Hobbit server in correct format
+
+$machine = "$server,amkor,com";
+
+$date = `date`;
+chomp($date);
+
+$line = "status $machine.$test $color $date $currently";
+
+system("/usr/local/hobbit/server/bin/bb hobbit_servername \"$line\"";
+</pre>
+
+
+<h3>Enabling the script in Hobbit</h3>
+<p>
+Now that we have our script ready, it's time to configure the Hobbit client
+to run it once every five minutes.  Open the file clientlaunch.cfg in the
+etc directory of your Hobbit home directory and add this entry:
+</p>
+
+<pre class="code">
+	[400cpu.pl]<br>
+	ENVFILE $HOBBITCLIENTHOME/etc/hobbitclient.cfg<br>
+	CMD $HOBBITCLIENTHOME/ext/400cpu.pl<br>
+	LOGFILE $HOBBITCLIENTHOME/logs/400cpu.pl<br>
+	INTERVAL 5m<br><br>
+</pre>
+
+<p>
+Now you can restart your Hobbit client, wait 10 or 15 minutes for data to
+be collected, then check your Hobbit gui for output similiar to this:<br>
+<img src="misc/colello/iseries.jpg" alt="iSeries Hobbit Output" width="676" height="590">
+</p>
+
+<h3>In Conclusion</h3>
+<p>
+In this brief article, we've managed to create a useful Hobbit test, and
+have it integrated into the Hobbit gui.  Simple variations of this
+technique can be used to monitor almost any metric that can be gotten to
+via snmp.
+</p>
+
+<script type="text/javascript">
+digg_url = 'http://linuxgazette.net/140/colello.html';
+digg_title = 'Custom Hobbit Monitoring Using SNMP';
+digg_bodytext = 'Hobbit is a great example of such a watchdog. Hobbit is a compiled binary replacement for Big Brother, and it offers more functionality and improved speed over the original. While Hobbit comes with many of the most common network and system tests right out of the box, it is also easy to extend it to monitor things that are specific to your environment.';
+digg_topic = 'linux_unix';
+</script>
+<script src="http://digg.com/tools/diggthis.js" type="text/javascript"></script> 
+
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:140/colello.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/authors/colello.jpg" class="bio">
+</p>
+
+<em>
+<p>
+Martin Colello is a unix engineer working for a semiconductor assembly
+ and test company called Amkor Technology. While he is primarily working
+ on Solaris administration, he uses Linux and other OSS software where
+ appropriate to get special projects completed quickly. Most often this
+ is in the area of network, server, and application monitoring using
+ tools such as Hobbit, Cricket, Cacti and Perl scripting.
+</p>
+
+
+
+</em>
+
+<br clear="all">
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2007, Martin Colello. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication License</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 140 of Linux Gazette, July 2007
+</p>
+
+</div>
+
+<div id="previousnextbottom">
+<A HREF="brownss.html" >&lt;-- prev</A> | <A HREF="dyckoff.html" >next --&gt;</A>
+</div>
+
+</div>
+</div>
+
+<script src="http://www.google-analytics.com/urchin.js"
+type="text/javascript">
+</script>
+<script type="text/javascript">
+_uacct = "UA-1204316-1";
+urchinTracker();
+</script>
+
+
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+</body>
+</html>
+

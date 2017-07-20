@@ -1,0 +1,745 @@
+// *********************************************************
+//
+// worm.c -- x86 Linux wormhole driver for diagnostics for 2.2.x Kernels
+//
+//    Provides access to x86 I/O ports, PCI configuration space,
+//    memory mapped devices, and sytem time delay functions.  All
+//    access is provided through ioctl calls.
+//
+//    Code here is based on scull.c from "Linux Device Drivers" by
+//    Alessandro Rubini, published by O'Reilly & Associates.
+//    Page references are to the same book.  Source code is available
+//    via the  O'Reilly & Associates web site at
+//    ftp://ftp.ora.com/pub/examples/linux/drivers/examples.tar.gz
+//
+//    see also http://www.atnf.csiro.au/~rgooch/linux/docs/porting-to-2.2.html
+//
+// Notes: 1.  Runs on Linux version 2.2.x  (created for 2.2.14)
+//        2.  8 bit pci memory was not implemented for 2.0.x kernels
+//
+//---------------------------------------------------------
+//  3/16/00  Mark Taylor
+//           o re-assigned ioctl numbers
+//           o consolidated 6 I/O port ioctls to 2 which share a common struct
+//           o consolidated 6 PCI ioctls to 2 which share a common struct
+//  3/12/00  Mark Taylor
+//           o add ISA commands to set, clear bits using read modify write
+//  3/09/00  Mark Taylor
+//           o incorporate the following changes for 2.2 kernel:
+//           o add new capability to read and write 8 bit pci memory
+//           o replace bios32.h with pci.h
+//           o added return value to worm_release
+//           o rdtsc inline assembly definition is now from msr.h and is
+//             different, added function read_timestamp to handle
+//           o pcibios_strerror is no longer supported, so just print the
+//             error number
+//           o replaced get_user and put_user, skip calls to verify_area
+//           o replaced access to current->timeout with schedule_timeout call,
+//             include current.h
+//           o replaced vremap, vfree with ioremap, iounmap
+//           o change file_ops structure format
+//           o use macro to export no symbols in init_module
+//
+//  6/11/99  Mark Taylor
+//           o increased delay
+//  6/04/99  Mark Taylor
+//           o added display of built on time to init_module
+//  5/24/99  Mark Taylor         Initial creation
+//---------------------------------------------------------
+
+#define SHOW_SIGNON_SIGNOFF
+#define WORM_PRINTK
+
+//#define DEBUG_CMD                // show cmd
+//#define DEBUG_WAIT_MS
+//#define DEBUG_PCIMEM
+//#define DEBUG_BIOSMEM
+
+#ifndef __KERNEL__
+#  define __KERNEL__
+#endif
+#ifndef MODULE
+#  define MODULE
+#endif
+
+#define __NO_VERSION__ /* don't define kernel_verion in module.h */
+
+
+/* look for Linux include files here:   /usr/src/linux/include   */
+
+#include <linux/module.h>
+#include <linux/version.h>
+
+char kernel_version [] = UTS_RELEASE;
+
+#include <linux/kernel.h> /* printk() */
+#include <linux/fs.h>     /* everything... */
+#include <linux/pci.h> /* pcibios_*.. */
+#include <linux/errno.h>  /* error codes */
+#include <linux/types.h>  /* size_t */
+#include <linux/sched.h>  /* schedule_timeout */
+#include <linux/proc_fs.h>
+#include <linux/delay.h>    /* udelay */
+
+#include <asm/system.h>  /* cli(), *_flags */
+#include <asm/msr.h>  /* rdtsc */
+#include <asm/uaccess.h>     /* get_user_ret */
+#include <asm/current.h>     /* macro for current */
+#include <asm/segment.h>  /* memcpy and such */
+#include <asm/page.h>     /* PAGE_MASK etc. */
+
+#include <linux/mm.h>     /* verify_area */
+#include <linux/param.h>          // HZ - Linux system clock rate
+
+#include <asm/io.h>       /* I/O ports. inb, outb ..., readl, writel */
+
+#include "worm.h"         /* wormhole driver definitions */
+#include "dtstmp.h"       /* Makefile generated time stamp header */
+/*
+ * I don't use static symbols here, because register_symtab is called
+ */
+
+int worm_major =   WORM_MAJOR;
+
+
+/*
+ * Open and close
+ */
+
+int worm_open (struct inode *inode, struct file *filp)
+{
+    MOD_INC_USE_COUNT;
+    return 0;          /* success */
+}
+
+int worm_release (struct inode *inode, struct file *filp)
+{
+    MOD_DEC_USE_COUNT;
+    return 0;          /* success */
+}
+
+// check PCI bios return status, if bad print console error and return -EFAULT
+int check_pcibios_status(int status)
+{
+    int result = 0;
+    if (status) {
+        result = -EFAULT;         // Bad address (errno.h)
+printk("<1>worm-PCI bios error= %d, see /usr/src/linux/include/./linux/pci.h\n"
+               , status);
+    }
+    return result;
+}
+
+/* read the processor time stamp counter (RDTSC instruction) */
+unsigned long long read_timestamp() {
+
+    unsigned long long result;
+    unsigned long ls, ms;
+
+    rdtsc(ls, ms);                     /* /usr/src/linux/include/asm/./msr.h */
+    result = (unsigned long long) ms;
+    result <<= 32;
+    result |= (unsigned long long) ls;
+
+    return result;
+}
+
+/*
+ * The ioctl() implementation
+ */
+
+int worm_ioctl (struct inode *inode, struct file *filp,
+                 unsigned int cmd, unsigned long arg)
+{
+
+    int return_code = 0;          // assume no errors to start
+    unsigned long flags;          // used to hold system flags
+    unsigned char value8;         // 8 bit value
+    unsigned short value16;       // 16 bit value
+    unsigned int value32;         // 32 bit value
+
+   // for I/O port access
+    PORT_VALUE  *user_port_p = NULL;    // pointer to user supplied structure
+    PORT_VALUE  port;
+
+    // for I/O port read/modify/write access
+    PORT_RMW_VALUE *user_iormw_p = NULL; // pointer to user supplied structure
+    PORT_RMW_VALUE iormw;                // driver structure
+    unsigned int original = 0;           // original value of I/O port
+
+   // for PCI configuration space access
+    PCI_VALUE *user_pci_p = NULL;     // pointer to user supplied structure
+    PCI_VALUE pci;
+    //unsigned char bus = 0;               // PCI bus number
+    //unsigned char function = 0;          // [7:3] - device,  [2:0] - function
+    //unsigned char where = 0;             // byte offset within PCI space
+    int status;                          // return status for pcibios calls
+
+   // for BIOS and PCI memory access
+    MEM_VALUE *user_mem_p = NULL;      // pointer to user supplied structure
+    MEM_VALUE mem;
+
+    // for device PCI memory access
+    volatile void *pci_memory_p = NULL;  // volatile to force memory access
+    unsigned long page_base = 0;
+    unsigned long offset = 0;
+    unsigned long region_size = 0;        // minimum memory area needed
+    unsigned long virtual_address = 0;    // virtual addr of location to access
+#ifdef DEBUG_PCIMEM
+    int retval;
+#endif
+
+     // for ms and us time delays
+    unsigned long numJiffie;              // number of jiffies to wait
+    DELAY_TIME_MS *user_delayp_ms = NULL; // pointer to user supplied structure
+    DELAY_TIME_US *user_delayp_us = NULL; // pointer to user supplied structure
+    unsigned long us;                    // microsecond delay time
+    unsigned long ms;                    // microsecond delay time
+    unsigned long long start_time;       // Time Stamp Counter at start of delay
+    unsigned long long end_time;         // Time Stamp Counter at end of delay
+    unsigned long long elapsed;          // elapsed Time Stamp counts
+
+    // for system time, system clock rate, clock tick delay
+    SYSTEM_TIMER *sys_timer_p = NULL;    // pointer to user supplied structure
+    HZ_TYPE *hz_p = NULL;
+    TICKS_TYPE *ticks_p = NULL;
+    /*
+     * extract the type and number bitfields, and don't decode
+     * wrong cmds: return EINVAL before verify_area()
+     */
+    if (_IOC_TYPE(cmd) != WORM_IOC_MAGIC) return -EINVAL;
+    if (_IOC_NR(cmd) > WORM_IOC_MAXNR) return -EINVAL;
+
+    /*
+     * Decode size and direction bits encoded in cmd and verify
+     * (for read and write transfers where arg is a pointer) that the
+     * area referenced by arg is within the user memory.
+     *
+     * the direction is a bitmask, and VERIFY_WRITE catches R/W
+     * transfers. `Type' is user-oriented, while
+     * verify_area is kernel-oriented, so the concept of "read" and
+     * "write" is reversed
+     */
+
+#ifdef DEBUG_CMD
+printk("<1>worm- cmd= %08lx\n", (unsigned long) cmd);
+#endif
+
+    switch(cmd) {
+      /*
+       * I/O port read - see pg 164
+       */
+      case WORM_IOP_R:
+        // get user structure
+        user_port_p = (PORT_VALUE *) arg;   // cast arg to structure pointer
+        if (copy_from_user(&port,                          // kernel buffer
+                           user_port_p,                    // user buffer
+                           sizeof(PORT_VALUE))) return -EFAULT;
+        switch(port.width) {
+          case 1:                                   // read 8 bit I/O port
+            value32 = (unsigned int) inb(port.ioport);
+            break;
+
+          case 2:                                   // read 16 bit I/O port
+            value32 = (unsigned short) inw(port.ioport);
+            break;
+
+          case 4:                                   // read 32 bit I/O port
+            value32 = inl(port.ioport);
+            break;
+
+          default: return -EFAULT;  // bad width
+
+        }  // end switch
+        // write back to users structure
+        put_user_ret(value32, &user_port_p->value, -EFAULT);
+        break;
+
+      /*
+       * I/O port write - see pg 164
+       */
+      case WORM_IOP_W:
+        // get user structure
+        user_port_p = (PORT_VALUE *) arg;   // cast arg to structure pointer
+        if (copy_from_user(&port,                          // kernel buffer
+                           user_port_p,                    // user buffer
+                           sizeof(PORT_VALUE))) return -EFAULT;
+
+        switch(port.width) {
+          case 1:                                   // read 8 bit I/O port
+            outb((unsigned char) port.value, port.ioport);
+            break;
+
+          case 2:                                   // read 16 bit I/O port
+            outw((unsigned short) port.value, port.ioport);
+            break;
+
+          case 4:                                   // read 32 bit I/O port
+            outl(port.value, port.ioport);
+            break;
+
+          default: return -EFAULT;   // bad width
+
+        }  // end switch width
+        break;
+
+
+      /*
+       * atomic read, modify, write an 8, 16, or 32 bit I/O port,
+       * return original contents, 8 and 16 bit values are LS justified
+       * in a 32 bit value.  All bits that are logic 1 in the set mask
+       * are set.  All bits that are logic 1 in the clear mask are cleared.
+       * The clear mask takes precedence.  Interrupts are disabled during
+       * the read/write/modify
+       */
+      case WORM_IOP_RMW:
+        user_iormw_p = (PORT_RMW_VALUE *) arg;          // cast to struct ptr
+        if (copy_from_user(&iormw,                      // kernel buffer
+                           user_iormw_p,                // user buffer
+                           sizeof(PORT_RMW_VALUE))) return -EFAULT;
+
+        save_flags(flags);      // save system flags for later
+        cli();                  // block interrupts via flag
+
+        switch(iormw.width) {                                 // number of bytes
+            case 1:
+                original = (unsigned int) inb(iormw.ioport);  // read and save
+                value32 = original | iormw.setMask;           // modify-set
+                value32 &= ~iormw.clearMask;                  // modify-clear
+                outb((unsigned char) value32, iormw.ioport);  // write back
+                break;
+            case 2:
+                original = (unsigned int) inw(iormw.ioport);
+                value32 = original | iormw.setMask;
+                value32 &= ~iormw.clearMask;
+                outw((unsigned short) value32, iormw.ioport);
+                break;
+            case 4:
+                original = inl(iormw.ioport);
+                value32 = original | iormw.setMask;
+                value32 &= ~iormw.clearMask;
+                outl(value32, iormw.ioport);
+                break;
+            default:
+                return_code = -EFAULT;   // bad width
+        }
+        restore_flags(flags);      // restore CPU interrupts
+
+        if (return_code) {         // bad width?
+            return return_code;    // yes-
+        }
+
+        // write the original I/O register value back to the user
+        put_user_ret(original, &user_iormw_p->original, -EFAULT);
+        break;
+
+
+      /*
+       * PCI configuration space read - see pg 349
+       * for error status see /usr/src/linux/include/linux/./bios32.h
+       */
+      case WORM_PCI_R:
+        user_pci_p = (PCI_VALUE *) arg;   // cast arg to structure pointer
+        if (copy_from_user(&pci,                          // kernel buffer
+                           user_pci_p,                    // user buffer
+                           sizeof(PCI_VALUE))) return -EFAULT;
+        switch(pci.width) {
+          case 1:                                   // read 8 bit pci cfg space
+            status = pcibios_read_config_byte(pci.bus,
+                                 pci.function, pci.where, &value8);
+            value32 = (unsigned int) value8;
+            break;
+
+          case 2:                                   // read 16 bit pci cfg spacet
+            status = pcibios_read_config_word(pci.bus,
+                                 pci.function, pci.where, &value16);
+            value32 = (unsigned int) value16;
+            break;
+
+          case 4:                                   // read 32 bit pci cfg space
+            status = pcibios_read_config_dword(pci.bus,
+                                 pci.function, pci.where, &value32);
+            break;
+
+          default: return -EFAULT;  // bad width
+
+        }  // end switch width
+
+        // check the return status of the PCI BIOS call
+        return_code = check_pcibios_status(status);
+
+        // write the value back to the users structure
+        put_user_ret(value32, &user_pci_p->value, -EFAULT);
+        break;
+
+      /*
+       * PCI configuration space write - see pg 349
+       * for error status see /usr/src/linux/include/linux/./bios32.h
+       */
+      case WORM_PCI_W:
+        user_pci_p = (PCI_VALUE *) arg;   // cast arg to structure pointer
+        if (copy_from_user(&pci,                          // kernel buffer
+                           user_pci_p,                    // user buffer
+                           sizeof(PCI_VALUE))) return -EFAULT;
+        switch(pci.width) {
+          case 1:                                   // read 8 bit pci cfg space
+            status = pcibios_write_config_byte(pci.bus,
+                                 pci.function, pci.where,
+                                 (unsigned char) pci.value);
+            break;
+
+          case 2:                                   // read 16 bit pci cfg spacet
+            status = pcibios_write_config_word(pci.bus,
+                                 pci.function, pci.where,
+                                 (unsigned short) pci.value);
+            break;
+
+          case 4:                                   // read 32 bit pci cfg space
+            status = pcibios_write_config_dword(pci.bus,
+                                 pci.function, pci.where, pci.value);
+            break;
+
+          default: return -EFAULT;  // bad width
+
+        }  // end switch width
+
+        // check the return status of the PCI BIOS call
+        return_code = check_pcibios_status(status);
+        break;
+
+      /*
+       * PCI memory read and write - see pg 158,
+       * This should only be used for memory mapped devices above
+       * the top of DRAM
+       * See /usr/src/linux/./mm/vmalloc.c and
+       * /usr/src/linux/include/./linux/mm.h
+       * ./asm-i386/page.h
+       * /usr/src/linux/include/asm/./errno.h
+       * PAGE_SHIFT determines the page size
+       *
+       * ioremap(offset, size)
+       * Remap an arbitrary physical address space into the kernel
+       * virtual address space. Needed when the kernel wants to
+       * access high addresses directly.
+       * Notes: 1. Offset cannot be less than the kernel symbol high_memory
+       *           which is believed to be the top of DRAM memory
+       *        2. Offset must be page aligned
+       *        3. Offset and size must be greater than zero
+       *        4. Allocates enough pages to hold size
+       *        5. returns NULL if an error
+       */
+
+      case WORM_PCIMEM_R:
+        user_mem_p = (MEM_VALUE *) arg;   // cast arg to structure pointer
+        if (copy_from_user(&mem,                          // kernel buffer
+                           user_mem_p,                    // user buffer
+                           sizeof(MEM_VALUE))) return -EFAULT;
+
+        page_base = mem.address & PAGE_MASK;
+        offset = mem.address - page_base;
+        region_size = offset + 4;              // minimum memory area needed
+#ifdef DEBUG_PCIMEM
+        printk("<1>worm-WORM_PCIMEM_* address= %0x\n",
+                (unsigned int) mem.address);
+        printk("<1>worm-WORM_PCIMEM_* page_base= %0x\n",
+                (unsigned int) page_base);
+        printk("<1>worm-WORM_PCIMEM_* offset= %0x, width= %d\n",
+                (unsigned int) offset, mem.width);
+#endif
+        // map whole pages starting at page_base
+        pci_memory_p = ioremap((unsigned long)page_base, region_size);
+        virtual_address = ((unsigned long) pci_memory_p) + offset;
+        if (pci_memory_p != NULL) {                       // map OK?
+
+            switch (mem.width) {
+              case 1:
+                // read, return in LSB of value
+                value8 = *((volatile unsigned char *)virtual_address);  // read
+                value32 = (unsigned int) value8;
+                break;
+              case 4:
+                // do 4 byte read
+                value32 = *((volatile unsigned long *)virtual_address);  // read
+                break;
+              default:
+                value32 = 0;
+                return_code = -EFAULT;
+            }
+
+#ifdef DEBUG_PCIMEM
+            retval = verify_area(VERIFY_READ, (void *)pci_memory_p, region_size);
+            printk("<1>worm-WORM_PCIMEM_R verify ret= %d\n", retval);
+            printk("<1>worm-WORM_PCIMEM_R pci_memory_p + offset= %0x\n",
+                (unsigned int) (pci_memory_p + offset));
+            printk("<1>worm-WORM_PCIMEM_R pci_memory_p= %0x\n",
+                (unsigned int) pci_memory_p);
+            printk("<1>worm-WORM_PCIMEM_R value= %0x\n",
+                (unsigned int) value32);
+#endif
+            iounmap((void *)pci_memory_p);                  // free page
+        } else {
+            return_code = -EACCES;         // Permission Denied (errno.h)
+            printk(
+            "<1>worm-WORM_PCIMEM_R: vremap error: base= %0x, size= %0x\n",
+                (unsigned int) page_base, (unsigned int) region_size);
+        }
+        put_user_ret(value32, &user_mem_p->value, -EFAULT);
+        break;
+
+      /*
+       * PCI memory write - see pg 158,
+       */
+      case WORM_PCIMEM_W:
+        user_mem_p = (MEM_VALUE *) arg;   // cast arg to structure pointer
+        if (copy_from_user(&mem,                          // kernel buffer
+                           user_mem_p,                    // user buffer
+                           sizeof(MEM_VALUE))) return -EFAULT;
+
+        page_base = mem.address & PAGE_MASK;
+        offset = mem.address - page_base;
+        region_size = offset + 4;              // minimum memory area needed
+#ifdef DEBUG_PCIMEM
+        printk("<1>worm-WORM_PCIMEM_* address= %0x\n",
+                (unsigned int) mem.address);
+        printk("<1>worm-WORM_PCIMEM_* page_base= %0x\n",
+                (unsigned int) page_base);
+        printk("<1>worm-WORM_PCIMEM_* offset= %0x, width= %d\n",
+                (unsigned int) offset, mem.width);
+#endif
+
+        // map whole pages starting at page_base
+        pci_memory_p = ioremap((unsigned long)page_base, region_size);
+        virtual_address = ((unsigned long) pci_memory_p) + offset;
+
+        if (pci_memory_p != NULL) {                       // map OK?
+
+#ifdef DEBUG_PCIMEM
+            printk("<1>worm-WORM_PCIMEM_W virtual_address= %0x\n",
+                (unsigned int) (virtual_address));
+            printk("<1>worm-WORM_PCIMEM_W pci_memory_p= %0x\n",
+                (unsigned int) pci_memory_p);
+#endif
+
+            switch (mem.width) {
+              case 1:
+                // write LSB of value
+                *((volatile unsigned char *)virtual_address) =
+                        (unsigned char) mem.value;
+                break;
+              case 4:
+                // do 4 byte write
+                *((volatile unsigned long *)virtual_address) = mem.value;
+                // Note- the writel macro commented out below doesn't seem
+                // to work.
+                // It may have been redefined to be differnt than the one in
+                // asm/io.h???
+                // writel(virtual_address, value32);   // write
+                break;
+              default:
+                return_code = -EFAULT;  // bad width
+            }
+            iounmap((void *)pci_memory_p);                  // free page
+        } else {
+            return_code = -EACCES;         // Permission Denied (errno.h)
+            printk(
+            "<1>worm-WORM_PCIMEM_W: vremap error: base= %0x, size= %0x\n",
+                (unsigned int) page_base, (unsigned int) region_size);
+        }
+        break;
+
+      /*
+       * BIOS (640K to 1M) memory read and write, io.h macros handle details
+       * See pg 171
+       */
+      case WORM_BIOSMEM_R:
+        user_mem_p = (MEM_VALUE *) arg;   // cast arg to structure pointer
+        if (copy_from_user(&mem,                          // kernel buffer
+                           user_mem_p,                    // user buffer
+                           sizeof(MEM_VALUE))) return -EFAULT;
+#ifdef DEBUG_BIOSMEM
+        printk("<1>worm- WORM_BIOSMEM_R address= %08lx, width= %d\n",
+                mem.address, mem.width);
+#endif
+        switch (mem.width) {
+          case 1:
+            value32 = (unsigned long) readb(mem.address); // mem read via macro
+            break;
+          case 4:
+            value32 = readl(mem.address);     // mem read via macro
+            break;
+          default:
+            value32 = 0;
+            return -EFAULT;
+        }
+        put_user_ret(value32, &user_mem_p->value, -EFAULT);
+        break;
+
+
+      case WORM_BIOSMEM_W:
+        user_mem_p = (MEM_VALUE *) arg;   // cast arg to structure pointer
+        if (copy_from_user(&mem,                          // kernel buffer
+                           user_mem_p,                    // user buffer
+                           sizeof(MEM_VALUE))) return -EFAULT;
+
+#ifdef DEBUG_BIOSMEM
+        printk("<1>worm- WORM_BIOSMEM_R address= %08lx, width= %d\n",
+                mem.address, mem.width);
+#endif
+
+       switch (mem.width) {
+          case 1:
+            writeb((unsigned char) mem.value, mem.address);
+            break;
+          case 4:
+            writel(mem.value, mem.address);          // no- do 4 bytes
+            break;
+          default:
+            return -EFAULT;
+        }
+        break;
+
+      /*
+       * millisecond minimum time delay
+       */
+      case WORM_DELAY_MS:
+        user_delayp_ms = (DELAY_TIME_MS *) arg; // cast arg to structure pointer
+        get_user_ret(ms, &user_delayp_ms->milliseconds, -EFAULT);
+
+        // convert ms to seconds (1/1000), divide by length of a jiffie (1/HZ)
+        // and round up ms to next higher jiffie
+        // This accounts milliseconds that aren't integral number of jiffies
+        numJiffie = ((ms * HZ) / 1000);   // integral number of jiffies
+        if (((ms * HZ) % 1000) != 0) {    // remainder?
+            numJiffie++;                  // yes- round up
+        }
+        // then add 1 jiffie to take care of partial interval till next tick
+        numJiffie++;
+
+#ifdef DEBUG_WAIT_MS
+        printk("<1>worm-WORM_DELAY_MS: jiffies= %ld, numJiffie= %ld\n",
+                jiffies, numJiffie);
+#endif
+
+        start_time = read_timestamp();          // read Time Stamp Counter
+
+        // set a timeout of duration numJiffie
+        current->state = TASK_INTERRUPTIBLE;
+        numJiffie = schedule_timeout(numJiffie);
+        end_time = read_timestamp();            // read Time Stamp Counter
+
+#ifdef DEBUG_WAIT_MS
+        printk("<1>worm-WORM_DELAY_MS: jiffies= %ld, remaining jiffies= %ld\n",
+                jiffies, numJiffie);
+#endif
+
+        // can't get/put more than 32 bits, so split up
+        elapsed = end_time - start_time;
+put_user_ret((unsigned long) (elapsed >> 32), &user_delayp_ms->elapsed_ms, -EFAULT);
+put_user_ret((unsigned long) (elapsed), &user_delayp_ms->elapsed_ls, -EFAULT);
+put_user_ret((unsigned long) (end_time >> 32), &user_delayp_ms->end_ms, -EFAULT);
+put_user_ret((unsigned long) (end_time), &user_delayp_ms->end_ls, -EFAULT);
+break;
+
+
+      /*
+       * microsecond minimum time delay
+       */
+      case WORM_DELAY_US:
+        user_delayp_us = (DELAY_TIME_US *) arg;   // cast arg to structure pointer
+        get_user_ret(us, &user_delayp_us->microseconds, -EFAULT);
+        start_time = read_timestamp();            // read Time Stamp Counter
+        udelay(us);                               // execute busy loop delay
+        end_time = read_timestamp();              // read Time Stamp Counter
+        elapsed = end_time - start_time;
+put_user_ret((unsigned long) (elapsed >> 32), &user_delayp_us->elapsed_ms, -EFAULT);
+put_user_ret((unsigned long) (elapsed), &user_delayp_us->elapsed_ls, -EFAULT);
+put_user_ret((unsigned long) (end_time >> 32), &user_delayp_us->end_ms, -EFAULT);
+put_user_ret((unsigned long) (end_time), &user_delayp_us->end_ls, -EFAULT);
+        break;
+
+      /*
+       * get system timer value
+       */
+      case WORM_SYS_TIMER:
+        sys_timer_p = (SYSTEM_TIMER *) arg; // cast arg to structure pointer
+        put_user_ret(jiffies, &sys_timer_p->value, -EFAULT);   // system clock
+        break;
+
+      /*
+       * get system timer tick rate (ticks/second)
+       */
+      case WORM_GET_HZ:
+        hz_p = (HZ_TYPE *) arg;
+        put_user_ret((HZ_TYPE) HZ, hz_p, -EFAULT);    // defined in <linux/param.h>
+        break;
+
+      /*
+       * delay until N system clock ticks occur (first tick may be soon)
+       */
+      case WORM_DELAY_TICKS:
+        ticks_p = (TICKS_TYPE *) arg;
+        get_user_ret(numJiffie, ticks_p, -EFAULT);
+
+        // set a timeout for the endJiffie timer value. see pg 136
+        current->state = TASK_INTERRUPTIBLE;
+        numJiffie = schedule_timeout(numJiffie);
+
+        break;
+      default:  /* redundant, as cmd was checked against MAXNR */
+        return_code = -EINVAL;
+    }  // end switch(cmd) - perform ioctl
+    return return_code;
+
+}
+
+/*
+ * The different file operations for the worm driver
+ * to match the device user system calls
+ * see /usr/src/linux/include/./linux/fs.h
+ * Note: the compiler assigns the named structure elements using the labels below
+ *       order is not important, remaining members are filled with NULL.
+ *       see http://www.atnf.csiro.au/~rgooch/linux/docs/porting-to-2.2.html
+ */
+struct file_operations worm_fops = {
+    ioctl:   worm_ioctl,
+    open:    worm_open,
+    release: worm_release,
+};
+
+/*
+ * Finally, the module stuff
+ */
+
+int init_module(void)
+{
+    int result;
+
+    /*
+     * Register your major, and accept a dynamic number
+     */
+    result = register_chrdev(worm_major, "worm", &worm_fops);
+    if (result < 0) {
+        printk(KERN_WARNING "worm: can't get major %d\n",worm_major);
+        return result;
+    }
+    if (worm_major == 0) worm_major = result; /* dynamic */
+
+// signon message giving build date
+#ifdef SHOW_SIGNON_SIGNOFF
+    printk(KERN_WARNING "worm kernel 2.2- init_module- major= %d, built on %s\n",
+            worm_major, show_version());
+#endif
+
+    EXPORT_NO_SYMBOLS;        /* see page 383 */
+
+    return 0; /* succeed */
+}
+
+void cleanup_module(void)
+{
+#ifdef SHOW_SIGNON_SIGNOFF
+    printk(KERN_WARNING "worm - cleanup_module- Unloading major= %d\n",
+           worm_major);
+#endif
+    unregister_chrdev(worm_major, "worm");
+}

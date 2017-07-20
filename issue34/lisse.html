@@ -1,0 +1,212 @@
+<!--startcut ==========================================================-->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML>
+<HEAD>
+<title>Sendmail Made Easy! LG #34</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#A000A0"
+ALINK="#FF0000">
+<!--endcut ============================================================-->
+
+<H4>
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<h1><font color="maroon">Sendmail Made Easy!</font></h1>
+<H4>By <a href="mailto:el@lisse.na">Eberhard W. Lisse</a></H4>
+</center>
+<P> <HR> <P>  
+
+All Linux distributions come with a Mail Transfer Agent (the program
+that does the routing and sending of the messages. The daddy of them
+all is <b>sendmail</b> (http://www.sendmail.org/).
+<p>
+<b>sendmail</b> is usually preconfigured, but if you need to set up a special
+situation (for example UUCP), it can become quite a nuisance. The
+reason for this is that at the initial writing of sendmail the
+configuration language was designed to parse quickly at the expense of
+being cryptic. I looked at a sendmail.cf in 1987 and didn't look again for 10 
+years.
+<p>
+<b>smail</b> is easier to understand and has always had the nice
+feature of batching messages, running the batches through gzip and
+sending the jobs off via UUCP. Saved me quite a lot of money in phone
+bills over the years.
+<p>
+However, a year and a half ago I found a package called BSMTP (Batched
+Simple Mail Transport Protocol) for taking care of the batch-gzipping stuff. 
+BSMTP is a package which is used with UUCP.  sendmail uses the SMTP Protocol 
+if sending
+or reeiving mail via TCP/IP, but you can also feed mail into sendmail
+directly using this protocol. Now this package will take outgoing
+mail, put many messages in batches with SMTP commands inserted between
+messages, gzip the batches and hand them to UUCP for transport. On the
+other end the process is reversed, uucp receives, hands to an
+uncompressor which feeds to sendmail.  This results in a compression
+of better then half. Using advanced features of the uucp on Linux you
+can achieve very high throughputs.  BSMTP works with both smail and sendmail
+and has a macro package which makes sendmail configuration much
+easier. I like to tinker so I tried it. It took about a weekend 
+to get sendmail working with BSMTP/UUCP.
+Once I had figured out the basics, it became much easier, I only needed about
+an hour to set it up for my leased line. 
+<p>
+Since you have Linux, you have all the tools required. If not, install
+them from your distribution. I'll assume you have a working DNS with MX entries
+for our system and are connected by a leased line. Install the latest
+sendmail and sendmail-cf RPMs in the /usr/lib/sendmail-cf directory.
+<p>
+Consider the following few lines in a file called linux.mc located in
+/usr/lib/sendmail-cf/cf:
+<p>
+<pre>
+divert(-1)
+OSTYPE(linux)
+FEATURE(use_cw_file)
+define(`confCW_FILE', `-o /etc/sendmail/sendmail.cw')
+FEATURE(mailertable,`hash -o /etc/sendmail/mailertable.db')
+FEATURE(local_procmail)
+define(`STATUS_FILE',`/etc/sendmail/sendmail.st')
+MAILER(procmail)
+MAILER(smtp)
+</pre>
+It's rather cryptic--or is it?
+<p>
+Run this file through the <b>m4</b> command by typing:
+<p>
+<pre>
+m4 ../m4/cf.m4 linux.mc > sendmail.cf
+</pre>
+It produces a sendmail.cf of approximately 1200 lines (still
+unreadeable to me) which has been in production use on my system.
+<p>
+Now let's have a look at what those lines mean.
+<p>
+<pre>
+# divert(-1)
+</pre>
+This line is a directive to the macro processor which I have never
+bothered to understand. It has something to do with suppressing 
+newline characters.
+<p>
+<pre>
+OSTYPE(linux)
+</pre>
+Now, that's fairly easy, right? Well, what it doesn't tell you is that
+the local delivery program <b>mail.local</b> from the sendmail distribution
+needs to be in /bin or your mail will disappear without a trace.
+<p>
+<pre>
+FEATURE(use_cw_file)
+define(`confCW_FILE', `-o /etc/sendmail/sendmail.cw')
+</pre>
+What on earth is a CW file?
+<p>
+I receive a lot of mail to the address of
+el@lisse.na; however, the host name is linux.lisse.na. No problem, we
+have an appropriate MX entry pointing lisse.na to linux.lisse.na,
+right? Wrong. You must tell sendmail the names under which it can receive
+mail on the local host. For example:
+<p>
+<pre>
+lisse
+lisse.na
+linux
+linux.lisse.na
+</pre>
+When doing this is overlooked, sendmail sends an error message which is 
+somewhat misleading.  The bouncing message has the  following Subject: line:
+<PRE> 
+Subject: Returned mail: Local configuration error
+</PRE> 
+And the MX list line is what is confusing:
+<PRE> 
+   ----- Transcript of session follows -----
+554 MX list for nws.com.na. points back to linux.lisse.na
+554 el@nws.com.na... Local configuration error
+</PRE> 
+<p>
+<pre>
+FEATURE(mailertable,`hash -o /etc/sendmail/mailertable.db')
+</pre>
+This line is only required if you have special delivery situations. For
+example, to use the BSMTP package to deliver mail for Triple A,
+Inc. via the UUCP neighbour <tt>bbbbb</tt>, set up an MX entry in the 
+DNS and write something like this in the mailertable file:
+<p>
+<pre>
+.aaa.com.na	bsmtp:bbbbb
+aaa.com.na	bsmtp:bbbbb
+</pre>
+A TAB character is in between the pairs, and you must run a program
+from the sendmail package called <b>makemap</b> on the file mailertable to
+produce the binary database file mailertable.db. For example:
+<p>
+<pre>
+makemap hash &lt; mailertable mailertable
+</pre>
+There are other database systems (for example, <b>dbm</b>) but
+let's not complicate matters.
+<p>
+<pre>
+FEATURE(local_procmail)
+</pre>
+This line redefines the local mailer to be <b>procmail</b>. You most 
+definitely want that.
+<p>
+<pre>
+define(`STATUS_FILE',`/etc/sendmail/sendmail.st')
+</pre>
+This line defines the status file. Make sure you have created this directory
+as root.
+<p>
+<pre>
+MAILER(procmail)
+</pre>
+<b>procmail</b> was written by Stefan van der Berg at my alma mater and
+deserves its own article. In short it is <i>the</i> local delivery program.
+Its strength lies in its message filtering capabilities. Very nice for
+those mailing lists.
+<p>
+<pre>
+MAILER(smtp)
+</pre>
+Please note that I have left out the <tt>bsmtp</tt> entry that would be
+required, if you had used a BSMTP entry in the mailer table. If
+you had a UUCP neighbour, you'd need a mailer entry too which must come
+after <tt>smtp</tt>.
+<p>
+Now, test this configruation file, copy it to the /etc directory after making a
+backup copy of the old one and restart sendmail. As root, I use
+the command:
+<p>
+<pre>
+killall -HUP sendmail
+</pre>
+I did not show you how to set up sendmail for UUCP, BSMTP, anti-SPAM
+or virtual domains. However, now that you have mastered the basics, it will be 
+fairly easy.
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<center><H5>Copyright &copy; 1998, Eberhard W. Lisse <BR> 
+Published in Issue 34 of <i>Linux Gazette</i>, November 1998</H5></center>
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<A HREF="./index.html"><IMG ALIGN=BOTTOM SRC="../gx/indexnew.gif" 
+ALT="[ TABLE OF CONTENTS ]"></A>
+<A HREF="../index.html"><IMG ALIGN=BOTTOM SRC="../gx/homenew.gif"
+ALT="[ FRONT PAGE ]"></A>
+<A HREF="./vertes.html"><IMG SRC="../gx/back2.gif"
+ALT=" Back "></A>
+<A HREF="./holve.html"><IMG SRC="../gx/fwd.gif" ALT=" Next "></A>
+<P> <hr> <P> 
+<!--startcut ==========================================================-->
+</BODY>
+</HTML>
+<!--endcut ============================================================-->

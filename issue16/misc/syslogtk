@@ -1,0 +1,162 @@
+#!/usr/bin/wish
+#
+# syslogtk      a simple tcl/tk script which is used to continuously display
+#               a syslog logging file
+#
+# Author:       John M. Fisk <fiskjm@ctrvax.vanderbilt.edu>
+# Version:      $Id: syslogtk,v 1.1.1.1 2002/08/14 22:26:58 dan Exp $
+
+#############################################################################
+#                             SET GLOBAL VARIABLES                          #
+#############################################################################
+
+# path to initial log file
+set logFile /var/adm/syslog
+
+# number of rows in Maximized and Minimized window
+set maxRows 25
+set minRows 5
+
+# initial number of rows & cols and the number of lines to 'tail'
+set initRows $minRows
+set initCols 80
+set tailLines 200
+
+# on occasion, tail seems to "hang" after pppd terminates; as a kludge, set
+# up "auto-update" which restarts the tail process every autoUpdateMIN minutes
+set autoUpdateMIN 20
+
+#############################################################################
+#                            PROCEDURE DEFINITIONS                          #
+#############################################################################
+
+proc CreateWindow { rows cols } {
+#
+# creates the primary set of widgets and displays the main window --
+# it accepts two arguments:  the no. of rows and cols of the text
+# widget in which the file is displayed
+
+    global logFile maxRows minRows tailLines fileList
+   
+    # FRAMES
+	frame .mbar -relief raised -bd 2
+    frame .info -relief flat
+    frame .text -relief groove -bd 2
+    frame .btn  -relief sunken -bd 2
+    pack .mbar .info .text .btn \
+         -side top -fill x -padx 1m -pady 1m
+
+	# MENUBAR
+	menubutton .mbar.file -text "File" -underline 0 -menu .mbar.file.menu
+	pack .mbar.file -side left
+
+	# ADD FILES IN /var/adm TO MENU
+	# for this to work, the user must have read permission on the files in
+	# /var/adm
+	menu .mbar.file.menu -tearoff false
+	foreach f [lsort [glob /var/adm/*]] {
+	    if {[file isfile $f] && [file readable $f]} {
+		.mbar.file.menu add command -label $f \
+		    -command [list ViewFile $f] 
+	    }
+	}
+	.mbar.file.menu add separator
+	.mbar.file.menu add command -label "Exit" -command { exit }
+	
+	tk_menuBar .mbar .mbar.file
+
+    # FILENAME LABEL
+    label .info.lbl -text "System Log File: "
+	entry .info.ent -textvariable logFile -relief flat
+    pack  .info.lbl .info.ent -side left
+
+    # TEXT AND SCROLLBAR WIDGETS
+    text .text.txt -relief raised -bd 2 -yscrollcommand ".text.sB set" \
+        -width $cols -height $rows -wrap word
+    scrollbar .text.sB -command ".text.txt yview"
+    pack .text.sB -side right -fill y
+    pack .text.txt -side left
+
+    # OPERATION BUTTONS
+    button .btn.head -text "Goto Head" -command { .text.txt see 1.0 }
+    button .btn.tail -text "Goto End"  -command { .text.txt see end }
+    button .btn.incr -text "Maximize Window" -command {
+        .text.txt configure -height $maxRows
+		.text.txt see end
+    }
+    button .btn.decr -text "Minimize Window" -command {
+        .text.txt configure -height $minRows
+		update
+		.text.txt see end
+    }
+    button .btn.update -text "Update" -command {
+        KillTail
+        LoadFile $logFile $tailLines
+    }
+    button .btn.quit -text "QUIT" -command { 
+        KillTail
+        exit  
+    }
+    pack .btn.head .btn.tail .btn.incr .btn.decr .btn.update .btn.quit \
+         -side left -padx 1m -pady 2m -fill x -expand TRUE
+}
+
+proc LoadFile { file lines } {
+#
+# uses ``tail'' to display the file and ``fileevent'' to continuously 
+# update the display.  it takes two arguments:  the path to file which 
+# is to be displayed and the number of lines to tail
+
+    global logFD tailPID
+
+    if [catch { open "|tail -n $lines -f $file" RDONLY } logFD] {
+        puts stderr $logFD
+    } else {
+        .text.txt delete 1.0 end
+        set tailPID [pid $logFD]
+        fileevent $logFD readable {
+            gets $logFD line
+            .text.txt insert end $line\n
+            .text.txt see end
+        }
+    }
+}
+
+proc ViewFile { filename } {
+#
+# This loads another log file in /var/adm by killing the current tail 
+# process and then loading up the file specified by "filename"
+
+	global logFile tailLines
+
+	set logFile $filename
+	KillTail
+	LoadFile $filename $tailLines
+}
+
+proc KillTail {} {
+#
+# Kills the tail process and closes the file
+
+    global logFD tailPID
+
+    catch {exec kill -SIGTERM $tailPID}
+    catch {close $logFD}
+}
+
+proc AutoUpdate { intervalMIN } {
+#
+# This automatically updates the display every ``interval'' minutes
+
+    .btn.update invoke
+    after [expr $intervalMIN * 60 * 1000 ] AutoUpdate $intervalMIN
+}
+
+#############################################################################
+#                                 MAIN PROGRAM                              #
+#############################################################################
+
+# create window, load the default logfile, and start auto-updating
+CreateWindow $initRows $initCols
+LoadFile $logFile $tailLines
+AutoUpdate $autoUpdateMIN

@@ -1,0 +1,72 @@
+#! /usr/local/bin/bash
+#
+# Copyright (c) 2003-2004 by William Park <opengeometry@yahoo.ca>.
+# All rights reserved.
+#
+# Usage: popcheck.bash
+#
+# Delete Microsoft Swen/Netsky worms from remote POP3 servers.  You can, then,
+# use Fetchmail to download the emails, like
+#	popcheck.bash && fetchmail
+# Since ~/.fetchmailrc already contains POP3 server, remote username, and
+# password, it uses
+#	fetchmail --configdump
+# to get those.  Logging will be printed on stdout.
+#
+# Microsoft Swen worms are about 150kB in size and use
+#	boundary="-*[a-z]+"	
+# as boundary marker for MIME attachments.  And, Microsoft Netsky worms are
+# about 42kB in size and use
+#	boundary="----=_NextPart_000_0016----=_NextPart_000_0016"
+#	boundary="----=_NextPart_000_001B_01C0CA80.6B015D10"
+#	boundary="----=_NextPart_000_001B_01C0CA81.7B015D10"
+# as boundary marker.
+
+read3 ()		# Usage: read3
+{
+    read -r -u3 -D		# read from fd=3
+}
+
+send3 ()		# Usage: send3 [cmd...]
+{
+    echo -D "$*" 1>&3		# write to fd=3
+    read3
+    echo "$* --> $REPLY"
+    [[ $REPLY == +OK* ]]  ||  exit 1
+}
+
+check () 		# Usage: check server username password
+{
+    local ok n size i
+
+    exec 3<>/dev/tcp/$1/pop3  ||  exit 1
+    read3
+    send3 user $2
+    send3 pass $3
+    send3 stat			# +OK 11 1504321
+    read ok n size <<< "$REPLY"	
+    for ((i = 1; i <= n; i++)); do
+	send3 top $i 0
+	case `until read3; [ "$REPLY" = . ]; do echo "${REPLY#.}"; done` in
+	    'boundary="-*[a-z]+"' )) echo swen.0 ;;
+	    'boundary="(----=_NextPart_000_0016){2}"' )) echo netsky.1 ;;
+	    'boundary="----=_NextPart_000_001B_01C0CA8(0\.6|1\.7)B015D10"' )) echo netsky.2 ;;
+	esac then
+	    send3 dele $i
+	fi
+    done
+    send3 quit
+}
+
+(
+fetchmail --configdump
+cat << EOF
+for server in fetchmailrc['servers']:
+    if server['protocol'] == 'POP3':
+	for user in server['users']:
+	    print server['pollname'], user['remote'], user['password']
+EOF
+) | python | while read server user pass; do
+    # use (...) to prevent 'exit' terminating entire script
+    check "$server" "$user" "$pass"
+done

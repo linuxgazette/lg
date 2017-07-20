@@ -1,0 +1,310 @@
+<!-- saved from url=(0022)http://internet.e-mail -->
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>Risk-Free Resource Allocation for I/O Memory-Mapped Device Drivers LG #83</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="stoddard.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../lg_faq.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="tougher.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+
+<!--endcut ============================================================-->
+
+<TABLE BORDER><TR><TD WIDTH="200">
+<A HREF="http://www.linuxgazette.net/">
+<IMG ALT="LINUX GAZETTE" SRC="../gx/2002/lglogo_200x41.png" 
+	WIDTH="200" HEIGHT="41" border="0"></A> 
+<BR CLEAR="all">
+<SMALL>...<I>making Linux just a little more fun!</I></SMALL>
+</TD><TD WIDTH="380">
+
+
+<center>
+<BIG><BIG><STRONG><FONT COLOR="maroon">Risk-Free Resource Allocation for I/O Memory-Mapped Device Drivers</FONT></STRONG></BIG></BIG><BR>
+<STRONG>By <A HREF="../authors/thangaraju.html">Dr B Thangaraju</A></STRONG></BIG>
+
+</TD></TR>
+</TABLE>
+<P>
+
+<!-- END header -->
+
+
+
+
+<FONT color=navy><H2>Abstract</H2></FONT color=navy>
+
+	<p>A device driver is an entry point to access a device. Developing a
+device driver is not as simple a task as writing application programs. Since
+any dynamically-loaded driver module is attached to the existing kernel, any
+error in the driver will crash the entire system. Resource allocation for a
+device is one of the main concerns for device driver developers. The device
+resources are I/O memory, IRQs and ports. This article presents a risk-free way
+of allocating resource for an I/O memory mapped device for a dynamically loaded
+Linux device driver, and is written so that less experienced Linux users can follow
+along.</p>
+
+<FONT color=navy><H2>Introduction</H2></FONT color=navy>
+
+<p>      In the rapidly developing IT field, new devices are constantly being
+developed and we see an increasingly wide variety of Input and Output devices.
+The I/O subsystem allows a process to communicate with peripheral devices such
+as disks, floppies, CD-ROMs, terminals, printers and networks. Kernel modules
+that control devices are known as device drivers.  The I/O subsystem handles
+the movement of data between memory and peripheral devices.  The type of the
+devices can be classified into character and block depending on the way the
+system accesses the device. In general, the character devices like keyboard,
+mouse, console and modem are accessed as a stream of bytes. However, the block
+devices like Hard disk, floppy and CD-ROM move blocks of data to and from the
+system. </p>
+
+<p>      The kernel interacts with these devices through device drivers.  A
+device driver is a collection of functions used to access any particular
+device.  One of the important features of Linux is that the device driver
+module can be inserted dynamically into the existing kernel.  Then the driver
+module will become part of the kernel and can access the kernel functions.
+ In the same way, the loaded driver can be removed dynamically. If the driver is not explicitly removed, it will be persistent in the system until we reboot the machine.</p>
+
+<p>	The most frequent job of any driver is transferring data between
+the computer and its external environment.  The external environment consists
+of a variety of external devices, including secondary memory devices,
+communications equipment and terminals. Three techniques are possible for I/O
+operations: programmed I/O, Interrupt - driver I/O and Direct Memory
+Access (DMA).  The programmed I/O devices pass the data from system to device
+or vice versa in two different ways: I/O port and I/O memory mapped. This
+article explains the basic concept of I/O memory mapped devices and the macros
+used by the device driver for allocating I/O memory regions for the device and
+expounds the concept with well tested device driver code. Since the driver
+module is part of the kernel, any attempt to allocate existing address to your
+device will crash the system. So the sample driver will first probe whether the
+address range is free or not, if it is already in use by other device it will
+return immediately with an error, otherwise it will allocate the given address range to
+your device. </p>
+
+
+<FONT color=navy><H2>Basics of I/O memory mapped device</H2></FONT color=navy>
+
+<p>	Device drivers are extremely device dependent. The driver framework
+should take responsibility of how the CPU interacts with the device. PIO and
+DMA are the two ways of moving data between the kernel and the device. PIO
+requires the CPU to move data  to or from the device as each byte is ready,
+by responding to an interrupt or polling. For DMA
+devices, the kernel gives the source address, the destination address and the size of
+the data in memory. The device can transfer the data without CPU intervention,
+and when the data is moved it will send an interrupt to notify the kernel of the
+completion. Typically, slow devices like modem and line printers are PIO
+devices, while disks and graphics terminals are DMA devices.  </p>
+
+<p>	For PIO devices, there are two ways to pass data from the device to
+system memory.  Which way a system uses depends on its architecture. For instance, Intel x86
+architectures supports I/O port, and Motorola 680x0 maintains memory mapped
+device I/O. Moreover, most of the ISA (Industry Standard Architecture) devices
+belong to the I/O support allocation and 
+  PCI (Peripheral Component Interconnect) devices uphold I/O memory mapped
+allocation.  Several parameters that a driver must know are, for example, the
+hardware's actual I/O addresses or memory range. Sometimes you need to pass
+parameters to a driver to help it in finding its own device or to
+enable/disable specific features. 
+In my previous article in Linux Focus
+(<A HREF="http://linuxfocus.org/English/November2002/article264.meta.shtml">
+http://linuxfocus.org/English/November2002/article264.meta.shtml</A>), I explained the
+fundamentals of device controllers and intricacies of the fail safe port
+allocation for Linux device drivers From the driver developer perspective, the
+allocation of I/O memory for a device has some similarity with allocation of
+I/O ports because both are based on similar internal mechanisms. So it is
+redundant to explain again the basics of device controller and the functions of
+status and control registers for transferring data from or to device to system
+memory.</p>
+
+
+<FONT color=navy><H2>Macros used for I/O memory address allocation </H2></FONT color=navy>
+
+<p>To probe whether the address range is already in use or not, use the following
+macro in driver.
+</p>
+<FONT color=#8281e10><h3>int check_mem_region (unsigned long start, unsigned
+long length);</h3></FONT color=#8281e10>
+
+<p>Here, the first argument <b>start</b> is the starting address of the I/O
+memory and <b>length</b> is the size of the address range. The function returns
+zero if the address range is available otherwise returns less than zero.
+To register the given I/O memory regions, the macro is 
+</P>
+<FONT color=#8281e10><h3> void request_mem_region (unsigned long start,
+unsigned long length, char
+*device_name);</h3></FONT color=#8281e10>
+
+
+<p>The string argument <b>char *device_name</b> is the name of device, which
+will own the I/O memory regions from start address to length size.
+	Before the device is unregistered, the allocated I/O memory regions
+should be released for other devices.  
+</P>
+
+<FONT color=#8281e10><h3>void release_mem_region (unsigned long start, unsigned
+long length);</h3></FONT color=#8281e10>
+
+<p>The above function will de-allocate the I/O memory regions.</p>
+
+<br><br><br>
+<FONT color=navy><H2>Example Driver Code for I/O memory region
+allocation</H2></FONT color=navy>
+
+<table BORDER COLS=1 WIDTH="52%" BGCOLOR="silver" >
+<tr> <td>
+<p>#include &lt;linux/module.h>
+<br>#include &lt;linux/init.h>
+<br>#include &lt;linux/fs.h>
+<br>#include &lt;linux/ioport.h>
+<p>static int Major, result;
+<br>struct file_operations fops;
+<p>unsigned long start = 0, length = 0;
+<p>MODULE_PARM (start, "l");
+<br>MODULE_PARM (length, "l");
+<p>int Wipro_init (void) {
+<br>&nbsp;&nbsp;&nbsp; Major = register_chrdev (0, "Wipro_device", &amp;fops);
+<br>&nbsp;&nbsp;&nbsp; if (Major &lt; 0)
+<br>&nbsp;&nbsp;&nbsp; {
+<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; printk (" Major number allocation
+is failed \n");
+<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; return (Major);
+<br>&nbsp;&nbsp;&nbsp; }
+<br>&nbsp;&nbsp;&nbsp; printk (" The Major number of the device is %d \n",
+Major);
+<p>&nbsp;&nbsp;&nbsp; result = check_mem_region (start, length);
+<br>&nbsp;&nbsp;&nbsp; if (result &lt; 0)
+<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; {
+<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+printk ("Allocation for I/O memory range is failed: Try other range\n");
+<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+return (result);
+<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; }
+<p>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; request_mem_region (start,
+length, "Wipro_device");
+<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; return 0;
+<br>}
+<p>void Wipro_cleanup (void) {
+<br>&nbsp;&nbsp;&nbsp; release_mem_region (start, length);
+<br>&nbsp;&nbsp;&nbsp; printk (" The I/O memory region is released successfully
+\n");
+<p>&nbsp;&nbsp;&nbsp; unregister_chrdev (Major, "Wipro_device");
+<br>&nbsp;&nbsp;&nbsp; printk (" The Major number is released successfully
+\n");
+<br>}
+<p>module_init (Wipro_init);
+<br>module_exit (Wipro_cleanup);
+</td> </tr> </table> 
+
+	<p>The above program is saved as io_mem.c.  First four lines are the
+headers, which are included to access kernel macros and functions. Next is the
+variable and file_operations structure declaration. The macro MODULE_PARM is
+the driver modules parameter for assigning value of any variable during the
+module loading. It will accept two arguments, first one is the variable name
+and the second one is data type of the variable. In this code, "<b>l</b>"
+means long int. </p>
+	<p>In Wipro_init and Wipro_cleanup functions are explicit
+initialization and cleanup for this driver module. The modern mechanism
+recommends this approach for marking init_module and cleanup_module. The
+Wipro_init function first registers the Wipro_device and allocates major number
+dynamically. Then it will probe the given address, <b>if the address is already
+in use, the function will return an error, otherwise it will allocate the
+address range for the device</b>. The Wipro_cleanup function deallocate the I/O
+memory region before unregistering the device name and major number.</p>
+<p>The file is compiled with 2.4 kernel and has been created io_mem.o  object file. 
+
+
+	The following <b>device</b> and <b>iomem</b> file contains part of the existing data in my computer shown below. 
+</p>
+<table BORDER COLS=1 WIDTH="52%" BGCOLOR="silver" >
+<tr> <td>
+<p><b>$cat /proc/devices</b>
+<br>Character devices:
+<br>  1 mem
+<br>  2 pty 
+<br>...
+<br>180 usb
+</p>
+
+<p><b>$cat /proc/iomem</b>
+<br>00000000-0009fbff : System RAM
+<br>...
+<br>e0000000-e3ffffff : Silicon Integrated Systems [SiS] 620 Host
+<br>ffff0000-ffffffff : reserved </p>
+</td> </tr> </table> 
+
+<p>	The module is loaded by a command, 
+<b>$insmod ./io_mem.o start=0xeeee0000 length=0xeeee</b>. 
+After loading successfully, it is evident that the device is registered with
+the existing devices list with major number 254 and the given memory range is
+allocated and shown in devices and iomem file respectively as shown below. </p>
+<table BORDER COLS=1 WIDTH="52%" BGCOLOR="silver" >
+<tr> <td>
+
+<p><b>$cat /proc/devices</b>
+<br>Character devices:
+<br>  1 mem
+<br>  2 pty
+<br>...
+<br>180 usb
+<br><b><FONT color=red>254 Wipro_device</b> </FONT color=red>
+<br>
+</P>
+
+<p><b>$cat /proc/iomem</b>
+<br>00000000-0009fbff : System RAM
+<br>...
+<br>e0000000-e3ffffff : Silicon Integrated Systems [SiS] 620 Host
+<br><b><FONT color=red>eeee0000-eeeeeeed : Wipro_device</b> </FONT color=red>
+<br>ffff0000-ffffffff : reserved </p>
+
+ </tr> </table> 
+
+<br><br><br><FONT color=navy><H2>Conclusion </H2></FONT color=navy>
+<p> We discussed the importance of the risk-free resource allocation for I/O memory mapped
+devices for Linux
+device drivers. We examined the basics of I/O memory mapped devices, the
+macros for 
+I/O memory address allocation. We explained the practical approach
+of how to allocate resource for 
+I/O memory mapped devices with the well tested device driver code.
+We verified the code is 
+explained and the device register and memory range address allocation. 
+</p>
+
+<H2><FONT color=navy>Acknowledgment</H2></FONT color=navy>
+
+I would like to acknowledge <b>Mr.V.Jayasurya and Dr. Sanjay Gupta
+</b>,Talent Transformation, Wipro Technologies, India.   
+
+<H2><FONT color=navy> References </H2></FONT color=navy>
+ 1. Linux Device Drivers (2nd Edition), by Alessandro Rubini and Jonathan Corbet. 
+<br>       The book is available from O'Reilly  :  <A HREF="http://linux.oreilly.com/">http://linux.oreilly.com/</A>
+
+
+
+
+<!-- *** BEGIN copyright *** -->
+<hr>
+<CENTER><SMALL><STRONG>
+
+Copyright &copy; 2002, Dr B Thangaraju.
+Copying license <A HREF="../copying.html">http://www.linuxgazette.net/copying.html</A><BR> 
+Published in Issue 83 of <i>Linux Gazette</i>, October 2002</H5>
+</STRONG></SMALL></CENTER>
+<!-- *** END copyright *** -->
+<HR>
+
+<!--startcut ==========================================================-->
+<CENTER>
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="stoddard.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../lg_faq.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="tougher.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+</CENTER>
+</BODY></HTML>
+<!--endcut ============================================================-->
+

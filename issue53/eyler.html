@@ -1,0 +1,294 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>Functions and aliases in bash LG #53</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<A HREF="http://www.linuxgazette.net/">
+<H1><IMG ALT="LINUX GAZETTE" SRC="../gx/lglogo.jpg" 
+	WIDTH="600" HEIGHT="124" border="0"></H1></A> 
+
+<!-- *** BEGIN navbar *** -->
+<A HREF="correa3.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A>
+<IMG ALT="" 
+	SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom" >
+<A HREF="index.html"><IMG ALT="[ Table of Contents ]" 
+	SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A>
+<A HREF="../index.html"><IMG ALT="[ Front Page ]" 
+	SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A>
+<A HREF="../faq/index.html"><IMG ALT="[ FAQ ]" 
+	SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A>
+<IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  >
+<IMG ALT="" 
+	SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom" >
+<A HREF="lamb.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A>
+<!-- *** END navbar *** -->
+<P>
+
+<FONT SIZE="+2"><EM>Talkback:</EM> Discuss this article with peers</FONT></A -->
+
+<!--endcut ============================================================-->
+
+<H4>
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H1><font color="maroon">Functions and aliases in bash</font></H1>
+<H4>By <a href="mailto:pate@gnu.org">Pat Eyler</H4>
+</center>
+<P> <HR> <P>  
+
+<!-- END header -->
+
+
+
+
+Many tutorials and introductions to bash talk about using aliases.
+Unfortunately most of them don't cover functions.  This is a real
+loss, because functions offer many values that aliases don't.
+
+<h3>Aliases</h3>
+<p>Aliases are simple string substitutions.  The shell looks at the first
+word of a command and compares it against it's current list of
+aliases.  Further, if the last character of an alias is a space, it
+looks at the next word as well.  For example:
+<blockquote><code>
+<br>$ alias 1='echo '
+<br>$ alias 2='this is an alias'
+<br>$ 1 2
+<br>this is an alias
+<br>$
+</code></blockquote>
+<p>Aliases don't allow for control-flow, command line arguments, or
+additional trickery that makes the command line so useful.
+Additionally, the rules surrounding alias expansion are a bit tricky,
+enough so that the bash(1) manpage recommends "[t]o be safe, always
+put alias definitions on a separate line,  and  do  not  use alias in
+compound commands".
+
+<h3>An Intro to Functions</h3>
+<p>Functions are really scripts run in the current context of the shell.
+(This bit of techspeak means that a second shell is not forked to run
+the function, it is run within the current shell.)  Functions really
+are full scripts in and of themselves, and allow all the flexibility
+and capability that entails.  
+
+<p>You can create a functions a couple of different ways.  You can just
+enter it into a file and source the file with the '.' command (either
+from the command line or in your start-up scripts).  You can also just
+enter the function into at the command line.  A function is only
+available in a session where it has been made available through one of
+these methods (or has inherited it from its parent shell).
+
+<p>To create a function from the command line you would do something
+like this:
+
+<blockquote><code><pre>
+$ gla() {
+&gt; ls -la | grep $1
+&gt; }
+</blockquote></code></pre>
+
+<p>This is a pretty simple function, and could be implemented as an
+alias as well.  (There are reasons you might not want to do this,
+we'll get to those later.)  As written, it does a long listing of the
+local directory and greps for any matches for the first argument.  You
+could make it more interesting by punching it through awk to find any
+matching files that are larger than 1024 bytes.  This would look like:
+
+<blockquote><code><pre>
+$ gla() {
+&gt; ls -la | grep $1 | awk ' { if ( $5 &gt; 1024 ) print $0 } '
+&gt; }
+</blockquote></code></pre>
+
+<p>You can't do this as an alias, you're no longer just replacing gla
+with the 'ls -la | grep'.  Since its written as a function, there is
+no problem using the $1 (referring to the first argument to gla)
+anywhere in the body of your commands.
+
+<p>For a larger example (well, okay it's a fair amount larger),
+suppose you are working on two projects with two different CVS
+repositories.  You might want to be able to write a function that
+allows you to set appropriate CVSROOT and CVS_ROOT variables, or clear
+any values from these variables if the argument unset is given.  It
+would also be nice if it would run 'cvs update' for you if given the
+argument 'update'.  With aliases, you could approximate this, but only
+by running multiple aliases from the command line.  Using functions,
+you could create a text file containing the following:
+&nbsp;&nbsp;(<A HREF="misc/eyler/setcvs.sh.txt">text version</A>)
+
+<blockquote><code><pre>
+setcvs() {
+    export done="no"
+    if  [ "$1" = "unset" ]  
+    # we want to clear all of the variables
+	then
+	echo -n "Clearing cvs related variables:  "
+	export CVSROOT=""
+	export CVS_RSH=""
+	export done="yes"
+	echo "done"
+    fi
+    if ( pwd | grep projects/reporting &gt; /dev/null &amp;&amp; \ 
+       [ "$done" != "yes" ] )
+    # if we're in the reporting area, and we're not already done   
+	then 
+	echo -n "Setting up cvs for reporting project:  "
+	export CVSROOT="issdata:/usr/local/cvs/"
+	export CVS_RSH="ssh"
+	export done="yes"
+	echo "done"
+    fi
+    if ( pwd | grep projects/nightly  &gt; /dev/null &amp;&amp; \ 
+       [ "$done" != "yes" ] )
+    # if we're in the nightly area, and we're not already done
+	then
+	echo -n "Setting up cvs for nightly project:  "
+	export CVSROOT="/home/cvs/"
+	export done="yes"
+	echo "done"
+    fi
+    if  [ "$1" = "update" ]
+    # we want to update the current tree from the cvs server after
+    # setting up the right variables 
+	then       
+	    if [ -z "$CVSROOT" ]
+	    # if there is a zero length $CVSROOT (it has already been
+	    # cleared or was never set) throw an error and do nothing 
+      		then
+		echo "no cvs variables set ... check your cwd and try again"
+	    elif [ -n "$CVSROOT" ]
+	    # if there is a $CVSROOT try and do the update
+		then
+		echo "updating local tree"
+		cvs -q update
+		echo "done"
+	    fi
+    fi
+}
+</pre></code></blockquote>
+<p>Then you could enable the function and use it like this:
+<blockquote><code>
+<br>$ . ~/scripts/setcvs
+<br>$ cd
+<br>$ pwd
+<br>/home/a257455
+<br>$ setcvs unset
+<br>Clearing cvs related variables:  done
+<br>$ echo $CVSROOT
+<br>
+<br>$ echo $CVS_RSH
+<br>
+<br>$ cd projects/reporting/htdocs/
+<br>$ setcvs
+<br>Setting up cvs for reporting project:  done
+<br>$ echo $CVSROOT
+<br>issdata:/usr/local/cvs/
+<br>$ echo $CVS_RSH
+<br>ssh
+<br>$ cd ../../nightly/
+<br>$ setcvs
+<br>Setting up cvs for nightly project:  done
+<br>$ setcvs update
+<br>Setting up cvs for nightly project:  done
+<br>updating local tree
+<br>done
+<br>$ cd 
+<br>$ setcvs unset
+<br>Clearing cvs related variables:  done
+<br>$ setcvs update
+<br>no cvs variables set ... check your cwd and try again
+<br>$ 
+</code></blockquote> 
+
+<p>Functions can do a lot more than aliases, the function above shows a
+little bit of flow control, some error handling, and the ability to
+use variables.  Certainly it could be improved, but it shows the
+point.  Another big win is that functions can be re-used in scripts,
+while aliases can't.  For example, because the function above is saved in
+a file called '~/scripts/setcvs' you can write a script like:
+<blockquote><code><pre>
+#!/bin/bash
+
+# a sample script
+
+# first source the functions
+. ~/scripts/setcvs
+
+# now go to the project directories and update them from cvs
+cd ~/projects/reporting/htdocs
+setcvs update
+cd -
+cd ~/projects/nightly
+setcvs update
+
+# now go back to where you were and unset any cvs variables.
+cd -
+setcvs unset
+</pre></code></blockquote>
+
+<h3>A Final Warning</h3>
+<p>Aliases are very useful little things, but I hope that after this
+introduction, you find functions at least as interesting (and probably
+even more useful).  A final caveat to both aliases and functions is
+that you should never replace a standard command with an alias or a
+function.  It is too easy to really hurt yourself by trying to execute
+your alias when it doesn't exist.  Imagine the difference between:
+<blockquote><code><pre>
+$ alias rm='rm -i'
+$ cd ~/scratch
+$ rm *   # here the rm alias catches you and interactively
+         # deletes the contents of your current directory
+</pre></code></blockquote>
+<br>and then later in the same session doing:
+<blockquote><code><pre>
+$ su -
+# cd /tmp
+# rm # here the rm alias no longer exists, and you whack
+     # a bunch of stuff out of /tmp
+</pre></code></blockquote>
+
+<p>Happy hacking!<BR>
+-pate
+
+
+
+<!-- *** BEGIN copyright *** -->
+<P> <hr> <!-- P --> 
+<H5 ALIGN=center>
+
+Copyright &copy; 2000, Pat Eyler<BR> 
+Published in Issue 53 of <i>Linux Gazette</i>, May 2000</H5>
+<!-- *** END copyright *** -->
+
+<!--startcut ==========================================================-->
+<!-- P --> <HR> <!-- P -->
+
+<FONT SIZE="+2"><EM>Talkback:</EM> Discuss this article with peers</FONT></A -->
+<P>
+<!-- *** BEGIN navbar *** -->
+<A HREF="correa3.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom">
+<IMG ALT="" 
+	SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom" >
+<A HREF="index.html"><IMG ALT="[ Table of Contents ]" 
+	SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A>
+<A HREF="../index.html"><IMG ALT="[ Front Page ]" 
+	SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A>
+<A HREF="../faq/index.html"><IMG ALT="[ FAQ ]" 
+	SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A>
+<IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  >
+<IMG ALT="" 
+	SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom" >
+<A HREF="lamb.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A>
+<!-- *** END navbar *** -->
+</BODY></HTML>
+<!--endcut ============================================================-->

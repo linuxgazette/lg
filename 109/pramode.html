@@ -1,0 +1,521 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Functional Programming with Python LG #109</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="park.html" >&lt;-- prev</A> | <A HREF="seymour.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Functional Programming with Python</h1>
+<p id="by"><b>By <A HREF="../authors/pramode.html">Pramode C.E.</A></b></p>
+
+<p>
+<p>
+Programs written in a functional programming 
+language (like say Scheme) mirror the structure
+of mathematical expressions; math expressions
+are composed of  strings of functions, each one
+computing a value and producing absolutely no side
+effects. The same function, called with the same 
+arguments, yields the same result whatever be the
+context in which it is called. There is
+elegance in structuring code in this way (and also,
+a certain amount of simplicity). The Python programming
+language has all the features necessary to make it 
+good at functional programming (FP). In this article, we
+examine a few interesting FP ideas like higher order
+functions, closures, lambda, currying, etc. from the
+`Pythonic' point of view!
+
+<h2>What is Functional Programming?</h2>
+<p>
+The functions we write as part of our programs are
+only superficially similar to mathematical functions.
+Let's say we write a function:
+<pre class="code">
+
+int current_balance = 100;
+int withdraw(int w)
+{
+   current_balance = current_balance - w;
+   return current_balance;
+}
+
+</pre>
+An invocation of `withdraw(10)' results in a value of 90 being
+returned. A subsequent invocation of `withdraw(10)' returns
+80. Had `withdraw' been a `pure' mathematical function, it would
+have returned the same result for both invocations as the value
+being passed is the same. Our program basically `remembers' the
+earlier invocations (it has `state') and returns a new value every
+time. A mathematical equation like:
+<pre class="code">
+
+y = f(a) + g(b) + f(a)
+
+</pre>
+has the nice property that it can be reduced to:
+<pre class="code">
+
+y = 2*f(a) + g(b)
+
+</pre>
+It is virtually impossible for us to perform such reductions on
+computer programs which are written as collections of functions
+which modify global variables. Reasoning about the correctness of
+computer programs becomes more of an activity of exploring all 
+kinds of what-if situations rather than generating mathematical 
+proofs.
+<p>
+The `assignment' operator creates its share of problems. Let's
+look at a simple loop to compute the factorial:
+<pre class="code">
+
+/* Compute factorial of `n' */
+int f = 1, n = 5;
+while (n &gt; 0) {
+   f = f * n;
+   n = n - 1;
+}
+return f;
+
+</pre>
+A common mistake which we make is interchanging the two statements
+within the body of the loop. The assignment operator, by changing the
+value assigned to symbols, forces us to be careful about the order
+in which we perform each and every action in our program. 
+
+<p>
+The functional programming paradigm encourages us to structure
+our programs as collections of `pure' functions which do not have
+any global state and which do not make use of the assignment 
+operator (note that this is not possible in all situations; a 
+banking system will surely have to `remember' lots of stuff). 
+Functional programmers use recursive invocation of functions 
+(iteration is considered to be a special case of recursion and specific
+iteration constructs like the `while' or `for' loop may be
+absent altogether) to program repetitive behaviour. Functions are
+considered `first class', ie, they can be passed to other functions
+and returned from other functions thereby facilitating the creation
+of what are called `higher order functions' - a powerful idea
+which can capture concisely many complex computational patterns when
+combined with the idea of `closures'. 
+
+<h2>Expressing recursion</h2>
+<p>
+There is nothing magical about defining recursive
+functions in Python. Here is the classical factorial
+written as a Python function:
+<pre class="code">
+
+def fact(n):
+   if (n == 0): return 1
+   return n * fact(n - 1)
+
+</pre>
+
+<h2>Functions as first class objects</h2>
+<p>
+Let's define  two functions at the interactive
+Python prompt and try some experiments:
+<pre class="code">
+
+&gt;&gt;&gt;
+&gt;&gt;&gt;def sqr(x): return x*x
+...
+&gt;&gt;&gt;def cube(x): return x*x*x
+...
+&gt;&gt;&gt;sqr
+&lt;function sqr at 0x402ba10c&gt;
+&gt;&gt;&gt;a = [sqr, cube]
+&gt;&gt;&gt;a[0](2)
+&gt;&gt;&gt;def compose(f, g): return f(g(x))
+...
+&gt;&gt;&gt;compose(sqr, cube, 2)
+64
+&gt;&gt;&gt;
+
+</pre>
+We first store the two functions in an array and then invoke
+`sqr' as `a[0][2]'.  We then define a function called `compose'
+and call it with the two functions `sqr' and `cube' as arguments.
+Note the absence of any special notation; we are manipulating
+functions as if they were objects like arrays and numbers.
+
+<h2>The power of the higher order function</h2>
+<p>
+<a href="http://mitpress.mit.edu/sicp/">Structure and Interpretation
+of Computer Programs</a>, the legendary `wizard book' by
+Abelson and Sussman, has a detailed description of the utility
+of higher order functions.  A `function' (or a subroutine,
+subprogram, procedure) is considered to be a mechanism for
+capturing patterns. If we have many statements of the form
+<pre class="code">
+
+a*a*a
+b*b*b
+c*c*c
+.....
+
+</pre>
+
+we can think of defining a function called `cube' which captures  the
+essence of the pattern and gives it a name.  The ability to pass functions
+as arguments to functions greatly broadens the scope of this `pattern
+capturing' mechanism. Let's examine a simple function, `sum':
+<pre class="code">
+
+def sum(a, b):
+   if (a &gt; b): return 0
+   else: return a + sum(a+1, b)
+
+</pre>
+The function sums all numbers from `a' to `b'. We try to
+broaden the scope of the function by making it capable of
+manipulating arbitrary sequences, like say:
+<pre class="code">
+
+1/(1*3) + 1/(5*7) + 1/(9*11) + ...
+
+</pre>
+We note that the above sequence and a sequence like:
+<pre class="code">
+
+1 + 2 + 3 + 4 + ...
+
+</pre>
+are similar in the sense that both are `summations'. We
+visualize a quantity `a' changing from 1 to 2, 2 to 3 and
+so on. The change from 1 to 2 can be captured by means of
+a function (a simple `add 1' function). In the case of the 
+first series, this quantity is seen to be changing from 1 to 5,
+5 to 9, 9 to 11 and so on. Here, the change can be captured
+by an `add 4' function. Another small problem. The
+terms of the series are not the numbers 1, 5, 9, 11 etc but
+the numbers 1/(1*3), 1/(5*7)... But then, this transformation
+also can be expressed in terms of a function! These observations
+result in the formulation of the function `sigma':
+<pre class="code">
+
+def sigma(term, a, next, b):
+   if(a &gt; b): return 0
+   return term(a) + sigma(term, next(a), next, b)
+
+</pre>
+
+And here's how we call `sigma' to compute the sum of the sequence:
+<pre class="code">
+
+1/(1*3) + 1/(5*7) + 1/(9*11) + ...
+
+</pre>
+We shall define two functions:
+<pre class="code">
+
+def term(x): return 1.0/(x * (x+2))
+def next(x): return x + 4
+
+</pre>
+and call:
+<pre class="code">
+
+sigma(term, 1, next, 1000)
+
+</pre>
+That should do the trick! Now it becomes possible for us
+to sum any sequence provided we define  two auxiliary
+functions. 
+<p>
+That's not the end of the story. We should think of generalizing
+`sigma'. We note that `sigma' is simply `combining' terms of
+a sequence using the combination function `add'. Why not have
+a general procedure which will combine the terms of a
+series according to a user defined function which is passed as
+an argument? Readers should try this as an exercise!
+
+<h2>Using `lambda'</h2>
+<p>
+We shall try the following at the Python prompt:
+<pre class="code">
+
+&gt;&gt;&gt;
+&gt;&gt;&gt;lambda x: x+4
+&lt;function &lt;lambda;&gt; at 0x402ba25c&gt;
+&gt;&gt;&gt;f = lambda x: x+4
+&gt;&gt;&gt;f(3)
+7
+&gt;&gt;&gt;
+
+</pre>
+The lambda keyword is used for creating anonymous functions.
+The body of a lambda should be composed of simple expressions
+only. In the above example, we use lambda to create a function
+which accepts an argument and returns it after adding four. 
+We should think of using `lambda' whenever we need to define a
+function just for the purpose of passing it over to another
+function. As an example:
+<pre class="code">
+
+&gt;&gt;&gt;
+&gt;&gt;&gt;map(lambda x:x*x, [1,3,7,9])
+[1, 9, 49, 81]
+&gt;&gt;&gt;filter(lambda x: x%2 == 0, range(10))
+[0, 2, 4, 6, 8]
+&gt;&gt;&gt;
+
+</pre>
+The map function accepts a function and a list as argument
+and returns the list obtained by applying the function on
+each element of the original list. Filter is similar; it 
+returns a list composed of only those elements for which the
+function returns true.
+
+<h2>Closures</h2>
+<p>
+Python allows function definitions to be nested. 
+<pre class="code">
+
+def add(x):
+   return lambda(y): x+y
+
+</pre>
+Invoking add(3) will result in a function of one
+argument being returned. Now, this function has a
+peculiar property - it's capable of remembering the
+environment in which it was created. The value of `x'
+in the body of the function is the value supplied when
+`add' was invoked. You call such functions `closures'.
+Invoking add(3)(4) will result in this function executing
+with value of x = 3 and y = 4.
+<p>
+You might have noticed something interesting here. Instead
+of defining a function `add' which accepts two arguments, we
+were able to get the same effect by nesting a one-argument
+function within another one argument function. It's possible to
+take this to any level:
+<pre class="code">
+
+def add3(x):
+   return lambda y: lambda z: x+y+z
+
+</pre>
+Now, we can call `add3(1)(2)(3)'! This idea goes by the name
+`currying' in the FP community.
+<p>
+Let's try to write a function for doing `numerical' differentiation.
+<pre class="code">
+
+def differentiate(f):
+   return lambda x: (f(x+0.001) - f(x))/0.001
+
+</pre>
+The function can be tested out as follows:
+<pre class="code">
+
+&gt;&gt;&gt;
+&gt;&gt;&gt;p = differentiate(cube)
+&gt;&gt;&gt;p(2)
+12
+&gt;&gt;&gt;
+
+</pre>
+Calling differentiate with argument `cube' will result in a
+one-argument function being returned which remembers the value
+of `f' to be equal to `cube'. Now, calling this function with
+argument say 2 will result in the evaluation of:
+<pre class="code">
+
+(cube(2+0.001) - cube(2))/0.001
+
+</pre>
+
+<h2>A bit more lambda fun</h2>
+<p>
+The idea of functional programming being `computing with functions'
+can be taken to its extreme; one might even go so far as to say
+that EVERYTHING (yes, I mean even things like integers, truth,
+falsehood, literally EVERYTHING) can be expressed as functions. A
+really smart guy called Alonzo Church had figured out how to do
+this and produced a remarkable piece of work called the `Lambda Calculus'.
+We shall not go into the details of Church's work - but will simply
+look at a few functions just for the fun of it.
+<p>
+Let's have our own definitions for `true' and `false':
+<pre class="code">
+
+true = lambda x, y: x
+false = lambda x, y: y
+iff = lambda p, x, y: p(x, y)
+
+</pre>
+We define true as a function which accepts two arguments and returns
+the first one; false returns the second argument. The logic of this
+definition becomes clear when we look at the context where we make 
+use of `true' and `false'; calling iff(true, 2, 3) will result in the
+number 2 being returned and calling iff(false, 2, 3) will result in 3
+being returned.
+<p>
+The claim is that all computational constructs can be defined
+in terms of lambda. Let's try building up an elementary data
+structure, a `pair'.
+<pre class="code">
+
+pair = lambda x, y: lambda f: f(x, y)
+
+</pre>
+The definition is a bit tricky: a `pair' is a function which
+accepts two arguments and returns another function; this time,
+a function which accepts one argument and applies that on x and
+y. The idea becomes clear when we define two other functions:
+<pre class="code">
+
+first = lambda p: p(true)
+second = lambda p: p(false)
+
+</pre>
+Now, we turn a bit philosophical and ask the question: "what is a pair?"
+The answer is, "P is a pair of two objects x and y if there are two
+functions `first' and `second' such that first(P) is x and second(P) is y."
+
+Let's now try:
+<pre class="code">
+
+&gt;&gt;&gt;
+&gt;&gt;&gt;P=pair(2,3)
+&gt;&gt;&gt;first(P)
+2
+&gt;&gt;&gt;second(P)
+3
+&gt;&gt;&gt;
+
+</pre>
+And that's magic! Think about it!
+
+<h2>Conclusion and Further Reading</h2>
+<p>
+If you wish to read the original Scheme version of
+the Python functions presented in this document, grab
+a copy of <a href="http://mitpress.mit.edu/sicp/">SICP</a>; you are sure to
+spend many an enjoyable hour reading it. If you are 
+looking for a cool Python project to do in the ample free
+time which you have, translate SICP into Python! If you
+wish to read some brain exploding lambda stuff, go to
+<a href="http://perl.plover.com/lambda">this site</a> 
+by Mark-Jason Dominus.
+You might also like to read 
+<a href="http://www.cs.chalmers.se/~rjmh/Papers/whyfp.html">this 
+document</a> written by John Hughes which explains why functional programming is
+important.
+
+
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<P>
+<img ALIGN="LEFT" ALT="[BIO]" SRC="../gx/2002/note.png" class="bio">
+<em>
+I am an instructor working for IC Software in Kerala, India. I would have loved
+becoming an organic chemist, but I do the second best thing possible, which is
+play with Linux and teach programming!
+</em>
+<br CLEAR="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2004, Pramode C.E.. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 109 of Linux Gazette, December 2004
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="park.html" >&lt;-- prev</A> | <A HREF="seymour.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">December 2004 (#109)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/2003/sit3-shine.7-2.gif" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

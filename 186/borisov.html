@@ -1,0 +1,476 @@
+<!DOCTYPE html
+	PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+	 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="utf-8" xml:lang="utf-8">
+<head>
+<title>PostgreSQL - import of large texts and dynamic content LG #186</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link rel="stylesheet" href="../lg.css" type="text/css" media="screen, projection"  />
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="../lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="../lg.rdf" />
+<!-- link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" / -->
+<link rel="shortcut icon" href="../favicon.ico" />
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+</head>
+<body>
+
+<a href="../">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+<div id="navigation">
+<table summary="masthead" width="100%">
+<tr>
+<td align="center" colspan="3" style="font-size: 10px; font-weight: bold">
+<a href="../index.html">Home</a>
+<a href="http://linuxgazette.net">Main Site</a>
+<a href="../faq/index.html">FAQ</a>
+
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/listinfo/">Mailing Lists</a>
+<a href="../jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+<hr width="99%" style="border: 1px inset #000033">
+</td>
+</tr>
+<tr>
+<td width="40%" align="left" style="font-size: 10px; font-weight: bold">
+The Free International Online Linux Monthly
+</td>
+<td width="20%" align="center" style="font-size: 10px; font-weight: bold">
+ISSN: 1934-371X
+</td>
+<td width="40%" align="right" style="font-size: 10px; font-weight: bold">
+Main site: <a href="http://linuxgazette.net">http://linuxgazette.net</a> 
+</td>
+</table>
+</div>
+
+
+<div id="breadcrumbs1">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">June 2011 (#186)</a> &gt; 
+Article
+
+</div>
+
+<div class="articlecontent1">
+<div class="content">
+
+<div id="previousnexttop">
+<A HREF="anonymous.html" >&lt;-- prev</A> | <A HREF="brown.html" >next --&gt;</A>
+</div>
+
+<h1>PostgreSQL - import of large texts and dynamic content</h1>
+<p id="by"><b>By <a href="../authors/borisov.html">Anton Borisov</a></b></p>
+
+<h3>Introduction</h3>
+
+<p>PostgreSQL is an enterprise-level database. It is an open-source software, 
+competes by some features with products from Oracle, so it is no surpise that 
+more and more projects delegate such important duties like data-mining and 
+data handling to PostgreSQL. And what's more important, the architectural 
+design for this database is extremely powerful and conforms to KISS principal 
+very close, so it is really very fun to deal with PGSQL internal programming, 
+as well as maintaining it.
+</p>
+
+<h3>The task</h3>
+
+<p>One of the projects that I need to take care of is based on PostgreSQL and 
+Liferay Portal, which in turn is based on Tomcat. Actually, it has a 3-tier 
+architecture, where Tomcat works as a web-server, i.e. it basically is a front-end, 
+that serves requests from around the world. Liferay's web-pages can be as: 
+(a) plain HTML, (b) JSP (Java Server Pages), (c) or can be programmed as 
+servlets (portlets) as well. The latter two scenarios require you to have 
+an IDE (Integrated Development Environment) with JSP-, portlet-, JDBC-bindings 
+deployed. Basically, either JSP, or portlet contains code, that just fetches 
+actual SQL-data from database instance (for example, news_portal) and prepares 
+lovely HTML-page, which shows today's weather forecast, or currency rates. However, 
+you might be interested in generating the same page without doing time consuming 
+efforts like downloading and installing IDE, programming new servlet and deploying 
+it afterall. How to make it happen? Simply execute necessary SQL-requests at 
+backyard, i.e. within operating system space, where Tomcat and PostgreSQL servers 
+reside. You can program it in 10 minutes - in bash, python or any other scripting 
+language. In my case I generate HTML-page, that consists of thousand lines of text, 
+and push it back into Liferay's CMS database engine (news_lportal), so HTML contents 
+of this page is to be displayed by Liferay itself. I also scheduled via cron how often 
+I regenerate this information page, so Liferay would always show up-to-date news, 
+rates, etc.
+</p>
+
+<h3>Data manipulating with PSQL</h3>
+
+<p>There's a native client, that comes with PostgreSQL server, called psql. 
+Although psql is console application only it has essentially the same 
+capabilities as it's counterpart - a GUI, GTK-based PgAdmin. If you don't 
+have it installed in your system, please run aptitude (for Debian):
+</p>
+
+<pre class="code">
+# aptitude install postgresql-client
+Reading package lists... Done
+Building dependency tree       
+Reading state information... Done
+Reading extended state information      
+Initializing package states... Done
+Reading task descriptions... Done  
+The following NEW packages will be installed:
+  postgresql-client postgresql-client-8.3{a} postgresql-client-common{a} 
+0 packages upgraded, 3 newly installed, 0 to remove and 6 not upgraded.
+Need to get 2028kB of archives. After unpacking 5276kB will be used.
+Do you want to continue? [Y/n/?]
+</pre>
+
+<p>
+Listing 1. Postgresql package consists of psql as well as other auxiliary utilities
+</p>
+
+<p>
+It will install psql, as well as pg* utilities (pg_dump, pg_restore and others).
+</p>
+
+<p>
+Surely, you can install a GUI application as well for performing complex tasks, 
+like data analysis:
+</p>
+
+<pre class="code">
+# aptitude install pgadmin3
+</pre>
+
+<img src="pgadmin.png" alt="PgAdmin" align="center" style="margin-right: 50px; margin-bottom: 15px;" />
+
+<p>
+Figure 1. PgAdmin - graphical application for handling SQL-queries
+</p>
+
+<p>
+With the help of psql you can quite easily run any SQL-statement, like this:
+</p>
+
+<pre class="code">
+psql -q -n -h 127.0.0.1 news_lportal -U root -c "select userid, emailaddress from user_"</pre>
+<p>where used:</p>
+
+<pre class="code">
+	host to connect to - <b>127.0.0.1</b>
+	desired database within PostgreSQL pool - <b>news_lportal</b>
+	username, which is granted to execute SQL-command - <b>root</b>
+	and SQL-command itself - <b>select userid, emailaddress from user_</b>
+</pre>
+
+<p>
+Alternatively, you can run psql with <i>update operator</i>, like this:
+</p>
+
+<pre class="code">
+psql -q -n -h 127.0.0.1 news_lportal -U root -c "update journalarticle set content = '&lt;H1&gt;Hello, World!&lt;/H1&gt;' where id_ = 24326"
+</pre>
+
+<p>
+Where ID with number 24326 is my HTML document previosuly created by CMS-engine 
+on top of Liferay and stored inside PostgreSQL database - news_lportal.
+</p>
+
+<p>
+In such a way, you could refresh any information, that is stored inside <b>journalarticle</b> 
+table. The only thing you should remember about is the correct ID for your article.
+</p>
+
+<p>
+However, in real life this update trick won't work as it should. I've prepared 
+an update script (import_table.sh), where the contents of <i>table_news.html</i> 
+file should be uploaded into PostgreSQL.
+</p>
+
+<pre class="code">
+#!/bin/sh
+    ct=`cat table_news.html`
+    psql -t -l -q -n -h 127.0.0.1 news_lportal -U root -c "update journalarticle set content = '$ct' where id_ = 24326;"
+</pre>
+
+<p>
+Listing 2. Very simple import script (import_table.sh), first version
+</p>
+
+<p>
+Argh! It didn't work out - PostgreSQL client refused to run an update command.
+</p>
+
+<pre class="code">
+$ ./import_table.sh 
+./import_table.sh: line 4: /usr/bin/psql: Argument list too long
+</pre>
+
+<p>
+At first glance, the file <i>table_news.html</i> seems to be quite good. 
+But a closer look shows another catch-up - the file is a bit too large - 400Kb in size.
+</p>
+
+<pre class="code">
+$ file table_news.html
+table_news.html: UTF-8 Unicode text, with very long lines
+$ cat table_news.html | wc
+    617    2505  408460
+</pre>
+
+<p>
+Is there a mechanism to load any text file larger than 2Kb into database? Yes! 
+Luckily, PostgreSQL has import/export functions that will ease communicating 
+with file I/O operations. Let's declare our own procedure get_text_document_portal() 
+that will load into database any text file.
+</p>
+
+<pre class="code">
+- Function: get_text_document_portal(character varying) 
+-- DROP FUNCTION get_text_document_portal(character varying); 
+CREATE OR REPLACE FUNCTION get_text_document_portal(p_filename character varying) 
+  RETURNS text AS 
+$BODY$ SELECT CAST(pg_read_file(E'liferay_import/' || $1 ,0, 100000000) AS TEXT); 
+$BODY$ 
+  LANGUAGE sql VOLATILE SECURITY DEFINER 
+  COST 100; 
+ALTER FUNCTION get_text_document_portal(character varying) OWNER TO postgres; 
+</pre>
+
+<p>
+Listing 3. Our new procedure will call pg_read_file() function and read text file from disk
+</p>
+
+<p>
+In order to load a text file into the database named news_lportal, I've written 
+the script below (import_table_2.sh), which takes filename - in this example, 
+<b>table.text</b> - as a parameter for get_text_document_portal() procedure and 
+places it's contents into corresponding field of table journalarticle. 
+</p>
+
+<pre class="code">
+#!/bin/sh
+    psql -q -n  -h 127.0.0.1 news_lportal -U root -c "update journalarticle set content = get_text_document_portal('table.text') where id_  = 24326;"
+</pre>
+
+<p>
+Listing 4. Import script (import_table_2.sh) that triggers our new pgsql-procedure
+</p>
+
+<p>
+All you need to do is to change the source HTML file, named table.text 
+and run import_table_2.sh. Please pay attention to a location, where 
+the imported file should be placed - this is a subdirectory <b>liferay_import</b> 
+under /var/lib/postgresql/8.3/main/ tree.
+</p>
+
+<pre class="code">
+$ ls -l /var/lib/postgresql/8.3/main/
+total 48
+-rw-------  1 postgres postgres    4 Nov  9 10:20 PG_VERSION
+drwx------ 10 postgres postgres 4096 Nov 10 11:16 base
+drwx------  2 postgres postgres 4096 Mar  4 16:44 global
+drwx------  2 postgres postgres 4096 Dec  3 18:27 liferay_import
+drwx------  2 postgres postgres 4096 Nov  9 10:20 pg_clog
+drwx------  4 postgres postgres 4096 Nov  9 10:20 pg_multixact
+drwx------  2 postgres postgres 4096 Mar  1 13:29 pg_subtrans
+drwx------  2 postgres postgres 4096 Nov  9 10:20 pg_tblspc
+drwx------  2 postgres postgres 4096 Nov  9 10:20 pg_twophase
+drwx------  3 postgres postgres 4096 Mar  4 12:43 pg_xlog
+-rw-------  1 postgres postgres  133 Feb 11 22:09 postmaster.opts
+-rw-------  1 postgres postgres   53 Feb 11 22:09 postmaster.pid
+lrwxrwxrwx  1 root     root       31 Nov  9 10:20 root.crt -> /etc/postgresql-common/root.crt
+lrwxrwxrwx  1 root     root       36 Nov  9 10:20 server.crt -> /etc/ssl/certs/ssl-cert-snakeoil.pem
+lrwxrwxrwx  1 root     root       38 Nov  9 10:20 server.key -> /etc/ssl/private/ssl-cert-snakeoil.key
+</pre>
+
+<p>
+Listing 5. Owners' information for PostgreSQL disk storage pool
+</p>
+
+<p>
+It is owned by postgres and can be written by this user only. Or, by root 
+account. Of course, you could add an entry into root's crontab, but a good 
+practice is - split jobs between different accounts. Assigning database jobs 
+to postgres only, and every other task trust to, for instance, tomcat account. 
+So how can tomcat user be able to write to <b>liferay_import</b> directory 
+with postgres owner access bits? By making a link - symlink doesn't work, 
+but hardlink will do!
+</p>
+
+<pre class="code">
+# ln /var/lib/postgresql/8.3/main/liferay_import/table.text	/home/tomcat/db/table.text
+</pre>
+
+<p>
+Listing 6. Hardlink allows to override owners' limitations provided by symlink 
+</p>
+
+<pre class="code">
+#!/bin/sh
+
+        /home/tomcat/db/prepare_table_news.sh > /home/tomcat/db/table.text
+        /home/tomcat/db/import_table_2.sh
+</pre>
+
+<p>
+Listing 7. Script (mk_db.sh), that prepares arbitrary HTML-document and loads it into database
+</p>
+
+<p>
+Hooray! Now I can place an entry into tomcat's crontab and get the news 
+information updated every hour. And this is done from under tomcat account. 
+Really nice.
+</p>
+
+<pre class="code">
+$ crontab -l
+# m h  dom mon dow   command
+0 * * * * /home/tomcat/db/mk_db.sh > /dev/null
+</pre>
+
+<p>
+Listing 8. One entry in tomcat's crontab that should be executed every 
+hour in order to update news 
+</p>
+
+<h3>Conclusion</h3>
+
+<p>
+There exist different approaches how to provide up-to-date information when 
+you deal with Liferay Portal and portlet-technology. First way requires to 
+have dedicated developer environment preinstalled (NetBeans IDE with portlets 
+bindings), whilst another way needs only to have a basic shell-scripting 
+knowledge and be able to correctly construct SQL-queries. Of course, the better 
+way is a good full-time developer with hands on IDE, JSR168 / JSR268 portlet 
+standards, that would program whatever web-application you need, especially 
+HTML-page with dynamically changed information. However, you can achieve the 
+same results much quicker - simply rely upon casual Linux console tools.
+</p>
+
+<h3>Resources</h3>
+
+<p>
+[1] <a href="http://www.postgresql.org/">http://www.postgresql.org/</a><br>
+[2] "Practical PostgreSQL" - Joshua D. Drake, John C. Worsley, O'Reilly Media<br>
+</p>
+
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/me_und_elefant.png" class="bio">
+</p>
+
+<em>
+<p>
+Anton has jumped in into Linux world in 1997, when he first tried a tiny muLinux distribution, being run
+from a single floppy. Later on, Red Hat and Slackware became his favorite choice. Nowdays, Anton designs.
+Linux-oriented applications and middleware, and prefers to work with hardware labeled as "Powered by Linux".
+</p>
+</em>
+
+<br clear="all" />
+
+<table align='center' cellspacing='10'>
+<tr>
+<td>
+<script type='text/javascript'>
+digg_url = 'http://linuxgazette.net/186/borisov.html';
+digg_title = 'PostgreSQL - import of large texts and dynamic content';
+digg_bodytext = '<p>PostgreSQL is an enterprise-level database. It is an open-source software,  competes by some features with products from Oracle, so it is no surpise that  more and more projects delegate such important duties like data-mining and  data handling to PostgreSQL. And what\'s more important, the architectural  design for this database is extremely powerful and conforms to KISS principal  very close, so it is really very fun to deal with PGSQL internal programming,  as well as maintaining it. </p> ';
+digg_topic = 'linux_unix';
+</script>
+<script src="http://digg.com/tools/diggthis.js" type="text/javascript"></script>
+</td>
+<td>
+<a name="fb_share" type="box_count" href="http://www.facebook.com/sharer.php">Share</a>
+<script src="http://static.ak.fbcdn.net/connect.php/js/FB.Share" type="text/javascript"></script>
+</td>
+<td>
+<a href="http://twitter.com/home?status=Currently%20reading:%20http://linuxgazette.net/186/borisov.html%20at%20Linux%20Gazette%20%23linuxgazette" title="Click to share this post on Twitter"><img src="../gx/twitter.png" width="50" height="85" border="0"></a>
+</td>
+</tr>
+</table>
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:186/borisov.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/authors/borisov.jpg" class="bio">
+</p>
+
+<em>
+<p>
+Anton jumped into Linux world in 1997, when he first tried a tiny
+ muLinux distribution, being run from a single floppy. Later on, Red Hat
+ and Slackware became his favorite choice. Nowdays, Anton designs
+ Linux-oriented applications and middleware, and prefers to work with
+ hardware labeled as "Powered by Linux".
+</p>
+
+
+
+</em>
+
+<br clear="all">
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2011, Anton Borisov. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication License</a>
+unless otherwise noted in the body of the article.
+<!-- Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc. -->
+</p>
+
+<p>
+Published in Issue 186 of Linux Gazette, June 2011
+</p>
+
+</div>
+
+<div id="previousnextbottom">
+<A HREF="anonymous.html" >&lt;-- prev</A> | <A HREF="brown.html" >next --&gt;</A>
+</div>
+
+</div>
+</div>
+
+<script src="http://www.google-analytics.com/urchin.js"
+type="text/javascript">
+</script>
+<script type="text/javascript">
+_uacct = "UA-1204316-1";
+urchinTracker();
+</script>
+
+
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+</body>
+</html>
+

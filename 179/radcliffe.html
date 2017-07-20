@@ -1,0 +1,715 @@
+<!DOCTYPE html
+	PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+	 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="utf-8" xml:lang="utf-8">
+<head>
+<title>Controlling DC Motors from your Linux Box LG #179</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link rel="stylesheet" href="../lg.css" type="text/css" media="screen, projection"  />
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="../lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="../lg.rdf" />
+<!-- link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" / -->
+<link rel="shortcut icon" href="../favicon.ico" />
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+</head>
+<body>
+
+<a href="../">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+<div id="navigation">
+<table summary="masthead" width="100%">
+<tr>
+<td align="center" colspan="3" style="font-size: 10px; font-weight: bold">
+<a href="../index.html">Home</a>
+<a href="http://linuxgazette.net">Main Site</a>
+<a href="../faq/index.html">FAQ</a>
+
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/listinfo.cgi">Mailing Lists</a>
+<a href="../jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+<hr width="99%" style="border: 1px inset #000033">
+</td>
+</tr>
+<tr>
+<td width="40%" align="left" style="font-size: 10px; font-weight: bold">
+The Free International Online Linux Monthly
+</td>
+<td width="20%" align="center" style="font-size: 10px; font-weight: bold">
+ISSN: 1934-371X
+</td>
+<td width="40%" align="right" style="font-size: 10px; font-weight: bold">
+Main site: <a href="http://linuxgazette.net">http://linuxgazette.net</a> 
+</td>
+</table>
+</div>
+
+
+<div id="breadcrumbs1">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">October 2010 (#179)</a> &gt; 
+Article
+
+</div>
+
+<div class="articlecontent1">
+<div class="content">
+
+<div id="previousnexttop">
+<A HREF="pfeiffer.html" >&lt;-- prev</A> | <A HREF="silva.html" >next --&gt;</A>
+</div>
+
+<h1>Controlling DC Motors from your Linux Box</h1>
+<p id="by"><b>By <a href="../authors/radcliffe.html">P. J. Radcliffe</a></b></p>
+
+
+<h3>Linux and Hardware</h3>
+
+<p>
+ Linux is the best general purpose operating system for controlling
+hardware. It allows fast and well-controlled access to Input/Output ports
+such as the parallel port and serial port as well as plug in cards. The
+Linux Gazette has two good articles on how to achieve this, see <A
+href="../112/radcliffe.html">[1]</A> and <A
+href="../118/chong.html">[2]</A>. If you need real time response, consider
+the RTAI extension of Linux, again Linux Gazette has some very useful
+articles that use RTAI to achieve motor control <A
+href="../118/sreejith.html">[3]</A>, make a stroboscope <A
+href="http://linuxgazette.net/114/pramode.html">[4]</A>, and use a
+joy-stick to control servo motors <A href="../101/pramode.html">[5]</A>
+.
+</p>
+
+<p>
+ Many of these approaches rely on direct access to ports such as the
+parallel port, but this is becoming increasingly difficult as laptops and
+newer desktops rely on USB as the sole input-output (IO) mechanism.
+Hardware access via USB requires a plug-in USB module that translates USB
+to basic digital IO, and if possible analogue IO. These boards are
+relatively cheap, starting from about US$35. It's also possible to build
+your own USB interface based on Open Source designs such as VUSB <A
+href="http://www.obdev.at/products/vusb/index.html">[6]</A>
+.  
+</p>
+
+<p>
+ In this article we will show you how to use a very flexible USB interface
+board called Open-USB-IO <A
+href="http://www.pjradcliffe.wordpress.com">[7]</A>
+ to achieve speed control of a DC motor without any form of shaft encoder.
+Open-USB-IO provides a lot of options for a very reasonable price. Notable
+hardware interfaces include digital IO with switches and LEDs, analogue
+inputs, three channels of PWM (Pulse Width Modulation), a serial port, and
+seven open collector drivers for motors. The USB stack is written in C that
+runs on an ATMEGA32 microprocessor; remarkably, you can add your own code
+to the USB code and then use a symbolic debugger to debug that code.
+Open-USB-IO hardware can thus be controlled from code running on the Linux
+box as we will do in this article, or from code that runs on the ATMEGA32
+microprocessor (if we get enough requests to the editor I will write an
+article showing how to write and debug code on the microprocessor from the
+Linux environment). The web site also has an extensive manual with many
+examples, and the full circuit of the board.
+</p>
+
+<h3>DC Motor Basics</h3>
+
+<p>
+<IMG src="misc/radcliffe/dc_motor_model.png" width="236" height="282" align="right" border="0" hspace="20" />
+There is a wide variety of DC motors; see Wikipedia <A
+href="http://en.wikipedia.org/wiki/Brushed_DC_electric_motor">[8]</A>
+ for a good overview. We will be dealing with the permanent magnet type
+which is the most common DC motor for small applications. The model of a DC
+motor at stable speed is shown in Figure 1. It's quite simple - if you can
+remember <a href="http://en.wikipedia.org/wiki/Ohms_Law">Ohms Law</a>, then
+you can understand it. The voltage across the motor must match the battery
+voltage and at a steady speed this is made up out of two parts: the first
+is the resistance losses through the motor equal to
+<tt>I<sub>m</sub>*R<sub>m</sub></tt>. The second part is caused by the
+spinning rotor acting as a generator which creates a voltage that opposes
+the battery. This voltage is often called the back-EMF
+(<tt>V<sub>bemf</sub></tt>) of the motor and is directly proportion to
+speed.
+</p>
+
+<pre>
+  Vbatt = Im * Rm + Vbemf  (1)     Vbatt= battery voltage
+  Vbemf = k * motor_speed  (2)     Rm = motor resistance
+  Motor Torque = c * Im    (3)     Vbemf = back emf of motor
+                                   Im = motor current
+                                   k,c = constants
+</pre>
+
+<p>
+When the motor starts it will speed up until the <tt>V<sub>bemf</sub></tt>
+rises and together with <tt>I<sub>m</sub>*R<sub>m</sub></tt> balances
+<tt>V<sub>batt</sub></tt>. If the motor has a mechanical load applied then
+it will slow down until a new balance is reached, the current must increase
+so the back-EMF drop is matched by a rise in the Im*Rm voltage drop. The
+increased current will increase the torque of the motor to cope with the
+new mechanical load.
+</p>
+
+<p>
+Given the formulas above it's possible to work out the speed of the DC
+motor using just electrical measurement, thus no shaft encoder is required.
+There are two basic approaches -
+</p>
+
+<pre>
+  motor_speed = ( Vbatt - Im*Rm) / k  (4)
+  motor_speed = Vbemf/k               (5)
+</pre>
+
+<p>
+Formula 4 requires measurement of the motor current, formula 5 requires
+measurement of the back-EMF of the motor. On first inspection measuring
+motor current looks easiest, simply add a very small resistor
+<tt>R<sub>s</sub></tt> in series with the motor and measure the voltage
+drop Vs across that resistor. The motor current is simply
+<tt>V<sub>s</sub>/I<sub>s</sub></tt>. However, this has the disadvantage of
+wasting energy, requiring amplification and measurement of very small
+voltages, and requires a high current, low value resistor.  Measuring the
+back-EMF of the motor would not have these problems - but there is no point
+where back-EMF can be directly measured when the motor is driven with a
+steady voltage. Fortunately, the back-EMF can be measured when a motor is
+driven with PWM (Pulse Width Modulation).
+</p>
+
+<p>
+To see a more complete treatment of a DC motor and a good <a
+href="http://en.wikipedia.org/wiki/SPICE">SPICE</a> model, see
+<a href="http://www.ecircuitcenter.com/circuits/dc_motor_model/dcmotor_model.htm">http://www.ecircuitcenter.com/circuits/dc_motor_model/dcmotor_model.htm</a>.
+</p>
+
+<h3>Pulse Width Modulation (PWM)</h3>
+
+<p>
+<IMG border="0" align="right" height="179" width="334"
+src="misc/radcliffe/basic_pwm.png" hspace="20" /> Pulse Width Modulation, usually
+abbreviated to just PWM, is a clever way to create a low voltage from a
+high voltage without any losses. Figure 2 shows a simple PWM waveform where
+a battery is driving a heater element, with an active duty cycle of
+<tt>T<sub>on</sub> / T<sub>period</sub></tt>. The heater has a thermal
+inertia, so the heat output will not vary in response to the fast on and
+off pulses. This inertia averages the out the pulses to give an effective
+voltage of <tt>V<sub>batt</sub> * T<sub>on</sub> / T<sub>period</sub></tt>.
+A load like a heater or a motor can be given a variable voltage just by
+using a switch opening and closing at high speed. This approach is much
+better than using a voltage regulator or series resistor, as there is no
+energy loss.
+</p>
+
+<p>
+<IMG src="misc/radcliffe/motor_pwm.png" width="478" height="203"
+align="right" border="0" hspace="20" /> Figure 3 shows the waveform of a
+motor driven by a PWM. When the switch disconnects the motor, the voltage
+measured at <tt>V<sub>x</sub></tt> is not <tt>V<sub>batt</sub></tt>, it is
+reduced by the back-EMF of the motor. PWM not only allows a variable
+voltage to be fed to the motor, it gives the opportunity to directly
+measure the motor back-EMF for the purposes of speed control. The waveform
+at Vx is far from perfect for our needs. When the switch first turns off
+the motor's stray inductance gives a voltage kick, typically 0.5
+milliseconds for a small motor. After the inductive kick has finished, the
+back-EMF is not smooth and has considerable noise. This waveform needs to
+be smoothed out in some way to give a single measurement for
+<tt>V<sub>bemf</sub></tt> over one cycle. When the switch is turned on,
+again the result is not perfect: <tt>V<sub>x</sub></tt> is not zero volts
+because all real switches have a finite resistance. For a mechanical switch
+this is very low but for electronic switches this will be noticeable and
+must be taken into account.
+</p>
+
+<p>
+  Why is there a diode across the motor?  A motor is a an inductor, and
+inductors can generate a huge voltage spike if the current through them is
+suddenly turned off.  This spike can be hundreds of volts and destroy the
+switching device.  The diode allows the current to continue to flow in a
+loop through the inductor while the switch is turned off.  This is shown in
+figure 3 as <tt>V<sub>x</sub></tt> rises above Vbatt by the voltage drop
+across the diode. 
+</p>
+
+<p>
+  Motor speed can be estimated as follows-
+</p>
+
+<pre>
+    Average_Vm = (Vbatt-Vbemf) * Poff + Von * Pon  (6)
+    Poff = proportion of time switch is off = Toff/Tperiod,  0-1.
+    Pon  = proportion of time switch is on  = Ton/Tperiod, 0-1.
+    Von = voltage across switch when turned on, caused by internal switch resistance. 
+  Vbemf = Vbatt - (Average_Vm - Von*Pon)/Poff   (7)
+</pre>
+
+<p>
+The back-EMF, <tt>V<sub>bemf</sub></tt>, can be taken as a proxy for speed
+as the speed is directly proportional to this value. The
+<tt>Average_V<sub>m</sub></tt> can be created by continually sampling
+<tt>V<sub>m</sub></tt> at high speed and taking an average, or by using a
+low pass filter to create a stable voltage. We will use the second approach
+as shown in Figure 5 because USB interfaces generally work at low speed,
+around 250 commands a second at best and its not possible to sample fast
+enough to be certain of getting a reliable value.
+</p>
+ 
+<h3>Open-USB-IO and PWM</h3>
+<p>
+<IMG src="misc/radcliffe/open-usb-io_2.jpg" width="300" height="227"
+align="right" border="0" hspace="20" /> The Open-USB-IO board, shown in
+Figure 4 opposite, comes with a command line program that allows you to
+control all the hardware features of the board from the comfort of your
+Linux computer. Common features such as PWM are very easy to use. Download
+the "ousb" program from <a href="http://www.pjradcliffe.wordpress.com">this
+website</a> and place it in your path; /usr/local/bin is convenient if you
+have root privileges.
+</p>
+
+<p>
+   To demonstrate the PWM function, we will use PWM 1 which lights LED 3 at
+various light intensities. In the commands below note that the # and beyond
+are comments, and do not need to be typed in.
+</p>
+<pre> 
+  ousb pwm-freq 1 45   # set PWM 1 frequency to 45 Hz.
+  ousb pwm 1 2         # set PWM duty cycle to 2% on.
+  ousb pwm 1 100       # PWM 1 is 100%, always on.
+  ousb pwm 1 0         # PWM is 0%, always off.
+</pre>
+
+<p>
+  Note that the pwm-freq command must be used first to set frequency but
+after that any number of pwm commands can be used to change the duty cycle.
+</p>
+
+<p>
+The Open-USB-IO board has many useful features, one of which is seven open
+collector drivers that can cope with up to 50 volts, and carry up to 500
+milliamps, enough for most small DC motors. Open collector drivers act as a
+switch connected on one side to zero volts, just as in the circuits above.
+One of these is controlled by PWM 1 and can be used to drive a small motor.
+There are eight ADC (Analogue to Digital Converter) inputs and one of
+these, ADC0, will be used to sense the motor voltage. The USB link to the
+computer supplies 5 volts, and can in theory be used to drive a small
+motor. In practice the motor injects a lot of electrical noise to the
+power supply and this can crash the microprocessor, so it's best to use an
+external plug-pack that plugs into the external socket (top right of Figure
+4). The plug pack can be either unregulated or regulated, as long as it is
+rated at up to about 1.5 times the motor voltage. If you're an electronics
+experimenter, there is a good chance that you have one of these in your
+junk box.
+</p>
+
+<p>
+<IMG src="misc/radcliffe/smoothing_circuit.png" width="274" height="218"
+align="right" border="0" hspace="20" /> One thing that Open-USB-IO lacks is
+a low pass filter to smooth out the noisy motor voltage as shown in Figure
+3. Luckily, the board has a prototype area that can easily fit the
+necessary components. Figure 5 shows the circuit of a simple smoothing
+filter and figure 6 shows how it can be wired into the prototype area. The
+smoothing filter drops the observed voltage by about 1/3, which allows the
+motor to be driven by up to 15 volts without overloading the 5 volt powered
+microprocessor and ADC input. The 47k&#8486; resistor also gives some
+protection to the ADC input in case of voltage spikes when the switch turns
+off and the inductive kick occurs. The <a
+href="http://en.wikipedia.org/wiki/corner_frequency">corner frequency</a>
+is about 1 Hertz, so it will smooth out the 45 Hertz PWM waveform to a
+reasonably stable voltage. The capacitor will need to be an electrolytic
+which is polarized, and its plus side must be connected to the resistor
+joint and not zero volts. 
+</p>
+
+<p>
+<IMG src="misc/radcliffe/dc_motor_connections_2.jpg" width="400" height="300" align="right" border="0" hspace="20" />
+Figure 6, opposite, shows a small motor bolted onto the Open-USB-IO board for
+convenience. The connections needed for the circuitry are all on J5, the 20
+by 2 IDC pin array at the top of the board. All even pins, the left hand
+row, are connected to zero volts and all the right hand row have useful
+connections. Each of the right hand row pins is also connected to a solder
+pad right next to the pin. This makes it easy to solder in your own
+circuitry. The motor leads are soldered to 2-pin headers which can be
+pushed onto J5. The zero volt connection is at the top of the board and is
+connected to the 22k&#8486; resistor and 10&micro;F capacitor. The 47k&#8486;
+resistor connects to the other end of the resistor and capacitor just
+mentioned and on to pin 27 of J5. The joint of all three components has a
+wire running down to pin 1 of J5 which is ADC0. This photo has a 1 k&#8486;
+resistor between pins 37 and 27, which is not needed for this application.
+</p>
+
+<p>
+    Be careful with the connections as pin 27 and 37 will have the plug
+pack voltages which are probably well over 5 volts. If these pins are
+accidentally connected to the wrong place then damage may be done to the 5
+volt powered devices on the board.
+</p>
+
+<h3>Linux Code</h3>
+
+<p>
+ The complete C++ code to implement motor control can be found <A
+href="misc/radcliffe/dc_motor_advanced_control.cpp.txt">here</A>. Below,
+key elements of the code will be discussed.
+</p>
+
+<p>
+   The code in Figure 7 allows any C++ program to directly access the
+Open-USB-IO board by calling the ousb program. If you prefer C, then please
+see the extensive Open-USB-IO manual at <A
+href="www.pjradcliffe.wordpress.com">www.pjradcliffe.wordpress.com</A> .
+The function opens a pipe to a newly created ousb process and sends it the
+text string of commands passed in with str. The ousb process then finishes
+and returns a result, which is converted into an integer and returned to
+the calling code. The extra "-r" in the ousb command tells ousb to just
+return the numerical result and omit any useful text description.  This is
+ideal when ousb is called from other programs and not a human using the
+command line.
+</p>
+
+<p>
+<b>Figure 7: C++ Function to Control USB Hardware</b>
+</p>
+
+<pre class="code">
+int cpp_do_ousb_command(string *str) 
+{ FILE *fpipe ;
+  if ( !(fpipe = (FILE*)popen(str-&gt;c_str(),"r")))
+   { cout &lt;&lt; "pipe error" &lt;&lt; endl ;
+     exit(0) ;
+   }
+  char line[100] ;
+  fgets( line, sizeof line, fpipe) ;
+  pclose(fpipe) ;
+  *str = line ; // Caller can see whole returned string.
+  return( atoi(str-&gt;c_str())) ; // try returning string as integer.
+}
+...
+  new_adc0_read = cpp_do_ousb_command("ousb -r adc 0") ;
+... </pre>
+
+<p>
+Before the motor can be controlled, two constants must be determined,
+<tt>V<sub>on</sub></tt> (switch on voltage drop) and
+<tt>V<sub>batt</sub></tt> (power supply voltage). One could measure these
+voltages and put them into the program as a constants - but it's handier to
+write a little code to automatically find these values. There is one
+disadvantage: the motor will run at full speed for a second when the
+program starts up. If a period of full speed is unacceptable, then the
+<tt>V<sub>on</sub></tt> value must be turned into a constant.
+</p>
+
+<p>
+<b>Figure 8:  Automatic Determination of Motor Constants</b>
+</p>
+
+<pre class="code">
+ //--- set PWM frequency.
+   str = "ousb pwm-freq 1 45" ;
+   cpp_do_ousb_command(&amp;str) ;
+ 	
+ //--- calculate Vext using pwm of zero.
+   str = "ousb pwm 1 0" ;
+   cpp_do_ousb_command(&amp;str) ;
+   sleep(2) ; // allow motor to stop if going.
+   str = "ousb -r adc 0" ;
+   float Vext = cpp_do_ousb_command(&amp;str) ;
+
+ //--- calculate ADC for motor full on,  Vsat
+   str = "ousb pwm 1 100" ;
+   cpp_do_ousb_command(&amp;str) ;
+   sleep(1) ; // allow motor to get up to speed.
+   str = "ousb -r adc 0" ;
+   float Vsat = cpp_do_ousb_command(&amp;str) ;
+   cout &lt;&lt; "  Calibration:   Vsat= " &lt;&lt; Vsat &lt;&lt; ",  Vext= " &lt;&lt; Vext &lt;&lt; endl ; 
+</pre>
+
+<p>
+Figure 9, below, shows the control loop which attempts to keep the motor
+speed constant. The loop tries to ensure that the motor back-EMF
+(<tt>V<sub>gen</sub></tt> below) matches the target back-EMF
+(<tt>V<sub>gen_goal</sub></tt>). On line 6, <tt>V<sub>gen</sub></tt> is
+calculated using Equation 7; on line 7, a change to the pwm duty cycle is
+calculated using "gain" times the difference between
+<tt>V<sub>gen</sub></tt> measured and <sub>V<sub>gen_goal</sub></sub>. Line
+8 accounts for maths errors and resets the pwm to zero if any errors have
+occurred. Similarly, lines 8 and 9 keep the PWM value within allowable
+limits. Finally, lines 13 to 16 are responsible for sending the next PWM
+value to the Open-USB-IO board.
+</p>
+
+<p>
+<b>Figure 9:  Motor Control Loop</b>
+</p>
+
+<pre class="code">
+ 1   float Vavg, Vgen ;
+ 2   while(1)
+ 3    {//--- read ADC input and calculate next PWM value.
+ 4      str = "ousb -r adc 0" ;
+ 5      Vavg = cpp_do_ousb_command(&amp;str) ;
+ 6      Vgen = Vext - (Vavg - Vsat*pwm/100) / ( 1 - pwm/100) ;
+ 7      pwm += gain*(Vgen_goal - Vgen) ;
+ 8      if (!isnormal(pwm))  pwm = 0 ; // if maths error set motor to stop.
+ 9      if (pwm&gt;100) pwm = 100 ;
+10      if (pwm&lt;0)   pwm = 0 ;
+11      cout &lt;&lt; "  pwm%= " &lt;&lt; (int)pwm &lt;&lt; ",  ADC0= " &lt;&lt; Vavg 
+           &lt;&lt; ",  Vgen= " &lt;&lt; (int)Vgen &lt;&lt; ",  Vgoal= " &lt;&lt; Vgen_goal &lt;&lt; endl ;
+12     //--- form PWM command and send to board.
+13      stst.str("") ;
+14      stst &lt;&lt; pwm ;
+15      str = "ousb pwm 1 " + stst.str() ;
+16      cpp_do_ousb_command(&amp;str) ;
+17    }
+</pre>
+
+<p>
+The gain is a constant that can dramatically affect performance. 
+Consider putting a mechanical load on the motor: a small gain will mean the
+motor slows down and then slowly creeps back up to speed as the PWM value
+is slowly moved up. A higher gain will get a quicker response but there
+may be overshoot (going above the desired speed) or limit cycles (small
+oscillations around the desired speed). You may well need to change the
+gain to suit your motor and power supply voltage.
+</p>
+
+<h3>Thoughts and Extensions</h3>
+
+<p>
+The basic plot of this article can be extended in many ways to get better
+control of motor speed or drive larger motors.
+</p>
+
+<p>
+The code to control the motor could be moved into the microprocessor so the
+Linux computer need only send down the desired speed; this is probably best
+done with the live-DVD of development tools that can be found at <A
+href="http://www.interestingbytes.wordpress.com">http://www.interestingbytes.wordpress.com</A>.
+See the /home/user/projects/Co-USB folder for a very simple way to add your
+own code to the USB interface code. The microprocessor code you write can
+be debugged using a symbolic debugger which also include breakpoints. The
+manual and examples on how to achieve this are quite clear and helpful.
+</p>
+
+<p>
+Control code in the microprocessor can work much faster than commands
+sent via a USB connection. The ousb program can be called at most about 25 times a
+second. By using pipes carefully the ousb program can stay in memory and
+can cope with 250 commands per second (see the live-DVD mentioned above).
+Code in the microprocessor can read the ADC at about 30,000 times per
+second and so get much finer grained control. For example, referring to
+Figure 3, the inductive kick pollutes the estimate of the motor back-EMF
+during the PWM off period. A microprocessor could do away with the
+smoothing capacitor and sample the waveform just through the resistors. It
+could then average the voltage during the PWM off period but exclude the
+inductive kick and so get a more accurate estimate of the back-EMF and
+hence the speed. The code in this article does not exclude the inductive
+kick and this can lead to problems when the PWM off cycle is very small:
+the control loop "believes" the back-EMF is negative and so gets totally
+confused. The simplest solution is to limit the PWM duty cycle to something
+less than 100% so as to get a reasonable estimate for the back-EMF.
+</p>
+
+<p>
+The motor control circuit assumes that the on-board open collector drivers
+can handle up to 500 milliamps which is adequate for many small motors. If
+a higher current motor is to be used then it may be best to use a power
+MOSFET such as the BUZ71 or IRF520. These can be driven with 0 or +5v and
+drive up to 3 amps given a reasonable heat sink, and the microprocessor
+pins on Open-USB-IO can be directly used for this. Currents over 3 amps
+need a higher gate drive voltage and the on-board open collector driver may
+be used to achieve this.
+</p>
+
+<p>
+  The frequency chosen for the PWM is only 45 Hz and this can be changed. 
+Higher frequencies start to have more problems with the inductive kick
+period distorting the estimate of back-EMF.  Frequencies above about 70
+Hertz and below 20 KHz can be heard as an annoying buzz and so are usually
+avoided. The Open-USB-IO PWM 2 can provide much finer grained frequency
+control and can be used to investigate frequency issues.  This PWM comes
+out on pin 23 of J5 and does not have its own LED.  Interestingly, a PWM
+frequency of 45 kHz can provide some speed control using the algorithms
+above: this works because the inductive kick rise time also depends on
+motor speed and so a smoothed version of the motor voltage gives some
+information about motor speed. However, the 45 Hz PWM is much better at
+keeping motor speed to a constant value.
+</p>
+
+<h3>Conclusion</h3>
+<p>
+This article sheds light on several important issues for anyone who wishes
+to control real hardware from their Linux computer. First of all, Linux is
+the best general purpose operating system for controlling hardware. Next,
+given that USB is becoming the only way that many computers will interface
+with external hardware means that some form of USB interface board is
+necessary. We found the Open-USB-IO to be particularly useful but many
+other boards would do.
+</p>
+
+<p>
+The core of this article showed how speed control of a DC motor can be
+achieved using only electrical means without any need for a shaft encoder. 
+The Open-USB-IO board can in theory control up to seven motors this way. 
+You can use the code and circuitry directly, or extend it to suit your own
+needs.That's one of the great joys of Linux: since so much of it is Open
+Source, you can look at it, understand it, and extend it for your own
+purposes.
+</p>
+
+<h3>References</h3>
+
+<p>
+ [1] Radcliffe, Pj,  "Linux: A Clear Winner for Hardware I/O", retrieved
+from <A href="../112/radcliffe.html">http://linuxgazette.net/112/radcliffe.html</A>
+</p>
+
+<p>
+ [2] Chong D., Chong P., "Linux Analog to Digital Converter", retrieved
+from <A href="../118/chong.html">http://linuxgazette.net/118/chong.html</A>
+</p>
+
+<p>
+ [3] Sreejith N., "Digital Speed Controller using RTAI/Linux", retrieved
+from <A href="../118/sreejith.html">http://linuxgazette.net/118/sreejith.html</A>
+</p>
+
+<p>
+ [4] Pramode C.E.,  "Measure CPU Fan Speed with an RTAI/LXRT Stroboscope!",
+retrieved from <A href="../114/pramode.html">http://linuxgazette.net/114/pramode.html</A>
+</p>
+
+<p>
+ [5] Pramode C.E.,  "Simple Joystick control of a servo motor with
+RTAI/Linux", retrieved from <A href="../101/pramode.html">http://linuxgazette.net/101/pramode.html</A>
+</p>
+
+<p>
+ [6] Objective Development's VUSB, a GPL USB stack, retrieved from <A href="http://www.obdev.at/products/vusb/index.html">http://www.obdev.at/products/vusb/index.html</A>
+</p>
+
+<p>
+ [7] Open-USB-IO board, manual, examples and reference material, retrieved
+from <A href="http://www.pjradcliffe.wordpress.com">http://www.pjradcliffe.wordpress.com</A>
+</p>
+
+<p>
+ [8] "Brushed DC electric motor" at Wikipedia,	retrieved from <A href="http://en.wikipedia.org/wiki/Brushed_DC_electric_motor">http://en.wikipedia.org/wiki/Brushed_DC_electric_motor</A>
+</p>
+
+
+
+<br clear="all" />
+
+<table align='center' cellspacing='10'>
+<tr>
+<td>
+<script type='text/javascript'>
+digg_url = 'http://linuxgazette.net/179/radcliffe.html';
+digg_title = 'Controlling DC Motors from your Linux Box';
+digg_bodytext = '<p>  Linux is the best general purpose operating system for controlling hardware. It allows fast and well-controlled access to Input/Output ports such as the parallel port and serial port as well as plug in cards. The Linux Gazette has two good articles on how to achieve this, see <A href="../112/radcliffe.html">[1]</A> and <A href="../118/chong.html">[2]</A>. If you need real time response, consider the RTAI extension of Linux, again Linux Gazette has some very useful articles that use RTAI to achieve motor control <A href="../118/sreejith.html">[3]</A>, make a stroboscope <A href="http://linuxgazette.net/114/pramode.html">[4]</A>, and use a joy-stick to control servo motors <A href="../101/pramode.html">[5]</A> . </p> ';
+digg_topic = 'linux_unix';
+</script>
+<script src="http://digg.com/tools/diggthis.js" type="text/javascript"></script>
+</td>
+<td>
+<a name="fb_share" type="box_count" href="http://www.facebook.com/sharer.php">Share</a>
+<script src="http://static.ak.fbcdn.net/connect.php/js/FB.Share" type="text/javascript"></script>
+</td>
+<td>
+<a href="http://twitter.com/home?status=Currently%20reading:%20http://linuxgazette.net/179/radcliffe.html%20at%20Linux%20Gazette%20%23linuxgazette" title="Click to share this post on Twitter"><img src="../gx/twitter.png" width="50" height="85" border="0"></a>
+</td>
+</tr>
+</table>
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:179/radcliffe.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<!-- *** BEGIN bio *** -->
+<hr>
+<p>
+
+<img align="left" alt="Bio picture" src="../gx/authors/radcliffe.jpg" class="bio">
+
+<em>
+
+<p> PJ Radcliffe is a senior lecturer at RMIT University in Melbourne
+Australia. His career started as an electronics/microprocessor engineer at
+Ericsson followed by consulting work in hardware and software, then an
+academic position at RMIT. Teaching has become a great pleasure, especially
+when linked with technologies and issues relevant to the workplace. In 2004
+he received an award for "Student Centred Learning" from RMIT.
+
+<p> For many years he was a Microsoft junkie - but then had to run a lecture
+series on Linux, and got hooked. Who wouldn't be? Linux can be used as a
+turn-key GUI like Windows, a powerful server, and to control hardware.
+
+<p> His interests apart from Linux, software and hardware are... ( I'll
+remember in a tick)... (context switch)... a lovely wife who hates
+computers (the other women in my life, you see), three really nice kids,
+and a rather large garden.
+
+</em>
+<br clear="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2010, P. J. Radcliffe. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication License</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 179 of Linux Gazette, October 2010
+</p>
+
+</div>
+
+<div id="previousnextbottom">
+<A HREF="pfeiffer.html" >&lt;-- prev</A> | <A HREF="silva.html" >next --&gt;</A>
+</div>
+
+</div>
+</div>
+
+<script src="http://www.google-analytics.com/urchin.js"
+type="text/javascript">
+</script>
+<script type="text/javascript">
+_uacct = "UA-1204316-1";
+urchinTracker();
+</script>
+
+
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+</body>
+</html>
+

@@ -1,0 +1,52 @@
+/*============= Give a user program IO access : iopl_start.c ===============
+
+  PURPOSE - show use of iopl and exec to give a non-root program
+            direct IO access, interrupt access, and set process priority.
+            All forked and exec'ed programs inherit IO access.
+	    
+    USAGE - compile,  ensure the executable is owned by root,
+            and do root SETUID with "chmod u+s iopl_start"
+          - ./iopl_start ./target_program_name  param1 param2 ...  
+
+     NOTE - iopl allows access to all IO ports 0-0xFFFF and the
+            ability to enable or disable interrupts.
+	  - the setgid, setuid removes root privileges.  
+          - the setpriority can set process scheduling priority.
+	  - the command line minus the first parameter (the target
+	    program name) is sent to the target program. 
+          - the ioperm method should be used instead unless interrupt control
+            is required or forked processes also need IO privileges.
+*/
+#include <stdio.h>
+#include <unistd.h>
+#include <sys/io.h>
+#include <sys/time.h>     /* for priority control.*/
+#include <sys/resource.h> /* for priority control.*/
+
+int main(int argc, char *argv[])
+{ /*--- abort if no parameters.*/
+    if ( argc < 2)
+      {  fprintf(stderr, "   No target program name : aborting.\n") ;
+         exit(-1) ;
+      }
+  
+  /*--- set process priority, 0= normal, -20 highest, +20 lowest.*/
+    setpriority( PRIO_PROCESS, -10, 0 ) ;
+
+  /*--- Get access to the ports and remove root privileges.*/  
+    if (iopl(3)) 
+      { perror("   Failed iopl(3)"); 
+        exit(-1);
+      }      
+    setgid( getgid() ) ;
+    setuid( getuid() ) ;  
+  
+  /*--- do the exec to the target program, 
+        use argv array from parameter 1 onward.*/
+    execvp(argv[1], &argv[1]) ;
+  /*    if get here exec must have failed.*/  
+    perror("   execv failed") ;
+    fprintf(stderr, "   Target program was %s.\n", argv[1]) ;
+    exit( -1) ;
+}
+ 

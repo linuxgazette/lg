@@ -1,0 +1,415 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>From Assembler to COBOL with the Aid of Open Source LG #126</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="dyckoff.html" >&lt;-- prev</A> | <A HREF="peterson.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>From Assembler to COBOL with the Aid of Open Source</h1>
+<p id="by"><b>By <A HREF="../authors/howell.html">Edgar Howell</A></b></p>
+
+<p>
+<h3>Introduction</h3>
+
+<p>Recently I had occasion to help convert an Assembler program into COBOL.
+The Assembler part of it was familiar to me from the old days of IBM
+Assembler 360/370/390, which was source-compatible with that used by
+Siemens, Amdahl, and others at one time or another on so-called "big-iron".
+For other than systems work, Assembler is gradually falling out of favor,
+not without justification, based on some of what I have seen over the last
+decade or so. Within this environment, COBOL is still a reasonable and
+viable alternative.</p>
+
+<h3>The Problem</h3>
+
+<p>The program in question was well over 6000 lines of code -- 8000
+with macro expansions -- and easily would have taken several weeks
+to convert completely by hand. Only then could compilation and
+testing start. A nightmare.</p>
+
+<p>Fortunately, for many years one of the participants in the
+project has been working on tools to improve the quality of
+Assembler code as well as to convert it to PL/1 or COBOL. But it is
+in the nature of Assembler that such a tool can never be finished.
+Many of the Assembler programs I've seen in the past remind me of a
+demolition derby: getting there is all that counts, it doesn't matter how
+you do it!</p>
+
+<p>I was given a copy of the Assembler program in which each
+line had a unique line number, as well as a copy of the COBOL
+program produced by software which had references to the line
+number of Assembler code that caused generation of that particular
+line of COBOL code. And "all" I had to do was review the generated
+code and adapt it as needed. Hmmmm...</p>
+
+<h3>Manual Work</h3>
+
+<p>Had it only been necessary to make minor changes here and there,
+likely the task would have been quickly finished. But there were
+numerous places where something needed to be adjusted, often the
+same problem, just a variation on a theme, and another place where
+another change meant another chance of making a mistake.</p>
+
+<p>To be sure, the vast majority of the software-generated code was
+in excellent condition - but this isn't horseshoes. Even though the
+customer will have to make final adjustments based on his operating
+environment, it just wouldn't do to turn the final product over
+with too many problems.</p>
+
+<p>As it turned out, the biggest problem was that the software
+faithfully produced COBOL code that replicated the Assembler code
+very closely. Where the original code was clean, so was the
+COBOL.</p>
+
+<h3>Assembler vs COBOL</h3>
+
+<p>Here is a small example of the problem. The following Assembler
+code, which defines storage to manipulate the date (century, year, month
+day) -</p>
+
+<pre class="code">
+    H1CYMD   DS    0CL8
+    H1CYM    DS    0CL6
+    H1CYY    DS    0CL4
+    H1C      DS    CL2
+    H1YY     DS    CL2
+    H1MM     DS    CL2
+    H1DD     DS    CL2
+</pre>
+
+<p>resulted in the following COBOL:</p>
+
+<pre class="code">
+    01  H1CYMD PIC X(8). 
+    01  filler6607 REDEFINES H1CYMD. 
+            10 H1CYM PIC X(6). 
+            10 filler6608 REDEFINES H1CYM. 
+                    20 H1CYY PIC X(4). 
+                20 filler6609 REDEFINES H1CYY. 
+                            30 H1C PIC X(2). 
+                            30 H1YY PIC X(2). 
+                            30 filler6611-0 REDEFINES H1YY. 
+                                35 H1YY-char PIC X(6). 
+                            30 filler6611 REDEFINES H1YY. 
+                                35 H1YY-2-char PIC X(4). 
+                20 H1MM PIC X(2). 
+            10 H1DD PIC X(2). 
+</pre>
+
+<p>Aside from the fact that this COBOL is pig-ugly, it isn't even
+syntactically correct!</p>
+
+<p>However, this is not due to the software but the Assembler code
+itself: in the symbol table H1YY has a length of 2 because of its
+explicit declaration with that length, but the REDEFINES H1YY-char
+has a syntactically invalid length of 6 because that is the
+explicit length used with it at one point in the Assembler program.
+That's not syntactically incorrect in Assembler, but it is up to the
+programmer to know whether that length is reasonable to use. Originally,
+it was - but not in COBOL.</p>
+
+<p>But there is no way I could have a chance of finding every
+situation like that by hand. Now what?!</p>
+
+
+<h3>Open Source to the Rescue</h3>
+
+<p>The Norns have been very kind to me of late. A while back I had
+discovered a COBOL complier for Linux but hadn't had the time to
+investigate it. The problem with it was that since it wasn't part
+of any distribution I had, I couldn't just grab an RPM and plop it
+onto one of the machines and expect it to function.</p>
+
+<p>It was now time to make time.</p>
+
+<h3>Installing Open COBOL under SuSE 10.0</h3>
+
+<p>As usual, nothing ever goes smoothly the first time - and
+installing this package was no exception. In the following, I have
+omitted the false starts, other than to demonstrate what to do if
+that should happen to you. Basically, by not doing my homework up
+front, I gained a certain level of experience at that. Do pay
+attention to prerequisites when a package you are interested in is
+kind enough to let you know in advance.</p>
+
+<p>The documentation that came with Open COBOL listed the following
+packages as required:</p>
+
+<pre class="code">
+   libgmp      decimal arithmetic
+   libtool     dynamic CALL statements
+</pre>
+
+<p>The following were optional:</p>
+
+<pre class="code">
+   libdb       indexed file I/O and SORT/MERGE
+   libncurses  SCREEN SECTION
+</pre>
+
+<p>Using YaST, I installed four of the following packages (listed as
+required for development) that were available but not yet installed:</p>
+
+<pre class="code">
+   autoconf
+   automake
+   libtool     present
+   gettext     present
+   bison
+   flex
+</pre>
+
+<p>Installation then went as follows (indentation indicates a
+different GUI window and CTRL-D exits root status):</p>
+
+<pre class="code">
+mkdir /tmp/COBOL
+cp /media/usb01/COB/open-cobol-0.32.tar.gz /tmp/COBOL/
+cd /tmp/COBOL
+tar xzf open-cobol-0.32.tar.gz
+cd open-cobol-0.32
+./configure
+</pre>
+
+<p>This failed because one of the required packages had not yet
+been installed. No biggie, I just opened another window and
+installed GMP.</p>
+
+<pre class="code">
+      mkdir /tmp/GMP
+      cp /media/usb01/COB/gmp-4.1.4.tar.gz /tmp/GMP/
+      cd /tmp/GMP
+      tar xzf gmp-4.1.4.tar.gz
+      cd gmp-4.1.4
+      ./configure
+</pre>
+
+<p>This also failed since I hadn't anticipated doing any
+"development" in this partition. So I fired up YaST and installed
+gcc as well as glib2-devel and glib2-doc (instead of glib-* since
+glib2 was already installed).</p>
+
+<pre class="code">
+      ./configure
+      make  
+</pre>
+
+<p>This took a tremendous amount of time to write endless messages
+to the screen. Well, that is what you will think if you have never
+run 'make' before.</p>
+
+<pre class="code">
+      su
+      make install
+</pre>
+
+<p>At this point you will need to note for later (export) the
+messages regarding /usr/local/lib or whatever.</p>
+
+<pre class="code">
+      make clean
+      CTRL-D  &lt;end root status&gt;
+./configure
+</pre>
+
+<p>The following messages at the end are merely informative ("no"
+due to absence of optional packages):</p>
+
+<pre class="code">
+            Use gettext for international messages: yes
+            Use Berkeley DB for file I/O:           no
+            Use fcntl for file locking:             yes
+            Use ncurses for screen I/O:             no
+</pre>
+
+<pre class="code">
+make
+su
+make install
+make clean
+CTRL-D  &lt;end root status&gt;
+</pre>
+
+<h3>Initial Tests</h3>
+
+<p>The only thing left to do was to see if it had been worth all
+the effort.</p>
+
+<pre class="code">
+cd &lt;directory_with_test_programs&gt;
+export LD_LIBRARY_PATH=/usr/local/lib
+cobc hello.cob
+./hello
+Hello World!
+</pre>
+
+<p>After that I spent a bit of time playing around with what the
+compiler can handle. <a href="misc/howell/cobol.cob">Here</a> you
+can see a bit of code using decimal arithmetic -- which blew me
+away! But, then, that is what the GMP package is all about.</p>
+
+<p>That worked so well that I decided to dig out an almost
+20-year-old test program from a COBOL package that worked under
+MS-DOS. Minimal compiler error messages. And after I made comments
+of a couple of lines of code, the program compiled. And executed!
+Like access to the date and time in the machine, output to the
+screen, input from the keyboard. And I didn't have to change
+anything!</p>
+
+<h3>The Acid Test</h3>
+
+<p>OK, so it's time to see if this thing can help me with my
+real-world problem. I fed it the program I had been working on and
+among the error messages were:</p>
+
+<pre>
+/tmp/temp.cob:2081: size of 'filler6611-0' larger than size of 'H1YY'
+/tmp/temp.cob:2083: size of 'filler6611' larger than size of 'H1YY'
+</pre>
+
+<p>I'm a believer!</p>
+
+<h3>Conclusion</h3>
+
+<p>While I may never have need to do any program development with this
+COBOL compiler, in a very brief period of time it has made a big impression
+on me. It seems to produce good code, although divide by zero didn't give
+the response <strong>I</strong> expected. Still, the ability to deal with
+decimal arithmetic is very impressive.</p>
+
+<p>It seems to be very good at discovering syntactic errors in source code.
+I spent considerable time finding and fixing minor syntax problems that I
+never ever would have found just by reading the code. Exactly what I had
+hoped for.</p>
+
+<p>And it ought to be perfect for anyone wanting to learn COBOL at home
+without the time pressure or expense of a formal class somewhere.</p>
+
+<p>Due to dependencies, installing Open Source programs can turn into a bit
+of a pain, particularly if the discrepancies between your system and the
+requirements of the package are too great. But within reason this can be
+overcome, as you saw above. And in all likelihood, the accompanying
+documentation will let you know what is needed.</p>
+
+<p>It can certainly be worth your taking the time to try out that
+package of interest.</p>
+
+
+</p>
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:126/howell.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<!-- *** BEGIN bio *** -->
+<hr>
+<P>
+<img ALIGN="LEFT" ALT="[BIO]" SRC="../gx/2002/note.png" class="bio">
+<em>
+Edgar is a consultant in the Cologne/Bonn area in Germany.
+His day job involves helping a customer with payroll, maintaining
+ancient IBM Assembler programs, some occasional COBOL, and
+otherwise using QMF, PL/1 and DB/2 under MVS.
+<p>
+(Note: mail that does not contain "linuxgazette" in the subject will be
+rejected.)
+
+</em>
+<br CLEAR="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2006, Edgar Howell. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 126 of Linux Gazette, May 2006
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="dyckoff.html" >&lt;-- prev</A> | <A HREF="peterson.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">May 2006 (#126)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

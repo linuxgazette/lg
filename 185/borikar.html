@@ -1,0 +1,727 @@
+<!DOCTYPE html
+	PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+	 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="utf-8" xml:lang="utf-8">
+<head>
+<title>Linux based SMB NAS System Performance Optimization LG #185</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link rel="stylesheet" href="../lg.css" type="text/css" media="screen, projection"  />
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="../lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="../lg.rdf" />
+<!-- link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" / -->
+<link rel="shortcut icon" href="../favicon.ico" />
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+</head>
+<body>
+
+<a href="../">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+<div id="navigation">
+<table summary="masthead" width="100%">
+<tr>
+<td align="center" colspan="3" style="font-size: 10px; font-weight: bold">
+<a href="../index.html">Home</a>
+<a href="http://linuxgazette.net">Main Site</a>
+<a href="../faq/index.html">FAQ</a>
+
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/listinfo/">Mailing Lists</a>
+<a href="../jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+<hr width="99%" style="border: 1px inset #000033">
+</td>
+</tr>
+<tr>
+<td width="40%" align="left" style="font-size: 10px; font-weight: bold">
+The Free International Online Linux Monthly
+</td>
+<td width="20%" align="center" style="font-size: 10px; font-weight: bold">
+ISSN: 1934-371X
+</td>
+<td width="40%" align="right" style="font-size: 10px; font-weight: bold">
+Main site: <a href="http://linuxgazette.net">http://linuxgazette.net</a> 
+</td>
+</table>
+</div>
+
+
+<div id="breadcrumbs1">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">April 2011 (#185)</a> &gt; 
+Article
+
+</div>
+
+<div class="articlecontent1">
+<div class="content">
+
+<div id="previousnexttop">
+<A HREF="lg_bytes.html" >&lt;-- prev</A> | <A HREF="dorado.html" >next --&gt;</A>
+</div>
+
+<h1>Linux based SMB NAS System Performance Optimization</h1>
+<p id="by"><b>By <a href="../authors/borikar.html">Sagar Borikar</a> and <a href="../authors/palani.html">Rajesh Palani</a></b></p>
+
+<h3>Introduction</h3>
+
+<p>
+SMB NAS systems range from the low end, targeting small offices (SOHO) that
+might have 2 to 10 servers, requiring 1 TB to 10 TB of storage, to the high
+end, targeting the commercial SMB (Small to Medium Business) market.
+Customers are demanding a rich feature set at a lesser cost, given the
+relatively cheap solutions available in the form of disk storage, compared
+to what was available 5 years ago. One of the key factors in deciding the
+unique selling proposition of the NAS (Network Attached Storage) in the
+SOHO market is the network and storage performance. Due to extremely
+competitive pricing, many NAS vendors are focused on reducing the
+manufacturing costs, so one of the challenges is dealing with the scarcity
+of system hardware resources without compromising the performance. This
+article describes the optimizations (code optimizations, parameter tuning,
+etc.) required to support the performance requirements in a
+resource-constrained Linux based SMB NAS system.
+</p>
+
+<h3>System Overview</h3>
+
+<p>
+A typical SMB NAS hardware platform contains the following blocks:
+</p>
+
+<p>
+1. 500MHz RISC processor<br>
+2. 256 MB RAM<br>
+3. Integrated Gigabit Ethernet controller<br>
+4. PCI 2.0<br>
+5. PCI-to-Serial ATA Host Controller<br>
+</p>
+
+<p>
+We broadly target the network and storage path in the kernel to
+improve the performance.  While focusing on the network path
+optimization, we look at device level, driver level and stack level
+optimization sequentially and with decreasing order of priority.
+Before starting the optimization, the first thing to measure is the
+current performance for CIFS, NFS and FTP accesses.  We can use tools
+such as IOzone, NetBench or bonnie++ to characterize the NAS box for
+network and storage performance.  The system level bottlenecks can be
+identified using tools like Sysstat, LTTng or SystemTap that make use
+of less intrusive instrumentation techniques.  OProfile is another
+tool which can be helpful to understand the functional bottlenecks.
+</p>
+
+<h3>1. Networking Optimization</h3>
+
+<h4>1.1. Device level optimization</h4>
+
+<p>
+Many hardware manufacturers typically add a lot of bells and whistles
+in their hardware for accelerating specific functions.  The key ones
+that have an impact on the NAS system performance are described below.
+</p>
+
+<h4>1.1.1 Interrupt Coalescence</h4>
+
+<p>
+Most of the gigabit Ethernet devices support interrupt coalescence,
+which when clubbed with NAPI will provide an improved performance.
+(Please refer to driver level optimization later).  Choosing the
+coalescence value for the best performance is a purely iterative job
+and highly dependent on the target application.  For the systems which
+are targeted for excessive network load of large packets, specifically
+jumbo  frames, and CPU intensive applications or CPUs with lesser
+frequency,  this value plays a significant role in reducing the
+frequent interruptions of the CPU.  Even though there is no rule of
+thumb to decide the coalescence value, keeping the following points in
+mind for reducing the number of interrupts will be helpful:
+</p>
+
+<ul>
+<li>  For the systems with the memory size of 256-512 MB, it helps to
+choose the smaller value of the coalescence, clubbed with a smaller
+budget value (The budget parameter 	specifies how many packets the
+driver is allowed to pass to the network stack on a poll() call).
+Note that the coalescence value also depends upon the type of the
+interface of the device, viz. Gigabit or Fast Ethernet.  For a Gigabit
+Ethernet device and 256 MB memory size, interrupt coalescence timeout
+value of 64 will be helpful.
+
+<li> Driver budget parameter will decide the buffering capacity which
+needs to be set, keeping in mind the coalescence value, and this could
+also be kept at 64 for the above configuration.
+</ul>
+
+<h4>1.1.2 MAC Filters</h4>
+
+<p>
+Enabling MAC filters in the device would greatly offload CPU
+processing of non-required packets and help to drop the packets at the
+device level itself.
+</p>
+
+<h4>1.1.3 Hardware Checksum</h4>
+
+<p>
+Most of the devices support hardware checksum calculation. Setting
+CHECKSUM_HW as the CRC calculation will greatly offload the CPU from
+the CRC computation and rejection of packets if there is a mismatch.
+Note that this is only the physical layer CRC and not the protocol
+level.
+</p>
+
+<h4>1.1.4 DMA support</h4>
+
+<p>
+The DMA controller tracks the buffer address and ownership bits for
+the transmit and receive descriptors.  Based on the availability of
+buffers in the memory, the DMA controller will transfer the packets to
+and from system memory.  This is the standard behavior of any Ethernet
+device IP. The performance can be improved by moving the descriptors
+to onchip SRAM if available in the processor. As transmit and receive
+descriptors would be accessed most frequently, moving them to the SRAM
+will help with faster access to the buffers.
+</p>
+
+<h3>1.2 Driver level optimization</h3>
+
+<p>
+This optimization scope is vast and needs to be treated based on
+the application requirement.  The treatment can be different if the
+need is to optimize only for packet forwarding performance, rather
+than TCP level performance.  Also, it varies based on the system
+configuration and resources viz, other important applications making
+use of the system resources, DMA channels, system memory and whether
+the Ethernet device is PCI based or directly integrated to the System-
+on-Chip (SoC) through the system bus.  In the DUT, the Ethernet device
+was hooked up directly to the system bus through the bridge so we'll
+not focus on PCI based driver optimization for now, although to some
+extent, this can be applied to PCI devices as well. Most of the NAS
+systems would be subject to heavy stress when they are up and running
+for several days and a lot of data transfer is going on over the
+period. Specifically, with the Linux based NAS systems the free buffer
+count keeps on reducing over the period and as the pdflush algorithm
+is not optimized in the kernel for this specific use case, and given
+that the cache flush mechanism is left to the individual file systems,
+it depends upon how efficiently the flushing algorithm is implemented
+in the filesystem.  It also depends upon how efficient the underlying
+hardware is, viz. SATA controller, the disks used etc.Following
+factors need to be considered when tweaking the Ethernet device
+driver:
+</p>
+
+<h4>1.2.1 Transmit interrupts</h4>
+
+<p>
+We can mask off transmit interrupts and avoid interrupt jitter
+occurring because of transmission of the packets.  If the transmit
+gets blocked, there is not much performance impact on the overall
+network process as such, and what matters is only the receive
+interrupts.
+</p>
+
+<h4>1.2.2 Error interrupts</h4>
+
+<p>
+Disable the error interrupts in the device unless you really want to
+take some action based on the error occurred and pass the status up to
+the application level to let it know that there is some problem in the
+device.
+</p>
+
+<h4>1.2.3 Memory alignment for descriptors</h4>
+
+<p>
+Even though there are some gaps added through padding in the
+descriptors, it always helps to have efficient access to the
+descriptors when they are cache line size aligned and bus width
+aligned.
+</p>
+
+<h4>1.2.4 Memory allocation for the packets</h4>
+
+<p>
+You may want to make a trade off for memory allocation in the receive
+path, viz. either choose to pre-allocate all the buffers, preferably
+fixed sized, fixed number of buffers and use them recursively or make
+dynamic allocations of buffers on a need basis.  Each has its own
+advantages and disadvantages.  In the prior case, you will consume
+memory and other applications in the system can't make use of the
+buffers.  This may lead to internal fragmentation of the buffers as
+well as not knowing the exact size of the packet to be received.  But
+it will significantly reduce the memory allocation and deallocation of
+the buffers in the receive path. As we rely on kernel memory
+allocation / deallocation routines, there is a possibility that we may
+end up starving or looping in the receive context to get the free
+buffers, or if the required memory is not available then it may end up
+in page allocation failures.  Dynamic memory allocation will
+significantly save on memory in a memory constrained system. This will
+help other applications to run freely without any issues even when the
+system is exposed to the heavy stress of IO.  But you will have to pay
+the penalty in the time required to allocate and free the buffers at
+runtime.
+</p>
+
+<h4>1.2.5 SKB Recycling</h4>
+
+<p>
+Socket buffers(skb) are allocated and freed by the driver on arrival
+of packets in standard Ethernet drivers.  By implementing SKB
+recycling, the sockets are pre-allocated and would be provided to the
+driver when requested and would be put back in the recycle queue when
+freed in kfree implementation.
+</p>
+
+<h4>1.2.6 Cache coherency</h4>
+
+<p>
+Cache coherency is usually not supported in most of the hardware to
+reduce the BOM, but if supported, it makes the system highly
+performance driven as software doesn't need to invalidate the cache
+line and flush the cache.  Especially under heavy IO stress, this can
+have a worse impact on the network performance, which will get
+propagated to the storage stack as well.
+</p>
+
+<h4>1.2.7 Prefetching</h4>
+
+<p>
+If the underlying CPU supports prefetching, it can help to
+dramatically improve the system performance under heavy stress.
+Specifically under heavy stress, this helps to improve the performance
+by avoiding cache misses.  Note that the cache needs to be invalidated
+if the coherency is not supported in the hardware, else it will
+greatly hamper the performance.
+</p>
+
+<h4>1.2.8 RCU locks</h4>
+
+<p>
+Spin locks / IRQ locks are expensive compared to light weight RCU
+locks. The lock/unlock mechanism of RCU locks is much lighter than the
+spin locks and helps a lot in performance improvement.
+</p>
+
+<h4>1.3 Stack level optimization</h4>
+
+<p>
+TCP/IP stack parameters are defined considering all the supported
+protocols in the network. Based on the priority of the path followed,
+we can choose the parameters as per our need. For example, NAS uses
+CIFS, NFS protocols primarily for the data transfer.
+</p>
+
+<h4>1.3.1 TCP buffer sizes</h4>
+
+<p>
+We could choose the following parameters:
+</p>
+
+<pre>
+net.core.rmem_max = 64K
+net.core.rmem_default = 109568
+</pre>
+
+<p>
+While this would provide ample space for the TCP packets to get queued
+up in the memory and yield better performance, it eats up the system
+memory, and therefore the memory required by other applications in the
+system to run smoothly needs to be considered. With low system memory,
+following options can be tried out, to check the performance
+improvement.  Again these changes are highly application dependent and
+would not necessarily yield a similar performance improvement as
+observed in our DUT.
+</p>
+
+<h4>1.3.2 Virtual Memory (VM) parameters</h4>
+
+<h4>1.3.2.1 min_free_kbytes</h4>
+
+<p>
+This parameter decides when pdflush will kick in to flush out the
+kernel cache to the disk.  Setting this value high will spawn the
+pdflush threads frequently to flush out the data to the disks.  This
+will help with freeing the buffers for the rest of the applications,
+when the system is exposed to heavy stress. The flip side is that,
+this may end up causing the system to thrash and consume CPU cycles
+for freeing the buffer more frequently, and hence dropping packets.
+</p>
+
+<h4>1.3.2.2 pdflush threads</h4>
+
+<p>
+The default number of threads in the system is 2. By increasing the
+number to 4, we can achieve better performance for NFS. This will help
+to flush the data promptly and not get queued up for long, thus making
+space available for free buffers for other applications.
+</p>
+
+<h3>2. Storage Optimization</h3>
+
+<p>
+Storage optimization highly depends upon the filesystem used along
+with the characteristics of the storage hardware path i.e. the type of
+the interface, viz. whether it has integrated SATA controller or over
+PCI.  It also depends on whether it has hardware RAID controller or
+software RAID controller. Hardware RAID controller increases the BOM
+dramatically.  Hence for SOHO solutions, software RAID manager "mdam"
+is used.  In addition to HW support for RAID functionality, the
+performance depends upon the software IO path which includes the block
+device layer, device driver and filesystem used.  NAS usually has
+journaling file systems such as ext3 or XFS.  XFS is more commonly
+used for sequential writes or reads due to its extent based
+architecture, whereas ext3 is well suited for sector wise reads or
+writes which work on 512 bytes rather than big chunks. We used XFS in
+our system.  The flip side of the XFS is the fragmentation which will
+be discussed in the next section.  The following areas were tweaked
+for performance improvements in the storage path:
+</p>
+
+<h4>2.1 Software RAID manager</h4>
+
+<p>
+There are two crucial parameters which can decide the performance of
+the RAID manager.
+</p>
+
+<h4>2.1.1. Chunk size</h4>
+
+<p>
+We should set the chunk size to 64K which will
+help in mirroring  redundancy application, viz. RAID1 or RAID10
+</p>
+
+<h4>2.1.2. Stripe Cache size</h4>
+
+<p>
+Stripe cache size decides the stripe size
+per disk.  Stripe size should be judiciously decided as it will decide
+the data that needs to be written in per disk of the RAID controller.
+In case of journaled file system, there will be duplicate copy of the
+disk and would bog down the IO if the chunk and stripe size value is
+high.
+</p>
+
+<h4>2.2 Memory fragmentation</h4>
+
+<p>
+Due to its architecture, XFS requires memory in multiples of extents.
+This leads to severe internal fragmentation if the blocks are of
+smaller sizes. XFS demands the memory in multiples of 4K and if the
+buddy allocator doesn't have enough room in order 2 or order 3 hash,
+then the system may slow down till the other applications release the
+memory and the kernel can join them back in the buddy allocator.  This
+will specifically be seen under heavy stress, after the system has
+been running for a couple of days.   This can be improved by tweaking
+the xfs syncd centisecs (see below) to flush the stale data to disks
+at higher frequency.
+</p>
+
+<h3>2.3 External journal</h3>
+
+<p>
+Journal or log plays an important role in defining XFS performance.
+Any journaled file system doesn't write the data directly at the
+destined sectors, but maintains the copy in the log and later writes
+to the sectors.  To achieve better performance, XFS writes the log at
+the center of the disk whereas the data is stored in the tracks at the
+outer periphery of the disk.  This helps the actuator arm of the disk
+to have reduced spindle movements, thereby increasing performance.  If
+we remove the dependency of maintaining the log in the same disk where
+the actual data is stored, it increases performance dramatically.
+Having NAND flash of 64M to store the log would certainly help reduced
+spindle movements.
+</p>
+
+<h3>2.4  Filesystem optimization</h3>
+
+<h4>2.4.1. Mount options</h4>
+<p>
+While mounting the filesystem, we can choose the mount options
+as logsize=64M,noatime,nodiratime.  Removing the access time for files
+and directories would help relieve the CPU from continuously checking
+the inodes for files and directories.
+</p>
+
+<h4>2.4.2. fs.xfs.xfssyncd_centisecs</h4>
+
+<p>
+This is the frequency at which XFS
+flushes the data to disk.  It will flush the log activity and clean up
+the unlinked inodes.  Setting this parameter to 500 will help increase
+the frequency of flushing the data. This would be required if the
+hardware performance is limited. Especially when the system is exposed
+to constant writes, this helps a lot.
+</p>
+
+<h4>2.4.3. fs.xfs.xfsbufd_centisecs</h4>
+<p>
+This is the frequency at which XFS
+cleans up the metadata.  Keeping it low would lead to frequent cleanup
+of the metadata for extents which are marked as dirty.
+</p>
+
+<h4>2.4.4. fs.xfs.age_buffer_centisecs</h4>
+<p>
+This is the frequency at which
+xfsbufd flushes the dirty metadata to the disk.  Setting it to 500
+will lead to frequent cleanup of the dirty metadata.
+</p>
+
+<p>
+The parameters listed in b,c and d above will lead to significant
+performance improvement when the log is kept in a separate disk or
+flash, compared to keeping it in the same media as the data.
+</p>
+
+<h3>2.5 Random disk IO</h3>
+
+<p>
+Simultaneous writes at non-sequential sectors would lead to a lot of
+actuator arm and spindle movement, inherently leading to the
+performance drop and impact on the overall throughput of the system.
+Although there is very little we can do here to avoid random disk IO,
+what we can control is the fragmentation.
+</p>
+
+<h3>2.6 Defragmentation</h3>
+
+<p>
+Any journaled filesystem will always have this issue when the system
+is running over a long period of time or exposed to heavy stress.  XFS
+provides a utility named xfs_fsr which can be run periodically to
+reduce the fragmentation in the disk, although it works only on the
+dirty extents which are currently not in use.  In fact, random disk IO
+and the fragmentation issue go hand in hand. More the fragmentation
+more will be the random disk IO and lesser the throughput. It is of
+utmost importance to keep the fragmentation under control to reduce
+the random IO.
+</p>
+
+<h3>2.7 Results</h3>
+
+<p>
+We can easily figure out that when the system is under heavy stress,
+the amount of time taken by the kernel for packet processing is more
+than the user space processing for the end-to-end path, i.e. from
+Ethernet device to hard disk.
+</p>
+
+<p>
+After implementing the above features, we captured the performance
+figures on the same DUT.
+</p>
+
+<p>
+For RAID creation, use '--chunk=1024'; for RAID5, use
+</p>
+
+<pre>
+echo 8192 &gt; /sys/block/md0/md/stripe_cache_size
+</pre>
+
+<p>
+Around 37% degradation in performance was observed after 99%
+fragmentation of the filesystem, as compared to when the filesystem
+was 5% fragmented. Note that these figures were captured using the
+bonnie++ tool.
+</p>
+
+<p>
+2.7.2 Having an external log gives around 28% improvement in
+performance compared to having the log in the same disk where the
+actual data is stored, on a system that was 99% fragmented.
+</p>
+
+<p>
+2.7.3 Running the defragmentating utility xfs_fsr on a system that is
+99% fragmented gave an additional 37% improvement in performance.
+</p>
+
+<p>
+2.7.4 CIFS write performance for a 1G file on a system that was
+exposed to 7 days of continuous writes, increased by 133% after
+implementing the optimizations.  Note that this is end to end
+performance that includes network and storage path.
+</p>
+
+<p>
+2.7.5. The NFS write performance was measured using IOzone.  NFS write
+performance for a 1G file on a system that was exposed to 7 days of
+continuous writes, increased by 180% after implementing the
+optimizations.  Note again that this is the end to end performance
+that includes network and storage path.
+</p>
+
+<h3>4. Conclusion:</h3>
+
+<p>
+While Linux based commercial SMB NAS systems have the luxury of
+throwing more powerful hardware to address the performance
+requirements, SOHO NAS systems have to make do with resource
+constrained hardware platforms, in order to meet the system cost
+requirements.  Although Linux is a general purpose OS that has a lot
+of code to run a wide variety of applications, and is not necessarily
+purpose built for an embedded NAS server application, it is possible
+to configure and tune the OS to obtain good performance for this
+application.  Linux has a lot of knobs that can be tweaked to improve
+system performance for a specific application.  The challenge is in
+figuring out the right set of knobs that need to be tweaked. Using
+various profiling and benchmarking tools, the performance hotspots and
+the optimizations to address the same, for a NAS server application
+have been identified and documented.
+</p>
+
+<hr>
+<h3>Test data:</h3>
+
+<p>
+<a href="misc/borikar/Bonnie++_benchmarks_.ods">Bonnie++ benchmarks (ODS)</a><br>
+<a href="misc/borikar/Magellan_skb_fix_CIFS_XP.csv">MagellanCIFS/XP (CSV)</a><br>
+<a href="misc/borikar/Magellan_skb_fix_nfs.csv">MagellanNFS (CSV)</a>
+</p>
+
+
+
+<br clear="all" />
+
+<table align='center' cellspacing='10'>
+<tr>
+<td>
+<script type='text/javascript'>
+digg_url = 'http://linuxgazette.net/185/borikar.html';
+digg_title = 'Linux based SMB NAS System Performance Optimization';
+digg_bodytext = '<p> SMB NAS systems range from the low end, targeting small offices (SOHO) that might have 2 to 10 servers, requiring 1 TB to 10 TB of storage, to the high end, targeting the commercial SMB (Small to Medium Business) market. Customers are demanding a rich feature set at a lesser cost, given the relatively cheap solutions available in the form of disk storage, compared to what was available 5 years ago. One of the key factors in deciding the unique selling proposition of the NAS (Network Attached Storage) in the SOHO market is the network and storage performance. Due to extremely competitive pricing, many NAS vendors are focused on reducing the manufacturing costs, so one of the challenges is dealing with the scarcity of system hardware resources without compromising the performance. This article describes the optimizations (code optimizations, parameter tuning, etc.) required to support the performance requirements in a resource-constrained Linux based SMB NAS system. </p> ';
+digg_topic = 'linux_unix';
+</script>
+<script src="http://digg.com/tools/diggthis.js" type="text/javascript"></script>
+</td>
+<td>
+<a name="fb_share" type="box_count" href="http://www.facebook.com/sharer.php">Share</a>
+<script src="http://static.ak.fbcdn.net/connect.php/js/FB.Share" type="text/javascript"></script>
+</td>
+<td>
+<a href="http://twitter.com/home?status=Currently%20reading:%20http://linuxgazette.net/185/borikar.html%20at%20Linux%20Gazette%20%23linuxgazette" title="Click to share this post on Twitter"><img src="../gx/twitter.png" width="50" height="85" border="0"></a>
+</td>
+</tr>
+</table>
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:185/borikar.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<H4>Sagar Borikar</H4>
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/authors/borikar.jpg" class="bio">
+</p>
+
+<em>
+<p>
+I got introduced to Linux through the very well-known <a
+ href="http://www.oreilly.com/catalog/opensources/book/appa.html">Tanenbaum
+ vs. Torvalds debate</a>. Till that time, all I'd heard was that Linux
+ was just another Unix-like operating system. But looking at the immense
+ confidence of a young college graduate who was arguing with the
+ well-known professor, Minix writer, and network operating systems
+ specialist got me interested in learning more about it. From that day
+ forward, I couldn't leave Linux alone - and won't leave it in the future
+ either. I started by understanding the internals, and the more I delved
+ into it, the more gems I discovered in this sea of knowedge. Open
+ Source development really motivates you to learn and help others learn!
+</p>
+
+<p>
+Currently, I'm actively involved in working with the 2.6 kernel and
+ specifically the MIPS architecture. I wanted to contribute my 2 cents to
+ the community - whatever I have gained from understanding and working
+ with this platform. I am hoping that my articles will be worthwhile for
+ the readers of LG.
+</p>
+
+
+
+</em>
+
+<br clear="all">
+
+
+<H4>Rajesh Palani</H4>
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/2002/note.png" class="bio">
+</p>
+
+<em>
+<p>
+Raj Palani works as a Senior Manager, Software Engineering at EMC. He
+ has been designing and developing embedded software since 1993. His
+ involvement with Linux development spans more than a decade.
+</p>
+</em>
+
+<br clear="all">
+
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2011, Sagar Borikar and Rajesh Palani. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication License</a>
+unless otherwise noted in the body of the article.
+<!-- Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc. -->
+</p>
+
+<p>
+Published in Issue 185 of Linux Gazette, April 2011
+</p>
+
+</div>
+
+<div id="previousnextbottom">
+<A HREF="lg_bytes.html" >&lt;-- prev</A> | <A HREF="dorado.html" >next --&gt;</A>
+</div>
+
+</div>
+</div>
+
+<script src="http://www.google-analytics.com/urchin.js"
+type="text/javascript">
+</script>
+<script type="text/javascript">
+_uacct = "UA-1204316-1";
+urchinTracker();
+</script>
+
+
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+</body>
+</html>
+

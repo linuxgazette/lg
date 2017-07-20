@@ -1,0 +1,59 @@
+#!/bin/sh
+# Envio de ficheros mime por correo desde hylafax
+
+# Ejemplo de llamada
+#	/usr/bin/metasend.sh "$MSG" "$DEVICE" "$COMMID" "$FILE" "$SENDTO" "$SENDER"
+
+MSG=$1
+DEVICE=$2
+COMMID=$3
+FILE=$4
+SENDTO=$5
+SENDER=$6
+
+TIFF2PDF=/usr/bin/tiff2pdf.sh
+SED=/usr/bin/sed
+METASEND=/usr/bin/metasend
+FROMADDRESS="Servidor Fax Torrelavega"
+ASUNTO=$(date -r $FILE +"Fax recibido el %a %d-%b-%Y a las %T")
+
+TMPFILE=$(mktemp /tmp/metasend.XXXXXX)
+LOGFILE=$(mktemp /tmp/metasend.log.XXXXXX)
+# Límite de tamaño para enviar los mensajes en una sola pieza
+MAXSIZE=2000000
+
+echo "Fax de $SENDER
+
+-------------------------------------
+
+" > $LOGFILE
+
+if [ "$MSG" ]; then
+    echo "Recibido en: $DEVICE
+
+No se ha recibido el documento completo porque:
+
+    $MSG
+
+ ---- Detalles ----
+" >> $LOGFILE
+	 if [ -f log/c$COMMID ]; then
+	    $SED -e '/-- data/d' \
+		 -e '/start.*timer/d' -e '/stop.*timer/d' \
+		 log/c$COMMID >> $LOGFILE
+	 elif [ -n "$COMMID" ]; then
+	    echo "    No transcript available (CommID c$COMMID)." >> $LOGFILE
+	 else
+	    echo "    No transcript available." >> $LOGFILE
+	 fi
+fi
+
+$TIFF2PDF $FILE > $TMPFILE
+
+OLDLC_ALL=$LC_ALL
+LC_ALL=POSIX; export LC_ALL
+$METASEND -b -t "$SENDTO" -s "$ASUNTO" -F "$FROMADDRESS" -m "text/plain" -f "$LOGFILE" -n \
+    -m "application/pdf;name=\"fax.pdf\"" -D fax.pdf -f $TMPFILE -z -S $MAXSIZE
+LC_ALL=$OLDLC_ALL; export LC_ALL
+
+rm -f $TMPFILE $LOGFILE

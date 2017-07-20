@@ -1,0 +1,678 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Right To Your Own Devices LG #114</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="john.html" >&lt;-- prev</A> | <A HREF="keeling.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Right To Your Own Devices</h1>
+<p id="by"><b>By <A HREF="../authors/kapil.html">Kapil Hari Paranjape</A></b></p>
+
+<p>
+<h3>Introduction</h3>
+
+<p>Linux 2.4.x had the Logical Volume Manager (LVM) and other
+multi-disk/multi-partition block device constructs. These have been
+enhanced by the Device Mapper in Linux 2.6.x. Here is a one line
+summary:</p>
+
+<blockquote>You can choose any sequence of blocks on a sequence of
+block devices and create a new block device <em>some</em> of whose
+blocks are identified with the blocks you chose
+earlier.</blockquote>
+That'll take a while to chew on. Meanwhile here are some ways you
+can use the device mapper:
+
+<ul>
+<li>What files will this program create? Get it to write them on a
+COW!</li>
+
+<li>Let the file-system not go on holiday while you take
+snapshots.</li>
+
+<li>Dice it, slice it, and resize it - but don't reboot.</li>
+
+<li>If your data is more valuable than the hard disk - encrypt
+it.</li>
+</ul>
+There <em>is</em> a catch, of course. To do all this with the
+<em>root</em> device, some changes need to be made at boot time.
+Rather than get diverted, we will concentrate on learning how to
+use the device mapper - to do this we will use &ldquo;dummy&rdquo;
+loop devices instead of &ldquo;real&rdquo; disks. After you have
+gained some confidence, you can move on to real disks and perhaps
+even the root device.
+
+<h3>How To Fake It With A Loop</h3>
+
+<p>In Unix, everything is a file. Even a block device like
+<code>/dev/hda2</code> which is meant to be read in
+&ldquo;chunks&rdquo; called <em>blocks</em>, can be read
+byte-by-byte like a file. The loop device allows us to reverse this
+asymmetry and treat any file like a block device. Activate loop
+devices for your Linux with <code>modprobe loop</code> (as root) if
+necessary.</p>
+
+<p>To demonstrate this without risking serious damage to useful
+files, we will only use empty files. First of all, create an empty
+file like so:</p>
+
+<pre>
+    dd if=/dev/zero of=/tmp/store1 bs=1024 seek=2047 count=1
+</pre>
+This creates a file full of nothing and 2 Megabytes in size. Now we
+make it into a block device:
+
+<pre>
+    losetup /dev/loop1 /tmp/store1
+</pre>
+We then operate with this block device just as we would with any
+other block device:
+
+<ol type="1">
+<li>Check its size in 512-byte blocks
+
+<pre>
+        blockdev --getsize /dev/loop1
+</pre></li>
+
+<li>Make a file system on it
+
+<pre>
+        mke2fs /dev/loop1
+</pre></li>
+
+<li>Mount this file system somewhere
+
+<pre>
+        mount /dev/loop1 /mnt
+</pre></li>
+</ol>
+After this you can use <code>/mnt</code> just as you would any
+other file-system - the changes will be written to
+<code>/tmp/store1</code>. When you get tired of playing with the
+loop blocks, you put them away with commands like <code>losetup -d
+/dev/loop1</code>.
+
+<p>We will use loop devices like <code>/dev/loop1</code>,
+<code>/dev/loop2</code> and so on as the building block devices in
+what follows.</p>
+
+<h3>Step Into My Parlor...</h3>
+
+<p>...said the device mapper to the block device. If it is not
+already activated, load the device mapper for your Linux with
+<code>modprobe dm-mod</code> (as root.) The device mapper can take
+any block device under its wing with a command like</p>
+
+<pre>
+    echo 0 $(blockdev --getsize /dev/loop1) linear /dev/loop1 0 | \
+        dmsetup create new
+</pre>
+This creates a &ldquo;new&rdquo; block device
+<code>/dev/mapper/new</code>; but this is not really new data.
+Reading from this block device returns <em>exactly</em> the same
+result as reading directly from <code>/dev/loop1</code>; similarly
+with writing to this block device. Looks a lot like the same old
+blah in a new block device! So you could get rid of this block
+device by <code>dmsetup remove new</code>.
+
+<p>Of course, you can do things differently. For example, you can
+take only half of <code>/dev/loop1</code> as your block device:</p>
+
+<pre class="code">
+    SIZE1=$(blockdev --getsize /dev/loop1)
+    echo 0 $(($SIZE1 / 2)) linear /dev/loop1 0 | \
+        dmsetup create half
+</pre>
+The remaining half (which could be the bigger &ldquo;half&rdquo; if
+<code>/dev/loop1</code> is odd-sized!) is then also available for
+use. You could use it in combination with <code>/dev/loop2</code>
+to create another block device:
+
+<pre class="code">
+    REST1=$((SIZE1 - $SIZE1 / 2))
+    echo 0 $REST1 linear /dev/loop1 $((SIZE1 / 2))  &gt; /tmp/table1
+    echo $REST1 $(blockdev --getsize /dev/loop2) \
+        linear /dev/loop2 0 &gt;&gt; /tmp/table1
+    dmsetup create onenahalf /tmp/table1
+</pre>
+Let us try to understand this example and what each of the three
+numbers on each line of <code>/tmp/table</code> mean. The first
+number is the starting sector of the map described, the second
+number is the number of sectors in the map. The word
+<code>linear</code> is followed by the name of the original device
+that the map refers to; this is followed by the sector number of
+the first sector (of this original device) which is assigned by
+this map. Read that again!
+
+<p>So you can slice and splice your disks as you like - but there
+<em>is</em> a small cost, of course. All operations to these new
+block devices go through the device mapper rather than directly to
+the underlying hardware. With efficient table management in the
+kernel, this overhead should not slow down things perceptibly.</p>
+
+<p>Notice how I slipped in (clever me!) the use of
+&ldquo;tables&rdquo; that contain the mapped device descriptions.
+If you are planning to use mapped devices a lot and don't want to
+forget your settings, such tables are the way to go. Don't worry -
+you can always get the table of any device like
+<code>/dev/mapper/new</code> by</p>
+
+<pre>
+    dmsetup table new
+</pre>
+In the output, the original block device will appear as
+<code>major:minor</code>, so you will have to figure out what the
+device is actually called if you need the table in human readable
+form. (Hint: Try
+
+<pre>
+    ls -l /dev | grep "$major, *$minor"
+</pre>
+or something very like it.) Don't forget to run
+
+<pre>
+    dmsetup remove half
+    dmsetup remove onenahalf
+</pre>
+when you are through.
+
+<p>Perhaps you are one of those people who own multiple disks
+configured so that reading <em>n</em> bytes from one of them is
+<em>slower</em> than reading <em>n</em>/2 bytes from two of them;
+this may happen because your disk controller is capable of
+multi-disk operations in parallel or because you have multiple disk
+controllers. The device mapper can help you to speed up your
+operations.</p>
+
+<pre class="code">
+    SIZE=$(( $(blockdev --getsize /dev/loop1) + \
+         $(blockdev --getsize /dev/loop2) ))
+    echo 0 $SIZE striped 2 16 /dev/loop1 0 /dev/loop2 0 | \
+        dmsetup create tiger
+</pre>
+Now reads/writes from <code>/dev/mapper/tiger</code> will alternate
+(in 16 sector chunks) between the two devices; you will also have
+combined the disks into one as in the <code>linear</code> case.
+
+<h3>Snapshots and COWs</h3>
+
+<p>There may be a number of reasons why you may want to stop all
+writes to your block device but not want the system to come to a
+grinding halt.</p>
+
+<dl compact>
+<dt><b>Regular backups</b>
+</dt>
+
+<dd>&ldquo;Classically&rdquo; machines were put in single-user mode
+to take backups. Backing-up a &ldquo;live&rdquo; system has the
+risk of incomplete or corrupted files and erroneous time
+stamps.</dd>
+
+<dt><b>Security</b>
+</dt>
+
+<dd>This jazzy new screen saver you want to install - what changes
+is it going to make to your file-system? You want to find out.</dd>
+
+<dt><b>CDROMs</b>
+</dt>
+
+<dd>...or other read-only physical devices. Say you want to set up
+your system on a CDROM but still want to allow local
+&ldquo;ephemeral&rdquo; changes that are discarded when the system
+reboots.</dd>
+</dl>
+The solution is re-direction. Effectively you tell the processes,
+&ldquo;Look behind you!&rdquo; and in-a-snap put a layer between
+the process and the device. Activate the snapshot feature of the
+device mapper with <code>modprobe dm-snapshot</code> if necessary.
+
+<p>Let us start then with a device which is managed by the device
+mapper. For example it could be created by</p>
+
+<pre class="code">
+    SIZE1=$(blockdev --getsize /dev/loop1)
+    SIZE2=$(blockdev --getsize /dev/loop2)
+    cat &gt; /tmp/table2 &lt;&lt;EOF
+    0 $SIZE1 linear /dev/loop1 0
+    $SIZE1 $SIZE2 linear /dev/loop2 0
+    EOF
+    dmsetup create base /tmp/table2
+</pre>
+Now assume that you have put a file system on this device with a
+command like <code>mke2fs /dev/mapper/base</code>; and suppose you
+have begun using this file system at <code>/mnt</code> with the
+command <code>mount /dev/mapper/base /mnt</code>.
+
+<p>We will now take a &ldquo;snapshot&rdquo; of this file-system -
+in slow motion! The following steps have to be run quite quickly
+(say with a script) on a running system where this file-system is
+being changed actively.</p>
+
+<p>First of all you create a duplicate of this device. This is not
+just for safety - we will be changing the meaning of
+<code>/dev/mapper/base</code> without telling the file-system!</p>
+
+<pre>
+    dmsetup table base | dmsetup create basedup
+</pre>
+Next we prepare our COW (copy-on-write) block device by making sure
+the first 8 (or whatever you decide is your chunk size) sectors are
+zeroed.
+
+<pre>
+    CHUNK=8
+    dd if=/dev/zero of=/dev/loop3 bs=512 count=$CHUNK
+</pre>
+Now we suspend all I/O (reads/writes) to the <code>base</code>
+device. This is the critical step for a running system. The kernel
+will have to put to sleep all processes that attempt to read from
+or write to this device; so we want to be sure we can resume soon.
+
+<pre>
+    dmsetup suspend base &amp;&amp; TIME=$(date)
+</pre>
+The next step is to use the COW to clone the device:
+
+<pre class="code">
+    echo 0 $(blockdev --getsize /dev/mapper/basedup) \
+        snapshot /dev/mapper/basedup /dev/loop3 p 8 | \
+        dmsetup create top
+</pre>
+What this says is that from now on reading from
+<code>/dev/mapper/top</code> will return the data from
+<code>/dev/mapper/basedup</code> <em>unless</em> you write
+&ldquo;on top&rdquo; of the original data. Writes to
+<code>top</code> will actually be written on
+<code>/dev/loop3</code> in chunks of size 8 sectors. If you have
+used multiple transparent plastic sheets one on top of the other
+(or &ldquo;Layers&rdquo; in GIMP) the effect is similar - what is
+written on top obscures what is below but wherever nothing is
+written on top you see clearly what is written on the lower layer.
+
+<p>In particular, we can now make sure that all changes to the
+underlying block devices are &ldquo;volatile.&rdquo; If we execute
+the following commands (we'll bookmark this as <a name="point_A"
+id="point_A">'<strong>Point A</strong>'</a> for later use) -</p>
+
+<pre>
+    dmsetup table top | dmsetup load base
+    dmsetup resume base
+</pre>
+we will have replaced the file-system under <code>/mnt</code> with
+another one where all changes actually go to
+<code>/dev/loop3</code>. When we dismantle this setup,
+<code>/dev/loop1</code> and <code>/dev/loop2</code> will be in
+<em>exactly</em> the state that they were in at time
+<code>$TIME</code>.
+
+<p>If <code>/dev/loop1</code> and <code>/dev/loop2</code> are on
+non-writable physical media (such as a CDROM), whereas
+<code>/dev/loop3</code> is on a writable one (such as RAM or hard
+disk), then we have created a writable file-system out of a
+read-only one!</p>
+
+<p>This solves the last problem in our list above - but what about
+the first two? To tackle the second problem we must have some way
+of comparing the new file-system with the older one. If you try to
+mount <code>/dev/mapper/basedup</code> somewhere in order to this,
+you will find that Linux (the kernel!) refuses to let you do this.
+Instead we can create yet another device:</p>
+
+<pre class="code">
+    echo 0 $(blockdev --getsize /dev/mapper/basedup) \
+        snapshot-origin /dev/mapper/basedup | \
+        dmsetup create origin
+</pre>
+You can now mount <code>/dev/mapper/origin</code> somewhere (say
+<code>/tmp/orig</code>) and compare the original file system with
+the current one with a command like
+
+<pre>
+    diff -qur /tmp/orig /mnt
+</pre>
+What happens if you write to <code>/tmp/orig</code>? Check it out
+and you'll be mystified for a moment.
+
+<p>The analogy of plastic sheets breaks down here! All writes to
+<code>/tmp/orig</code> go directly to the underlying device
+<code>basedup</code> but are <em>negated</em> on
+<code>/dev/loop3</code> so as to become invisible to reads from
+<code>/mnt</code>. Similarly, reads from <code>/tmp/orig</code>
+ignore whatever changes were made by writing to <code>/mnt</code>.
+In other words the original file system has been <em>forked</em>
+(and orthogonally at that!) and <code>/dev/loop3</code> actually
+stores both negative and positive data in order to achieve this. No
+plastic sheet can be made to work like this!</p>
+
+<p>To see why this is useful, let us see how it solves the problem
+of backups. What we want is to get a &ldquo;snapshot&rdquo; view of
+the file-system but we want to continue using the <em>original</em>
+system. So in this case we should <em>not</em> run the commands at
+<a href="#point_A">point A</a> above. Instead we run the commands
+here, at <a name="point_B" id="point_B"><strong>point
+B</strong></a>:</p>
+
+<pre>
+    dmsetup table origin | dmsetup load base
+    dmsetup resume base
+</pre>
+Now all writes to <code>/mnt</code> will go onto the original
+device, but these changes are negated on
+<code>/dev/mapper/top</code>. So if we mount the latter device at
+(say) <code>/tmp/snap</code>, then we can read a snapshot of the
+files at time <code>$TIME</code> from this directory. A command
+like
+
+<pre class="code">
+    cd /tmp/snap
+    find . -xdev | cpio -o -H new &gt; "backup-at-$TIME"
+</pre>
+will provide a snapshot backup of the file-system at time
+<code>$TIME</code>.
+
+<p>We could also have taken such a snapshot at <a href=
+"#point_A">Point A</a> with the commands</p>
+
+<pre class="code">
+    cd /tmp/orig
+    find . -xdev | cpio -o -H new &gt; "backup-at-$TIME"
+</pre>
+The main difference is that the changes to
+<code>/dev/mapper/top</code> are volatile! There is no way to
+easily dismantle the structure created under (A) without losing all
+the changes made. In the backup context you <em>want</em> to retain
+the changes; at <a href="#point_B">Point B</a> you run
+
+<pre>
+    dmsetup suspend base
+    dmsetup remove top
+    dmsetup remove origin
+    dmsetup table basedup | dmsetup load base
+    dmsetup resume base
+</pre>
+and you are back to business as usual. If you were to run this at
+<a href="#point_A">Point A</a> the results would be quite
+unpredictable! What would be the status of all those open files on
+<code>/dev/mapper/top</code>? A number of hung processes would be
+the most likely outcome - even some kernel threads could hang - and
+then perhaps break!
+
+<h3>For Your Eyes Only</h3>
+
+<p>Say you have a laptop or CD which carries some valuable data -
+valuable not just to you but to anyone who has it. (When, Oh! When
+will <em>I</em> ever get my hands on such data). In this case
+backups are no good. What you want is to protect this data from
+theft. Assuming you believe in the strength of current encryption
+techniques you could protect it by encrypting the relevant file.
+This approach has some serious problems:</p>
+
+<ul>
+<li>The file must be de/re-encrypted every time you want to use
+it.</li>
+
+<li>The encrypted file is pin-pointed, thus narrowing down the
+search for anyone wanting to steal your stuff.</li>
+
+<li>You may not know precisely which files contain secret stuff.
+For example you prepare a secret report and send it to the printer.
+Unbeknownst to you a temporary PDF file was created for this purpose
+and you didn't encrypt that.</li>
+</ul>
+For these and a possible host of other reasons you may want to
+encrypt the entire block device. The device mapper offers a way to
+do this. Activate the encryption service of the device mapper with
+<code>modprobe dm-crypt</code> if necessary. Also activate some
+encryption and hashing mechanism by commands like <code>modprobe
+md5</code> and <code>modprobe aes</code> if necessary.
+
+<p>First of all you need to generate and store your secret key. If
+you use AES as indicated above then you can use a key of length
+up to 32 bytes which can be generated by a command like</p>
+
+<pre class="code">
+    dd if=/dev/random bs=16 count=1 | \
+      od --width=16 -t x2 | head -1 | \
+      cut -f2- -d' ' | tr -d ' ' &gt; /tmp/my_secret_key
+</pre>
+Of course, you should probably not output your secret key to such a
+file - there <em>are</em> safer ways of storing it:
+
+<ul>
+<li>Output it directly to the screen and memorize it! It's only 32
+characters after all!</li>
+
+<li>Write it to a USB stick or some such device which
+<em>never</em> leaves your pocket.</li>
+
+<li>Encrypt it using <code>gpg</code> or <code>openssl</code> and
+then store it on a the USB stick or a device that never leaves
+you.</li>
+</ul>
+If you use the third option you will need to use a passphrase - you
+must remember this passphrase as well. One way to do that is to use
+this passphrase often - use it... or lose it!
+
+<p>You can now setup the encrypted device</p>
+
+<pre class="code">
+    echo 0 $(blockdev --getsize /dev/loop1) \
+      crypt aes-plain $(cat /tmp/my_secret_key) 0 /dev/loop1 0 | \
+      dmsetup create mydata
+</pre>
+You can then make a file-system <code>mke2fs
+/dev/mapper/mydata</code> on this block device and store data on it
+after mounting it somewhere with <code>mount /dev/mapper/mydata
+/mnt</code>. All the data written to <code>/mnt</code> will then be
+transparently encrypted before storing it in
+<code>/dev/loop1</code>. When you are through you unmount the
+device and dismantle it as before:
+
+<pre>
+    umount /mnt
+    dmsetup remove mydata
+</pre>
+The next time you want to use the device you can set it up with the
+same command as above (providing you supply the secret key in
+<code>/tmp/my_secret_key</code>). Of course, you shouldn't rune
+<code>mke2fs</code> on the device a second time unless you want to
+erase all that valuable data!
+
+<h3>Getting To The Root Of The Problem</h3>
+
+<p>All the steps given above can be carried out on any block
+device(s) in place of the loop devices that were used. However,
+when the block device is the root device then life gets a little
+more complex. (Roots generally <em>are</em> complex).</p>
+
+<p>First of all we need to put the root device under the control of
+the device mapper; this is best done with an initial RAM disk (or
+<code>initrd</code>). Even after this is done, we need to be
+careful if we are trying to run some of the above commands for the
+root file system on a &ldquo;live&rdquo; system. In particular, it
+is not advisable to suspend I/O on the root file system without
+deep introspection! After all this means that all processes that
+make a read/write call to the root file system will be put to
+sleep.</p>
+
+<p>Here is one way around the problem. Create a temporary file
+system</p>
+
+<pre>
+    mount -t tmpfs tmpfs /mnt
+</pre>
+To this file system copy all the files that are necessary in order
+to perform the changes - in particular, you need
+<code>/sbin/dmsetup</code>, <code>/bin/sh</code>, the
+<code>/dev</code> files and all shared libraries that these
+programs depend on. Then you run <code>chroot /mnt</code>. After
+this you <em>can</em> run a script or (if you type quickly and
+without errors!) a sequence of commands that will suspend the root
+device map and make relevant changes to it - for example, to take a
+snapshot. Don't forget to resume the root device before exiting the
+<code>chroot</code>.
+
+<h3>After word</h3>
+
+<p>Given the complexity of the various operations, it is probably
+best to produce a shell script or even a C program that carries out
+the tasks. Luckily, the latter has already been implemented - the
+<a href="http://sourceware.org/lvm2/">Linux Logical Volume Manager
+version 2</a> does carry out most of the tasks described above
+quite &ldquo;automagically.&rdquo; Setup and use of encryption is
+greatly simplified by the <a href=
+"http://www.saout.de/misc/dm-crypt/"><tt>cryptsetup</tt></a>
+program. Why then did I write this article?</p>
+
+<p>I originally came upon <a href=
+"ftp://sources.redhat.com/pub/dm/"><tt>dmsetup</tt></a> while
+trying to create a read-only root file system for a
+&ldquo;live&rdquo; CDROM. Unfortunately, the LVM2 tools are not
+useful as they only look at the use of snapshots for backups -
+clearly they don't care for COWs! The only resource that I found
+for this was the <a href=
+"https://www.redhat.com/archives/dm-devel/2004-July/msg00071.html">RedHat
+Mailing list</a> archives. There are now tools which come with live
+CD's that make use of <code>dmsetup</code>; for example I came
+across <a href=
+"http://www.ubuntulinux.org/wiki/LiveCDPersistence">this link</a>
+which explains how UBuntu does it.</p>
+
+<p>Of course, using <code>dmsetup</code> allowed me to get as
+&ldquo;close to the metal&rdquo; as is possible without writing
+real programs...</p>
+
+<hr size="2">
+
+<blockquote><em>This document was translated from
+L<sup>A</sup>T<sub>E</sub>X by</em> <a href=
+"http://pauillac.inria.fr/~maranget/hevea/index.html"><em>H<font size="2">
+<sup>E</sup></font>V<font size=
+"2"><sup>E</sup></font>A</em></a><em>.</em></blockquote>
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/authors/kapil.jpg" class="bio">
+<em>
+
+Kapil Hari Paranjape has been a ``hack''-er since his punch-card days.
+Specifically, this means that he has never written a ``real'' program.
+He has merely tinkered with programs written by others. After playing
+with Minix in 1990-91 he thought of writing his first program---a
+``genuine'' *nix kernel for the x86 class of machines. Luckily for him a
+certain L. Torvalds got there first---thereby saving him the trouble
+(once again) of actually writing code. In eternal gratitude he has spent
+a lot of time tinkering with and promoting Linux and GNU since those
+days---much to the dismay of many around him who think he should
+concentrate on mathematical research---which is his paying job. The
+interplay between actual running programs, what can be computed in
+principle and what can be shown to exist continues to fascinate him.
+
+</em>
+<br clear="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2005, Kapil Hari Paranjape. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 114 of Linux Gazette, May 2005
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="john.html" >&lt;-- prev</A> | <A HREF="keeling.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">May 2005 (#114)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/2003/sit3-shine.7-2.gif" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

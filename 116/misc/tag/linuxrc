@@ -1,0 +1,391 @@
+#!/static/sh
+#
+# KNOPPIX General Startup Script
+# (C) Klaus Knopper <knoppix@knopper.net>
+#
+#
+# This script needs some of the builtin ash commands (if, test, ...)
+# mount/umount, insmod/rmmod are also a builtin in ash-knoppix.
+#
+
+# hardcoded configurable options
+# Default maximum size of dynamic ramdisk in kilobytes
+RAMSIZE=1000000
+# End of options
+
+# Don't allow interrupt signals
+trap "" 1 2 3 15
+
+# "Safe" SCSI modules in the right order for autoprobe
+# Warning: The sym53c8xx.o and g_NCR* cause a kernel Oops if no such adapter
+# is present.
+#
+# NB: It looks like that ncr53c8xx.o is more stable than 53c7,8xx.o for
+# a ncr53c810 controller (at least on my installation box it's more
+# immune to SCSI timeouts)
+# Removed 53c7,8xx -> crashes if no device attached.
+# Removed AM53C974 -> crashes tmscsim if adapter found
+# Added initio.o on request (untested)
+SCSI_MODULES="aic7xxx.o aic7xxx_old.o BusLogic.o \
+ncr53c8xx.o NCR53c406a.o \
+initio.o \
+advansys.o aha1740.o aha1542.o aha152x.o \
+atp870u.o dtc.o eata.o fdomain.o gdth.o \
+megaraid.o pas16.o pci2220i.o pci2000.o psi240i.o \
+qlogicfas.o qlogicfc.o qlogicisp.o \
+seagate.o t128.o tmscsim.o u14-34f.o ultrastor.o wd7000.o \
+a100u2w.o 3w-xxxx.o"
+
+# Misc functions
+
+mountit(){
+# Usage: mountit src dst "options"
+# Uses builtin mount of ash.knoppix
+# Builin filesystems
+BUILTIN_FS="iso9660 ext2 vfat"
+for fs in $BUILTIN_FS; do
+test -b $1 && mount -t $fs $3 $1 $2 >/dev/null 2>&1 && return 0
+done
+return 1
+}
+
+FOUND_SCSI=""
+FOUND_KNOPPIX=""
+INTERACTIVE=""
+
+# Clean input/output
+exec >/dev/console </dev/console 2>&1
+
+# Reset fb color mode
+RESET="]R"
+# ANSI COLORS
+# Erase to end of line
+CRE="[K"
+# Clear and reset Screen
+CLEAR="c"
+# Normal color
+NORMAL="[0;39m"
+# RED: Failure or error message
+RED="[1;31m"
+# GREEN: Success message
+GREEN="[1;32m"
+# YELLOW: Descriptions
+YELLOW="[1;33m"
+# BLUE: System mesages
+BLUE="[1;34m"
+# MAGENTA: Found devices or drivers
+MAGENTA="[1;35m"
+# CYAN: Questions
+CYAN="[1;36m"
+# BOLD WHITE: Hint
+WHITE="[1;37m"
+
+# Clear screen with colormode reset
+# echo "$CLEAR$RESET"
+# echo "$CLEAR"
+# Just go to the top of the screen
+# echo -n "[H[J"
+echo ""
+# Be verbose
+echo "${WHITE}Welcome to the ${CYAN}K${MAGENTA}N${YELLOW}O${WHITE}P${RED}P${GREEN}I${BLUE}X${WHITE} live Linux-on-CD!${NORMAL}"
+echo ""
+echo ""
+
+# We only need the builtin commands and /static at this point
+PATH=/static
+export PATH
+
+umask 022
+
+# Mount /proc and /dev/pts
+mount -t proc none /proc
+mount -t devpts none /dev/pts
+
+# Read boot command line with builtin cat command (shell read function fails in Kernel 2.4.19-rc1)
+CMDLINE="$(cat /proc/cmdline)"
+
+# Check if we are in interactive startup mode
+case "$CMDLINE" in *BOOT_IMAGE=expert\ *) INTERACTIVE="yes"; :>/interactive; ;; esac
+# Does the user want to skip scsi detection?
+NOSCSI=""
+case "$CMDLINE" in *noscsi*) NOSCSI="yes"; ;; esac
+
+# Disable kernel messages while probing modules in autodetect mode
+echo "0" > /proc/sys/kernel/printk
+
+# Mount module disk
+mountmodules(){
+TYPE="$1"; shift
+echo -n "${CRE}${CYAN}Please insert ${TYPE} modules disk and hit Return. ${NORMAL}"
+read a
+echo -n "${CRE}${BLUE}Mounting ${TYPE} modules disk... ${NORMAL}"
+# We always mount over /modules/scsi (because it's there ;-)
+if mountit /dev/fd0 /modules/scsi "-o ro"; then
+echo "${GREEN}OK.${NORMAL}"
+return 0
+fi
+echo "${RED}NOT FOUND.${NORMAL}"
+return 1
+}
+
+# Unmount module disk
+umountmodules(){
+TYPE="$1"; shift
+echo -n "${CRE}${BLUE}Unmounting ${TYPE} modules disk... ${NORMAL}"
+umount /modules/scsi 2>/dev/null
+echo "${GREEN}DONE.${NORMAL}"
+}
+
+# Ask user for modules
+askmodules(){
+TYPE="$1"; shift
+echo "${BLUE}${TYPE} modules available:${WHITE}"
+c=""; for m in "$@"; do
+if test -f "/modules/scsi/$m"; then
+test -z "$c"  && { echo -n "	$m"; c="1"; } || { echo "		$m"; c=""; }
+fi
+done
+[ -n "$c" ] && echo ""
+echo "${CYAN}Load ${TYPE} Modules?${NORMAL}"
+echo "${CYAN}[Enter full filename(s) (space-separated), Return for autoprobe, ${WHITE}n${CYAN} for none] ${NORMAL}"
+echo -n "${CYAN}insmod module(s)> ${NORMAL}"
+read MODULES
+case "$MODULES" in n|N) MODULES=""; ;; y|"")  MODULES="$*"; ;; esac
+}
+
+# Try to load the given modules (full path or current directory)
+loadmodules(){
+TYPE="$1"; shift
+test -n "$INTERACTIVE" && echo "6" > /proc/sys/kernel/printk
+for i in "$@"; do
+echo -n "${CRE}${BLUE}Probing ${TYPE}... ${MAGENTA}$i${NORMAL}"
+if test -f /modules/scsi/$i && insmod -f /modules/scsi/$i >/dev/null 2>&1
+then
+echo "${CRE} ${GREEN}Found ${TYPE} device(s) handled by ${MAGENTA}$i${GREEN}.${NORMAL}"
+case "$TYPE" in scsi|SCSI) FOUND_SCSI="yes"; ;; esac
+fi
+done
+test -n "$INTERACTIVE" && echo "0" > /proc/sys/kernel/printk
+echo -n "${CRE}"
+}
+
+# load usb-modules first (so that memory-stick becomes /dev/sda1)
+# uncomment for USB 2.0 support (experimental)
+#insmof -f /modules/usb/ehci-hcd.o
+insmod -f /modules/usb/usbcore.o
+#insmod -f /modules/usb/uhci.o
+insmod -f /modules/usb/usb-uhci.o
+insmod -f /modules/usb/uhci.o
+insmod -f /modules/usb/usb-ohci.o
+insmod -f /modules/usb/usb-storage.o
+# need to sleep because it takes some time to register things
+ash -c "sleep 4"
+
+# Check for SCSI, use modules on bootfloppy first
+if test -n "$INTERACTIVE"; then
+# Let the user select interactively
+askmodules SCSI $(cd /modules/scsi; echo *.o)
+else
+# these are the autoprobe-safe modules
+MODULES="$SCSI_MODULES"
+fi
+test -z "$NOSCSI" && test -n "$MODULES" && loadmodules SCSI $MODULES
+# End of SCSI check
+
+# Check for misc modules in expert mode
+if test -n "$INTERACTIVE"; then
+another=""; answer=""
+while test "$answer" != "n" -a "$answer" != "N"; do
+echo -n "${CYAN}Do you want to load additional modules from$another floppy disk? [${WHITE}Y${CYAN}/n] ${NORMAL}"
+another=" another"
+read answer
+case "$answer" in n*|N*) break; ;; esac
+if mountmodules new; then
+askmodules new $(cd /modules/scsi; echo *.o)
+test -n "$MODULES" && loadmodules new $MODULES
+umountmodules current
+fi
+done
+fi
+# All interactively requested modules should be loaded now.
+
+# Check for ide-scsi supported CD-Roms et al.
+test -f /proc/scsi/scsi && FOUND_SCSI="yes"
+
+# Disable kernel messages again
+echo "0" > /proc/sys/kernel/printk
+
+# Now that the right SCSI driver is (hopefully) loaded, try to find CDROM
+#DEVICES="/dev/hd?"
+#test -n "$FOUND_SCSI" && DEVICES="/dev/scd? /dev/scd?? $DEVICES"
+# New: Also try parallel port CD-Roms [for Mike].
+#DEVICES="$DEVICES /dev/pcd?"
+# New: also check HD partitions for a KNOPPIX/KNOPPIX image
+#test -n "$FOUND_SCSI" && DEVICES="$DEVICES /dev/sd?[1-9] /dev/sd?[1-9][0-9]"
+#DEVICES="$DEVICES /dev/hd?[1-9] /dev/hd?[1-9][0-9]"
+#for i in $DEVICES
+#do
+#echo -n "${CRE}${BLUE}Looking for CDROM in: ${MAGENTA}$i${NORMAL}   "
+#if mountit $i /cdrom "-o ro" >/dev/null 2>&1
+#then
+#if test -d /cdrom/KNOPPIX
+#then
+#echo -n "${CRE} ${GREEN}Accessing KNOPPIX CDROM at ${MAGENTA}$i${GREEN}...${NORMAL}"
+#FOUND_KNOPPIX="$i"
+#break
+#fi
+#umount /cdrom
+#fi
+#done
+
+# mount /dev/sda1 (memorystick to cdrom)
+FOUND_KNOPPIX="/dev/sda1"
+mount -t vfat /dev/sda1 /cdrom
+# Harddisk-installed script part version has been removed
+# (KNOPPIX can be booted directly from HD now).
+if test -n "$FOUND_KNOPPIX" -a -f /cdrom/KNOPPIX/KNOPPIX; then
+# DEBUG
+# echo "6" > /proc/sys/kernel/printk
+insmod -f /modules/cloop.o file=/cdrom/KNOPPIX/KNOPPIX
+mountit /dev/cloop /KNOPPIX "-o ro" || FOUND_KNOPPIX=""
+fi
+
+# Final test if everything succeeded.
+if test -n "$FOUND_KNOPPIX"
+then
+# copy library cache
+cat /KNOPPIX/etc/ld.so.cache > /etc/ld.so.cache
+echo ""
+
+# Enable kernel messages
+echo "6" > /proc/sys/kernel/printk
+
+# Set paths
+echo -n "${CRE}${BLUE}Setting paths...${NORMAL}"
+PATH="/sbin:/bin:/usr/sbin:/usr/bin:/usr/X11R6/bin:."
+export PATH
+
+# Debian weirdness
+/bin/cp -a /KNOPPIX/etc/alternatives /etc/ 2>/dev/null
+
+# From here, we should have all essential commands available.
+hash -r
+
+# Clean up /
+rm -rf /modules /static
+
+# New in Kernel 2.4.x: tempfs with variable ramdisk size.
+# We check for available memory anyways and limit the ramdisks
+# to a reasonable size.
+FOUNDMEM="$(awk '/MemTotal/{print $2}' /proc/meminfo)"
+TOTALMEM="$(awk 'BEGIN{m=0};/MemFree|Cached/{m+=$2};END{print m}' /proc/meminfo)"
+ 
+# Be verbose
+echo "${CRE}${BLUE}Total memory found: ${YELLOW}${FOUNDMEM}${BLUE} kB${NORMAL}"
+
+# Now we need to use a little intuition for finding a ramdisk size
+# that keeps us from running out of space, but still doesn't crash the
+# machine due to lack of Ram
+
+# Minimum size of additional ram partitions
+MINSIZE=2000
+# At least this much memory minus 30% should remain when home and var are full.
+MINLEFT=16000
+# Maximum ramdisk size
+MAXSIZE="$(expr $TOTALMEM - $MINLEFT)"
+# Default ramdisk size for ramdisk
+RAMSIZE="$(expr $TOTALMEM / 5)"
+
+# Check for sufficient memory to mount extra ramdisk for /home + /var
+if test -n "$TOTALMEM" -a "$TOTALMEM" -gt "$MINLEFT"; then
+test -z "$RAMSIZE" && RAMSIZE=1000000
+mkdir -p /ramdisk
+# tmpfs/varsize version, can use swap
+RAMSIZE=$(expr $RAMSIZE \* 4)
+echo -n "${CRE}${BLUE}Creating ${YELLOW}/ramdisk${BLUE} (dynamic size=${RAMSIZE}k) on ${MAGENTA}/dev/shm${BLUE}...${NORMAL}"
+# We need /bin/mount here for the -o size= option
+/bin/mount -t tmpfs -o "size=${RAMSIZE}k" /dev/shm /ramdisk && mkdir -p /ramdisk/home /ramdisk/var && ln -s /ramdisk/home /ramdisk/var /
+echo "${BLUE}Done.${NORMAL}"
+else
+mkdir -p /home /var
+fi
+
+echo -n "${CRE}${BLUE}Creating directories and symlinks on ramdisk...${NORMAL}"
+# Create common WRITABLE (empty) dirs
+mkdir -p /var/run /var/backups /var/cache/apache /var/local /var/lock/news \
+         /var/nis /var/preserve /var/state/misc /var/tmp /var/lib \
+	 /var/spool/cups/tmp \
+         /mnt/cdrom /mnt/floppy /mnt/hd /mnt/test \
+         /home/knoppix /home/root /etc/sysconfig /etc/X11 /etc/cups
+chown knoppix.knoppix /home/knoppix
+# Create empty utmp and wtmp
+:> /var/run/utmp
+:> /var/run/wtmp
+# CUPS wants writable files. :-/
+cp -a /KNOPPIX/etc/cups/*.conf /etc/cups/ 2>/dev/null
+# All files in here should be size zero after Knoppix.clean was run
+cp -a /KNOPPIX/var/local /KNOPPIX/var/games /KNOPPIX/var/log \
+      /KNOPPIX/var/spool /var/ 2>/dev/null
+cp -a /KNOPPIX/var/lib/games /KNOPPIX/var/lib/wine \
+      /KNOPPIX/var/lib/nfs /KNOPPIX/var/lib/xkb /KNOPPIX/var/lib/isdn \
+      /KNOPPIX/var/lib/kdm /KNOPPIX/var/lib/pcmcia \
+      /KNOPPIX/var/lib/dhcp* \
+      /var/lib/ 2>/dev/null
+# Problematic directories in /var/lib (lots and lots of inodes)
+ln -s /KNOPPIX/var/lib/dpkg /KNOPPIX/var/lib/apt /KNOPPIX/var/lib/doc-base \
+      /KNOPPIX/var/lib/gnome /KNOPPIX/var/lib/kde \
+      /KNOPPIX/var/lib/scrollkeeper /KNOPPIX/var/lib/texmf \
+      /var/lib/ 2>/dev/null
+# Debian-apt
+ln -s /KNOPPIX/var/cache/apt /var/cache/ 2>/dev/null
+ln -s /KNOPPIX/etc/skel /KNOPPIX/etc/nessus /etc/dhcpc/resolv.conf \
+      /etc/ 2>/dev/null
+ln -s /KNOPPIX/dev/* /dev/ 2>/dev/null
+# Index files can be HUGE, so better replace cache/man tree by links later
+# cp -a /KNOPPIX/var/cache/man /var/cache/ 2>/dev/null
+# Create links from CDROM for UNWRITABLE (remaining) files
+cp -aus /KNOPPIX/var/* /var/ 2>/dev/null
+cp -aus /KNOPPIX/etc/* /etc/ 2>/dev/null
+# Make SURE that these are files, not links!
+rm -rf /etc/ftpusers /etc/passwd /etc/shadow /etc/group \
+       /etc/ppp /etc/isdn /etc/ssh /etc/ioctl.save \
+       /etc/inittab /etc/network /etc/sudoers \
+       /etc/init /etc/localtime /etc/dhcpc /etc/pnm2ppa.conf 2>/dev/null
+cp -a /etc/ftpusers /KNOPPIX/etc/passwd /KNOPPIX/etc/shadow /KNOPPIX/etc/group \
+      /KNOPPIX/etc/ppp /KNOPPIX/etc/isdn /KNOPPIX/etc/ssh \
+      /KNOPPIX/etc/inittab /KNOPPIX/etc/network /KNOPPIX/etc/sudoers \
+      /KNOPPIX/sbin/init /KNOPPIX/etc/dhcpc /etc/ 2>/dev/null
+# Extremely important, init crashes on shutdown if this is only a link
+:> /etc/ioctl.save
+:> /etc/pnm2ppa.conf
+# Diet libc bug workaround
+cp -f /KNOPPIX/etc/localtime /etc/localtime
+echo "${BLUE}Done.${NORMAL}"
+
+# Now tell kernel where the real modprobe lives
+echo "/sbin/modprobe" > /proc/sys/kernel/modprobe
+
+# Change root device from /dev/fd0 to /dev/ram0
+echo "0x100" > /proc/sys/kernel/real-root-dev
+
+# Give control to the init process.
+echo "${CRE}${BLUE}Starting init process.${NORMAL}"
+rm -f /linuxrc
+exit 0
+
+else
+echo "${CRE}${RED}Can't find KNOPPIX filesystem, sorry.${NORMAL}"
+echo "${RED}Dropping you to a (very limited) shell.${NORMAL}"
+echo "${RED}Press reset button to quit.${NORMAL}"
+echo ""
+echo "Additional builtin commands avaliable:"
+echo "	cat        mount     umount"
+echo "	insmod     rmmod     lsmod"
+echo ""
+PS1="knoppix# "
+export PS1
+echo "6" > /proc/sys/kernel/printk
+# Allow signals
+trap 1 2 3 15
+exec /static/ash
+fi

@@ -1,0 +1,385 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Troubleshooting Apache using strace LG #132</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+<a href="../">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="sevenich.html" >&lt;-- prev</A> | <A HREF="weatherwax.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Troubleshooting Apache using strace</h1>
+<p id="by"><b>By <A HREF="../authors/vishnu.html">Vishnu Ram V</A></b></p>
+
+<!-- I ran this file through tidy prior to reviewing just to shorten
+     the lines. I also took the liberty of rephrasing some sentences
+	 in order to make the text more fluent to the reader. I hate to do
+	 that since it interferes with the author's style, but I tried to
+	 change as little as possible where the wording is concerned.
+
+     - Lynx (US ACII for Ren&eacute; ;)
+-->
+
+<h3>Introduction</h3>
+
+<p>Occasionally system administrators can run into situations where 
+the conventional way of
+troubleshooting an issue may not yield results. The conventional way
+means using test scripts, observing the log files, tweaking
+configuration settings and the like. In such cases, one will have to dig
+deeper into the internals of the server. <b>Strace</b> proves to
+be a valuable tool in such situations. The <b>strace</b> utility
+intercepts and records the system calls which are made by a
+process and the signals which are received by a process. This
+article shows how to use <b>strace</b> to troubleshoot Apache by
+illustrating a real-world issue. I will begin with the problem
+statement and then move on to describe the initial troubleshooting
+attempts. The inner workings of the Apache server are briefly explained just
+before examining the strace results. Various options of <b>strace</b>
+and its internal working is beyond the scope of this article,
+so please refer to the man pages for the same.</p>
+
+<h3>Problem statement</h3>
+
+<p>
+<b>ISSUE</b>: Can't send mail from web pages using PHP 'mail()'
+function.<br>
+<b>OS</b>: RedHat<br>
+<b>SMTP Server</b>: Sendmail<br>
+<b>Web Server</b>: Apache/1.3.22 - It's a virtual hosting
+environment, there are many sites hosted in the server.<br>
+<b>PHP version</b>: 4.0.6<br>
+</p>
+<!-- SCNR: Anyone running Apache 1.3.22 and PHP 4.0.6 may have more troubles
+     than mail delivery... (pfeiffer) -->
+
+<h3>Initial troubleshooting attempts</h3>
+
+<p>
+Let me first recreate the issue and see the error for myself. I
+will create a test script, 'mail.php', that will use the 'mail()'
+function for sending mail. The test script is as follows.
+</p>
+
+<pre class="code">
+&lt;?php
+error_reporting(E_ALL);
+$to = "Vishnu &lt;we2cares@fastmail.fm&gt;";
+$subject = "This is a test email";
+$message = "This is a test email, please ignore.";
+
+if (mail($to,$subject,$message))
+{
+echo "Thank you for sending email";
+}
+else
+{
+echo "Can't send email";
+}
+?&gt;
+</pre>
+
+<p>I placed mail.php into the web area of the virtual domain in question,
+and then accessed it through a browser. The resulting page
+displayed an echoed message "Can't send email", no PHP specific
+error messages were shown. Analyzing the maillog shows no trace of
+mail injected from the virtual domain in question. I needed to verify
+whether the issue is specific to the virtual host in question or
+whether the issue is server wide. The same test script was used in a few
+other virtual hosts and produced the same result. That means the issue
+is not specific to a virtual host, it's a server wide issue. Looks
+like Apache/PHP is broken.</p>
+
+<p>Let me see whether the mail() function is disabled in the
+php.ini file using <b>disable_functions</b>.</p>
+
+<pre class="code">
+[root@dns1 root]# grep disable_functions /etc/php.ini
+disable_functions =
+</pre>
+
+<p>No, mail function is not disabled.</p>
+
+<p>I have turned on <b>display_errors</b> and
+<b>display_startup_errors</b> in php.ini so that any internal PHP
+error is displayed on the web page, but that didn't help either.
+The test PHP page doesn't display any error, there are no error
+messages in the Apache, sendmail or other system logs. What
+next?</p>
+
+<!-- Ok, sorry, now I have to say something. -->
+
+<p class="editorial">[ When debugging a production system be sure to use
+your development system (which, by the way, should be identical to and
+separate from your production environment). If you cannot avoid using the
+production system for this, make sure your error messages are never
+displayed to the browser and redirect them to your logs. This is more
+secure and doesn't bother your end users with messages they can't
+understand. -- Ren&eacute; ]
+</p>
+
+<p>As I mentioned earlier, in order to know what's happening 
+at the process level, the <b>strace</b> utility is very useful.
+Before using <b>strace</b> to troubleshoot the issue, I will give a
+brief explanation of how Apache serves an incoming request.</p>
+
+<h3>Detour into Apache</h3>
+
+<p>Apache starts by creating a parent process with root privileges.
+This is the main process, it is responsible for forking child
+processes and maintaining them. The main Apache process doesn't
+serve any requests, the requests are served by child processes.
+The number of idle child processes at a given time is determined
+by the <b>MinSpareServers</b> and <b>MaxSpareServers</b> directives
+in <b>httpd.conf</b>. When a new request comes in, it is served by
+one of the idle child processes. If there are no idle child processes,
+then a new child process is forked by the parent, to serve an
+incoming request. From the <b>ps</b> result shown below, it's clear
+the the process with PID 1861 is the Apache parent process. It is
+running with "root" privileges, all the child processes are running
+as user "apache".
+</p>
+
+<pre class="code">
+[root@haqmail ~]# ps aux | grep httpd
+USER       PID %CPU      %MEM           VSZ  RSS TTY      STAT        START   TIME     COMMAND
+root      1861  0.0      0.4           25680 1992 ?        Ss         Sep24   0:02     /usr/sbin/httpd
+apache    2295  0.0      0.4           25852 2024 ?        S          Sep24   0:00     /usr/sbin/httpd
+apache    2296  0.0      0.4           25852 2024 ?        S          Sep24   0:00     /usr/sbin/httpd
+apache    2297  0.0      0.4           25852 2024 ?        S          Sep24   0:00     /usr/sbin/httpd
+apache    2298  0.0      0.4           25852 2024 ?        S          Sep24   0:00     /usr/sbin/httpd
+apache    2299  0.0      0.4           25852 2024 ?        S          Sep24   0:00     /usr/sbin/httpd
+apache    2300  0.0      0.4           25852 2024 ?        S          Sep24   0:00     /usr/sbin/httpd
+apache    2301  0.0      0.4           25852 2024 ?        S          Sep24   0:00     /usr/sbin/httpd
+apache    2302  0.0      0.4           25852 2024 ?        S          Sep24   0:00     /usr/sbin/httpd
+</pre>
+
+<p>A better view of parent child relationship is available from the
+<b>pstree</b> result.</p>
+
+<pre class="code">
+[root@haqmail ~]# pstree -p | grep httpd
+        +-httpd(1861)---httpd(2295)
+        |             +-httpd(2296)
+        |             +-httpd(2297)
+        |             +-httpd(2298)
+        |             +-httpd(2299)
+        |             +-httpd(2300)
+        |             +-httpd(2301)
+        |             +-httpd(2302)
+</pre>
+
+<h3>Using strace</h3>
+
+<p>Now we know that our request for mail.php is served by one of
+the Apache child processes and that <b>strace</b> can be used to
+get details of how requests are served, but there is one more
+problem: Which child process serves the mail.php request? We either
+know the process ID of the exact child process, or we 
+trace all the child processes and then sort out the output of strace. There is no way to
+know in advance which child process will serve the mail.php
+request, so we will have to trace the parent Apache and all its
+child processes. The "-f" <b>strace</b> option traces child
+processes as they are created by currently traced processes as a
+result of the 'fork' system call.</p>
+
+<p>Here we go...<br>
+First stop Apache and then restart Apache with <b>strace</b>.</p>
+
+<pre class="code">
+[root@dns1 root]# strace -f -o trace.txt /etc/rc.d/init.d/httpd start
+</pre>
+
+<p>The "-o" option saves the result to "trace.txt" file. Now access
+the test PHP page through the browser. Stop <b>strace</b> and 
+restart Apache as usual. It may be necessary to send the <b>strace</b> process
+a SIGKILL signal, because it captures some signals it gets from the terminal
+session.
+</p>
+
+<p>Let us now go ahead and examine the <b>strace</b> result in the
+trace.txt file.</p>
+
+<pre class="code">
+[root@dns1 root]# grep mail.php trace.txt
+21837 read(7, "GET /mail.php HTTP/1.1\r\nUser-Age"..., 4096) = 472
+21837 stat64("/var/www/virtdomain/mail.php", {st_mode=S_IFREG|0644, st_size=587, ...}) = 0
+</pre>
+
+<p>From the above <b>grep</b> result it's clear that the Apache
+child process serving our request for mail.php is the one
+with PID "21837". Now <b>grep</b> trace.txt for "21837". Relevant
+result is pasted below.</p>
+
+<pre class="code">
+21837 chdir("/var/www/virtdomaint") = 0
+21837 open("/var/www/virtdomain/mail.php", O_RDONLY) = 8
+.
+.
+.
+.
+21837 fork() = 21844
+</pre>
+
+<p>The last line shows that the Apache child process forks another process
+with PID 21844. Let us <b>grep</b> for 21844 in trace.txt and see
+what it does.</p>
+
+<pre class="code">
+21844 execve("/bin/sh", ["sh", "-c", "/usr/sbin/sendmail -t -i"], [/* 21 vars */]) = -1 EACCES (Permission denied)
+</pre>
+
+<p>Well, the process is used for sending mail using /usr/sbin/sendmail,
+but an incorrect permissions prevent it doing so. Sendmail
+permissions are set correctly, but checking /bin/sh reveals that it is
+set to "770" with "root.root" ownership. Since the Apache child
+process is running as user "apache", it doesn't have read and
+execute permission over /bin/sh, and hence the issue. Changing
+/bin/sh permission to "755" fixed it.</p>
+
+<p class="editorial"> [ At this point I'd be inclined to wonder <em>why</em>
+the file permissions were wrong. It could be that someone is tip-toeing
+through your filesystem. -- Steve Brown ] </p>
+
+<h3>Conclusion</h3>
+
+<p>With a basic understanding of Apache and using <b>strace</b>,
+we could find the root cause of the issue and hence fix it.
+<b>Strace</b> is a general purpose utility and it can be used to
+troubleshoot any program. <b>Strace</b> and <b>GDB</b> (GNU
+Debugger) are very useful in system level troubleshooting. <a href=
+"http://www-128.ibm.com/developerworks/aix/library/au-unix-strace.html">
+Here</a> is a good article discussing both the utilities.</p>
+
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:132/vishnu.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<!-- *** BEGIN bio *** -->
+<hr>
+<p>
+<img align="left" alt="Bio picture" src="../gx/2002/note.png" class="bio">
+
+<!-- 
+If the author has sent his pic, save it to the right directory, delete the
+line above, and uncomment the line below.
+
+<img align="left" alt="Bio picture" src="../gx/authors/pic.jpg" class="bio">
+
+-->
+</p>
+<p>
+<em>
+
+<p>
+I'm an MTech. in Communication Systems from the IIT Madras. I joined Poornam
+Info Vision Pvt Ltd. in 2003 and have been working for Poornam since then.
+</p>
+
+<p>
+My area of interest are performance tuning, server monitoring, and
+security. In my free time I practice Karate, read books and listen to music.
+</p>
+
+</em>
+</p>
+<br clear="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2006, Vishnu Ram V. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 132 of Linux Gazette, November 2006
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="sevenich.html" >&lt;-- prev</A> | <A HREF="weatherwax.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/mailman/listinfo/">Mailing Lists</a>
+<a href="../jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">November 2006 (#132)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

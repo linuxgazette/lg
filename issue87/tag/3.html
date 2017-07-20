@@ -1,0 +1,878 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<META NAME="generator" CONTENT="lgazmail v1.4G.c">
+<TITLE>The Answer Gang 87: The One Remaining (non-Depracated) Use for rsh</TITLE>
+</HEAD><BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+<!-- begin 3 -->
+<H3 align="left"><img src="../../gx/dennis/bbubble.gif" 
+	height="50" width="60" alt="(!) " border="0"
+	>The One Remaining (non-Depracated) Use for rsh</H3>
+
+
+<p><strong>From Dave Falloon
+</strong></p> 
+<p align="right"><strong>Answered By Jim Dennis, Mike "Iron" Orr, Kapil Hari Paranjape 
+<p></strong></p>
+<P><STRONG>
+<IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> 
+Hi Answer Guy,
+</STRONG></P>
+<P><STRONG>
+I have a 32 node cluster running <A HREF="http://www.debian.org/">Debian</A> 3.0 (Woody).  The primary way we
+use these machines is in a batch type submission, kind of a fire an forget
+thing, via rsh "&lt;command&gt;".
+</STRONG></P>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [JimD] 
+These days the knee jerk response would be: "Don't run rsh; use ssh
+instead."
+</blockQuote>
+<P><STRONG>
+<IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> 
+Agreed, the reason for rsh is that this little cluster is all by itself,
+accessed through a "choke host" that is pretty well locked down, only a
+handful of users can access it on the external interface.
+</STRONG></P>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [JimD] 
+However, compute clusters, on an isolated network segment, (perhaps
+with one or more multi-homed ssh accessible cluster controller nodes)
+are still a reasonable place for the insecure r* tools (rsh, rlogin,
+rcp).  (rsync might still be preferable to rcp for some workloads and
+filesets).
+</blockQuote>
+<P><STRONG>
+<IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> 
+I crippled PAM a little to allow this ( changed
+one line to be sufficient).  This cluster is not a super critical farm so if
+things go haywire its not a big deal but it would be nice to figure out why
+sometimes you can't connect to the nodes, here is the output from one such
+attempt:
+</STRONG></P>
+
+<pre><strong>(503)[dave@snavely] ~$ rsh ginzu
+Last login: Thu Jan 16 16:37:22 2003 from snavely on pts/1
+Linux ginzu 2.4.18 #1 SMP Fri Aug 2 11:20:55 EDT 2002 i686 unknown
+rlogin: connection closed.
+(504)[dave@snavely] ~$
+</strong></pre>
+<P><STRONG>
+This happened once then when I repeated the command it succeeded, with no
+error.
+</STRONG></P>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [Kapil] 
+One possible reason for the problem is the assignment of a free pty.
+</blockQuote>
+<blockQuote>
+1. You may be running out of pty's if many processes unnecessarily
+open them.
+</blockQuote>
+<P><STRONG>
+<IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> 
+This is a definate possibility, and I am recompiling a kernel as we speak to
+up this limit to 2048.
+</STRONG></P>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [Kapil] 
+2. Your tweaking of rsh and PAM was not sufficient to give rsh
+permission to open a pty.
+</blockQuote>
+<P><STRONG>
+<IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> 
+Would this produce an intermitten connection drop or would it prevent any
+connection at all?
+</STRONG></P>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [Kapil] 
+This would also explain the unable to get TTY name error.
+</blockQuote>
+<P><STRONG>
+<IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> 
+So how does the chain of events happen?  Is this correct; I rsh to a machine
+it, pam looks over its rules and see that it is crippled and should allow
+this connection with no passwd, passes this on to login which then tries to
+assigned a pty but the pty's are all currently used, then it tries to assign
+a TTY because there are no ptys, and in my logs I get the can't get TTY name
+error?
+</STRONG></P>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [Kapil] 
+No, there is no separate "TTY" assignment. The "pty/tty" pair is what is
+assigned for interactive communication.
+</blockQuote>
+<blockQuote>
+Let's see if we can track the sequence of events (the Gang please post
+corrections, I am sure I'll go wrong somewhere!):
+</blockQuote>
+<blockQuote><BLOCKQuote>
+Client "rsh" request is usually handled on the server by "inetd" which
+then passes this request to "tcpd" which then passes the request to
+"rshd".
+</BLOCKQuote></blockQuote>
+<blockQuote>
+O. However, tcpd may refuse the connection if its host_access rules do
+not allow the connection. This refusal could be intermittent depending
+on whether the name service system is responding (NIS/DNS whatever).
+(This possibility has already been mentioned on the list in greater
+detail).
+</blockQuote>
+<blockQuote>
+At this point, I looked up the Sun Solaris man page for rshd (none
+of the Linux machines here has "rsh" installed!). The following steps
+are carried out and failure leads to closing the connection.
+</blockQuote>
+<blockQuote>
+A. The server tries to create the necessary sockets for a connection.
+</blockQuote>
+<blockQuote>
+B. The server checks the client's address which <EM>must</EM> be resolvable
+via the name service switch specification (default NIS+/etc/hosts).
+</blockQuote>
+<blockQuote>
+C. The server checks the server user name which <EM>must</EM> be verifiable
+via the name service switch specification (default NIS+/etc/passwd).
+</blockQuote>
+<blockQuote>
+D. The server checks via PAM that the either (the client is in <TT>/etc/hosts.equiv</TT>
+</blockQuote>
+<blockQuote>
+and the client user name is the same as the server user name) or
+the client username is in .rhosts.
+</blockQuote>
+<blockQuote>
+E. The server tries to acquire the necessary pty/tty's and connects them
+to the sockets and the server user's shell (which must exist).
+</blockQuote>
+<blockQuote>
+I am a bit confused about the use of PAM but I think it is also used
+in steps C and E through the "account" and "session" entries. The
+"auth" entry for PAM is used in "D".
+</blockQuote>
+<blockQuote>
+So it seems like O,A-E need to be checked on your system. My own
+earlier suggestion was only about E but the failure could be
+elsewhere.
+</blockQuote>
+<blockQuote>
+Temporary failure of the NIS server to respond could affect B and C;
+it could even affect E as the "passwd" entry is required to find the
+user's shell. Thus, in such situations it is a good idea to run the
+name service caching daemon.
+</blockQuote>
+<blockQuote>
+If NFS is used for home directories then temporary failure of the NFS
+server to respond could affect D as well.
+</blockQuote>
+<blockQuote>
+Hope this helps,
+</blockQuote>
+<blockQuote>
+Kapil.
+</blockQuote>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [JimD] 
+So it was a transient (or is an intermittent) problem.
+</blockQuote>
+<P><STRONG>
+<IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> 
+Yup
+</STRONG></P>
+<P><STRONG>
+I have adjusted the <TT>/etc/inet.conf</TT> by adding the .500 to the rsh line
+nowait:
+</STRONG></P>
+
+<pre><strong>shell           stream  tcp     nowait.500      root    /usr/sbin/tcpd /usr/sbin/in.rshd
+</strong></pre>
+<P><STRONG>
+in order for these machines to allow more jobs to be run at a time.
+</STRONG></P>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [JimD] 
+This adjusts inetd's tolerance/threshold to frequent connections
+on a given service.   It simply means that inetd won't throttle back
+the connections as readily --- it will try to service them even if
+they are coming in fast and furious.  In this case it will allow up to
+500 attempted rsh connections per minute (about 8 per second).
+</blockQuote>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [JimD] 
+That really doesn't adjust anything about the number of concurrent
+jobs that a machine can run --- just the number of times that the
+inetd process will accept connections on a give port before treating
+it as a DoS (denial of service) attack or networking error, and
+throttling the connections.
+</blockQuote>
+<P><STRONG>
+<IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> 
+I adjusted this because we ran into lots of problems with inet dropping
+connections, I just wanted to make sure that it behaved like it was supposed
+to, ie you didn't know of some immediately relevant bug in this line
+</STRONG></P>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [JimD] 
+In your example this is clearly NOT the problem.  It made the
+connection and then disconnected you.  Thus it wasn't inetd refusing
+the connection, but the shell process exiting (or being killed by the
+kernel).
+</blockQuote>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [Iron] 
+Just to clarify, I think Jim is saying that it's not inetd or tcpd refusing
+you, because otherwise rlogin wouldn't have started at all, and it (rlogin)
+ouldn't have been able to print the "last login:" and kernel version lines.
+</blockQuote>
+<blockQuote>
+By the way, when tcpd doesn't like me, it waits a couple seconds (usually
+doing reverse DNS lookup), and then I see "Connection closed by foreign host"
+with no other messages.
+</blockQuote>
+<P><STRONG>
+<IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> 
+One possibility is that we have everyone's home drive on NFS and if the NFS
+was slow to respond that may cause rlogin to find no home directory and
+refuse the connection.  Is that a realistic possibility?
+</STRONG></P>
+<P><STRONG>
+One interesting turn of events is the message you get in auth.log :
+</STRONG></P>
+<P><STRONG><BLOCKQuote>
+Jan 20 15:41:31 ginzu PAM_unix[31073]: (login) session opened for user dave
+by (uid=0)
+Jan 20 15:41:31 ginzu login[31073]: unable to determine TTY name, got
+/dev/tty6
+</BLOCKQuote></STRONG></P>
+<P><STRONG>
+These machines have no video cards/keyboards/otherinput, really they are
+processor/harddrive/ram/NIC and thats all so it would make sense to comment
+out the getty lines in inittab for these boxes ... correct?
+</STRONG></P>
+<P><STRONG>
+That would at the very least stop the auth.log and daemon.log spamming, I
+think
+</STRONG></P>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [Iron] 
+If inetd is not listening to the port at all and no other daemon is, you'll
+get an immediate "Connection refused" error.  This is confusing because it
+doesn't mean it doesn't like you, it means there's nobody there to answer the
+door.
+</blockQuote>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [JimD] 
+I'd run vmstat processes on the affected nodes (or all of them) for
+a day or two --- redirect their output to local files or over the
+network (depending one which will have the least impact on your
+desired workload) and then write some scripts to analyze and/or graph
+them.
+</blockQuote>
+<P><STRONG>
+<IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> 
+I have started collecting info on these machines.
+</STRONG></P>
+<P><STRONG>
+Can you think of why these machines behave like this?  Could it be a load
+average problem, maybe its network related, is it a setup problem?  Any
+ideas would be appreciated
+</STRONG></P>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [JimD] 
+It's not likely to be a networking or setup issue.  Your networking
+seems to work.  Things seem to be configured properly for moderate
+workloads, so we have to find out which host resources are under the
+most pressure.  So it's probably a loading problem.
+</blockQuote>
+<P><STRONG>
+<IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> 
+Its not a loading issue the system is pretty good at evening out load across
+the pool of machines
+</STRONG></P>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [JimD] 
+(Note I did NOT say "load average" problem.  "load average" is simply
+a measure of the average number of processes that were in a runnable
+(non-blocked) state during each context switch over the last minute,
+and five and fifteen minutes.  A high load average should NOT result
+in processes dying as you've described --- but often indicates a
+different resource loading issue.  Sorry to split hairs on that point
+but this is a case were understanding that distinction is important).
+</blockQuote>
+<P><STRONG>
+<IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> 
+These machines can get a little bagged at times but the login failure
+happens regardless of the load of a given host.
+</STRONG></P>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [JimD] 
+As always you should be checking your system logs.  Hopefully there'll
+be messages therein that will tell you if the kernel killed your
+process and why.  Otherwise you can always write an "strace" wrapper
+around these executables.  It will kill your performance, but, if you
+can reproduce the problem you'll be able to see what the process died.
+</blockQuote>
+<P><STRONG>
+<IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> 
+After a look in the logs ( I can't believe I didn't do this earlier ), I
+found a lot of messages about getty trying to use <TT>/dev/tty*</TT>, no such device,
+which makes sense considering they have no input/output hardware like
+video/keyboard, etc.
+</STRONG></P>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [JimD] 
+Some tweaks to the setup might help.
+</blockQuote>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [JimD] 
+There are basically four resources we're concerned about here:
+memory, CPU, process table, and file descriptor table (space and
+contention).  (I'm not concerned about I/O contention in this case
+since that usually causes processes to block --- performance to
+go very slowly.  It doesn't generally result in processes dying like
+you've described here).
+</blockQuote>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [JimD] 
+vmstat's output will tell you more.  You can probably make some guesses
+based on your workload profile.
+</blockQuote>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [JimD] 
+If you're running many small jobs spawning from one (or a small number
+of) dispatcher processes (on each node) you might be bumping into
+rlimit/ulimit issues.  Read the man page for your shell's ulimit
+built-in command, and the ulimit(3) man page for more details on that.
+</blockQuote>
+<P><STRONG>
+<IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> 
+Ulimits have been adjusted already we ran into file descriptor limits before
+</STRONG></P>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [JimD] 
+If you're running a few large jobs than its more likely to be a memory
+pressure problem --- though we'd expect you'd run into paging/thrashing
+issues first.  There are cases where you can run out of memory without
+doing any signficant paging/swapping (where the memory usage is on
+non-swappable kernel memory rather than normal process memory).
+</blockQuote>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [JimD] 
+By the way, you might want to eliminate tcpd from your configuration
+(remove the references to <TT>/usr/sbin/tcpd</TT> from your inetd.conf file).
+This will save you an extra fork()/exec() and a number of file access
+operations on each new job dispatched.  (The use of rsh already assumed
+you've physically isolated this network segment with very restrictive
+packet filters and anti-spoofing --- so TCP Wrappers is not useful
+in your case and is only costing you some capacity, albeit small).
+</blockQuote>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [JimD] 
+You might even eliminate rsh/rlogin and go with the even simpler
+rexec command!
+</blockQuote>
+<P><STRONG>
+<IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> 
+Some times people will run an interactive job on this cluster, so rsh/rlogin
+is still nice to have.  We have no real policy about what can or cannot be
+run on these machines, like I had said it is more of a playground for our
+researchers, than a critical cluster.
+</STRONG></P>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [JimD] 
+It goes without saying that you may wish to eliminate, renice, or
+reconfigure any daemons you're running on these nodes.  For example,
+you can almost certainly eliminate cron and atd from the nodes (since
+your goal is to dispatch the jobs from one or a few central
+cluster control nodes.  <EM>They</EM> could run a small number of cron/atd
+processes and dispatch jobs across the cluster as appropriate.
+</blockQuote>
+<P><STRONG>
+<IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> 
+True, but really it doesn't seem related, I can't see an interaction between
+login and cron that would drop your connection.  Although it is nice to cut
+down bloat where you can.
+</STRONG></P>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [JimD] 
+The klogd/syslogd daemons are worth extra consideration.  I'd
+strongly consider running syslog under 'nice' and giving it lowest
+possible priority.  I'd also consider tweaking the syslog.conf to
+remove the leading "-" (dashes) from any local log file names
+(so that they will be written asynchronously rather than with
+ <TT>fsync()</TT> calls after every write to the logs).
+</blockQuote>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [JimD] 
+I'd even consider eliminating all local files from these configurations
+and having these nodes do all their logging over the net (which being
+UDP based, might result in some lossage of log messages).  However,
+that depends heavily on your workload and network topology and
+capacity.  Basically you might have bandwidth to burn (Gig ethernet,
+for example) and this might be a reasonable tradeoff.
+</blockQuote>
+<P><STRONG>
+<IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> 
+We are on a switched full duplex 100 base TX, network.  The logs on the
+switches report that in the last 3 months we have only went above 80% of the
+switches bandwith once, so I think we have enough bandwidth to support logs
+over the net.
+</STRONG></P>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [JimD] 
+I'd also consider setting the login shell for these job handling
+accounts to ash (or the simplest, smallest shell that can successfully
+process your jobs).  bash, particularly with version 2.x is a pretty
+"resourceful" (read "bloated") program which may not be necessary
+unless you're doing some fairly complex shell scripting.
+</blockQuote>
+<P><STRONG>
+<IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> 
+A possibility, but as I had said some of our researchers will run an
+interactive job so they want a full shell.
+</STRONG></P>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [JimD] 
+Also in your shell/jobs you might want to make some strategic use of
+the exec built-in command.  Basically in any case where the shell
+or subshell doesn't have a command subsequent to one of your external
+binaries --- exec the binary.  This saves a <TT> fork()</TT> system call, and
+means that the shell processes are NOT taking up memory, file descriptors,
+and entries in the process table just waiting for other executables to
+exit.
+</blockQuote>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [JimD] 
+I'd also eliminate PAM and look for the older r* and login suite.
+The traditional <TT>/bin/login</TT> program does an exec*() system call to
+run your shell.  The PAM based suite performs a <TT> fork()</TT> and then an
+ <TT>exec()</TT> --- and the <TT>/bin/login</TT> program remains in order to perform
+post logout cleanup.  It is quite likely that you are not interested
+in these more advanced features provided by PAM's approach.
+</blockQuote>
+<P><STRONG>
+<IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> 
+PAM is overkill but I don't think it is the culprit.
+</STRONG></P>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [JimD] 
+Incidentally, another point to consider is your local filesystems.
+You may want to mount as many of them as possible in "read-only" mode
+and all of them with the noatime option.  Both of these tweaks can
+considerably reduce the amount of work the system is doing to maintain
+your filesystem consistency and the (rarely used) access time stamps.
+</blockQuote>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [JimD] 
+You may also want to consider using the older ext2 filesystem rather
+than any of the journaling filesystem choices.  This depends on your
+data integrity requirements, of course, but the journaling done by
+ext3, reiserfs, XFS and others does come at a significant cost.
+</blockQuote>
+<blockQuote>
+(Note: In some other cases, where intensive use of local filesystems
+is part of the workload, XFS or reiserfs might be VASTLY better than
+ext2 --- for various complicated reasons).
+</blockQuote>
+<P><STRONG>
+<IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> 
+Reiser is working fine on these nodes.  I have found a significant
+improvement over ext2 for the majority of tasks run on these boxes.
+</STRONG></P>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [JimD] 
+Depending on your application, you might even want to consider
+recompiling it using older, simpler versions of libc/libm (since
+many of the advanced features of GNU glibc 2.x may be useless
+for your computations).  Of course if the application is multi-threaded
+then you may needs glibc 2.x' re-entrancy.
+</blockQuote>
+<P><STRONG>
+<IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> 
+Not really possible, in a lot of cases we are running some third party
+commercial software which is very closed source.
+</STRONG></P>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [JimD] 
+It's possible that you need to do some kernel tuning.  This might
+involve writing some magic values into the sysctl nodes under
+<TT>/proc/sys</TT> (or running the systune or Linux powertweak utilities).
+It might also involve rebuilding your kernel, possibly with a few
+static variables changed or a few scalability patches applied.
+</blockQuote>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [JimD] 
+(In this case, "scalability" is a loaded term --- since it means
+much different things to differing workloads).
+</blockQuote>
+<P><STRONG>
+<IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> 
+I think the real problem is that we are having a bad interaction with some
+piece of software and rlogin/login/getty?/init or something and that causes
+the connection to be dropped.
+</STRONG></P>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [JimD] 
+You can find numerous hints about Linux kernel performance
+tweaking using Google! <A HREF="http://www.google.com/linux"
+	>http://www.google.com/linux</A>
+</blockQuote>
+<blockQuote>
+Here's a few links:
+</blockQuote>
+<blockQuote><DL><DT>
+The C10K problem
+<DD><A HREF="http://www.kegel.com/c10k.html"
+	>http://www.kegel.com/c10k.html</A>
+</DL></blockQuote>
+<blockQuote>
+Written and maintained by Dan Kegel, originally in response
+to the infamous "Mindcraft" fiasco wherein Microsoft paid an
+"independent" lab to prove that MS Windows was "faster" or
+"more scalable" than Linux.
+</blockQuote>
+<blockQuote>
+Dan is/was one of the advocates for improving the Linux kernel
+in a number of key areas regardless of if Mindcraft's
+credibility.
+</blockQuote>
+<blockQuote>
+CITI: Projects: Linux scalability - University of Michigan
+</blockQuote>
+<blockQuote>
+<A HREF="http://www.citi.umich.edu/projects/linux-scalability"
+	>http://www.citi.umich.edu/projects/linux-scalability</A>
+Run by Peter Honeyman (a legendary UNIX programmer).
+</blockQuote>
+<blockQuote><DL><DT>
+SGI - Developer Central Open Source: Scalability Project
+<DD><A HREF="http://oss.sgi.com/projects/linux-scalability"
+	>http://oss.sgi.com/projects/linux-scalability</A>
+</DL></blockQuote>
+<blockQuote><DL><DT>
+IBM developerWorks: Linux: Linux Kernel Performance &amp; Scalability
+<DD><A HREF="http://www-106.ibm.com/developerworks/linux/library/l-kperf"
+	>http://www-106.ibm.com/developerworks/linux/library/l-kperf</A>
+</DL></blockQuote>
+<blockQuote>
+The problem with all of these links is that they are not focused on
+the set of requirements specific to your needs.  They are more
+concerned with webserver, database, SMP, and single-server scalability
+rather than Beowulf style cluster performance.
+</blockQuote>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [JimD] 
+Of course you could read the information at <A HREF="http://www.beowulf.org"
+	>http://www.beowulf.org</A>
+Strictly speaking it doesn't sound like you're really running a Beowulf
+cluster --- you're dispatching jobs via rsh rather than distributing
+computation load using MPI, PVM or similar libraries.  However some of
+the same configuration suggestions and performance observations might
+still apply.
+</blockQuote>
+<P><STRONG>
+<IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> 
+Most of the tweaking described has already been implemented
+</STRONG></P>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [JimD] 
+In general there isn't any silver bullet to increasing the capacity
+of your cluster.  You have to find out which resources are being
+hit hardest (the bottlenecks), review what is using those resources,
+find ways to eliminate as much of that utilization as possible
+(removing tcpd, using a simpler/smaller shell, running terminal
+processes via exec, changing to a non-journaling filesystem,
+eliminating unneeded daemons) and try various tradeoffs that shift
+the utilization of a constrained resource (local filesystem I/O vs.
+pushing things out to the network, memory/cache and indexed data
+structures vs CPU and linear searches).
+</blockQuote>
+<P><STRONG>
+<IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> 
+Capacity is not the objective, I would say reliability ( not necessarily
+100%, but better than 50%, for sure 
+<IMG SRC="../../gx/dennis/smily.gif" ALT=":)" 
+		height="24" width="20" align="middle"> is more my goal.
+</STRONG></P>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [JimD] 
+That's really all there is to performance tuning.  Finding what's
+using which resources.  Finding what you can "not" do.  Finding ways
+to tradeoff one form of resource consumption with another.  Of course
+the black magic is in the details (especially when it comes to
+poking new values into nodes under <TT>/proc/sys/vm/</TT> --- read the
+Documentation/sysctl* text files in your Linux kernel sources for some
+hints about <EM>that</EM>)!
+</blockQuote>
+<P><STRONG>
+<IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> 
+Perhaps a more detailed view of the cluster will give you more to work on.
+There are really 34 machines to this cluster, one choke node that stands
+between the outside world and the inside nodes.  32 machines (identical
+hardware), dual Pentium 3 550 MHz's, 256 megs SDRAM (133MHz), single Maxtor
+12 GB hardrive (7200 RPM ATA 66), 3com 3c590 ethernet card, identical
+kernel's across the board, 2.4.18, SMP.  One single sun machine, that
+serves, NIS, NFS, and DNS, and home brewed batch server ( keeps track of
+jobs and hosts loads and assigns jobs to hosts via rsh ).  After searching
+some more websites I found that some people have a problem with the
+services.byname map in NIS.  Could that be an issue here? I have adjusted
+the inittab by commenting out the lines:
+</STRONG></P>
+
+<pre><strong>#  &lt;id&gt;:&lt;runlevels&gt;:&lt;action&gt;:&lt;process&gt;
+#1:2345:respawn:/sbin/getty 38400 tty1
+#2:23:respawn:/sbin/getty 38400 tty2
+#3:23:respawn:/sbin/getty 38400 tty3
+#4:23:respawn:/sbin/getty 38400 tty4
+#5:23:respawn:/sbin/getty 38400 tty5
+#6:23:respawn:/sbin/getty 38400 tty6
+</strong></pre>
+<P><STRONG>
+Because these machines have no video/input.
+</STRONG></P>
+<P><STRONG>
+Thanks for all your help so far.  I hope all this new info helps you get a
+better idea of whats going on.
+</STRONG></P>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [JimD] 
+You could build a new kernel, setting CONFIG_UNIX98_PTY_COUNT=2048
+(apparently their maximal value).
+</blockQuote>
+<P><STRONG>
+<IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> 
+Running a compile with this right now, thanks
+</STRONG></P>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [JimD] 
+I'd also try to eliminate NIS from these systems.  I'd look at using
+rsync to replicate the various <TT>/etc</TT> configuration files across the
+cluster (passwd, group, hosts, services, et al).  Failing that make
+sure that you have the nscd (NIS name services cache daemon) properly
+configured on the client nodes.
+</blockQuote>
+<P><STRONG>
+<IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> 
+I have been waffling on moving this farm over to Cfengine and losing NIS for
+about three months, I think I am going to get started on that right away.
+Have you guys used cfengine, or do you have any suggestions for config
+management tools?
+</STRONG></P>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [JimD] 
+I'd also try to eliminate NFS, or at least try to minimize it's use
+especially for home directories.  I'd also eliminate the automounting
+if at all possible.  This requires that the users work a little
+smarter, manually transferring their data/input files down to the
+proper nodes, and pulling the results back therefrom.
+</blockQuote>
+<P><STRONG>
+<IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> 
+I have suggested this, but the tools (third party, very badly designed) some
+of the research guys use need to write to the home drive, and in order to
+take advantage of more than one node that would suggest that the home drive
+be in two places at once (NFS, SMB or whatever).  The way it works is that
+one node will modify a model file, another will immediately pick up the
+change and adjust what it is doing and modify the file more until the proper
+mathematical model for a given project is found.  Then they use that model
+to figure out a whole range of useful information, at least thats how its
+supposed to work.
+</STRONG></P>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [JimD] 
+If that's not feasible, at least configure these systems so that the
+home directories are not automounted, replicate the basic suite of
+"dot files" out to them and have a lower mount point provide the shared
+data.
+</blockQuote>
+<P><STRONG>
+<IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> 
+I don't think I can.
+</STRONG></P>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [JimD] 
+I'd also be quite wary of configuring the systems to allow NFS crossing
+the isolated segment and out into filers on your network.  This sounds
+like a supremely bad idea allowing anyone with local root access on any
+node on the outer network to impersonate any users, dropping files into
+their directories which will be executed/sourced by shell session in
+the inner network.
+</blockQuote>
+<P><STRONG>
+<IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> 
+NFS traffic never leaves the clusters subnet, think of it as a hole in my
+network covered by one node that runs ssh with 6 local accounts.  Once you
+log in to that firewall node you need to then rsh or ssh out the other
+interface to either a node in the cluster or the old sun machine serving
+NIS/NFS.  All traffic on the local subnet stays on the local subnet.  Once a
+researcher has a proper model defined they have to rcp/scp that file to the
+firewall machine, and then scp (rsync over ssh, or whatever) it to their
+destination (rcp is not enabled outside of my protected subnet).
+</STRONG></P>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [JimD] 
+However, I think you're getting closer to the real heard of the problem
+by looking into Kapil's suggestion regarding your PTY availability.
+</blockQuote>
+<P><STRONG>
+<IMG SRC="../../gx/dennis/qbub.gif" ALT="(?)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> 
+I'll know shortly, thanks everyone you guys rock!
+</STRONG></P>
+<P><STRONG>
+Dave
+</STRONG></P>
+
+<!-- end 3 -->

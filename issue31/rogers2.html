@@ -1,0 +1,178 @@
+<!--startcut ==========================================================-->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML>
+<HEAD>
+<title>SANE & Linux LG #31</title>
+   <META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=iso-8859-1">
+   <META NAME="GENERATOR" CONTENT="Mozilla/4.03 [en] (X11; I; Linux 2.0.32 i586) [Netscape]">
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#A000A0"
+ALINK="#FF0000">
+<!--endcut ============================================================-->
+
+<H4>
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H1><font color="maroon">How I got my Adaptec AVA 1502 SCSI card to work with Linux and SANE</font></H1>
+<H4>By <a href="mailto:jrogers@u.washington.edu">James M. Rogers</a></H4>
+</center>
+<P> <HR> <P>  
+
+<P>I have a Microtek ScanMaker E3 that I have ran under windows for a few
+years to allow me to convert from hard copy to digital.&nbsp; I have never
+been satisfied with the performance of this scanner under windows because
+I was so limited in the size of the images that I could process.&nbsp;
+I won't bore you with the details, suffice it to say that it was slow,
+tedious and the results were only adequate.
+
+<P>I have heard about Scanner Access Now Easy (SANE) for a few years.&nbsp;
+It is a project to implement a consistent scanner interface across all
+scanners, digital cameras, and other items.&nbsp; It only works with SCSI
+scanners at this time.
+
+<P>It took me three tries to get the program to work for me.
+
+<P>Try one:
+
+<P>The SCSI driver card that came with my scanner claimed to be an AVA-1502E.&nbsp;
+I couldn't find a driver to work with this under Linux.
+
+<P>Try two:
+
+<P>I thought that this card is an Adaptec card so I tried to load the Adaptec
+modules, concentrating on the aha152x.o&nbsp; The most I got was the insmod
+program seeming to lock up.&nbsp; At no point in this process did it recognize
+my card.
+
+<P>Try three:
+
+<P>I peeled the sticker off of the main chip and saw that it was an 6360
+chip (Doing this probably voids the warranty.)&nbsp; So I dug into the
+Linux source code. In <TT>/usr/src/linux-2.0.32/drivers/scsi/</TT>&nbsp;
+there is a file called <TT>aha152x.c</TT>.&nbsp; I read this file several
+times and got a general picture of how this file worked.&nbsp; I then modified
+the file <TT>/usr/src/linux-2.0.32/drivers/scsi/Makefile</TT> and commented
+out the line following line:
+
+<P><TT>&nbsp;&nbsp;&nbsp; AHA152X = -DDEBUG_AHA152X -DAUTOCONF</TT>
+
+<P>turns to:
+
+<P><TT>&nbsp;&nbsp;&nbsp; #AHA152X = -DDEBUG_AHA152X -DAUTOCONF</TT>
+
+<P>I then added this line right below the commented line:
+
+<P><TT>&nbsp;&nbsp;&nbsp; AHA152X = -DDEBUG_AHA152X -DSKIP_BIOSTEST -DSETUP0="{
+0x140, 11, 7, 0, 0, 0, 100, 0 }"</TT>
+
+<P>Basically we are telling the module to stop trying to autoconfigure
+the card, don't try to see which card it is and to use the given settings.&nbsp;
+<I>I will contact the maintainers of this code and work with them on getting
+this driver to autorecognize this card, if possible.</I>
+
+<P>The first two numbers are the ones that you care about.&nbsp; These
+numbers correspond to the the jumpers on the card.&nbsp; The first number
+is 0x140 if the jumper is on the card , or 0x340 if the jumper is removed.&nbsp;
+The 11 corresponded to the irq setting on my card.&nbsp; This number can
+be 9, 10, 11 or 12 depending on how the jumper was set.
+
+<P>If you want to know more about these other settings look in the source
+code and
+
+<P>I then changed to <TT>/usr/src/linux-2.0.32/</TT>&nbsp; put a floppy
+disk in the drive and did a
+
+<P><TT>&nbsp;&nbsp;&nbsp; make dep ; make clean ; make zdisk</TT>
+
+<P>Once the disk had been made I put the disk in my Linux box with the
+scanner attached and rebooted.&nbsp; It came up and saw my card and told
+me that the card was device /dev/sga.&nbsp; When I looked in /dev/ for
+a device called sga I couldn't find one.&nbsp; So I made a link from <TT>/dev/scanner</TT>
+to <TT>/dev/sg0</TT> instead with the following command:
+
+<P><TT>&nbsp;&nbsp;&nbsp; cd /dev</TT>
+<BR><TT>&nbsp;&nbsp;&nbsp; ln -s sg0 scanner</TT>
+
+<P>I then configured my <TT>/etc/sane.d/dll.conf</TT> to look like this:
+
+<P><TT># enable the next line if you want to allow access through the network:</TT>
+<BR><TT>#net</TT>
+<BR><TT>microtek</TT>
+<BR><TT>pnm</TT>
+
+<P>I configured my <TT>/etc/sane.d/microtek.conf</TT> to look like this:
+
+<P><TT>#Uncomment the following if you are tired of seeing the dump of
+the</TT>
+<BR><TT># scanner INQUIRY every time the backend starts up...</TT>
+<BR><TT>nodump</TT>
+<BR><TT>/dev/scanner</TT>
+
+<P>Then I ran the following command and it worked!!!:
+
+<P><TT>&nbsp;&nbsp;&nbsp; scanimage --help -d microtek</TT>
+
+<P>This tells you the other commands that will work with the scanner.
+
+<P>I then scanned in stuff with the command line command and with <TT>xscanner</TT><TT></TT>
+
+<P><TT>&nbsp;&nbsp;&nbsp; scanimage -dmicrotek -x214 -y296 --resolution
+97 > test.pnm</TT>
+
+<P>The above command is a full scan of the entire page at 200dpi. The output
+of these programs is pnm format which allows you access to hundreds of
+filters to process and convert your output to the exact format that you
+desire.&nbsp; See the <TT>man pnm</TT> page for more details.
+
+<P>I have already done some 11MB graphics files and used some pnm utilities
+to filter them, edited them with gimp, cut out the area that I wanted and
+saved them as jpg's.&nbsp; The neat thing is that I am testing out SANE
+by running it on a machine with only 16MB of memory and no swap.&nbsp;
+(I am processing the files on a different, faster machine) So far SANE
+has only failed on full screen images above 200dpi which is not bad.&nbsp;
+Once I have a baseline I will put this machine to 32MB RAM and 32MB swap
+space.
+
+<P>I love the ability of Linux to get in there and let me really control
+my hardware configuration.&nbsp; With Microsoft the only option that I
+would have had would have been to buy a "compatible" product and install
+one of the manufactures full featured (bloated), buggy driver programs.&nbsp;
+The support tech would have probably sneered at me as he said this.&nbsp;
+This is the first time that I have "dug into" the kernel driver code, researched
+a problem and found a solution.&nbsp; Just the satisfaction of being able
+to fix the kernel to recognize the hardware that I have already paid for
+is very rewarding.
+
+<P>Next month I will talk about getting the networking portion of SANE
+up and running.
+<BR>&nbsp;
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<center><H4>Previous "The Standard C Library for Linux" Articles</H4></center>
+<P>
+<A HREF="../issue24/rogers.html">The Standard C Library for Linux #1,
+February 1998</A> <BR>
+<P><HR><P>
+<center><H5>Copyright &copy; 1998, James M. Rogers <BR> 
+Published in Issue 31 of <i>Linux Gazette</i>, August 1998</H5></center>
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<A HREF="./index.html"><IMG ALIGN=BOTTOM SRC="../gx/indexnew.gif" 
+ALT="[ TABLE OF CONTENTS ]"></A>
+<A HREF="../index.html"><IMG ALIGN=BOTTOM SRC="../gx/homenew.gif"
+ALT="[ FRONT PAGE ]"></A>
+<A HREF="./dibona.html"><IMG SRC="../gx/back2.gif"
+ALT=" Back "></A>
+<A HREF="./ayers1.html"><IMG SRC="../gx/fwd.gif" ALT=" Next "></A>
+<P> <hr> <P> 
+<!--startcut ==========================================================-->
+</BODY>
+</HTML>
+<!--endcut ============================================================-->

@@ -1,0 +1,699 @@
+<!DOCTYPE html
+	PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+	 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="utf-8" xml:lang="utf-8">
+<head>
+<title>Joey's Notes: Basic Samba Configuration LG #157</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link rel="stylesheet" href="../lg.css" type="text/css" media="screen, projection"  />
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<!-- link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" / -->
+<link rel="shortcut icon" href="../favicon.ico" />
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+</head>
+<body>
+
+<a href="../">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+<div id="navigation">
+<table summary="masthead" width="100%">
+<tr>
+<td align="center" colspan="3" style="font-size: 10px; font-weight: bold">
+<a href="../index.html">Home</a>
+<a href="http://linuxgazette.net">Main Site</a>
+<a href="../faq/index.html">FAQ</a>
+
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/mailman/listinfo/">Mailing Lists</a>
+<a href="../jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+<hr width="99%" style="border: 1px inset #000033">
+</td>
+</tr>
+<tr>
+<td width="40%" align="left" style="font-size: 10px; font-weight: bold">
+The Free International Online Linux Monthly
+</td>
+<td width="20%" align="center" style="font-size: 10px; font-weight: bold">
+ISSN: 1934-371X
+</td>
+<td width="40%" align="right" style="font-size: 10px; font-weight: bold">
+Main site: <a href="http://linuxgazette.net">http://linuxgazette.net</a> 
+</td>
+</table>
+</div>
+
+
+<div id="breadcrumbs1">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">December 2008 (#157)</a> &gt; 
+Article
+
+</div>
+
+<div class="articlecontent1">
+<div class="content">
+
+<div id="previousnexttop">
+<A HREF="lieber.html" >&lt;-- prev</A> | <A HREF="collinge.html" >next --&gt;</A>
+</div>
+
+<h1>Joey's Notes: Basic Samba Configuration</h1>
+<p id="by"><b>By <a href="../authors/prestia.html">Joey Prestia</a></b></p>
+
+<img src="../gx/minilogos/joeys_notes.png" alt="Joey's Notes image" align="left" />
+
+<p>
+Samba is a program that runs on Linux and allows seamless interaction
+between the Linux and Windows operating systems. By using Samba, your users can
+be using Windows and actually access their data on a Linux server.
+This benefits the administrator -  in the form of ease of
+administration, along with the inherent security of Linux - while 
+also benefitting the user through familiarity.  This month's article covers 
+basic setup of a Samba server for use as a user home directory server,
+and configuration for a simple group collaboration share.  </p>
+
+<p>
+"Microsoft's file access protocol [is] called the Common Internet File
+System (CIFS). CIFS is an interoperable mechanism for a client system to
+request file access from a server system in a network regardless of the
+underlying operating system platforms of the respective systems." <a
+id="prestia.html_1_back"></a><a href="#prestia.html_1">[1]</a> Samba has
+been adapted to use CIFS, which is actually an update to Server
+Message Block (SMB) protocol - which is what lies at the heart of SaMBa.
+It can even serve as a Primary Domain Controller (PDC). Some
+advantages are:    
+</p>
+
+<ul>
+	<li>Your users will never know that they are using a Linux server, so
+	they won't have to learn a new operating system.</li>
+	<li>You'll be able to centralize backups and administer a more secure 
+	environment.
+	<li>You'll be able to allow your users to use their Windows 
+	credentials to login and access their Linux home directories.</li>
+	<li>You can share your Linux printers with your Windows clients.</li>
+</ul>
+
+<p>
+The list goes on and on. More details can be found at <a
+href="http://us1.samba.org/samba/">http://us1.samba.org/samba/</a>. Please
+keep in mind that Samba is a very rich, complex environment, and that what I
+am showing here just demonstrates its most basic operation.   
+</p>
+
+<p>
+I'll be using Red Hat Enterprise Linux 5.2 in this tutorial, with the
+firewall disabled and SELinux set to "enforcing". Samba isn't installed by
+default in RHEL 5, so, if you didn't select Windows File
+Server packages at install time, you can install it by doing <code>yum</code>
+(i.e., <code># yum install -y samba</code>), or by using your distribution's 
+package manager.  Ideally, having access to a Windows computer 
+located on the same network will allow you to see firsthand how Samba
+works. (Note: If you want to allow Samba through your firewall, you 
+must allow access to ports 137-139.)
+</p>
+
+<p>
+There are two daemons associated with Samba's basic operation: The
+first is smbd, which handles the Server Message Block protocol.
+The second daemon, nmbd, publishes WINS name service.  WINS implements
+the NETBIOS nameserver protocol used by Windows systems.  (This can be
+thought of as being a Windows-only version of DNS name mapping; somewhat
+confusingly, modern Windows systems support both WINS and DNS.) When
+connecting a Windows OS to a share, the syntax is
+<tt>\\NETBIOSname\sharename</tt>; this format is dubbed "Universal
+Naming Convention" (UNC). Samba's NMB daemon converts references to a
+machine's DNS hostname to its NETBIOS name if necessary; therefore,
+<tt>\\ipaddress\sharename</tt> will also work. There is a third daemon -
+Winbind,  but it is for more-advanced configurations than I will be
+covering in this basic article.  </p>
+
+<p>
+First, assuming you have Samba and all its dependencies installed, we'll
+look at Samba's configuration file - <tt>/etc/samba/smb.conf</tt>.  
+smb.conf has comments (indicated by #) and potential options
+(shown by semicolons). Both get ignored by Samba, and are present for
+readability purposes only.
+</p>
+
+<h3>
+Configuration of /etc/samba/smb.conf
+</h3>
+
+<p>
+
+Before we do anything else, let's back up this file (i.e., <tt>cp
+/etc/samba/smb.conf /etc/samba/smb.conf.orig</tt>), for safety. smb.conf
+is divided in two main sections, indicated by a line of equals signs '='
+and either "Global Settings" or "Share Definitions" in the middle of them.
+Subsections are indicated by minus signs '-' with the name of the
+subsection in the middle of the line. Now, configuring 
+/etc/samba/smb.conf for basic operation as a user's home directory server
+and a group collaborative share is really simple; in fact, it's almost
+ready out of the box. The first thing we will be concerned with is the
+Network Related Options subsection, under the Global Settings section. Look
+for the directive workgroup, and set this according to your needs. In this
+case, I will just set it to SAMBAGROUP. Later, I will have my Windows
+computer join the SAMBAGROUP workgroup. You can also change the server
+string; this may be especially desirable in a production environment,
+although I didn't do it for this tutorial. (By the way, it's always a
+really good idea when editing big configuration files like this to make a
+note, wherever you make a change. Additionally, leave the changed option's
+original value commented out rather than deleting it. This way, anyone
+working with the file later can see what was changed, who changed it, and
+why. You yourself at a later date may need this information when you need
+to troubleshoot or modify something.) 
+</p>
+
+<h4>Common Global Options</h4>
+
+<p><em><strong>Basic</strong></em></p>
+
+<table border="1">
+<tr><th>Directive</th><th>Expected Setting</th><th>Comment</th></tr>
+<tr><td>workgroup</td><td>workgroup name</td><td>Maps to the Windows workgroup.</td></tr>
+<tr><td>realm</td><td>kerberos realm</td><td>Specifies the Kerberos realm to use.</td></tr>
+<tr><td>netbios name</td><td>netbios name</td><td>The NetBIOS name that the Sambe server is known by.</td></tr>
+<tr><td>netbios aliases</td><td>netbios alias</td><td>Additional NetBIOS names that nmbd will map to the server.</td></tr>
+<tr><td>server string</td><td>server description</td><td>This shows up in browse lists, next to the machine name.</td></tr>
+<tr><td>interfaces</td><td>eth0 ip/netmask</td><td>Network interfaces to listen on.</td></tr>
+</table>
+
+<p><em><strong>Security</strong></em></p>
+
+<table border="1">
+<tr><th>Directive</th><th>Expected Setting</th><th>Comment</th></tr>
+<tr><td>security</td><td>user / share</td><td>If you have Linux users, then you want <tt>user</tt>; if using 
+guest shares without passwords, then you would want <tt>share</tt>.</td></tr>
+<tr><td>auth methods</td><td>guest / sam / winbind</td><td>Guest is anonymous, sam looks in local 
+accounts, and winbind relays requests for remote users.</td></tr>
+<tr><td>encrypt passwords</td><td>yes / no</td><td>Use encrypted passwords: this defaults to "yes".</td></tr>
+<tr><td>client schannel</td><td>auto / yes / no</td><td>Controls client 
+offering or requesting use of netlogon schannel.</td></tr>
+<tr><td>server schannel</td><td>auto / yes / no	</td><td>Controls server offering or requesting use of netlogon schannel.</td></tr>
+<tr><td>passdb backend</td><td>smbpasswd / tdbsam / ldapsam</td><td>Specify which passwd backend to authenticate with.</td></tr>
+<tr><td>guest account</td><td>nobody / ftp</td><td>Specify system account for guest user accesses and permissions.</td></tr>
+<tr><td>invalid users</td><td>username / groupname</td><td>List of users to be 
+denied login: '@' indicates a NIS group, '+' and group name searches the Linux group database.</td></tr>
+<tr><td>valid users</td><td>username</td><td>List of users allowed login, if left empty then anyone can login.</td></tr>
+<tr><td>admin users</td><td>username</td><td>Users to assume role of superuser.</td></tr>
+<tr><td>read list</td><td>username</td><td>Users to be granted  read-only access.</td></tr>
+<tr><td>write list</td><td>username</td><td>Users to be granted write permissions.</td></tr>
+<tr><td>printer admin</td><td>username</td><td>Users given printer administrative access.</td></tr>
+<tr><td>hosts allow</td><td>IP, hostname, or IP/mask</td><td>Hosts to be granted access; may be tab-, space-, or
+comma-delimited lists. See hosts_access (5) man page for details.</td></tr>
+<tr><td>hosts deny</td><td>IP, hostname, or IP/mask</td><td>hosts to be denied access; may be tab-, space-, or
+comma-delimited lists. See hosts_access (5) man page for details.</td></tr>
+</table>
+
+
+<p><em><strong>Common Share Options</strong></em></p>
+
+<table border="1">
+<tr><th>Directive</th><th>Expected Setting</th><th>Comment</th></tr>
+<tr><td>comment</td><td>text comment</td><td>A description of the share.</td></tr>
+<tr><td>path</td><td>absolute Linux path</td><td>This is the Linux path - not the Windows path - to the share.</td></tr>
+<tr><td>invalid users</td><td>username / groupname</td><td>List of users to be 
+denied login: @ indicates a NIS group, '+' and group name searches the Linux group database.</td></tr>
+<tr><td>valid users</td><td>username</td><td>List of users allowed login, if left empty then anyone can login.</td></tr>
+<tr><td>admin users</td><td>username</td><td>Users to assume role of superuser.</td></tr>
+<tr><td>read list</td><td>username</td><td>Users to be granted  read-only access.</td></tr>
+<tr><td>write list</td><td>username</td><td>Users to be granted write permissions.</td></tr>
+<tr><td>read only</td><td>username</td><td>Users that cannot create or modify files; this will default to 'yes'.</td></tr>
+<tr><td>guest ok</td><td>yes / no</td><td>If "yes", then no password is required and privileges of guest 
+account apply (defaults to "no".)</td></tr>
+<tr><td>guest only</td><td>yes / no</td><td>This allows only guest connections (default to 'no'.)</td></tr>
+<tr><td>hosts allow</td><td>IP, hostname, or IP/mask</td><td>Hosts to be granted access; may be tab-, space-, or
+comma-delimited lists. See hosts_access (5) man page for details.</td></tr>
+<tr><td>hosts deny</td><td>IP, hostname, or IP/mask</td><td>hosts to be denied access; may be tab-, space-, or 
+comma-delimited lists. See hosts_access (5) man page for details.</td></tr>
+<tr><td>browseable</td><td>yes / no</td><td>This setting governs whether the share is visible in 
+the list of shares to browse (defaults to "yes".)</td></tr>
+</table>
+
+<p>
+Let's start with the Global Settings section, in the Network Related Options subsection.
+Again, both the pound (or hash) sign (#) and semi-colon (;) are
+acceptable comment markers.  </p>
+
+<pre class="code">
+#  Edited on 7-2-08 by Joey changed workgroup and set NetBIOS name to server1 see below.
+#        workgroup = MYGROUP
+          workgroup = SAMBAGROUP
+          server string = Samba Server Version %v
+
+;         netbios name = MYSERVER
+          netbios name = SERVER1          
+</pre>
+
+<p>
+Next, we'll set up a group collaboration share for our users, so let's go
+down to the "Share Definitions" heading.  When scrolling through this file,
+notice that "homes" (users' home directories) are already enabled as shares,
+by default. Be careful; even though these directives look simple, always
+refer to the manpages for smb.conf(5) for explanation of anything you may
+be uncertain of. 
+</p>
+
+<h3>Shares</h3>
+
+<p>
+
+I created my share at the end of the file, under Share Definitions.  Once
+again, leave yourself a note for future reference. There's nothing worse
+than playing detective through a configuration file months and months
+later, trying to find out what was changed and why. Shares can consist of
+lots of options, but we will just stick to the basics here. I will give a
+brief explanation of the ones I use in this example.  The first thing
+we see enclosed in brackets is the "sharename". This has no bearing on
+the Linux path. The Linux path can be anything appropriate; I would use a
+descriptive term and use the same term for the Linux path, so when you have
+several of them they are easy to keep straight. When setting up shares, you
+needs to keep in mind that a Linux path is not going to be the same as a
+Windows path. In Linux a share named [Winshare] with a path of <tt>path =
+/srv/samba/winshare</tt> would be referenced  <tt>\\NETBIOSname\sharename</tt> in
+Windows, so, if our Linux machine were assigned a NETBIOS name of SERVER1 and
+the share were called <tt>winshare</tt> one way to connect to it from Windows would
+be to place \\SERVER1\winshare in the address bar and hit &lt;ENTER&gt;.  At this
+point, you would get prompted for your credentials. 
+
+</p>
+
+<pre class="code">
+
+#============================ Share Definitions ==============================
+
+[homes]
+        comment = Home Directories
+        browseable = no
+        writable = yes
+
+
+[printers]
+        comment = All Printer
+        path = /var/spool/samba
+        browseable = no
+        guest ok = no
+        writable = no
+        printable = yes
+
+
+# A publicly accessible directory, but read-only, except for people in
+# the "staff" group
+;       [public]
+;       comment = Public Stuff
+;       path = /home/samba
+;       public = yes
+;       writable = yes
+;       printable = no
+;       write list = +staff
+
+# Edited on 7-2-08 by Joey added winshare for test project group 'smbuser'
+# don't forget about SELinux and permissions for this to work! 
+[Winshare] 
+	comment = Samba test share
+	path = /srv/samba/winshare
+	hosts allow = 10.0.2. 
+	browseable = yes
+	write list = +smbuser
+
+</pre>
+
+<p>
+Now notice  how the IP address is set up on the "hosts allow" line:  10.0.2. 
+allows access to all hosts on the 10.0.2. subnet.  Below the "hosts allow"
+line is "browseable = yes"; this will allow users on the network to browse 
+the network and see the share.  Also note the "write list" - I gave
+group-wide write access to the smbuser group. 
+</p>
+
+
+<h3>Testparm</h3>
+
+<p>
+The "testparm" command entered on the Linux command line parses the
+/etc/samba/smb.conf file, and checks it for syntax errors. When you have
+finished editing this file, run <tt>testparm</tt> and see if anything pops
+up. It will also output your configuration, so you can see the shares you
+have set up and whether things are set up correctly. You do not need
+SMB running to test the configuration.  </p>
+
+<pre class="code">
+
+[root@rhce-prep ~]# vi /etc/samba/smb.conf 
+[root@rhce-prep ~]# testparm
+Load smb config files from /etc/samba/smb.conf
+Processing section "[homes]"
+Processing section "[printers]"
+Processing section "[Winshare]"
+Loaded services file OK.
+Server role: ROLE_STANDALONE
+Press Enter to see a dump of your service definitions
+
+[global]
+        workgroup = SAMBAGROUP
+        server string = Samba Server Version %v
+        passdb backend = tdbsam
+        cups options = raw
+
+[homes]
+        comment = Home Directories
+        read only = No
+        browseable = No
+
+[printers]
+        comment = All Printers
+        path = /var/spool/samba
+        printable = Yes
+        browseable = No
+
+[Winshare]
+        comment = Samba test share
+        path = /srv/samba/winshare
+        write list = +smbuser
+        hosts allow = 10.0.2.
+[root@rhce-prep ~]# 
+
+</pre>
+
+<p>
+Check that everything looks correct:
+</p>
+
+<pre class="code">
+
+[root@rhce-prep ~]# mkdir -p /srv/samba/winshare
+[root@rhce-prep ~]# groupadd smbuser
+[root@rhce-prep ~]# useradd john -G smbuser
+[root@rhce-prep ~]# passwd john
+Changing password for user john.
+New UNIX password: 
+Retype new UNIX password: 
+passwd: all authentication tokens updated successfully.
+[root@rhce-prep ~]# chown .smbuser /srv/samba/winshare/
+[root@rhce-prep ~]# chmod 2775 /srv/samba/winshare/
+
+</pre>
+
+<h3>Allow for SELinux</h3>
+
+<p>
+As things stand, when SELinux is in enforcing mode, Samba just won't work
+with newly created directories; they don't have the correct SELinux context
+applied to them. To allow access and have SELinux still enforcing, we need
+to look to the comments in smb.conf. Under the SELINUX NOTES section
+(toward the top of the file), note that it tells you what most people miss:
+the SELinux boolean "samba_enable_home_dirs" must be set to <tt>on</tt>.
+The command is right there, in the comments. In addition to the home
+directories, we created a new directory that needs the SELinux context
+"samba_share_t" assigned to it.  Again, smb.conf gives us the command we
+need to set the context for SELinux protection.  
+</p>
+
+<pre class="code">
+# If you want to share home directories via Samba, please run:
+# <b>setsebool -P samba_enable_home_dirs on</b>
+#
+# If you create a new directory you want to share, you should mark it as
+# "samba-share_t", so that SELinux will let you write into it.
+# Make sure not to do that on system directories, as they may already have
+# been marked with the SELinux labels.
+#
+# Use ls -ldZ /path, to see which context a directory has.
+#
+# Set labels only on directories you created!
+# To set a label, use the following: <b>chcon -t samba_share_t /path</b>
+</pre>
+
+<pre class="code">
+
+[root@rhce-prep ~]# setsebool -P samba_enable_home_dirs on
+[root@rhce-prep ~]# chcon -t samba_share_t /srv/samba/winshare/
+[root@rhce-prep ~]# chkconfig smb on 
+[root@rhce-prep ~]# service smb start
+Starting SMB services:                                     [  OK  ]
+Starting NMB services:                                     [  OK  ]
+[root@rhce-prep ~]# 
+
+</pre>
+
+<h3>Smbpasswd</h3> 
+
+<p>
+In addition to configuring standard group access and permissions, Samba
+requires a different password-encoding algorithm, so we need to create
+Samba passwords for our users. For domain controller configurations, there
+are other advanced options for adding groups and users - but, for now, we
+will just stick with the basics. In addition, the user must exist on the
+system; you can't just create samba-only users. (Note that I created a
+regular user called "john", earlier.) 
+</p>
+
+<pre class="code">
+
+[root@rhce-prep ~]# smbpasswd -a john
+New SMB password:
+Retype new SMB password:
+[root@rhce-prep ~]# 
+
+</pre>
+
+
+<h3>Testing the setup with smbclient</h3>
+
+<p>
+The "smbclient" command allows connections to Samba server shares from
+the Linux command line. It will accept a username and password, as well
+as the location and name of the share to which you want to connect. The
+basic format of the command is shown below. You can use it in a variety
+of ways; I have included the one that I find easiest.  Use -U to specify
+the username, which is immediately followed by the % separator and
+the password.  Following that, on the same line, I have the Linux
+equivalent of a Samba location -  double forward slashes, 'localhost',
+and a forward-slash separator, followed by the name of the share we are
+connecting to; the result of all this should be an smb:\&gt; prompt.
+</p>
+
+<pre>
+smbclient -U user%password //localhost/share
+</pre>
+
+<pre class="code">
+
+[root@rhce-prep ~]# smbclient -U john%redhat //localhost/winshare
+Domain=[RHCE-PREP] OS=[Unix] Server=[Samba 3.0.28-0.el5.8]
+smb: \&gt; ls
+  .                                   D        0  Sun Aug  3 15:34:49 2008
+  ..                                  D        0  Sun Aug  3 15:34:49 2008
+
+                63700 blocks of size 16384. 44363 blocks available
+ smb: \&gt;
+
+</pre>
+
+<h3>Testing it out on the Windows side</h3>
+
+<p>
+The true test is to get on a Windows box and see how all this looks 
+from there. Test it out: Can you join the workgroup? Can you access 
+your home directory? What about the share? The first thing I did 
+was join my Windows computer to workgroup SAMBAGROUP, 
+which of course required a reboot. I did this by going into Control 
+Panel, System, and clicking on the "Computer Name" tab, then 
+clicking on "Change" to rename the computer or join a 
+domain, and selecting the Workgroup option to make this computer a member 
+of the SAMBAGROUP workgroup. After rebooting, I opened My Computer and browsed 
+to My Network Places, then to View Workgroup Computers.
+</p>
+
+<img src="misc/prestia/smbgroup.png" alt="SambaGroup">
+
+<p>  
+At this point, you can clearly see the words "Samba Server Version
+3.0.28-0.el5.8" (the Samba server string).  Depending on where you deploy
+your Samba server, you may not want to give anyone a starting point for
+hacking your setup; it only takes a second to hide the fact that you're
+running a Samba server from others that may have access to machines on your
+network. It is also important to consider whether you should make the
+shares visible on the network or not. I believe it's best to leave things
+on a need-to-know basis to prevent unnecessary problems.  But, again, on
+things like this your company's policy should always be your guide.  You
+should be aware that permissions - both in the smb.conf and on directories
+- are <em>stacked</em>; i.e., the most restrictive ones control what
+happens - so it is important to pay close attention to both. 
+</p>
+
+<p>
+In this next image you can see where I clicked on Server1 and was presented 
+with a login screen. If you're following along, you will have to present 
+credentials at this point. We've also set up Samba for a group collaboration 
+share and home directory server, and the options we selected in our 
+share definitions dictate what will occur at this point.
+</p>
+
+<img src="misc/prestia/login.png" alt="Login to Share">
+
+<p>
+In the following image, we are able to view available 
+printers that are available by default. We can also see user john's
+home directory, along with our newly created Windows share 'Winshare'.   
+</p>
+
+<img src="misc/prestia/shares.png" alt="Shares">
+
+<p>
+Briefly, this is basic configuration of a Samba server for use as a
+Windows home directory server and simple group collaboration share server.
+Samba works out of the box with little or no configuration for a lot of
+purposes, and can be configured to act as a Primary Domain Controller for a
+network. This is a significantly more complex task, and requires a great
+deal of time spent learning the various options and security measures and
+implementing them correctly.  It is easy to assume, because something can be
+so easy to set up, that it is overly simplistic and therefore implement
+it in a haphazard way.  </p>
+
+<p>
+In this last figure, we will access user &quot;john's&quot; home
+directory. As you can see, he can work from Windows without problems, not
+even realizing he was in reality working on a Linux server.
+</p>
+
+<p>
+
+<img src="misc/prestia/homedir-new.png" width="597" height="451"></p> 
+
+<h3>Samba Web Administration Tool</h3>
+
+<p>
+The Samba Web Administration Tool (SWAT) tool allows an administrator to
+configure Samba via Web interface. It is an excellent way for new Samba
+administrators to get additional information on options available
+when setting up Samba. It is also commonly used by seasoned Samba
+administrators, because of its ease of use and advanced displays. It
+allows the administrator to start and stop daemons, see advanced
+possible configurable options, look up definitions for those options,
+and get help.  It comes with some downsides: it is insecure and
+therefore not a good idea to use remotely. Additionally, using it
+overwrites smb.conf, which contains valuable comments.    </p>
+
+
+<h3>Resources</h3>
+
+
+<a id="prestia.html_1"></a><a href="#prestia.html_1_back">[1]</a> <a
+href="http://www.microsoft.com/downloads/details.aspx?FamilyID=c4ad
+b584-7ff0-4acf-bd91-5f7708adb23c&displaylang=en">Document containing
+details of Microsoft's Common Internet File System (CIFS) File Access
+Protocol</a> 
+<ul>
+<li><a href="http://us1.samba.org/samba/">Samba Website</a></li>
+
+<li><a href="http://www.samba.org/samba/docs/man/Samba3-HOWTO/">The Samba How 
+To Guide</a></li></ul>
+
+<br clear="all" />
+
+<script type='text/javascript'>
+digg_url = 'http://linuxgazette.net/157/prestia.html';
+digg_title = 'Joey\'s Notes: Basic Samba Configuration';
+digg_bodytext = '<p> Samba is a program that runs on Linux and allows seamless interaction between the Linux and Windows operating systems. By using Samba, your users can be using Windows and actually access their data on a Linux server. This benefits the administrator -  in the form of ease of administration, along with the inherent security of Linux - while  also benefitting the user through familiarity.  This month\'s article covers  basic setup of a Samba server for use as a user home directory server, and configuration for a simple group collaboration share.  </p> ';
+digg_topic = 'linux_unix';
+</script>
+<script src="http://digg.com/tools/diggthis.js" type="text/javascript"></script>
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:157/prestia.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/authors/prestia.jpg" class="bio">
+</p>
+
+<em>
+<p>
+Joey was born in Phoenix and started programming at the age fourteen on
+ a Timex Sinclair 1000. He was driven by hopes he might be able to do
+ something with this early model computer. He soon became proficient in
+ the BASIC and Assembly programming languages. Joey became a programmer
+ in 1990 and added COBOL, Fortran, and Pascal to his repertoire of
+ programming languages. Since then has become obsessed with just about
+ every aspect of computer science. He became enlightened and discovered
+ RedHat Linux in 2002 when someone gave him RedHat version six. This 
+ started off a new passion centered around Linux. Currently Joey is 
+ completing his degree in Linux Networking and working on campus
+ for the college's RedHat Academy in Arizona. He is also on the staff of
+ the Linux Gazette as the Mirror Coordinator.
+</p>
+
+
+
+</em>
+
+<br clear="all">
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2008, Joey Prestia. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication License</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 157 of Linux Gazette, December 2008
+</p>
+
+</div>
+
+<div id="previousnextbottom">
+<A HREF="lieber.html" >&lt;-- prev</A> | <A HREF="collinge.html" >next --&gt;</A>
+</div>
+
+</div>
+</div>
+
+<script src="http://www.google-analytics.com/urchin.js"
+type="text/javascript">
+</script>
+<script type="text/javascript">
+_uacct = "UA-1204316-1";
+urchinTracker();
+</script>
+
+
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+</body>
+</html>
+

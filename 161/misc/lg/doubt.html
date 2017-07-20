@@ -1,0 +1,329 @@
+<!DOCTYPE html PUBLIC '-//W3C//DTD XHTML 1.0 Transitional//EN'
+		 'http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd'>
+<html xmlns='http://www.w3.org/1999/xhtml' lang='utf-8' xml:lang='utf-8'>
+<head>
+<title>Doubt...</title>
+<meta http-equiv='Content-Type; charset=utf-8' />
+<link rel='stylesheet' type='text/css' href='../../../lg.css' />
+</head>
+<body>
+<a href="../../../"><img alt="Linux Gazette" src="../../../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" /></a><img alt="Tux" src="../../../gx/tux_86x95_indexed.png" id="tux" /><p id="fun">...making Linux just a little more fun!</p><div class='content articlecontent'><a name="top"></a><h3>Doubt...</h3>
+<p>
+<b><p>
+Deepti R [deepti.rajappan at gmail.com]
+
+</p>
+</b><br />
+<b>Tue, 24 Mar 2009 09:04:17 +0530</b>
+</p>
+
+<p>
+Hello,
+</p>
+
+<p>
+    I have read the article of yours from
+   <a href='../../../136/anonymous.html'>http://linuxgazette.net/136/anonymous.html</a>. I am trying to write a small
+   driver program, i have written it, but little bit of redesigning is
+   needed. So it would be great anyone of you can help me.. i am posting my
+   question below ..
+</p>
+
+<p>
+   I wrote a simple keyboard driver program, which detects the control k
+   (CTRL + K) sequence [I have written the code to manipulate only ctrl + k].
+   I also have a simple application program which does a normal
+   multiplication function.
+</p>
+
+<p>
+   I need to invoke that application program from my driver when I press ctrl
+   + k in my keyboard [once I press the ctrl + k, driver will send a SIGUSR1
+   signal to my application program. That will accept the signal and perform
+   multiplication]. I could do that if I hardcode the pid of application
+   progam [pid of a.out fille] in driver. Ie, inside the function
+   kill_proc(5385, SIGUSR1, 0), the first parameter is the pid of application
+   program.
+   But this is not a correct method, every time I need to compile the
+   application program open the driver add the pid to it, compile it using
+   Makefile then insert the .ko file, it doesn't look good. I tried using -1
+   as the first parameter for kill_proc () [to send the SIGNAL to all the
+   process that are listening], since my application program is also
+   listening to the SIGNAL, ideally it should catch the SIGUSR1 signal and
+   execute It, but it's not working* 1/4.
+</p>
+
+<p>
+   Can you suggest any method to send the SIGUSR1 signal from my driver
+   [which is in kernal spcae] to application program [which is in userspace]?
+</p>
+
+<p>
+   Having an entry of pid to /proc also i can achieve this, but that is not a
+   good design. <img src="../gx/frown.png" alt=":(">, Can it be implemented through ioctl?
+</p>
+
+<p>
+   I am pasting my codes below...
+</p>
+
+<p>
+<pre class='code'>
+   Driver code
+   -------- --------- --------
+   #define <em> KERNEL SYSCALLS </em>
+   #include &lt;linux/ctype.h&gt;
+   #include &lt;linux/tty.h&gt;
+   #include &lt;linux/tty_flip.h&gt;
+   #include &lt;asm/system.h&gt;
+   #include &lt;linux/kernel.h&gt;
+   #include &lt;linux/module.h&gt;
+   #include &lt;linux/console.h&gt;
+   #include &lt;linux/consolemap.h&gt;
+   #include &lt;linux/vt_kern.h&gt;
+   #include &lt;linux/tty.h&gt;
+   #include &lt;linux/tty_flip.h&gt;
+   #include &lt;linux/version.h&gt;
+   #include &lt;linux/string.h&gt;
+ 
+   #include &lt;linux/sched.h&gt;
+   #include &lt;linux/unistd.h&gt;
+   #include &lt;linux/uaccess.h&gt;
+   #include &lt;linux/proc_fs.h&gt;
+   #include &lt;asm/signal.h&gt;
+   #include &lt;linux/file.h&gt;
+   #include &lt;linux/interrupt.h&gt;
+   #include &lt;asm/io.h&gt;
+ 
+   #define LCTRL 0x04
+   #define RCTRL 0x08
+   #define CAPS 0x40
+   #define CAPSDOWN 0x80
+   #define SCRLED 0x01
+   #define NUMLED 0x02
+   #define CAPSLED 0x04
+   #define _write(f, buf, sz) (f-&gt;f_op-&gt;write(f, buf, sz, &amp;f-&gt;f_pos));
+   #define WRITABLE(f) (f-&gt;f_op &amp;&amp; f-&gt;f_op-&gt;write)
+ 
+   ssize_t proc_write( struct file *filp, const char __user *buffer, unsigned
+   long len, void * data );
+   int proc_read( char *page, char **start, off_t off, int count, int *eof,
+   void *data );
+ 
+   unsigned char kmode = 0;
+   static void do_self(int);
+   static unsigned char key_map[] = {
+   0, 27, '1', '2', '3', '4', '5', '6',
+   '7', '8', '9', '0', '-', '=', 127, 9,
+   'q', 'w', 'e', 'r', 't', 'y', 'u', 'i',
+   'o', 'p', '[', ']', 13, 0, 'a', 's',
+   'd', 'f', 'g', 'h', 'j', 'k', 'l', ';',
+   ''', '`', 0, '', 'z', 'x', 'c', 'v',
+   'b', 'n', 'm', ',', '.', '/', 0, '*',
+   0, 32, 0, 0, 0, 0, 0, 0,
+   0, 0, 0, 0, 0, 0, 0, 0,
+   0, 0, '-', 0, 0, 0, '+', 0,
+   0, 0, 0, 0, 0, 0, '&lt;', 0,
+   0, 0, 0, 0, 0, 0, 0, 0,
+   0 };
+ 
+   static unsigned char shift_map[] = {
+   0, 27, '!', '@', '#', '$', '%', '^',
+   '&amp;', '*', '(', ')', '_', '+', 127, 9,
+   'Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I',
+   'O', 'P', '{', '}', 13, 0, 'A', 'S',
+   'D', 'F', 'G', 'H', 'J', 'K', 'L', ':',
+   '"', '~', '0', '|', 'Z', 'X', 'C', 'V',
+   'B', 'N', 'M', '&lt;', '&gt;', '?', 0, '*',
+   0, 32, 0, 0, 0, 0, 0, 0,
+   0, 0, 0, 0, 0, 0, 0, 0,
+   0, 0, '-', 0, 0, 0, '+', 0,
+   0, 0, 0, 0, 0, 0, '&gt;', 0,
+   0, 0, 0, 0, 0, 0, 0, 0,
+   0 };
+ 
+   void do_keyboard(void)
+   {
+   unsigned char scancode,x;
+   scancode=inb_p(0x60);
+   x=inb_p(0x61);
+   outb_p(x|0x80, 0x61);
+   outb_p(x&amp;0x7f, 0x61);
+   outb(0x20, 0x20);
+   if(scancode == 0x3A)
+   {
+   kmode|=CAPS;
+   }
+   if(scancode == 0xBA)
+   {
+   kmode&amp;=(~CAPS);
+   }
+   if(scancode == 0x1D)
+   {
+   kmode |= RCTRL;
+   kmode |= LCTRL;
+   }
+   if(scancode == 0x9D)
+   {
+   kmode&amp;=(~RCTRL);
+   kmode&amp;=(~LCTRL);
+   }
+ 
+   do_self(scancode);
+   }
+ 
+   static void do_self(int sc)
+   {
+   unsigned char ch;
+   int res;
+   if (kmode &amp; (LCTRL | RCTRL))
+   {
+   ch = shift_map[sc];
+   }
+   else
+   ch = key_map[sc];
+ 
+   if (ch == 0)
+   return;
+ 
+   if (kmode &amp; (LCTRL | RCTRL | CAPS)) /* ctrl or caps */
+   if ((ch &gt;= 'a' &amp;&amp; ch &lt;= 'z') || (ch &gt;= 224 &amp;&amp; ch &lt;= 254))
+   {
+   ch -= 32;
+   }
+   if (kmode &amp; (LCTRL | RCTRL))
+   {
+   if (ch == 0x4b)
+   {
+   printk(KERN_INFO"detected ctrl+k n");
+   res = kill_proc(5853, SIGUSR1, 0);
+   }
+   }
+ 
+   }
+ 
+   static void my_irq_handler()
+   {
+   do_keyboard();
+   }
+ 
+   int init_module()
+   {
+   int result;
+   result = request_irq(1,(void *)my_irq_handler, IRQF_SHARED,
+   "L1S keyboard",(void *)(my_irq_handler));
+   if(result !=0)
+   {
+   printk(KERN_ALERT"Not able to allocate IRQ");
+   return -1;
+   }
+   else
+   {
+   printk(KERN_ALERT"Success");
+   return 0;
+   }
+   }
+ 
+   void cleanup_module()
+   {
+   free_irq(1,(void *)(my_irq_handler));
+   printk(KERN_ALERT"Freed IRQ");
+   }
+ 
+  Application Program
+  --------------- --------
+ 
+  #include &lt;stdio.h&gt;
+  #include &lt;stdlib.h&gt;
+  #include &lt;ctype.h&gt;
+  #include &lt;unistd.h&gt;
+  #include &lt;fcntl.h&gt;
+  #include &lt;signal.h&gt;
+  #include &lt;sys/wait.h&gt;
+ 
+  volatile sig_atomic_t child_alive = 1;
+ 
+  void mysignal_handler(int signum);
+  void multiply (int a,int b);
+  int x,y;
+  int main (void)
+  {
+  switch (fork ())
+  {
+  case -1:
+  exit (3);
+  case 0:
+  if (setsid () == -1)
+  {
+  exit (4);
+  }
+  break;
+  default:
+  return 0;
+  }
+ 
+  if (signal (SIGUSR1, mysignal_handler) == SIG_IGN)
+  {
+  signal (SIGUSR1,mysignal_handler);
+  }
+ 
+  if (signal (SIGINT, mysignal_handler) == SIG_IGN)
+  {
+  signal (SIGINT,mysignal_handler);
+  }
+ 
+  while (child_alive)
+  {
+  pause();
+  }
+  return 0;
+  }
+ 
+  void multiply (int a, int b)
+  {
+  int f1=a;
+  int f2=b;
+  int r=f1*f2;
+  printf("\nResult of 5 * 10 = %d", r);
+  }
+ 
+  void mysignal_handler (int signum)
+  {
+  switch(signum)
+  {
+  case SIGUSR1:
+  multiply(5,10);
+  signal (signum, mysignal_handler);
+  break;
+  case SIGINT:
+  printf("Captured SIGINT in mysignal_handler \n");
+  child_alive = 0;
+  return;
+  break;
+  default:
+  return;
+  }
+  }
+ 
+  Makefile
+  ------ ----
+  obj-m += kboard.o
+ 
+  all:
+  make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules
+ 
+  clean:
+  make -C /lib/modules/$(shell uname -r)/build M=$(PWD) clean
+</pre>
+
+<p>
+   Thanks,
+   Deepti
+</p>
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_mail.html#mb-doubt">Back</a><hr width="50%" align="left" /><p><br /></p></div>
+</body>
+</html>

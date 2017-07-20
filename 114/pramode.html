@@ -1,0 +1,508 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Measure CPU Fan Speed with an RTAI/LXRT Stroboscope! LG #114</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="okopnik.html" >&lt;-- prev</A> | <A HREF="collinge.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Measure CPU Fan Speed with an RTAI/LXRT Stroboscope!</h1>
+<p id="by"><b>By <A HREF="../authors/pramode.html">Pramode C.E.</A></b></p>
+
+<p>
+<p>The BIOS on most modern motherboards will show you the
+rotational speed of the CPU fan. Let's design a simple
+&lsquo;optical&rsquo; experiment for verifying whether the value
+reported is indeed correct. For maximum voodoo effect, the
+experiment should be conducted at night with the only source of
+light being an LED blinking under the control of some dark and
+devious <a href="http://www.aero.polimi.it/~rtai">RTAI/LXRT</a>
+code!</p>
+
+<h3>What is the big idea?</h3>
+
+<p>Think of a fan with four blades rotating at a speed of 3600
+rotations per minute (RPM.) Let's mark a part of one of the blades
+with a distinct color, say white. Once the fan starts rotating, it
+will be difficult for us to differentiate this blade as everything
+becomes blurred. Each full rotation takes 1/60th of a second. What
+if we look at the blades for a very brief period only once in that
+1/60th of a second? It will appear as if the white mark is
+motionless because each time we will see it at almost the same
+position each revolution. A light source (like an LED) can be made
+to generate short bursts of light at fairly high frequencies; an
+object illuminated by such a source will be seen only during those
+periodic short bursts of light. When the frequency of the bursts
+match the frequency of rotation of the object being observed, the
+object appears to be stationary. This is the principle of the
+<a href=
+"http://homepages.which.net/~paul.hills/Circuits/Stroboscope/Stroboscope.html">
+stroboscope</a>.</p>
+
+<h3>The hardware</h3>
+
+<p>There is almost always a cooling fan attached to the CPU in a
+desktop computer; your only job is to &lsquo;mark&rsquo; one of the
+blades. I did this by pasting a small piece of white paper onto one
+blade and it seems to work well.</p>
+
+<p class="editorial">[Editor's note - leaving a high-speed fan
+unbalanced <b>will</b> shorten the life of its bearings. I strongly
+advise you to remove the marker from the fan when you are done with
+the experiment! &mdash; dsrich]</p>
+
+<p>The light source is a &lsquo;high-brightness&rsquo; LED
+controlled by the parallel port. It's better that the LED is driven
+by a transistor other than the parallel port output to increase the
+amount of current through the LED and therefore its brightness. If
+you are new to PC interfacing, please proceed with caution,
+preferably after reading the material presented on web sites such
+as <a href=
+"http://www.epanorama.net/circuits/parallel_output.html">this
+one</a>.</p>
+
+<h3>The software</h3>
+
+<p>Generating small (and precise) time delays under a general
+purpose operating system like Linux is not an easy job. In one of
+my <a href="http://linuxgazette.net/issue95/pramode.html">earlier
+articles</a>, I had explained the use of an exciting technology
+called &lsquo;Real Time Application Interface&rsquo; (RTAI) which
+converts GNU/Linux into a hard real-time OS capable of doing
+complex timing-sensitive control operations. The trouble with the
+&lsquo;classical&rsquo; RTAI approach was that timing sensitive
+code had to be written as modules and loaded into the kernel. The
+more &lsquo;modern&rsquo; way of doing things is to use a component
+of RTAI called LXRT and code real-time tasks as ordinary POSIX
+threads.</p>
+
+<h3>Setting up RTAI/LXRT</h3>
+
+<p>RTAI/LXRT is composed of the following:</p>
+
+<ul>
+<li>A kernel patch which does some low level magic to convert your
+Linux kernel to a &lsquo;real time OS&rsquo;.</li>
+
+<li>A set of kernel modules which implement functionality like
+intertask communication.</li>
+
+<li>A library which gets linked with your application code and
+helps to convert it into a real-time application.</li>
+</ul>
+
+<p>Here are the steps required to get RTAI/LXRT running on your
+machine:</p>
+
+<ol>
+<li>Download a a &lsquo;plain&rsquo; Linux kernel (from kernel.org)
+- I used linux-2.6.10.</li>
+
+<li>Download rtai-3.2-test3 from <a href=
+"http://www.aero.polimi.it/~rtai/">here</a></li>
+
+<li>When you untar the RTAI source package, you will see several
+patches under the <code>base/arch/i386/patches</code> directory.
+Apply the proper patch to your newly downloaded Linux kernel
+(hal-linux-2.6.10-i386-r9.patch, in case you are using Linux
+2.6.10). The patch should apply cleanly.</li>
+
+<li>Configure and compile the kernel. When you configure the
+kernel, make sure that module versioning support is disabled. The
+experimental &lsquo;pass parameters in registers&rsquo; feature
+should also be disabled. You can verify both by reading your
+.config file (after you have done <code>make menuconfig</code>)
+which should contain the lines:
+
+<pre>
+
+# CONFIG_REGPARM is not set
+# CONFIG_MODVERSIONS is not set
+
+</pre></li>
+
+<li>Configure and compile rtai-3.2-test3. The configuration and
+compilation process is fairly simple - you just have to do:
+
+<pre>
+
+make menuconfig; make; make install
+
+</pre>
+When you run <code>make menuconfig</code>, you will be asked to
+provide the full path to the RTAI-patched Linux kernel source tree.
+During <code>make install</code>, a few directories will be created
+under /usr/realtime/ - the header files, libraries and kernel
+modules required to do RTAI/LXRT development will be found under
+these directories.</li>
+
+<li>Reboot with the newly compiled kernel. Go to the
+<code>/usr/realtime/modules</code> directory and try to insert the
+modules rtai_hal.ko and rtai_lxrt.ko:
+
+<pre>
+
+cd /usr/realtime/modules/
+insmod ./rtai_hal.ko
+insmod ./rtai_lxrt.ko
+
+</pre>
+The modules should load cleanly. Check the output of the program
+<code>dmesg</code> if there is any problem.</li>
+</ol>
+
+<h3>Blinking LEDs</h3>
+
+<p>The traditional &lsquo;hello world&rsquo; program of the
+hardware enthusiast is a simple LED blinker. Let's code it as an
+RTAI/LXRT application:</p>
+
+<p>[Download <a href="misc/pramode/listing1.txt">Listing 1</a>]</p>
+
+<pre class="code">
+
+/* led1.c, an LXRT LED blinker */
+
+#include &lt;pthread.h&gt;
+#include &lt;rtai_lxrt.h&gt;
+#include &lt;sys/mman.h&gt;
+#include &lt;sys/io.h&gt;
+
+// delay in nanoseconds
+#define TICKS 500000000 
+
+main()
+{
+        RT_TASK *task;
+        int priority = 0, i;
+        int stack_size = 4096;
+        int msg_size = 0; // use default
+
+        // get enough privilege to 
+        // access the I/O ports.
+
+        iopl(3);
+
+        task = rt_task_init(nam2num("main"), 
+                        priority, stack_size, msg_size);
+        if(task == 0) exit(1);
+        rt_set_oneshot_mode();
+        start_rt_timer(0);
+        mlockall(MCL_CURRENT|MCL_FUTURE);
+        rt_make_hard_real_time();
+
+        for(i = 0; i &lt; 10; i++) {
+                outb(0xff, 0x378);
+                rt_sleep(nano2count(TICKS));
+                outb(0x0, 0x378);
+                rt_sleep(nano2count(TICKS));
+        }
+        // back to non-rt land!
+        rt_make_soft_real_time();
+        stop_rt_timer();
+        rt_task_delete(task);
+        return 0;
+}
+
+</pre>
+
+<p>The <code>rt_task_init</code> function registers our program
+with the RTAI/LXRT kernel subsystem - the return value is a
+pointer. Each task should have a name associated with it - we have
+assigned the name <code>main</code> to our task.</p>
+
+<p>Timing delays in RTAI/LXRT are generated by using the hardware
+timer chip found on the motherboard. The timer is capable of
+generating interrupts and can run in two modes - periodic and one
+shot. When running in periodic mode, it keeps generating interrupts
+at a fixed rate (say once every 1 millisecond). If all the time
+delays required in your code can be expressed as multiples of a
+&lsquo;base&rsquo; period (say 1 millisecond), you can think of
+using the periodic mode. In the &lsquo;one-shot&rsquo; mode, the
+timer will generate just one interrupt at a time after a certain
+delay. This mode provides more flexibility as the timer can be
+reprogrammed repeatedly to fire at differing intervals.</p>
+
+<p>The <code>mlockall</code> function is called to disable paging
+of program memory - paging might result in the program being
+transferred to persistent swap store medium thereby affecting its
+real-time behavior.</p>
+
+<p>The <code>rt_make_hard_real_time</code> function transfers
+control of our application to the RTAI/LXRT realtime scheduler. The
+effect of this transition is that our code will never get disturbed
+by normal Linux processes or activities going within the Linux
+kernel. Note that once the program becomes &lsquo;hard real
+time&rsquo;, it should never invoke Linux system calls - doing so
+will result in the task becoming non real-time.</p>
+
+<p>The <code>nano2count</code> function converts time specified in
+nanoseconds to some &lsquo;internal count units&rsquo; specific to
+RTAI/LXRT. We have defined TICKS to be 500 milliseconds; so</p>
+
+<pre>
+
+rt_sleep(nano2count(TICKS))
+
+</pre>
+will suspend our task for half a second. If we run the code with an
+LED connected to an output pin (pins 2 to 9) of the parallel port,
+we will see it blinking on and off ten times.
+
+<p>The program should be compiled like this:</p>
+
+<pre>
+
+cc led1.c -I/usr/realtime/include -L/usr/realtime/lib -lpthread -llxrt
+
+</pre>
+Before running the code, make sure to edit your /etc/ld.so.conf
+file so that it contains the path to the directory containing the
+LXRT library (say /usr/realtime/lib); the <code>ldconfig</code>
+command should also be executed.
+
+<h3>The LXRT stroboscope!</h3>
+
+<p>I enter the CMOS setup program of my Athlon64 machine and note
+that my CPU fan is running at a speed of about 3900 rotations per
+minute, or 65 rotations per second. The time for one rotation is
+therefore (1000000000/65) nanoseconds, or 15384615 nanoseconds. The
+idea is to blink an LED connected to pin number 2 of the parallel
+port at this frequency.</p>
+
+<pre>
+
+LED on + off time = 15384615 nanoseconds
+LED on time = 15384615/12 nanoseconds
+
+</pre>
+Out of the total period of 15384615 nanoseconds, the LED would stay
+on for (1/12)th of the period and would be off for the remaining
+time. The fan (and the white paper stuck onto one of the blades)
+will be visible only during this brief period; by the time the LED
+is on again, the blade with the paper will have returned back to
+its original position. Thus, we should be able to see an almost
+static image of the paper pasted onto the blade.
+
+<p>In practice, I had to continuously tweak the period to get an
+almost static image. This might be because the fan speed is not
+remaining constant and keeps on changing slightly.</p>
+
+<p>The code I had written is shown below:</p>
+
+<p>[Download <a href="misc/pramode/listing2.txt">Listing 2</a>]</p>
+
+<pre class="code">
+
+#include &lt;pthread.h&gt;
+#include &lt;rtai_lxrt.h&gt;
+#include &lt;sys/mman.h&gt;
+#include &lt;sys/io.h&gt;
+
+#define ONE_ROTATION   15384615
+
+volatile int stop = 0;
+unsigned int on_time, off_time; 
+
+void* led_task(void *arg)
+{
+        RT_TASK *task;
+        int priority = 0, i;
+        int stack_size = 4096;
+        int msg_size = 0;
+
+        printf("LED started ...\n");
+
+        task = rt_task_init(nam2num("led"), 
+                        priority, stack_size, msg_size);
+        if(task == 0) exit(1);
+        mlockall(MCL_CURRENT|MCL_FUTURE);
+        rt_make_hard_real_time();
+
+        while(!stop) {
+                outb(0xff, 0x378);
+                rt_sleep(nano2count(on_time));
+                outb(0x0, 0x378);
+                rt_sleep(nano2count(off_time));
+        }
+        rt_make_soft_real_time();
+        rt_task_delete(task);
+        return 0;
+}
+
+main()
+{
+        RT_TASK *task;
+        int priority = 10, i;
+        int stack_size = 4096;
+        int msg_size = 0;
+        pthread_t t1;
+
+        on_time = ONE_ROTATION/12;
+        off_time = ONE_ROTATION - on_time;
+
+        task = rt_task_init(nam2num("main"), 
+                        priority, stack_size, msg_size);
+        if(task == 0) exit(1);
+        rt_set_oneshot_mode();
+        start_rt_timer(0);
+        
+        pthread_create(&amp;t1, 0, led_task, 0);
+        getchar();
+        stop = 1;
+        pthread_join(t1, 0);
+        stop_rt_timer();
+        rt_task_delete(task);
+        return 0;
+}
+
+</pre>
+Note that the main thread is spawning a new thread which calls
+<code>rt_make_hard_real_time</code> - this is the real-time LED
+flasher. The main thread remains non real-time because it has to
+interact with Linux (the <code>getchar</code> function will call
+the <code>read</code> system call). This is typical of LXRT code;
+one or more non real-time threads will do all the Linux-interaction
+part and the hard real-time threads will do some hardware
+manipulations without invoking any system calls.
+
+<h3>Conclusion</h3>
+
+<p>As I mentioned in the beginning, do this experiment at night,
+preferably near around midnight! Whether you see the stroboscopic
+effect or not, your friends (or family members) who might catch you
+in action staring at the open motherboard of the machine in pitch
+darkness with an LED light in your hands are sure to get a very
+favorable impression about your general geek qualities!</p>
+
+<p>If you have trouble compiling your RTAI patched Linux kernel, 
+<!-- 20050508 dsrich Moved config.txt to local directory, changed link. -->
+you might try using my <a href="misc/pramode/config.txt">.config
+file</a> (Linux 2.6.10, patched with the corresponding RTAI patch.)
+You should modify the CPU type to match your computer before
+compilation.</p>
+
+<p>You can learn more about RTAI/LXRT by reading the paper <a href=
+"http://people.mech.kuleuven.ac.be/~psoetens/portingtolxrt.html">Porting
+your C++ GNU/Linux application to RTAI/LXRT</a>. The <a href=
+"http://www.fdn.fr/~brouchou/rtai/rtai-doc-prj/doxyapi/lxrt_faq.html">
+LXRT-Informed FAQ</a> is good reading too. The <a href=
+"http://en.wikipedia.org/wiki/Strobe_light">wikipedia entry on
+strobe light</a> links the phenomenon to &lsquo;aliasing&rsquo;
+which is common in digital signal processing.</p>
+
+<p>As we are not dealing with sub-millisecond time periods here,
+the usual Linux delay mechanisms (based on the system clock running
+at 1KHz on the 2.6 kernel) should be sufficient for this
+experiment. Doing so is left as an exercise to the reader!</p>
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<P>
+<img ALIGN="LEFT" ALT="[BIO]" SRC="../gx/2002/note.png" class="bio">
+<em>
+I am an instructor working for IC Software in Kerala, India. I would have loved
+becoming an organic chemist, but I do the second best thing possible, which is
+play with Linux and teach programming!
+</em>
+<br CLEAR="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2005, Pramode C.E.. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 114 of Linux Gazette, May 2005
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="okopnik.html" >&lt;-- prev</A> | <A HREF="collinge.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">May 2005 (#114)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/2003/sit3-shine.7-2.gif" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

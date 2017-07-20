@@ -1,0 +1,313 @@
+diff -Naur nethack-3.4.3/dat/Tourist.des nethackdib-3.4.3/dat/Tourist.des
+--- nethack-3.4.3/dat/Tourist.des       Mon Dec  8 12:39:12 2003
++++ nethackdib-3.4.3/dat/Tourist.des    Sat Feb 14 16:44:06 2004
+@@ -173,12 +173,12 @@
+ REGION:(53,11,59,14),lit,"zoo"
+ REGION:(63,14,72,16),lit,"barracks"
+ REGION:(32,14,40,16),lit,"temple"
++REGION:(53,01,58,02),lit,"food shop"
+ #
+ REGION:(06,01,11,02),random,"ordinary"
+ REGION:(24,01,29,02),random,"ordinary"
+ REGION:(31,01,36,02),random,"ordinary"
+ REGION:(42,01,45,03),random,"ordinary"
+-REGION:(53,01,58,02),random,"ordinary"
+ REGION:(24,04,26,05),random,"ordinary"
+ REGION:(30,06,34,07),random,"ordinary"
+ REGION:(73,05,74,05),unlit,"ordinary"
+@@ -259,6 +259,17 @@
+ # Toilet paper
+ OBJECT:'?',"blank paper",(71,12)
+ OBJECT:'?',"blank paper",(71,12)
++# Dibbler's main fare 
++OBJECT:'%',"sausage-inna-bun",(58,02),random,0
++OBJECT:'%',"sausage-inna-bun",(58,02),random,0
++OBJECT:'%',"sausage-inna-bun",(53,02),random,0
++OBJECT:'%',"sausage-inna-bun",(53,02),random,0
++CONTAINER:'(',"ice box",(54,02)
++# Rat! Rat-onna-stick!
++OBJECT:'%',"corpse",contained,cursed,"sewer rat",0
++OBJECT:'%',"corpse",contained,cursed,"sewer rat",0
++OBJECT:'%',"corpse",contained,cursed,"rabid rat",0
++OBJECT:'%',"corpse",contained,cursed,"giant rat",0
+ # Random traps
+ TRAP:random,random
+ TRAP:random,random
+diff -Naur nethack-3.4.3/dat/data.base nethackdib-3.4.3/dat/data.base
+--- nethack-3.4.3/dat/data.base Mon Dec  8 12:39:13 2003
++++ nethackdib-3.4.3/dat/data.base      Sat Feb 14 16:35:39 2004
+@@ -3480,6 +3480,20 @@
+        a Sasquatch -- not Burns's giant Indian, but the hairy apelike
+        creature that we have all come to know.
+                [ The Encyclopedia of Monsters, by Daniel Cohen ]
++sausage*bun
++dibbler
++       Victor eyed the glistening tubes in the tray around Dibbler's
++       neck. They smelled appetizing. They always did. And then you
++       bit into them, and learned once again that Cut-me-own-Throat
++       Dibbler could find a use for bits of an animal that the animal
++       didn't know it had got. Dibbler had worked out that with enough
++       fried onions and mustard people would eat anything.
++
++       [...]
++
++       "The thing is that Mr. Dibbler can even sell sausages to people
++       who have bought them off him *before*."
++               [Moving Pictures, Terry Pratchett]
+ *sceptre of might
+        This mace was created aeons ago in some unknown cave,
+        and has been passed down from generation to generation of
+diff -Naur nethack-3.4.3/include/config.h nethackdib-3.4.3/include/config.h
+--- nethack-3.4.3/include/config.h      Mon Dec  8 12:39:13 2003
++++ nethackdib-3.4.3/include/config.h   Sat Feb 14 16:40:39 2004
+@@ -325,6 +325,7 @@
+ #define SEDUCE         /* Succubi/incubi seduction, by KAA, suggested by IM */
+ #define STEED          /* Riding steeds */
+ #define TOURIST                /* Tourist players with cameras and Hawaiian shirts */
++#define DIBBLER                /* CMOT Dibbler and his sausages-inna-bun - DJC */
+ /* difficulty */
+ #define ELBERETH       /* Engraving the E-word repels monsters */
+ /* I/O */
+diff -Naur nethack-3.4.3/src/eat.c nethackdib-3.4.3/src/eat.c
+--- nethack-3.4.3/src/eat.c     Mon Dec  8 12:39:13 2003
++++ nethackdib-3.4.3/src/eat.c  Mon Feb 16 12:56:28 2004
+@@ -1407,6 +1407,10 @@
+            case MEAT_RING:
+                goto give_feedback;
+             /* break; */
++#ifdef DIBBLER
++           case SAUSAGE_INNA_BUN:
++               break;
++#endif
+            case CLOVE_OF_GARLIC:
+                if (is_undead(youmonst.data)) {
+                        make_vomiting((long)rn1(victual.reqtime, 5), FALSE);
+@@ -1711,6 +1715,66 @@
+                }
+                if(!otmp->cursed) heal_legs();
+                break;
++ifdef DIBBLER
++               case SAUSAGE_INNA_BUN:
++               {
++               exercise(A_WIS, FALSE); /* eating Dibbler's food isn't wise */
++               roll = d(5 + bcsign(otmp), 2);
++               switch(roll);
++
++               case 12:
++                   /* gain poison resistance */
++                   pline("That was surprisingly tasty!");
++                   if(!(HPoison_resistance & FROMOUTSIDE)) {
++                       You_feel(Poison_resistance ?
++                            "especially healthy." : "healthy.");
++                       HPoison_resistance |= FROMOUTSIDE;
++                   }
++                   break;
++               case 11:
++               case 10:
++                   {
++                   /* Dibbler's sausages are a unique experience... */
++                   pline("That's an experience you won't forget in a hurry.");
++                   more_experienced(1,0);
++                   newexplevel();
++                   }
++                   break;
++               case 9:
++               case 8:
++                   /* base case - no effect */
++                   pline("For some reason, you feel like another...");
++                   break;
++               case 7:
++               case 6:
++                   {
++                   /* makes you vomit */
++                   Your("%s churns...", body_part(STOMACH));
++                   make_vomiting(Vomiting+d(10,4), TRUE);
++                   }
++                   break;
++               case 5:
++               case 4:
++                   /* food poisoning */
++                   pline("Now that's a sausage you won't live to regret.");
++                   if (Sick_resistance) {
++                       pline("Needs mustard.");
++                   } else {
++                       char buf[BUFSZ];
++                           long sick_time;
++                           sick_time = (long) rn1(10, 10);
++                           if (Sick && (sick_time > Sick))
++                               sick_time = (Sick > 1L) ? Sick - 1L : 1L;
++                       Sprintf(buf, "one of Mr. Dibbler's sausages")
++                       make_sick(sick_time, buf, TRUE, SICK_VOMITABLE);
++                   }
++                   return(2);
++                   break;
++               default:
++               impossible("bad sausage roll %d", roll);
++               }
++               break;
++#endif
+            case EGG:
+                if (touch_petrifies(&mons[otmp->corpsenm])) {
+                    if (!Stone_resistance &&
+@@ -1817,6 +1881,14 @@
+                if (yn_function(buf,ynchars,'n')=='n') return 1;
+                else return 2;
+        }
++#ifdef DIBBLER
++       if otmp->otyp == SAUSAGE_INNA_BUN {
++               Sprintf(buf, "%s rather suspicious. %s",
++                       foodsmell, eat_it_anyway);
++               if (yn_function(buf,ynchars,'n')=='n') return 1;
++               else return 2;
++       }
++#endif
+        if (cadaver && acidic(&mons[mnum]) && !Acid_resistance) {
+                Sprintf(buf, "%s rather acidic. %s",
+                        foodsmell, eat_it_anyway);
+diff -Naur nethack-3.4.3/src/mkobj.c nethackdib-3.4.3/src/mkobj.c
+--- nethack-3.4.3/src/mkobj.c   Mon Dec  8 12:39:13 2003
++++ nethackdib-3.4.3/src/mkobj.c        Sat Feb 14 16:24:08 2004
+@@ -443,6 +443,12 @@
+                }
+                blessorcurse(otmp, 10);
+                break;
++#ifdef DIBBLER
++           case SAUSAGE_INNA_BUN:
++               if !rn2(10) otmp->blessed = 1;
++               else if rn2(3) otmp->cursed = 1;
++               break;
++#endif
+            case SLIME_MOLD:
+                otmp->spe = current_fruit;
+                break;
+diff -Naur nethack-3.4.3/src/objects.c nethackdib-3.4.3/src/objects.c
+--- nethack-3.4.3/src/objects.c Mon Dec  8 12:39:13 2003
++++ nethackdib-3.4.3/src/objects.c      Sat Feb 14 22:23:01 2004
+@@ -681,7 +681,12 @@
+ /* meatballs/sticks/rings are only created from objects via stone to flesh */
+ 
+ /* meat */
++#ifdef DIBBLER
++FOOD("tripe ration",       135, 2, 10, 0, FLESH, 200, CLR_BROWN),
++FOOD("sausage-inna-bun",     5, 1,  5, 0, FLESH,  80, CLR_BROWN),
++#else
+ FOOD("tripe ration",       140, 2, 10, 0, FLESH, 200, CLR_BROWN),
++#endif
+ FOOD("corpse",               0, 1,  0, 0, FLESH,   0, CLR_BROWN),
+ FOOD("egg",                 85, 1,  1, 1, FLESH,  80, CLR_WHITE),
+ FOOD("meatball",             0, 1,  1, 0, FLESH,   5, CLR_BROWN),
+diff -Naur nethack-3.4.3/src/objnam.c nethackdib-3.4.3/src/objnam.c
+--- nethack-3.4.3/src/objnam.c  Mon Dec  8 12:39:13 2003
++++ nethackdib-3.4.3/src/objnam.c       Wed Feb 11 13:57:17 2004
+@@ -1302,6 +1302,8 @@
+                                || !strncmp(spot, " from ", 6)
+                                || !strncmp(spot, " in ", 4)
+                                || !strncmp(spot, " on ", 4)
++                               || !strncmp(spot, "-inna-", 6)
++                               || !strncmp(spot, "-onna-", 6)
+                                || !strncmp(spot, " a la ", 6)
+                                || !strncmp(spot, " with", 5)   /* " with "? */
+                                || !strncmp(spot, " de ", 4)
+@@ -1735,6 +1737,9 @@
+        { "kelp", KELP_FROND },
+        { "eucalyptus", EUCALYPTUS_LEAF },
+        { "grapple", GRAPPLING_HOOK },
++#ifdef DIBBLER
++       {"sausage in a bun", SAUSAGE_INNA_BUN},
++#endif
+        { (const char *)0, 0 },
+ };
+ 
+diff -Naur nethack-3.4.3/src/shk.c nethackdib-3.4.3/src/shk.c
+--- nethack-3.4.3/src/shk.c     Mon Dec  8 12:39:13 2003
++++ nethackdib-3.4.3/src/shk.c  Mon Feb 16 11:43:21 2004
+@@ -2281,6 +2281,8 @@
+                obj->quan = 1L; /* fool xname() into giving singular */
+                pline("%s; only %ld %s %s.\"", buf, ltmp,
+                        (quan > 1L) ? "per" : "for this", xname(obj));
++               if (!rn2(3) && strcmp(shkname(shkp), "Dibbler") == 0)
++                       pline("And that's cutting me own throat.");
+                obj->quan = quan;
+            } else
+                pline("%s will cost you %ld %s%s.",
+@@ -3698,6 +3700,8 @@
+        if (choice == 0) choice = (cost < 100L ? 1 : cost < 500L ? 2 : 3);
+        switch (choice) {
+            case 4:
++               if (strcmp(shkname(shkp), "Dibbler") == 0)
++                       return ", and that's cutting me own throat.";
+                if (cost < 10L) break; else o = itm->oclass;
+                if (o == FOOD_CLASS) return ", gourmets' delight!";
+                if (objects[itm->otyp].oc_name_known
+diff -Naur nethack-3.4.3/src/shknam.c nethackdib-3.4.3/src/shknam.c
+--- nethack-3.4.3/src/shknam.c  Mon Dec  8 12:39:13 2003
++++ nethackdib-3.4.3/src/shknam.c       Sat Feb 14 16:28:33 2004
+@@ -286,6 +286,13 @@
+            /* special-case minetown lighting shk */
+            shname = "Izchak";
+            shk->female = FALSE;
++#ifdef TOURIST
++       } else
++       if (nlp == shkfoods && Is_qlocate(&u.uz) && Role_if(PM_TOURIST)) {
++               /* Cut-Me-Own-Throat Dibbler - on Tourist Quest */
++               shname = "Dibbler";
++               shk->female = FALSE;
++#endif
+        } else {
+            /* We want variation from game to game, without needing the save
+               and restore support which would be necessary for randomization;
+diff -Naur nethack-3.4.3/util/makedefs.c nethackdib-3.4.3/util/makedefs.c
+--- nethack-3.4.3/util/makedefs.c       Mon Dec  8 12:39:13 2003
++++ nethackdib-3.4.3/util/makedefs.c    Sat Feb 14 16:41:46 2004
+@@ -705,6 +705,9 @@
+ #ifdef STEED
+                "saddles and riding",
+ #endif
++#ifdef DIBBLER
++               "sausages-inna-bun",
++#endif
+ #ifdef SCORE_ON_BOTL
+                "score on status line",
+ #endif
+diff -Naur nethack-3.4.3/win/share/objects.txt nethackdib-3.4.3/win/share/objects.txt
+--- nethack-3.4.3/win/share/objects.txt Mon Dec  8 12:39:14 2003
++++ nethackdib-3.4.3/win/share/objects.txt      Sat Feb 14 16:37:55 2004
+@@ -4612,6 +4612,25 @@
+   MMMMMMMMMMMMMMMM
+   MMMMMMMMMMMMMMMM
+ }
++# tile 435 (sausage-inna-bun)
++{
++  MMMMMMMMMMMMMMMM
++  MMMMMMMMMMMMMMMM
++  MMMMMMMMMMMMMMMM
++  MMMMMMMMMMJCDMMM
++  MMMMMMMMMJCDJAMM
++  MMMMMMMMJLDJAMMM
++  MMMMMMJDLKJAMMMM
++  MMMMMJLCKJAMMMMM
++  MMMMJLCKJAMMMMMM
++  MMMJLLKJAMMMMMMM
++  MMJDCKJAMMMMMMMM
++  MMMCKJAMMMMMMMMM
++  MMMMJAMMMMMMMMMM
++  MMMMMMMMMMMMMMMM
++  MMMMMMMMMMMMMMMM
++  MMMMMMMMMMMMMMMM
++}
+ # tile 242 (corpse)
+ {
+   MMMMMMMMMMMMMMMM
+diff -Naur nethack-3.4.3/win/share/tilemap.c nethackdib-3.4.3/win/share/tilemap.c
+--- nethack-3.4.3/win/share/tilemap.c   Mon Dec  8 12:39:14 2003
++++ nethackdib-3.4.3/win/share/tilemap.c        Sat Feb 14 16:39:10 2004
+@@ -83,6 +83,9 @@
+ #ifndef STEED
+        { OBJ_GLYPH, TOWEL, "saddle" },
+ #endif
++#ifndef DIBBLER
++       { OBJ_GLYPH, TRIPE_RATION, "sausage-inna-bun" },
++#endif
+        /* allow slime mold to look like slice of pizza, since we
+         * don't know what a slime mold should look like when renamed anyway
+         */

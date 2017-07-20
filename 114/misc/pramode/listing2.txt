@@ -1,0 +1,65 @@
+#include <pthread.h>
+#include <rtai_lxrt.h>
+#include <sys/mman.h>
+#include <sys/io.h>
+
+//#define ONE_ROTATION 15151515
+//#define ONE_ROTATION 13333333
+//#define ONE_ROTATION   14285714
+//#define ONE_ROTATION   14705882
+#define ONE_ROTATION   15384615
+
+volatile int stop = 0;
+unsigned int on_time, off_time; 
+
+void* led_task(void *arg)
+{
+	RT_TASK *task;
+	int priority = 0, i;
+	int stack_size = 4096;
+	int msg_size = 0;
+
+	printf("LED started ...\n");
+
+	task = rt_task_init(nam2num("led"), 
+			priority, stack_size, msg_size);
+	if(task == 0) exit(1);
+	mlockall(MCL_CURRENT|MCL_FUTURE);
+	rt_make_hard_real_time();
+
+	while(!stop) {
+		outb(0xff, 0x378);
+		rt_sleep(nano2count(on_time));
+		outb(0x0, 0x378);
+		rt_sleep(nano2count(off_time));
+	}
+	rt_make_soft_real_time();
+	rt_task_delete(task);
+	return 0;
+}
+
+main()
+{
+	RT_TASK *task;
+	int priority = 10, i;
+	int stack_size = 4096;
+	int msg_size = 0;
+	pthread_t t1;
+
+	on_time = ONE_ROTATION/12;
+	off_time = ONE_ROTATION - on_time;
+
+	task = rt_task_init(nam2num("main"), 
+			priority, stack_size, msg_size);
+	if(task == 0) exit(1);
+	rt_set_oneshot_mode();
+	start_rt_timer(0);
+	
+	pthread_create(&t1, 0, led_task, 0);
+	getchar();
+	stop = 1;
+	pthread_join(t1, 0);
+	stop_rt_timer();
+	rt_task_delete(task);
+	return 0;
+}

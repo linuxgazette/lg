@@ -1,0 +1,703 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Custom OpenLDAP Schemas LG #130</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="orr.html" >&lt;-- prev</A> | <A HREF="ruecker.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Custom OpenLDAP Schemas</h1>
+<p id="by"><b>By <A HREF="../authors/peterson.html">Ron Peterson</A></b></p>
+
+<h3>Editor's Note</h3>
+
+<p class="editorial">As Ron notes in his article, the adoption of
+LDAP has been rather slow despite its broad range of benefits; in
+my experience as a consultant, much of the problem stems from lack
+of general familiarity with the protocol, or even awareness of its
+existence. To be fair, today's endless alphabet soup of protocols
+is enough to bewilder and stump anyone - so it's unsurprising that
+something this useful can get lost in the noise. However, if you
+need an organization-wide authentication system, or a secure,
+highly-scalable "White Pages" service for your company - i.e., the
+ability to browse directories of structured shareable information
+(user names, contact info, e-mail addresses, security certificates,
+etc.) - then LDAP is custom-made for you, and Ron's introduction
+just might make your initial adaptation a bit easier. Enjoy.<br>
+-- Ben Okopnik</p>
+
+<hr>
+
+<h3>Introduction</h3>
+
+<p>For some reason, in spite of LDAP's ubiquity, many of us are
+still unfamiliar with all of its benefits. We have a Free LDAP
+server in OpenLDAP, and LDAP-enabled applications are everywhere;
+so what's the hang up? Among other things, the standard set of
+attribute types and object classes included in the default OpenLDAP
+schema files are maladapted to the requirements of many
+applications. Fortunately, you can easily create attribute types
+and object classes to fit your particular requirements, once you
+get the hang of it. This article will attempt to get you
+started.</p>
+
+<p>I'm going to organize this article around a practical example.
+Both Outlook Express and Mozilla Thunderbird can do address book
+look-ups against an LDAP database. The trick is to figure out what
+their respective LDAP look-ups expect to see when they perform
+their queries. Once we know that, we can construct our own custom
+LDAP object which will contain a set of attributes suitable for
+both applications.</p>
+
+<p>For the purpose of this article, I'm going to assume you have a
+basic grasp of how to configure and run OpenLDAP. If not, there are
+a number of <a href="#Res">resources</a>
+available to help you brush up.</p>
+
+<p>If you've never seen an OpenLDAP <a href=
+"http://www.openldap.org/doc/admin23/schema.html">schema file</a>,
+now would be a good time to take a look. They typically reside in a
+sub-directory called 'schema' within your OpenLDAP installation's
+configuration directory, e.g. /etc/ldap/schema. The schema file
+names typically end with a '.schema' extension. If you have any
+trouble finding them, try "locate" or "slocate":</p>
+
+<pre>
+slocate schema | grep schema$
+</pre>
+
+<p>This is also a handy way to discover schema files belonging to
+other packages on your system that you might not have known
+existed. Look around a bit, but before we start attempting to
+emulate the definitions in these files, we must deal with an
+important preliminary issue: we have to get our hands on some
+OIDs.</p>
+
+<h3>Object Identifiers (OIDs)</h3>
+
+<p>The LDAP <em>attributetype</em> and <em>objectclass</em>
+definitions you find in these schema files are each assigned a
+unique object identifier called an <a href=
+"http://www.alvestrand.no/objectid/index.html">OID</a>. OIDs look
+like decimal delimited sets of integers, e.g. 1.3.6.1 (which
+happens to be the Internet OID).</p>
+
+<p>There is a lot that can be said about OIDs, but for our current
+purposes, you must understand that you can't just use them
+willy-nilly. There are a small number of registration authorities
+responsible for allocating portions of the OID hierarchy. Hijacking
+someone else's OID space is very bad form at best. Improper use of
+the OID namespace could cause namespace collisions that break
+things.</p>
+
+<p>So then, the first hurdle we must deal with is getting our hands
+on a portion of the OID space that we can use. We have a couple of
+options:</p>
+
+<ul>
+<li>You might belong to an organization which has already
+registered a portion of the OID namespace. Work the proper channels
+to get your hands on a few.</li>
+
+<li><a href=
+"http://www.iana.org/cgi-bin/enterprise.pl">Register</a> for an
+<a href=
+"http://www.iana.org/assignments/enterprise-numbers">Enterprise
+OID</a> with <a href="http://www.iana.org/">IANA</a>. The IANA
+administered Enterprise OIDs fit into the OID hierarchy like this:
+
+<ul>
+<li>1 - ISO assigned OIDs</li>
+
+<li>1.3 - ISO Identified Organization</li>
+
+<li>1.3.6 - US Department of Defense</li>
+
+<li>1.3.6.1 - OID assignments from 1.3.6.1 - Internet</li>
+
+<li>1.3.6.1.4 - Private</li>
+
+<li>1.3.6.1.4.1 - IANA-registered Private Enterprises</li>
+</ul></li>
+</ul>
+
+<p>I have my own OID namespace registered under the name Yellowbank
+(the name of a creek on the farm where I grew up). Yellowbank has
+registered the following OID base with IANA: 1.3.6.1.4.1.25948.
+It's up to me to decide how to use the OID namespace hierarchy
+under this. I have elected to not use the 1.3.6.1.4.1.25948.1
+branch of my hierarchy (see the <em>yNonUnique</em> OID Macro
+below) for anything important, for example. That means that if you
+were to happen to reconnoiter the use of OIDs under
+1.3.6.1.4.1.25948.1, you would never run the risk of colliding with
+a production Yellowbank OID. Of course, the second you start
+thinking you might like to disseminate your work, or put it into
+production, you would of course immediately register for your own
+OID. I do <b>not</b> condone customizing any portion of the
+Yellowbank OID space for any production purpose whatsoever.
+Ahem.</p>
+
+<h3>Playing Detective</h3>
+
+<p>Now that we have our OID preliminaries out of the way, let's get
+to work. The first thing we need to do is to figure out exactly
+what our application expects from LDAP. How? Simple: watch
+OpenLDAP's log file. First, make sure your OpenLDAP installation is
+configured to log at a level sufficient to see the queries. The
+slapd.conf configuration directive is 'loglevel'. For the examples
+below, I have my loglevel set to 256. I also direct my syslog
+daemon to put my slapd log in it's own file, by adding the
+following directive to /etc/sysklogd.conf:</p>
+
+<pre>
+local4.*                /var/log/slapd.log
+</pre>
+
+<p>As the man page for slapd says, local4 corresponds to slapd's
+default logging facility. You may need to adjust this directive to
+match your installation.</p>
+
+<h4>Thunderbird</h4>
+
+<p>Let's configure Thunderbird to use our LDAP server for address
+book queries: start Thunderbird, open the address book (Menu:
+Tools/Address Book), and create a new LDAP directory (Menu:
+File/New/LDAP Directory). What you enter here depends on your local
+LDAP installation. It goes without saying, but I'll say it anyway,
+that you need to be authorized to query the Base DN that you enter.
+If you don't enter a Bind DN, then of course the Base DN will be
+queried anonymously. If none of this makes sense to you, you need
+to consult with your LDAP administrator. If none of this makes
+sense to you and you <i>are</i> the LDAP administrator, you should
+spend some quality time with some of the aforementioned LDAP
+resources.</p>
+
+<p>Once you've added your LDAP directory to Thunderbird's address
+book, we can query the database (Menu: Edit/Search Addresses).
+Create a query that includes every possible field, with a unique
+search string for each field (click the '+' symbol to add
+additional query conditions). I set up my query like this:</p>
+
+<pre class="code">
+Anyname | contains | MyAnyname
+Display Name | contains | MyDisplayName
+etc.
+</pre>
+
+<p>When you're all done, click the 'Search' button. We don't care
+so much about the results returned, as we do about what the slapd
+process logged. Open your log file in your favorite pager, so we
+can see what happened. On my system, my log looks like this
+(reformatted a bit to be browser friendly):</p>
+
+<pre class="code">
+Jun  9 11:08:12 ahostname slapd[13144]: conn=349441 op=1 SRCH
+base="ou=my,dc=base,dc=dn"
+scope=2 deref=0
+filter="(|(cn=*myanyname*)
+          (givenName=*myanyname*)
+          (sn=*myanyname*)
+          (?=undefined)
+          (?=undefined)
+          (cn=*mydisplayname*)
+          (?=undefined)
+          (?=undefined)
+          (mail=*myemail*)
+          (?=undefined)
+          (homePhone=*MyAnyNumber*)
+          (telephoneNumber=*MyAnyNumber*)
+          (?=undefined)
+          (pager=*MyAnyNumber*)
+          (mobile=*MyAnyNumber*)
+          (telephoneNumber=*MyWorkPhone*)
+          (homePhone=*MyHomePhone*)
+          (?=undefined)
+          (pager=*MyPager*)
+          (mobile=*MyMobile*)
+          (l=*mycity*)
+          (street=*mystreet*)
+          (title=*mytitle*)
+          (?=undefined)
+          (?=undefined))
+"Jun  9 11:08:12 ahostname slapd[13144]: conn=349441 op=1
+SRCH attr=company o title modifytimestamp mozillaCustom4 custom4
+mozillaHomeUrl homeurl mozillaCustom2 custom2 mozillaHomeCountryName
+department departmentnumber ou orgunit mobile cellphone carphone
+mozillaHomeState mozillaCustom1 custom1mozillaNickname xmozillanickname
+mozillaWorkUrl workurl fax facsimiletelephonenumber st region
+telephoneNumber mozillaHomeStreet mozillaSecondEmail xmozillasecondemail
+nsAIMid nscpaimscreenname street streetaddress postOfficeBox l locality
+homePhone description notes cn commonname givenName
+mozillaHomePostalCode mozillaHomeLocalityName mozillaCustom3 custom3
+mozillaWorkStreet2 mozillaUseHtmlMail xmozillausehtmlmail
+mozillaHomeStreet2 postalCode zip c countryname pager pagerphone mail sn
+surname birthyear
+</pre>
+
+<p>The slapd log clearly shows us what attributes Thunderbird wants
+to see returned. It also shows us which attributes correspond to
+the fields in the Thunderbird query form. For example, the value of
+the field labeled 'Any Name' in the query form is compared against
+the 'cn', 'givenName', and 'sn' attributes.</p>
+
+<h4>Outlook Express</h4>
+
+<p>Now we do the same thing for Outlook Express. First add the
+directory service (Menu: Tools/Accounts/Add/Directory Service).
+Again, you'll either need to be familiar with your LDAP setup, or
+consult with your LDAP administrator to ascertain the proper
+settings.</p>
+
+<p>To perform a query, open the Address Book, click 'Find People',
+and select your previously configured LDAP provider in the pull
+down menu. In the dialog that appears, click the advanced tab, and
+enter:</p>
+
+<pre class="code">
+Name contains MyName
+E-mail contains MyEmail
+First Name contains MyFirst
+Last Name contains MyLast
+Organization contains MyOrg
+</pre>
+
+<p>Again, search your log file to determine what attributes are
+requested, and to see how the filter expression corresponds to the
+search dialog.</p>
+
+<h4>Consolidated results</h4>
+
+<p>My fancy ASCII table below summarizes what I discovered. The
+leftmost column contains the intersection of the attributes that
+Outlook Express and Thunderbird requested. I took the liberty of
+doubling up attribute names like 'cn' and 'commonName' which mean
+the same thing. The other two columns indicate how the search
+dialogs map to those attributes. So we see that the 'E-mail' box in
+the Outlook Express search form is queried against the 'mail'
+attribute, for example.</p>
+
+<pre class="code">
+Common Attributes           | Outlook Express   | Thunderbird
+========================================================================
+c                           |                   |
+cn, commonName              | Name              |
+department                  |                   |
+facsimileTelephoneNumber    |                   |
+givenName                   | First Name        | Any Name
+homePhone                   |                   | Any Number, Home Phone
+l                           |                   | City
+mail                        | E-mail            | Email
+mobile                      |                   | Any Number, Mobile
+o                           | Organization      |
+ou                          |                   |
+pager                       |                   | Any Number, Pager
+postalCode                  |                   |
+sn, surname                 | Last Name         | Any Name
+st, street                  |                   | Street
+streetAddress               |                   |
+telephoneNumber             |                   | Any Number, Work Phone
+title                       |                   | Title
+</pre>
+
+<h3>Putting it all together</h3>
+
+<p>Wouldn't it be nice if our LDAP directory were populated by user
+objects that would make sense to both Outlook Express and
+Thunderbird? Well, we now have enough information to do that. It's
+time to put all the pieces together.</p>
+
+<h4>The LDAP Schema File</h4>
+
+<p>Your schema file can live anywhere your LDAP daemon can read it.
+Edit the LDAP daemon's configuration file. On my system, it's
+/etc/ldap/slapd.conf. The 'include' directives in this
+configuration file load the schema files used by your LDAP
+installation. These schema files typically reside in a
+sub-directory of your configuration directory. On my system, they
+are in in /etc/ldap/schema. We can put our new custom schema file
+anywhere the LDAP daemon can read it. For the sake of consistency,
+we'll put it in the same place as the rest of the schema files.
+Verify your installation's schema file location by reviewing your
+configuration file. Add an 'include' directive to your
+configuration file as below. Don't <tt>kill -SIGHUP</tt> your server until our new
+schema file is fleshed out, of course.</p>
+
+<pre>
+include         /etc/ldap/schema/yellowbank.sample.schema
+</pre>
+
+<p>While we're in the slapd.conf file, let's update our indices.
+Add indices on whatever attributes you think you might query
+frequently. Use the table above to assist you. Something like the
+following might suffice, perhaps.</p>
+
+<pre class="code">
+index objectClass           pres,eq
+index cn,sn,uid,memberUid   pres,eq,approx,sub
+index givenName,mail        pres,eq,approx,sub
+</pre>
+
+<p>You can add indices later too, of course. Just be aware that
+LDAP will <i>not</i> use new indices on an existing database until
+you use the the 'slapindex' command.</p>
+
+<p>Guess what? It's finally time to actually start editing our
+schema file! What follows is basically just a colloquial summary of
+the <a href=
+"http://www.openldap.org/doc/admin23/schema.html">schema
+specification information</a> available in the OpenLDAP Software
+Administrator's Guide. The examples I give will be a partial
+representation of what I have in my full 'yellowbank.schema'. You
+can use the examples as they are, if you like; or you can adapt
+them to your own OID space.</p>
+
+<p>We'll begin by fleshing out a rudimentary OID hierarchy, and
+giving these OIDs symbolic names, so that we don't have to remember
+really long strings of integers. This is not strictly necessary,
+you can use labels like 1.3.6.1.4.1.25948.4.2.1.1.2006.08.20.1 if
+you like, but I prefer names I can recognize. We'll do this using
+'OID Macros', like so:</p>
+
+<pre class="code">
+# OID Macros
+#
+# Yellowbank's IANA Assigned OID
+objectIdentifier  yOID                        1.3.6.1.4.1.25948
+#
+objectIdentifier  yNonUnique                  yOID:1
+objectIdentifier  yPedagogy                   yOID:2
+objectIdentifier  yProduction                 yOID:3
+#
+# Note that OID's are used for more than just LDAP.
+objectIdentifier  ypSNMP                      yPedagogy:1
+objectIdentifier  ypLDAP                      yPedagogy:2
+#
+objectIdentifier  ypAttributeType             ypLDAP:1
+objectIdentifier  ypObjectClass               ypLDAP:2
+#
+objectIdentifier  ypPersonAttribute           ypAttributeType:1
+objectIdentifier  ypAssetAttribute            ypAttributeType:2
+objectIdentifier  ypApplicationAttribute      ypAttributeType:3
+objectIdentifier  ypFacilityAttribute         ypAttributeType:4
+objectIdentifier  ypOrganizationAttribute     ypAttributeType:5
+#
+objectIdentifier  ypSakaiAttribute            ypApplicationAttribute:1
+#
+objectIdentifier  ypPersonObject              ypObjectClass:1
+</pre>
+
+<h4>A Custom Attribute Type</h4>
+
+<p>Both Thunderbird and Outlook Express would like to see an
+attribute called 'department' which, interestingly enough, is not
+included in any of OpenLDAP's standard schema files. So let's
+create it. Add the following to our new schema file after the OID
+Macro section.</p>
+
+<pre class="code">
+attributetype ( ypOrganizationAttribute:1.2006.08.20.1
+  NAME 'department'
+  DESC 'Department Name'
+  EQUALITY caseIgnoreMatch
+  SUBSTR caseIgnoreSubstringsMatch
+  ORDERING caseIgnoreOrderingMatch
+  SYNTAX 1.3.6.1.4.1.1466.115.121.1.15{128}
+  SINGLE-VALUE )
+</pre>
+
+<p>What do we see here? For starters, I'm appending a unique suffix
+to one of my defined OID Macros. There are no rules about how you
+create OIDs, but I've adopted the convention of appending a
+date.version to the unique integer string that identifies my
+attributeType. In other words, my 'department' attributetype is
+uniquely yOrganizationAttribute:1, and I follow this with a
+date.version string which corresponds to when I edited my
+definition. The main thing is that each OID must be unique, and
+that the OID string is created by appending a colon and an integer
+string suffix to our OID macro.</p>
+
+<p>The Backus-Naur Form (BNF) grammar for attributetype definitions
+can be found in the <a href=
+"http://www.openldap.org/doc/admin23/schema.html">appropriate
+section</a> of the OpenLDAP Manual. I'll briefly summarize the
+definition above. Hopefully 'NAME' and 'DESC' are fairly
+self-explanatory. The 'EQUALITY' line defines the matching rule
+used in equality comparisons (case and space insensitive). The
+'SUBSTR' line defines the matching rule used in substring matching
+(case and space insensitive). The 'ORDERING' lines defines the
+matching rule used in (you guessed it) ordering comparisons. The
+'SYNTAX' line delimits valid input, where the given OID means
+'Unicode string', and the {128} at the end limits input to 128
+characters. The 'SINGLE-VALUE' line means that there can only be
+one instance of this attribute in an object; in other words, this
+is not a multi-valued attribute. Attributes are multi-valued by
+default, so to create an attribute type which can contain multiple
+values, simply omit this line.</p>
+
+<h4>A Custom Object Class</h4>
+
+<p>Assuming our slapd.conf includes any other requisite schema
+files, which contain our other standard attribute type definitions,
+we can now define our own objectClass.</p>
+
+<pre class="code">
+objectclass ( ypPersonObject:1.2006.08.20.1
+  NAME 'ypContact'
+  DESC 'Yellowbank Contact'
+  SUP top
+  STRUCTURAL
+  MUST ( cn $ sn $ mail )
+  MAY ( c $ department $ facsimileTelephoneNumber $ givenName $
+        homePhone $ l $ mobile $ o $ ou $ pager $ postalCode $
+        st $ streetAddress $ telephoneNumber $ title $ description ) )
+</pre>
+
+<p>Again, we see that our definition begins by assigning a unique
+OID. Again, I hope that 'NAME' and 'DESC' are fairly
+self-explanatory. I'll defer discussion of the 'SUP' line until a
+bit later. The 'MUST' line indicates, as you might guess, the
+attributes which must be present in objects defined with this
+objectClass. The 'MAY' line describes optional attributes. Let's
+create one more objectClass.</p>
+
+<pre class="code">
+objectclass ( ypPersonObject:2.2006.08.20.1
+  NAME 'ypLoginAccount'
+  DESC 'Yellowbank Contact'
+  SUP ypContact
+  STRUCTURAL
+  MAY ( userPassword $ memberUid ) )
+</pre>
+
+<p>Notice that the 'SUP' line for this objectClass points to our
+previously defined objectClass. In other words, our ypLoginAccount
+objectClass extends our previous definition to include a couple of
+new attributes. We have defined a chain of inheritance that looks
+like this:</p>
+
+<pre>
+top &lt;- ypContact &lt;- ypLoginAccount
+</pre>
+
+<p>When we define objects, the objectClasses we use can only
+include one STRUCTURAL inheritance chain going back to 'top'. We
+can mix in other objectClasses as well, but only if they are
+defined as 'AUXILIARY'. The LDAP Manual includes the following
+objectClass definition, for example.</p>
+
+<pre class="code">
+objectclass ( 1.1.2.2.1
+  NAME 'myPhotoObject'
+  DESC 'mixin myPhoto'
+  AUXILIARY
+  MAY myPhoto )
+</pre>
+
+<p>I could define an object which uses myPhotoObject to supplement
+the attributes available to an object like this:</p>
+
+<pre class="code">
+dn: blah blah
+objectClass: top
+objectClass: ypLoginAccount
+objectClass: myPhotoObject
+cn: aname
+sn: lname
+...
+</pre>
+
+<p>But the following definition would give me trouble, because the
+ypLoginAccount and inetOrgPerson objectClasses are part of
+different STRUCTURAL inheritance chains.</p>
+
+<pre class="code">
+dn: blah blah
+objectClass: top
+objectClass: ypLoginAccount
+objectClass: inetOrgPerson
+cn: aname
+sn: lname
+...
+</pre>
+
+<p>The linuxlaboratory.org site has a nice <a href=
+"http://www.linuxlaboratory.org/index.php?title=Installing_an_OpenLDAP_server_-_Part_II">
+LDAP Article</a> which might provide additional illumination.</p>
+
+<h4>Try it out</h4>
+
+<p>Here's a snippet of LDIF you can use to try our new schema.</p>
+
+<pre class="code">
+dn: cn=wile,ou=someplace,ou=meaningful,dc=to,dc=you
+cn: wile
+userPassword: {SHA}Wfi6Kd1nmjpbtmzcFqCnvEqIPzs=
+givenName: Wile
+mail: wile.coyote@acme.com
+l: Los Lobos Hermanos
+o: ACME
+sn: Coyote
+description: Malnourished but dogged
+memberUid: coyote
+memberUid: mammal
+memberUid: emaciated
+objectClass: top
+objectClass: ypLoginAccount
+</pre>
+
+<p>Modify the dn as appropriate to your installation, and upload
+with your favorite incarnation of the ldapadd command - after
+reloading your slapd.conf file, of course, which will read in the
+new schema file. If all goes well, you can now query this user from
+either Outlook Express or Thunderbird, assuming you've taken care
+of all the configuration niceties.</p>
+
+<h3>Conclusion</h3>
+
+<p>I find knowing how to customize OpenLDAP indispensable. For
+example, I recently encountered an application vendor that
+considered their product "LDAP compliant" because it worked with
+one particular vendor's directory implementation. Although I tend
+to cynically attribute this kind of mischievous marketing
+malapropism to clever salesmanship, my world view may just be the
+simple result of ensconcing myself in an intellectually gated
+community. Who knows? In any case, it was a simple problem to
+remedy: I just used OpenLDAP to emulate the other directory
+implementation, thereby avoiding pointless additions to our
+infrastructure.</p>
+
+<p>May the new-found depth of your LDAP knowledge allow you to
+overcome all of life's adversities, get a big raise, and earn a
+well-deserved promotion.</p>
+
+<hr>
+<h3><a name="Res">Resources</a></h3>
+<a href=
+"http://www.oreillynet.com/pub/a/sysadmin/2006/07/27/demystifying-ldap.html">
+"Demystifying LDAP"</a>, by Brian K. Jones<br>
+Brad Marshall's <a href=
+"http://quark.humbug.org.au/publications/ldap/ldap_tut.html">"Introduction
+to LDAP"</a><br>
+<a href="http://www.openldap.org/doc/admin23/index.html">OpenLDAP
+Software 2.3 Administrator's Guide</a><br>
+<a href="http://www.oreilly.com/catalog/ldapsa/index.html">"LDAP
+System Administration"</a> By Gerald Carter
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:130/peterson.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<!-- *** BEGIN bio *** -->
+<hr>
+<p>
+<img align="left" alt="Bio picture" src="../gx/authors/peterson.jpg" class="bio">
+</p>
+<p>
+<em>
+
+Ron Peterson is a Network & Systems Manager at Mount Holyoke College in
+the happy hills of western Massachusetts. He enjoys lecturing his three
+small children about the maleficent influence of proprietary media
+codecs while they watch Homestar Runner cartoons together.
+
+</em>
+</p>
+<br clear="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2006, Ron Peterson. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 130 of Linux Gazette, September 2006
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="orr.html" >&lt;-- prev</A> | <A HREF="ruecker.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/mailman/listinfo/">Mailing Lists</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">September 2006 (#130)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

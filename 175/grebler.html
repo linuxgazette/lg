@@ -1,0 +1,850 @@
+<!DOCTYPE html
+	PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+	 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="utf-8" xml:lang="utf-8">
+<head>
+<title>Pixie Chronicles: Part 3 PXE boot LG #175</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link rel="stylesheet" href="../lg.css" type="text/css" media="screen, projection"  />
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="../lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="../lg.rdf" />
+<!-- link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" / -->
+<link rel="shortcut icon" href="../favicon.ico" />
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+</head>
+<body>
+
+<a href="../">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+<div id="navigation">
+<table summary="masthead" width="100%">
+<tr>
+<td align="center" colspan="3" style="font-size: 10px; font-weight: bold">
+<a href="../index.html">Home</a>
+<a href="http://linuxgazette.net">Main Site</a>
+<a href="../faq/index.html">FAQ</a>
+
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/listinfo.cgi">Mailing Lists</a>
+<a href="../jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+<hr width="99%" style="border: 1px inset #000033">
+</td>
+</tr>
+<tr>
+<td width="40%" align="left" style="font-size: 10px; font-weight: bold">
+The Free International Online Linux Monthly
+</td>
+<td width="20%" align="center" style="font-size: 10px; font-weight: bold">
+ISSN: 1934-371X
+</td>
+<td width="40%" align="right" style="font-size: 10px; font-weight: bold">
+Main site: <a href="http://linuxgazette.net">http://linuxgazette.net</a> 
+</td>
+</table>
+</div>
+
+
+<div id="breadcrumbs1">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">June 2010 (#175)</a> &gt; 
+Article
+
+</div>
+
+<div class="articlecontent1">
+<div class="content">
+
+<div id="previousnexttop">
+<A HREF="dyckoff1.html" >&lt;-- prev</A> | <A HREF="hoogland.html" >next --&gt;</A>
+</div>
+
+<h1>Pixie Chronicles: Part 3 PXE boot</h1>
+<p id="by"><b>By <a href="../authors/grebler.html">Henry Grebler</a></b></p>
+
+
+<h3>The Story So Far</h3>
+
+<p>
+In Part 1 I outlined my plans: to build a server using network
+install. However, I got sidetracked by problems. In Part 2 I made some
+progress and dealt with one of the problems. Now I'm going to detail
+what I did when I got it right.
+</p>
+
+<h3>Quick Overview</h3>
+
+<p>
+The task is to install Fedora 10 on a machine (the target
+machine) which will become a web and email server. I'm not going to
+use CDs; I'm going to install from a network. So, somewhere on the
+network, I need a machine to supply all the information normally
+supplied by CDs or a DVD.
+</p>
+
+<h3>How booting from a disk works</h3>
+
+<p>
+When a machine is (re)started, the BIOS takes control. Typically, a
+user configures the BIOS to try various devices in order (DVD/CD,
+Floppy, HDD). If there is no removable disk in any drive, the boot
+proceeds from the hard drive. The BIOS typically reads the first block
+from the hard drive into memory and executes the code it finds
+(typically GRUB). This leads to more reading and more executing.
+</p>
+
+<h3>How PXE works</h3>
+
+<p>
+When a machine using PXE is (re)started, it behaves like a DHCP
+client. It broadcasts a request on a NIC using the <A
+HREF="http://en.wikipedia.org/wiki/MAC_address">MAC address</A> (aka
+Ethernet address) of the NIC as an identifier.
+</p>
+
+<p>
+If the machine is recognised, the DHCP server sends a reply. For PXE,
+the reply contains the IP address and a file name (the PXE boot Linux
+kernel). The PXE client uses tftp to download the specified file into
+memory and execute it. This leads to more reading and more executing.
+</p>
+
+<h3>Get the software for the PXE server</h3>
+
+<p>
+You'll need <tt>tftp-server</tt>, DHCP, <tt>syslinux</tt>.
+</p>
+
+<p>
+I was already running <tt>dnsmasq</tt> as a DHCP server, so I didn't need to
+install anything. There are many packages which can act as DHCP
+servers. If you are already running DHCP software, you should be able
+to use that. 
+</p>
+
+<p>
+I didn't have tftp. Getting it on a Fedora machine is just:
+</p>
+
+<pre class="code">
+	yum install tftp-server
+</pre>
+
+<p>
+PXELINUX is part of the syslinux RPM (which came as part of my
+server's Fedora distribution), but it's also available on the
+installation images.
+</p>
+
+<h3>Configure DHCP</h3>
+
+<p>
+Since I was already running <tt>dnsmasq</tt> as a DHCP server, I just needed
+to add a couple of lines:
+</p>
+
+<pre class="code">
+	dhcp-host=00:D0:B7:4E:31:1B,b2,192.168.0.60
+	dhcp-boot=pxelinux.0
+</pre>
+
+<p>
+These lines say: if the host with MAC address
+<strong>00:D0:B7:4E:31:1B</strong> asks, tell him his hostname is
+<strong>b2</strong>, he should use IP address <strong>192.168.0.60</strong>
+and tell him to boot the file <strong>pxelinux.0</strong> (by
+implication, using <tt>tftp</tt>).
+</p>
+
+<pre>
+	NB I'm using a non-routable IP address from the subnet
+	<strong>192.168.0/24</strong> during the build of the server. Later,
+	I will configure different IP addresses in preparation
+	for using this server on a different subnet.
+</pre>
+
+<pre>
+	NB Although I can specify a hostname here, in this case it
+	acts merely as documentation because the install process will
+	require that the name be specified again.
+</pre>
+
+<p>
+	In other words, at this stage, these are interim values which
+	may or may not be the same as final values.
+</p>
+
+<p>
+Having made changes to the config file, I restart the DHCP server:
+</p>
+
+<pre class="code">
+	/etc/rc.d/init.d/dnsmasq restart
+</pre>
+
+<h3>Configure tftp</h3>
+
+<p>
+By default, <tt>tftp</tt>, which runs from <tt>xinetd</tt>, is
+turned off. Edit <strong>/etc/xinetd.d/tftp</strong>
+
+<pre class="code">
+	< disable = yes
+	---
+	> disable = no
+</pre>
+
+<p>
+Restart <tt>xinetd</tt>:
+</p>
+
+<pre class="code">
+	/etc/rc.d/init.d/xinetd restart
+</pre>
+
+<p>
+
+If you examine <strong>/etc/xinetd.d/tftp</strong>, you will see that
+the default configuration wants to serve <strong>/tftpboot</strong>. I
+don't like to have such directories on my root partition, so I created
+<strong>/tftpboot</strong> as a symlink pointing to the directory
+which contained the requisite data.
+</p>
+
+<pre class="code">
+	mkdir /Big/PXEBootServer/tftpboot
+	ln -s /Big/PXEBootServer/tftpboot /
+</pre>
+
+<p>
+Note that the use of a symlink keeps the path short. There are
+limits; and it means there is less to type.
+</p>
+
+<p>
+
+Either I wasn't thinking too clearly, or perhaps I was concerned that
+I might not be able to get the net install to work, because I
+downloaded 6 CD images instead of a single DVD. Knowing what I know
+now, if I had to do it over, I would download just the DVD image. (The
+old machine on which I want to install Fedora 10 only has a CD drive, not
+DVD.)
+</p>
+
+<h3>Populate /Big/PXEBootServer/tftpboot:</h3>
+
+<p>
+One of the CD images which comes with Fedora 10 is called
+<strong>Fedora-10-i386-netinst.iso</strong>; it has a copy of
+<strong>pxelinux.0</strong> and some other needed files.
+</p>
+
+<pre class="code">
+	mount -o loop -r /Big/downloads/Fedora-10-i386-netinst.iso /mnt2
+	cp /mnt2/isolinux/vmlinuz /mnt2/isolinux/initrd.img /tftpboot
+	cp /usr/lib/syslinux/pxelinux.0 /tftpboot
+</pre>
+
+<p>
+(Note: I could also have typed
+</p>
+
+<pre class="code">
+	cp /usr/lib/syslinux/pxelinux.0 /Big/PXEBootServer/tftpboot
+</pre>
+
+<p>
+but using the symlink saves typing.)
+</p>
+
+<h3>Configure pxelinux</h3>
+
+<pre class="code">
+	mkdir /tftpboot/pxelinux.cfg
+</pre>
+
+<p>
+What do we have so far?
+</p>
+
+<pre class="code">
+	ls -lA /tftpboot/.
+total 19316
+-rw-r--r-- 1 root root  17159894 Nov 20 11:50 initrd.img
+-rw-r--r-- 1 root root     13100 Feb  9  2006 pxelinux.0
+drwxrwxr-x 3 root staff     4096 Nov 27 15:42 pxelinux.cfg
+-rwxr-xr-x 1 root root   2567024 Nov 20 11:50 vmlinuz
+</pre>
+
+<pre class="code">
+	cd /tftpboot/pxelinux.cfg
+</pre>
+
+<p>
+Most of the documentation says to create (<tt>touch</tt>) a whole
+stack of files, but I prefer to make just two: one called
+<strong>default</strong> as a backstop, and one with a name like
+<strong>01-00-d0-b7-4e-31-1b</strong>. What is this?
+</p>
+
+<p>
+Get the MAC address of the NIC to be used. This is nowhere near as
+easy as it sounds. My PC has 2 NICs. Which is the one to use? It's
+probably the one that corresponds to <strong>eth0</strong>. I
+discovered which one was <strong>eth0</strong> by first booting into
+the Knoppix CD - a very good idea for all sorts of reasons (see Part
+2). Once booted into Knoppix, <strong>ifconfig eth0</strong> will give
+the MAC address. In my case it was <strong>00:40:05:58:81:2F</strong>.
+</p>
+
+<p>
+Now convert the colons to hyphens and upper- to lower-case:
+</p>
+
+<pre class="code">
+        echo 00:D0:B7:4E:31:1B | tr ':A-Z' '-a-z'
+00-d0-b7-4e-31-1b
+</pre>
+
+<p>
+The required filename is this string preceded by <strong>01-</strong> ie
+<strong>01-00-d0-b7-4e-31-1b</strong>.
+</p>
+
+<ul>
+<li>
+	NB Many documents disagree with me. They indicate that the
+	file name should be in upper-case. Possibly different PXE
+	clients operate in different ways, but my PXE client
+	explicitly looks for lower-case.
+</li>
+
+<li>
+	The <strong>01</strong> represents "ARP type 1" ie Ethernet.
+</li>
+
+<li>
+	See <strong>/usr/share/doc/syslinux-3.10/pxelinux.doc</strong>.
+</li>
+</ul>
+
+<p>
+I chose to be very specific. I figured if the net install is
+successful, I can use the same technique for other target machines. To
+achieve that, each machine would be distinguished by its MAC address.
+Consequently, I did not think it was a good idea to use
+<strong>default</strong> for a specific machine. Rather, I configured
+<strong>default</strong> to contain generic parameters to handle the
+possible case of an as yet unconfigured machine performing a PXE boot.
+<strong>default</strong> would also handle the case where I got the
+MAC address wrong (for example while I was trying to figure if the
+other file should be in upper-case or lower-case). Of course, the PXE
+boot would behave incorrectly, but at least it would show that there
+was some life in the system.
+</p>
+
+<p>
+Here are the contents of the <strong>/tftpboot/pxelinux.cfg/default</strong>:
+
+<pre>
+prompt 1
+default linux
+timeout 100
+
+label linux
+kernel vmlinuz
+append initrd=initrd.img ramdisk_size=9216 noapic acpi=off
+</pre>
+</p>
+
+<p>
+Readers familiar with GRUB or LILO will recognise this as a boot
+config file.
+</p>
+
+<p>
+<strong>default</strong> is a generic config file. I could use it for
+the installation, but I'd have to type a lot of extra args at
+<strong>boot: </strong> time, for example
+</p>
+
+<pre class="code">
+	boot: linux ks=nfs:192.168.0.3:/NFS/b2
+</pre>
+
+<p>
+To save typing and to provide me with documentation and an audit
+trail, I've tailored a config file specifically for my current server.
+And how better to tie it to the target machine than by the target
+machine's MAC address? (In the absence of user intervention, MAC
+addresses are unique.)
+</p>
+
+<p>
+<strong>/tftpboot/pxelinux.cfg/01-00-d0-b7-4e-31-1b</strong>:
+
+<pre>
+prompt 1
+default lhd
+timeout 100
+display help.txt
+f1 help.txt
+f2 help.txt
+f3 b2.cfg
+
+# Boot from local disk (lhd = local hard drive)
+
+label lhd
+localboot 0
+
+label linux
+kernel vmlinuz
+append initrd=initrd.img ramdisk_size=9216 noapic acpi=off
+
+label b2
+kernel vmlinuz
+append initrd=initrd.img ramdisk_size=9216 noapic acpi=off ksdevice=eth0 ks=nfs:192.168.0.3:/NFS/b2
+</pre>
+
+</p>
+
+<pre>
+        NB It may look ugly, but the <strong>append</strong> line must be a single
+        line. The kernel cannot handle any mechanism which attempts to
+        split the text over more than one line.
+</pre>
+
+<p>
+See <strong>/usr/share/doc/syslinux-3.10/syslinux.doc</strong> for
+info on the items in the config file.
+</p>
+
+<p>
+Please note that this is vastly different from the first file I used
+(the one that got me into trouble). By this stage, the config file has
+been refined to within an inch of its life.
+</p>
+
+<p>
+Here are the little wrinkles that make this config file so much
+better:
+</p>
+
+<pre>
+<strong>default lhd</strong>
+	tells the PXE client to use the entries under the label <strong>lhd</strong>
+	by default
+
+<strong>ksdevice=eth0</strong>
+	forces the install to use <strong>eth0</strong> and avoids having <tt>anaconda</tt> (the
+	Linux installer) ask the user which interface to use
+
+<strong>ks=nfs:192.168.0.3:/NFS/b2</strong>
+	tells <tt>anaconda</tt> where to find the kickstart file
+</pre>
+
+<p>
+When the target machine is started, the PXE client will eventually
+come to a prompt which says
+</p>
+
+<pre class="code">
+	boot:
+</pre>
+
+<p>
+If the user presses <tt>Enter</tt>, the machine will attempt to boot
+from the local hard drive. If the user does not respond within 10
+seconds (<strong>timeout 100</strong> has units of 1/10 of a second),
+the boot will continue with the default label (<strong>lhd</strong>).
+Alternatively, the user can enter <strong>linux</strong> (with or
+without arguments) for different behaviour. In truth, I used this
+label earlier in the development of this config file; I would lose
+little if I now removed this label.
+</p>
+
+<p>
+If the user presses function-key 1 or function-key 2 , help is
+displayed. If the user presses function-key 3, the actual boot config
+file is displayed (on the PXE server <strong>b2.cfg</strong> is just a
+symlink pointing to
+<strong>/tftpboot/pxelinux.cfg/01-00-d0-b7-4e-31-1b</strong>). I added
+the <strong>f3</strong> entry largely for debugging and understanding
+- there's nothing the user can do but choose menu options which are
+displayed by <strong><A HREF="#details">help.txt</A></strong>.
+</p>
+
+<p>
+This completes this part of the exercise. This is the point at which
+you can try out the PXE process.
+</p>
+
+<h3>Try it out</h3>
+
+<p>
+Machines differ and I daresay PXEs differ. I will describe how my
+machine behaves and what to expect.
+</p>
+
+<p> 
+When turned on, my machine, a Compaq Deskpro EP/SB Series,
+announces its own Ethernet (aka MAC) address and that it is trying
+DHCP. The MAC address indicates which NIC is being used. This machine
+will present this MAC address to the DHCP server, which hopefully will
+respond with the offer of an IP address. It is also used at PXE
+boot time when searching the TFTP directory for its config file.
+</p>
+
+<p>
+If the DHCP server responds, then a series of dots appear as my
+machine downloads the PXE boot Linux kernel. When the kernel is given
+control it announces itself with the prompt <strong>boot:</strong>.
+</p>
+
+<p>
+If you get to this point, then the PXE server has been configured
+correctly, and the client and server are working harmoniously. In Part
+4 I'll discuss the rest of the install.
+</p>
+
+<h3>It didn't work for me!</h3>
+
+<p>
+You might recall that in Part 1 Lessons from Mistakes I discussed this
+subject. I will also confess that the first few times I tried to get
+things going, I was not successful.
+</p>
+
+<p>
+Here's what to do if things don't behave as expected.
+</p>
+
+<pre>
+	This terminology is misleading. As much as you might like
+	things to work first time, if you're human, chances are they
+	don't. Consequently, you should <i>expect</i> things to <i>not</i> work.
+	(You can feel that you are batting better than average when
+	they do work.)
+</pre>
+
+<p>
+Here's what to do when things go wrong. First, the target machine is
+in a very primitive state so it is not likely to be of much help.
+Since the process under investigation involves a dialogue between 2
+machines, you would like to monitor the conversation (A said U1, then
+B said U2, then A said U3, ... ). Who was the last to speak? What did
+he say? What did I expect him to say?
+</p>
+
+<p>
+Ideally, you would have a third machine on the same subnet as the 2
+machines (the target machine and the PXE server). But that's unlikely,
+and adds very little. Clearly, the place to monitor the conversation
+is on the PXE server. Use <tt>tcpdump</tt> and <tt>tshark</tt> and/or
+<tt>ethereal</tt>).
+</p>
+
+<p>
+As my notes from the exercise say,
+</p>
+
+<pre>
+	This gave me the opportunity to try and try, again and again,
+	turning on tcpdump and tshark, and fiddling and fiddling until
+	about the 15th time I got it right.
+</pre>
+
+<p>
+Here's the expected conversation:
+</p>
+
+<pre class="code">
+PXE client	sends broadcast packet with its own MAC address
+PXE server	sends BOOTP/DHCP reply
+</pre>
+
+<p>
+I see the above repeated another 3 times. Then,
+</p>
+
+<pre class="code">
+PXE client	arp enquiry
+PXE server	arp reply
+</pre>
+
+<p>
+The arp enquiry comes from an IP address (earlier packets have an IP
+address of 0.0.0.0), and confirms that the DHCP server has sent the
+client an IP address and that the client has used the value specified.
+</p>
+
+<pre class="code">
+PXE client	sends a RRQ (tftp read request) specifying <strong>pxelinux.0</strong>
+PXE server	sends the file
+</pre>
+
+<p>
+There should be many packets, large ones from the server (containing
+the file data); small (length 4) acks from the client.
+</p>
+
+<pre class="code">
+PXE client	sends a RRQ specifying <strong>pxelinux.cfg/01-00-d0-b7-4e-31-1b</strong>
+</pre>
+
+<p>
+This is where you find out what <i>exactly</i> your PXE client is asking for.
+</p>
+
+<p>
+I guess there are zillions of other ways that things could go wrong,
+but the above covers pretty much everything I can think of.
+</p>
+
+<p>
+Here's a complete conversation:
+</p>
+
+<pre>
+12:03:06.208042 IP 0.0.0.0.68 > 255.255.255.255.67: BOOTP/DHCP, Request from 00:d0:b7:4e:31:1b, length: 548
+12:03:06.243002 IP 192.168.0.3.67 > 255.255.255.255.68: BOOTP/DHCP, Reply, length: 300
+12:03:07.192231 IP 0.0.0.0.68 > 255.255.255.255.67: BOOTP/DHCP, Request from 00:d0:b7:4e:31:1b, length: 548
+12:03:07.192641 IP 192.168.0.3.67 > 255.255.255.255.68: BOOTP/DHCP, Reply, length: 300
+12:03:09.169864 IP 0.0.0.0.68 > 255.255.255.255.67: BOOTP/DHCP, Request from 00:d0:b7:4e:31:1b, length: 548
+12:03:09.170287 IP 192.168.0.3.67 > 255.255.255.255.68: BOOTP/DHCP, Reply, length: 300
+12:03:13.125134 IP 0.0.0.0.68 > 255.255.255.255.67: BOOTP/DHCP, Request from 00:d0:b7:4e:31:1b, length: 548
+12:03:13.142644 IP 192.168.0.3.67 > 255.255.255.255.68: BOOTP/DHCP, Reply, length: 300
+12:03:13.143673 arp who-has 192.168.0.3 tell 192.168.0.60
+12:03:13.143716 arp reply 192.168.0.3 is-at 00:01:6c:31:ec:77
+12:03:13.143912 IP 192.168.0.60.2070 > 192.168.0.3.69:  27 RRQ "pxelinux.0" octet tsize 0 
+12:03:13.261195 IP 192.168.0.3.34558 > 192.168.0.60.2070: UDP, length 14
+12:03:13.261391 IP 192.168.0.60.2070 > 192.168.0.3.34558: UDP, length 17
+12:03:13.261601 IP 192.168.0.60.2071 > 192.168.0.3.69:  32 RRQ "pxelinux.0" octet blksize 1456 
+12:03:13.284171 IP 192.168.0.3.34558 > 192.168.0.60.2071: UDP, length 15
+12:03:13.284367 IP 192.168.0.60.2071 > 192.168.0.3.34558: UDP, length 4
+12:03:13.309059 IP 192.168.0.3.34558 > 192.168.0.60.2071: UDP, length 1460
+12:03:13.310453 IP 192.168.0.60.2071 > 192.168.0.3.34558: UDP, length 4
+12:03:13.333326 IP 192.168.0.3.34558 > 192.168.0.60.2071: UDP, length 1460
+12:03:13.334717 IP 192.168.0.60.2071 > 192.168.0.3.34558: UDP, length 4
+12:03:13.358162 IP 192.168.0.3.34558 > 192.168.0.60.2071: UDP, length 1460
+12:03:13.359557 IP 192.168.0.60.2071 > 192.168.0.3.34558: UDP, length 4
+12:03:13.381382 IP 192.168.0.3.34558 > 192.168.0.60.2071: UDP, length 1460
+12:03:13.382769 IP 192.168.0.60.2071 > 192.168.0.3.34558: UDP, length 4
+12:03:13.405583 IP 192.168.0.3.34558 > 192.168.0.60.2071: UDP, length 1460
+12:03:13.406981 IP 192.168.0.60.2071 > 192.168.0.3.34558: UDP, length 4
+12:03:13.430128 IP 192.168.0.3.34558 > 192.168.0.60.2071: UDP, length 1460
+12:03:13.431518 IP 192.168.0.60.2071 > 192.168.0.3.34558: UDP, length 4
+12:03:13.453394 IP 192.168.0.3.34558 > 192.168.0.60.2071: UDP, length 1460
+12:03:13.454782 IP 192.168.0.60.2071 > 192.168.0.3.34558: UDP, length 4
+12:03:13.478026 IP 192.168.0.3.34558 > 192.168.0.60.2071: UDP, length 1460
+12:03:13.479420 IP 192.168.0.60.2071 > 192.168.0.3.34558: UDP, length 4
+12:03:13.503527 IP 192.168.0.3.34558 > 192.168.0.60.2071: UDP, length 1456
+12:03:13.504917 IP 192.168.0.60.2071 > 192.168.0.3.34558: UDP, length 4
+12:03:13.517760 IP 192.168.0.60.57089 > 192.168.0.3.69:  63 RRQ "pxelinux.cfg/01-00-d0-b7-4e-31-1b" octet tsize 0 blks
+12:03:13.544383 IP 192.168.0.3.34558 > 192.168.0.60.57089: UDP, length 25
+12:03:13.544592 IP 192.168.0.60.57089 > 192.168.0.3.34558: UDP, length 4
+12:03:13.584227 IP 192.168.0.3.34558 > 192.168.0.60.57089: UDP, length 373
+12:03:13.584728 IP 192.168.0.60.57089 > 192.168.0.3.34558: UDP, length 4
+12:03:13.584802 IP 192.168.0.60.57090 > 192.168.0.3.69:  38 RRQ "help.txt" octet tsize 0 blksize 1440 
+12:03:13.615601 IP 192.168.0.3.34559 > 192.168.0.60.57090: UDP, length 25
+12:03:13.615803 IP 192.168.0.60.57090 > 192.168.0.3.34559: UDP, length 4
+12:03:13.639528 IP 192.168.0.3.34559 > 192.168.0.60.57090: UDP, length 368
+12:03:13.640023 IP 192.168.0.60.57090 > 192.168.0.3.34559: UDP, length 4
+12:03:18.259021 arp who-has 192.168.0.60 tell 192.168.0.3
+12:03:18.259210 arp reply 192.168.0.60 is-at 00:d0:b7:4e:31:1b
+</pre>
+
+<a name="details></a>
+<h3>Other details</h3>
+
+<p>
+Here are some details mising from the above. You are probably only
+interested in thse details if you are trying to "sing along" (reproduce
+my work).
+</p>
+
+<p>
+<strong>/tftpboot/help.txt</strong>:
+
+<pre>
+The default is to boot from the local hard drive.
+
+You can enter one of:
+
+        lhd     (default) boot from local hard drive
+        linux   (legacy) normal (ie manual) install
+        b2      (hmg addition) kickstart install for b2
+                ksdevice=eth0
+                ks=nfs:192.168.0.3:/NFS/b2
+
+        f3      display the current boot config file
+
+</pre>
+</p>
+
+<p>
+The final contents of <strong>/tftpboot</strong>:
+
+<pre>
+	ls -lAt /tftpboot/.
+total 19328
+drwxrwxr-x 3 root   staff      4096 Dec 21  2008 pxelinux.cfg
+-rw-rw-r-- 1 root   staff       364 Dec  7  2008 help.txt
+lrwxrwxrwx 1 root   staff        33 Dec  7  2008 b2.cfg -> pxelinux.cfg/01-00-d0-b7-4e-31-1b
+-rw-r--r-- 1 root   root   17159894 Nov 20  2008 initrd.img
+-rwxr-xr-x 1 root   root    2567024 Nov 20  2008 vmlinuz
+-rw-r--r-- 1 root   root      13100 Feb  9  2006 pxelinux.0
+
+	ls -lAt /tftpboot/pxelinux.cfg/
+total 24
+-rw-rw-r-- 1 root   staff   369 Dec  7  2008 01-00-d0-b7-4e-31-1b
+-rw-rw-r-- 1 root   staff   123 Nov 26  2008 default
+
+</pre>
+</p>
+ 
+
+
+<h3>Resources:</h3>
+
+<p>
+<a href="http://www.thekelleys.org.uk/dnsmasq/doc.html">http://www.thekelleys.org.uk/dnsmasq/doc.html</a><br>
+<a href="http://fedoraproject.org/en/get-fedora">http://fedoraproject.org/en/get-fedora</a><br>
+<a href="ftp://mirror.optus.net/fedora/linux/releases/10/Fedora/i386/iso/Fedora-10-i386*">ftp://mirror.optus.net/fedora/linux/releases/10/Fedora/i386/iso/Fedora-10-i386*</a>
+</p>
+
+<h3>References:</h3>
+
+<p>
+<a href="http://linux-sxs.org/internet_serving/pxeboot.html">http://linux-sxs.org/internet_serving/pxeboot.html</a><br>
+<a href="http://www.stanford.edu/~alfw/PXE-Kickstart/PXE-Kickstart-6.html">http://www.stanford.edu/~alfw/PXE-Kickstart/PXE-Kickstart-6.html</a><br>
+<a href="http://syslinux.zytor.com/wiki/index.php/PXELINUX">http://syslinux.zytor.com/wiki/index.php/PXELINUX</a><br>
+<br>
+<a href="http://docs.fedoraproject.org/release-notes/f10preview/en_US/What_is_New_for_Installation_and_Live_Images.html">http://docs.fedoraproject.org/release-notes/f10preview/en_US/What_is_New_for_Installation_and_Live_Images.html</a><br>
+<a href="fedora-install-guide-en_US/sn-automating-installation.html">fedora-install-guide-en_US/sn-automating-installation.html</a><br>
+<a href="http://www.linuxdevcenter.com/pub/a/linux/2004/11/04/advanced_kickstart.html">http://www.linuxdevcenter.com/pub/a/linux/2004/11/04/advanced_kickstart.html</a>
+</p>
+
+
+<br clear="all" />
+
+<table align='center' cellspacing='10'>
+<tr>
+<td>
+<script type='text/javascript'>
+digg_url = 'http://linuxgazette.net/175/grebler.html';
+digg_title = 'Pixie Chronicles: Part 3 PXE boot';
+digg_bodytext = '<p> In Part 1 I outlined my plans: to build a server using network install. However, I got sidetracked by problems. In Part 2 I made some progress and dealt with one of the problems. Now I\'m going to detail what I did when I got it right. </p> ';
+digg_topic = 'linux_unix';
+</script>
+<script src="http://digg.com/tools/diggthis.js" type="text/javascript"></script>
+</td>
+<td>
+<a name="fb_share" type="box_count" href="http://www.facebook.com/sharer.php">Share</a>
+<script src="http://static.ak.fbcdn.net/connect.php/js/FB.Share" type="text/javascript"></script>
+</td>
+<td>
+<a href="http://twitter.com/home?status=Currently%20reading:%20http://linuxgazette.net/175/grebler.html%20at%20Linux%20Gazette%20%23linuxgazette" title="Click to share this post on Twitter"><img src="../gx/twitter.png" width="50" height="85" border="0"></a>
+</td>
+</tr>
+</table>
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:175/grebler.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/authors/grebler.jpg" class="bio">
+</p>
+
+<em>
+<p>
+Henry has spent his days working with computers, mostly for computer
+ manufacturers or software developers. His early computer experience
+ includes relics such as punch cards, paper tape and mag tape. It is
+ his darkest secret that he has been paid to do the sorts of things he
+ would have paid money to be allowed to do. Just don't tell any of his
+ employers. 
+</p>
+
+<p>
+He has used Linux as his personal home desktop since the family got its
+ first PC in 1996. Back then, when the family shared the one PC, it was a
+ dual-boot Windows/Slackware setup. Now that each member has his/her own
+ computer, Henry somehow survives in a purely Linux world.
+</p>
+
+<p>
+He lives in a suburb of Melbourne, Australia.
+</p>
+
+
+
+</em>
+
+<br clear="all">
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2010, Henry Grebler. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication License</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 175 of Linux Gazette, June 2010
+</p>
+
+</div>
+
+<div id="previousnextbottom">
+<A HREF="dyckoff1.html" >&lt;-- prev</A> | <A HREF="hoogland.html" >next --&gt;</A>
+</div>
+
+</div>
+</div>
+
+<script src="http://www.google-analytics.com/urchin.js"
+type="text/javascript">
+</script>
+<script type="text/javascript">
+_uacct = "UA-1204316-1";
+urchinTracker();
+</script>
+
+
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+</body>
+</html>
+

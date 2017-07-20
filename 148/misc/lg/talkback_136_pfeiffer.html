@@ -1,0 +1,409 @@
+<!DOCTYPE html PUBLIC '-//W3C//DTD XHTML 1.0 Transitional//EN'
+		 'http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd'>
+<html xmlns='http://www.w3.org/1999/xhtml' lang='utf-8' xml:lang='utf-8'>
+<head>
+<title>Talkback:136/pfeiffer.html</title>
+<meta http-equiv='Content-Type; charset=utf-8' />
+<link rel='stylesheet' type='text/css' href='../../../lg.css' />
+</head>
+<body>
+<a href="../../../"><img alt="Linux Gazette" src="../../../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" /></a><img alt="Tux" src="../../../gx/tux_86x95_indexed.png" id="tux" /><p id="fun">...making Linux just a little more fun!</p><div class='content articlecontent'><a name="top"></a><h3>Talkback:136/pfeiffer.html</h3>
+<p><b>[ In reference to "<a href='../../../136/pfeiffer.html'>Measuring TCP Congestion Windows</a>" in LG#136 ]</b></p><p>
+<b><p>
+Ren&eacute; Pfeiffer [lynx at luchs.at]
+
+</p>
+</b><br />
+<b>Sat, 16 Feb 2008 16:12:19 +0100</b>
+</p>
+
+<p>
+<p class="editorial">
+[[[  Greetings to Indonesia! Thanks to this thread, I've learned the word
+"Balasan", which seems to mean "re:". Is this a word in Malay, or Bahasa
+Indonesia? -- Kat  ]]]
+</p>
+
+</p>
+
+<p>
+Hello!
+</p>
+
+<p>
+On Feb 15, 2008 at 1135 +0700, Niko Wilfritz Sianipar Sianipar appeared and said:
+</p>
+
+<pre>
+&gt; I,ve read your article about measuring tcp congestion window. Maybe I
+&gt; can ask you, how to use tcp_info structure in my Apache code (more
+&gt; specifically in sendfile_it_all function in core_filters.c. I want to
+&gt; get the time to transfer last byte sent in order to schedule the
+&gt; packet sent to client according to that metric), cause I really realy
+&gt; confused with the Apache source code. Or, do you know what part in
+&gt; Apache that provide the time to transfer last by sent to client.
+</pre>
+
+<p>
+The tcp_info structure contains statistics derived from an active TCP
+connection. getsockopt() fills the structure with data. An example
+function call from my article in #136 looks like this:
+</p>
+
+<pre>
+getsockopt( tcp_work_socket, SOL_TCP, TCP_INFO, (void *)&amp;tcp_info,
+&amp;tcp_info_length );
+</pre>
+
+<p>
+I looked into the code for core_filters.c in a httpd 2.2.8 distribution.
+Basically the sendfile_it_all() function reads a file and sends it to
+the network by using sendfile(). There's not much you can tune there
+since sendfile() does most of the buffering. You could periodically call
+getsockopt() with the TCP_INFO option, but you'd only get the TCP
+parameters. You cannot influence the TCP connection when it transfers
+date, it is handled by the kernel. You can only use one of the TCP
+congestions algorithms and set some parameters of the TCP stack (either
+through /proc/sys/net/... or by using socket options such as TCP_CORK).
+</p>
+
+<p>
+If you want to do any timing you have to do the buffering yourself, send
+chunks of data and take the time after every buffer transmit. That's
+what I did in my example code, but that's not what you want to do in
+production code. The Linux kernel has the TCP stack and should deal with
+the details. The kernel also keeps track of TCP parameters used with
+recent clients. An application usually doesn't see all of this.
+</p>
+
+<p>
+As far as the Apache code is concerned, I don't know where or whether
+Apache stores the time of transfers. There are some options for the
+socket code, so I'd look for the persistant connections (KeepAlive,
+etc.) or all things that deal with the socket handling.
+</p>
+
+<p>
+Best,
+Ren&eacute;.
+</p>
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_talkback.html#mb-talkback_136_pfeiffer">Back</a><hr width="50%" align="left" /><p><br /></p><p>
+<b><p>
+Ren&eacute; Pfeiffer [lynx at luchs.at]
+
+</p>
+</b><br />
+<b>Wed, 20 Feb 2008 19:31:05 +0100</b>
+</p>
+
+<p>
+On Feb 19, 2008 at 2100 +0700, Niko Wilfritz Sianipar Sianipar appeared and said:
+</p>
+
+<pre>
+&gt; How to use getsockopt in core_filters.c (in sendfile_it_all()
+&gt; function)? Because we can't use c-&gt;client_socket-&gt;sockdes in
+&gt; getsockopt. it will error at compiling the httpd.
+</pre>
+
+<p>
+Can you show me the source of this file along with your modifications?
+What does the compiler complain about?
+</p>
+
+
+<pre>
+&gt; Actually, I'm doing a task about Apache that set socket priority
+&gt; according to the throughput of socket's connection (not need to get
+&gt; the exact value just need an approach). And I need the tcp_info
+&gt; structure to find out the throughput.
+</pre>
+
+<p>
+You can measure the throughput yourself if you send out chunks of a
+certain size and measure the time. The problem is that the kernel will
+queue packets and that your measurement is a rough estimate.
+</p>
+
+<p>
+I have no clear idea what you mean by setting the socket priority.
+Do you have something like this
+<a href="http://curl.haxx.se/mail/lib-2005-03/0024.html">http://curl.haxx.se/mail/lib-2005-03/0024.html</a> in mind?
+</p>
+
+
+<pre>
+&gt; The idea you give to me is using the getsockopt, and I will do it
+&gt; before the sendfile() function. And just before the sendfile() call, I
+&gt; also call the setsockopt() to set the socket priority with SO_PRIORITY
+&gt; option (Am I right???), then sendfile() will be executed.
+</pre>
+
+<p>
+If you call getsockopt() before sendfile() you will only get a snapshot
+of the TCP parameters before the file transmission. Once you call
+sendfile() userspace is out of business and I guess you can't peek into
+the transmission anymore. I'd say that you have to do the buffering
+yourself if you want to keep track of the TCP parameters.
+</p>
+
+
+<pre>
+&gt; I use tc to make the PRIO qdisc.
+&gt; That's all what I'm gonna do. And I hope you can also help me with this explanation.
+</pre>
+
+<p>
+Well, I'm trying, but so far I have only a vague idea of what you wish
+to code. <img src="../gx/smile.png" alt=":)">
+</p>
+
+<p>
+Best,
+Ren&eacute;.
+</p>
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_talkback.html#mb-talkback_136_pfeiffer">Back</a><hr width="50%" align="left" /><p><br /></p><p>
+<b><p>
+Ren&eacute; Pfeiffer [lynx at luchs.at]
+
+</p>
+</b><br />
+<b>Thu, 21 Feb 2008 09:14:09 +0100</b>
+</p>
+
+<p>
+On Feb 21, 2008 at 1211 +0700, Niko Wilfritz Sianipar Sianipar appeared and said:
+</p>
+
+<pre>
+&gt; What buffering you mean here? I still confused with the buffering term
+&gt; here. Can you write some example code or something.
+</pre>
+
+<p>
+The example code is in the articles I wrote. If you look up the man page
+of sendfile() it says:
+</p>
+
+<p>
+sendfile()  copies  data  between  one  file  descriptor  and  another.
+Because this copying is done within  the  kernel,  sendfile()  is  more
+efficient  than  the  combination  of read(2) and write(2), which would
+require transferring data to and from user space.
+</p>
+
+<p>
+This means that as soon as you call sendfile() your file goes from the
+filesystem to the socket and your code won't get any notice about how
+many bytes are transferred within a given time frame. This in turn means
+that you have to use read(), write() and your own buffer if you want to
+do any measurement such as "bytes per second".
+</p>
+
+<p>
+My advise is to let the kernel handle this if you are going to use
+sendfile() anyway. The kernel knows best what to do during the TCP
+transmission. If you want to play with TCP parameters during the
+transmission you're better of writing your own TCP/IP stack or coding a
+new TCP congestions algorithm kernel module. Especially the latter is
+easier since you are in kernel space and can easily query the kernel's
+internal structures without resorting to getsockopt() and TCP_INFO.
+</p>
+
+
+<pre>
+&gt; About the file that I've modified I will write as soon as possible here.
+&gt; Squid configurationr your patience..Still help me with this task please...
+&gt; Wait for a minute..
+</pre>
+
+<p>
+Waiting is the easy part. <img src="../gx/smile.png" alt=":)">
+</p>
+
+<p>
+Best,
+Ren&eacute;.
+</p>
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_talkback.html#mb-talkback_136_pfeiffer">Back</a><hr width="50%" align="left" /><p><br /></p><p>
+<b><p>
+Ren&eacute; Pfeiffer [lynx at luchs.at]
+
+</p>
+</b><br />
+<b>Thu, 21 Feb 2008 14:22:08 +0100</b>
+</p>
+
+<p>
+On Feb 21, 2008 at 1802 +0700, Niko Wilfritz Sianipar Sianipar appeared and said:
+</p>
+
+<pre>
+&gt; This I attach the file that I've modified in core_filters.c. Still to
+&gt; much bug there, and I hope you can help me with your experience.
+</pre>
+
+<p>
+Yes, you have to be careful about the variables you introduce.
+</p>
+
+
+<pre>
+&gt; Please look at sendfile_it_all() function, also in the "include file" part.
+&gt; I also confuse with the #include part. The error maybe come from there too.
+&gt; Here, I will try to modifying it too with all my "POWER".
+&gt; Thanks.
+</pre>
+
+<p>
+I looked at your code. As far as I understand you do the following in
+sendfile_it_all():
+<pre>
+ - Enter an endless loop
+ - Get the TCP parameters by requesting a TCP INFO structure with
+   getsockopt()
+ - Compute the throughput
+ - Set the socket priority according to throughput classes
+ - Call apr_socket_sendfile() to send the file to the socket
+ - Return if apr_socket_sendfile() sent all bytes of the file or
+   returned APR_SUCCESS
+</pre>
+
+<p>
+I doubt that your throughput measurements will yield useful data. In
+addition to that the SO_PRIORITY may influence the ToS field for
+outgoing packets, but you could do this by using Netfilter. It's still
+only an advice to all network equipment outside your server box, and I
+don't believe that you will gain performance by doing this.
+</p>
+
+<p>
+Best,
+Ren&eacute;.
+</p>
+
+<p>
+<a href="misc/lg/core_filters.c">core_filters.c</a></br>
+<a href="misc/lg/core_filters_modified.c">core_filters_modified.c</a>
+</p>
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_talkback.html#mb-talkback_136_pfeiffer">Back</a><hr width="50%" align="left" /><p><br /></p><p>
+<b><p>
+Rick Moen [rick at linuxmafia.com]
+
+</p>
+</b><br />
+<b>Tue, 26 Feb 2008 01:01:16 -0800</b>
+</p>
+
+<p>
+Quoting Ren? Pfeiffer (lynx@luchs.at):
+</p>
+
+
+<pre>
+&gt; /* Copyright 2001-2005 The Apache Software Foundation or its licensors, as
+&gt;  * applicable.
+&gt;  *
+&gt;  * Licensed under the Apache License, Version 2.0 (the "License");
+&gt;  * you may not use this file except in compliance with the License.
+&gt;  * You may obtain a copy of the License at
+&gt;  *
+&gt;  *     <a href="http://www.apache.org/licenses/LICENSE-2.0">http://www.apache.org/licenses/LICENSE-2.0</a>
+&gt;  *
+&gt;  * Unless required by applicable law or agreed to in writing, software
+&gt;  * distributed under the License is distributed on an "AS IS" BASIS,
+&gt;  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+&gt;  * See the License for the specific language governing permissions and
+&gt;  * limitations under the License.
+&gt;  */
+</pre>
+
+<p>
+Rene, I've manually approved that post, even though it was 2x over the
+size limit for this mailing list.  It would be appreciated, in similar
+situations, if you would please post URLs from which such files can be
+fetched, rather than file-attaching them inline.  Thanks.
+</p>
+
+<p>
+<p class="editorial">
+[[[  I've clipped that message and turned the attached text into
+clickable links. -- Kat  ]]]
+</p>
+
+</p>
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_talkback.html#mb-talkback_136_pfeiffer">Back</a><hr width="50%" align="left" /><p><br /></p><p>
+<b><p>
+Ren&eacute; Pfeiffer [lynx at luchs.at]
+
+</p>
+</b><br />
+<b>Wed, 27 Feb 2008 21:04:48 +0100</b>
+</p>
+
+<p>
+On Feb 26, 2008 at 1144 +0700, Niko Wilfritz Sianipar Sianipar appeared and said:
+</p>
+
+<pre>
+&gt; Can I use tcp_info.tcpi_snd_cwnd/tcp_info.tcpi_rtt to get throughput in Bytes/second?
+</pre>
+
+<p>
+AFAIK you can't. The ratio between the sender's congestion window and
+the round trip time per packet is not the throughput.
+</p>
+
+
+<pre>
+&gt; And how to use read() and write() function to calculate the time of
+&gt; transfer of a chunk data?
+</pre>
+
+<p>
+I used both functions to fill/send a buffer and took the time before and
+after calling the functions. This isn't the throughput either, because
+the kernel keeps buffers for every socket. You can only estimate the
+throughput.
+</p>
+
+
+<pre>
+&gt; Have you receive my attached file??
+</pre>
+
+<p>
+Yes, and I already commented it.
+</p>
+
+<p>
+Best,
+Ren&eacute;.
+</p>
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_talkback.html#mb-talkback_136_pfeiffer">Back</a><hr width="50%" align="left" /><p><br /></p></div>
+</body>
+</html>

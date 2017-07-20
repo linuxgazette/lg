@@ -1,0 +1,450 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>Using SWIG to interface scripting languages with C/C++ LG #49</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<!-- *** BEGIN navbar *** -->
+<A HREF="index.html"><IMG ALT="[ Table of Contents ]" 
+	SRC="../gx/indexnew.gif" WIDTH=163 HEIGHT=60 ALIGN=bottom ></A>
+<A HREF="../index.html"><IMG ALT="[ Front Page ]" 
+	SRC="../gx/homenew.gif" WIDTH=163 HEIGHT=60 ALIGN=bottom></A>
+<A HREF="orr.html"><IMG ALT="[ Prev ]" SRC="../gx/back2.gif" WIDTH=41 HEIGHT=60 ALIGN=bottom></A>
+<A HREF="../faq/index.html"><IMG ALT="[ Linux Gazette FAQ ]" 
+	SRC="./../gx/dennis/faq.gif"WIDTH=163 HEIGHT=60 ALIGN=bottom></A>
+<A HREF="silva.html"><IMG ALT="[ Next ]" SRC="../gx/fwd.gif" WIDTH=41 HEIGHT=60 ALIGN=bottom  ></A>
+<!-- *** END navbar *** -->
+
+<!--endcut ============================================================-->
+
+<H4>
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H1><font color="maroon">Using SWIG to interface scripting languages with C/C++</font></H1>
+<H4>By <a href="mailto:iclabs@vsnl.com">Pramode C.E and Gopakumar C.E</a></H4>
+</center>
+<P> <HR> <P>  
+
+<!-- END header -->
+
+
+
+
+
+<H2> Introduction </H2>
+<p>
+Scripting languages like Perl, Python and Tcl are receiving a lot of attention nowadays - mainly because
+these languages facilitate Rapid Application Development and Prototyping. It has been shown 
+time and again that using a language like Python cuts down development time drastically - with the added 
+advantage that you get highly robust and  flexible  code. But there are situations in which a 
+pure scripting approach does not work, typical examples being scientific applications which require high
+speed math and graphics routines or applications which need to control and coordinate hardware devices
+on a real time basis. What we need is a mixed-language paradigm in which  traditional systems languages
+like C/C++ do the 'dirty' low-level work while the Scripting language acts as the overall supervisor. This
+article focuses on using an excellent program called the Simplified Wrapper and Interface Generator (SWIG) 
+to integrate code written in C/C++ with the popular scripting language Python. The code fragments in this article have
+been tested on a Red Hat Linux (5.2) machine running Python ver 1.5.1.
+
+<H2> Getting and Installing SWIG </H2>
+<p>
+SWIG is being developed by Dave Beazley and can be downloaded from <a href="http://www.swig.org">www.swig.org</a>.
+Installation is straightforward, just run ./configure and then make. Currently, SWIG supports Perl, Python,
+Tcl and FSF Guile.
+
+<H2> A simple example </H2>
+<p>
+Let us say we have a C function called add(a, b) which returns the sum of two numbers passed to it as
+arguments. We will see how the add function can be made Python-callable.
+We will create a file called arith.c which contains the following code:
+<PRE>
+
+int add(int a, int b)
+{
+		return a+b;
+}
+
+</PRE>
+
+Let us now execute the following command:
+<PRE>
+
+        <b>swig -python -module arith arith.c</b>
+		
+</PRE>
+We see that SWIG has created two new files, arith_wrap.c and arith_wrap.doc. We should now compile both arith.c and
+arith_wrap.c to produce object files, the command being:
+<PRE>
+
+        <b>gcc -I/usr/include/python1.5 -c arith.c arith_wrap.c</b>
+	
+</PRE>
+The object files arith.o and arith_wrap.o should  now be combined to produced a shared object called arith.so:
+<PRE>
+
+        <b>ld -shared -o arith.so arith.o arith_wrap.o</b>
+	
+</PRE>
+
+If everything goes well, we will  have a file called arith.so in our current directory. Here is a sample
+interaction using the arith module:
+<PRE>
+
+import arith
+&gt;&gt;&gt;arith.add(10, 20)
+30
+&gt;&gt;&gt;arith.add(10, -10)
+0
+&gt;&gt;&gt;
+
+</PRE>
+
+<H3> Does using C  improve speed? </H3>
+<p>
+We will find out! Let us add one more function to our arith.c file and then rebuild arith.so:
+<PRE>
+
+int fact (int n)
+{
+		int f=1;
+		while (n &gt; 1){
+				f = f * n;
+				n = n - 1;
+		}
+		return f;
+}
+
+</PRE>
+Let us make a similar function in Python (store it in a file fact.py):
+<PRE>
+
+def fact(n):
+	f = 1
+	while n &gt; 1:
+		f = f * n
+		n = n - 1
+	return f
+	
+</PRE>
+
+We will now write a crude profiling program, profile.py:
+
+<PRE>
+
+#!/usr/bin/python
+
+import fact, arith, time
+
+pyfact = fact.fact
+cfact = arith.fact
+
+# Measuring speed of cfact
+start = time.time()
+for i in range(1,100000):
+	cfact(10)
+end = time.time()
+
+print 'C factorial function used', end-start, 'seconds'
+
+start = time.time()
+for i in range(1,100000):
+	pyfact(10)
+end = time.time()
+
+print 'Python factorial function used', end-start, 'seconds'
+
+</PRE>
+
+Here is the output on our old Pentium box:
+<PRE><b>
+
+C factorial function used 1.29531896114 seconds
+Python factorial function used 8.22897398472 seconds
+
+</PRE></b>
+
+<H3> The proper way of using SWIG </H3>
+<p>
+SWIG generates wrappers not by looking at how your C code works internally, but by seeing the interface
+specification. Here is how we should have proceeded.
+First, create an interface file, arith.i. The file should contain the following
+lines:
+<PRE>
+
+%module arith
+
+extern int add(int a, int b);
+extern int fact(int n);
+
+</PRE>
+
+Now generate the wrappers by running <b>swig -python arith.i</b>, compile into object files and use ld to create
+arith.so.
+
+<H2> A low-level interfacing example </H2>
+<p>
+The PC's parallel port can be used to perform some very amusing  hardware interfacing
+experiments. On Linux, we have functions like inb(), outb() etc which can be used to access I/O ports.
+Here is a C program which writes to the printer port:
+<PRE>
+
+#include &lt;asm/io.h&gt;
+int main()
+{
+		iopl(3);
+		outb(1, 0x378);
+}
+
+</PRE>
+
+The program should be compiled as <b>cc -O2 io.c</b> and it should be executed with superuser privilege. The iopl 
+call is required to make the IO ports accessible to user programs. How do we write a Python version of this 
+program? Simple. Use SWIG to make Python callable versions of outb(), inb() and iopl(). Here is an io.c module
+tailored for SWIG:
+
+<PRE>
+
+#include &lt;asm/io.h&gt; 
+
+int py_iopl(int level)
+{
+		return iopl(level);
+}
+
+void py_outb(unsigned char val, int port)
+{
+		
+		outb(val, port);
+}
+
+unsigned char py_inb(int port)
+{
+		return inb(port);
+}
+
+</PRE>
+
+Run SWIG and generate the io.so file. Here is a sample interaction (remember, you should run the
+Python interpreter as root):
+
+<PRE>
+&gt;&gt;&gt;import io
+&gt;&gt;&gt;io.py_iopl(3)
+&gt;&gt;&gt;io.py_outb(10, 0x378)
+&gt;&gt;&gt;io.py_inb(0x378)
+10
+&gt;&gt;&gt;
+
+</PRE>
+
+<H2> Accessing C variables </H2>
+<p>
+Global variables declared in your C module can be accessed from Python. We create a module <b>example</b> with
+two variables foo and baz:
+<PRE>
+
+int foo = 10;
+int baz = 20;
+	
+</PRE>
+The variables foo and baz are accessible in Python through an object called cvar:
+<PRE>
+
+&gt;&gt;&gt;import example
+&gt;&gt;&gt;example.cvar
+Global variables { foo, baz }
+&gt;&gt;&gt;example.cvar.foo
+10
+&gt;&gt;&gt;example.cvar.baz
+20
+&gt;&gt;&gt;example.cvar.foo = 100
+&gt;&gt;&gt;example.cvar.foo
+100
+&gt;&gt;&gt;
+
+</PRE>
+
+<H2> Accessing C++ Classes </H2>
+<p>
+Accessing C++ classes is a bit tricky. Let us first create a header file with a simple class
+declaration. We call this zoo.h:
+<PRE>
+
+class Zoo{
+		int n;
+		char animals[10][50];
+public:
+		Zoo();
+		void shut_up(char *animal);
+		void display();
+};
+
+</PRE>
+Now we create an interface file zoo.i:
+<PRE>
+
+%module zoo
+
+%{
+#include "zoo.h"
+%}
+
+class Zoo{
+	char animals[10][50];
+	int n;
+public:
+	 Zoo();
+	 void shut_up(char *animal);
+	 void display();
+};
+
+</PRE>
+
+We generate the Python wrappers by running the command:
+<PRE>
+        <b>swig -python -c++ zoo.i</b>
+		
+</PRE>
+Here comes our source file zoo.cc:
+<PRE>
+
+#include "zoo.h"
+#include &lt;stdio.h&gt;
+
+Zoo::Zoo()
+{
+		n = 0;
+}
+
+void Zoo::shut_up(char *animal)
+{
+		if (n &lt; 10) {
+				strcpy(animals[n], animal);
+				n++;
+		}
+}
+
+void Zoo::display()
+{
+		int i;
+		for(i = 0; i &lt; n; i++)
+				printf("%s\n", animals[i]);
+}
+
+</PRE>
+We create the object files by running:
+<PRE>
+
+        <b>g++ -I/usr/include/python1.5 -c zoo.cc zoo_wrap.c</b>
+		
+</PRE>
+And finally, we create the module zoo.so:
+<PRE>
+
+        <b>ld -shared  -o zoo.so zoo.o zoo_wrap.o /usr/lib/libg++.so.2.7.2 /usr/lib/libstdc++.so</b>
+		
+</PRE>
+Here is an interactive Python session with our zoo module:
+<PRE>
+
+Script started on Mon Dec 13 14:31:26 1999
+[pce@bhim] ~/src/writings/swig/src/shadow$ python
+Python 1.5.1 (#1, Sep  3 1998, 22:51:17)  [GCC 2.7.2.3] on linux-i386
+Copyright 1991-1995 Stichting Mathematisch Centrum, Amsterdam
+&gt;&gt;&gt; import zoo
+&gt;&gt;&gt; dir(zoo)
+['Zoo_display', 'Zoo_shut_up', '__doc__', '__file__', '__name__', 'new_Zoo']
+&gt;&gt;&gt; z=zoo.new_Zoo()
+&gt;&gt;&gt; zoo.Zoo_shut_up(z,'Tiger')
+&gt;&gt;&gt; zoo.Zoo_shut_up(z,'Lion')
+&gt;&gt;&gt; zoo.Zoo_display(z)
+Tiger
+Lion
+&gt;&gt;&gt; z2=zoo.new_Zoo()
+&gt;&gt;&gt; zoo.Zoo_shut_up(z2,'Python')
+&gt;&gt;&gt; zoo.Zoo_display(z2)
+Python
+&gt;&gt;&gt;
+
+</PRE>
+The constructor in our class Zoo has been mapped to a function called new_Zoo. Similarly, the
+member functions shut_up and display have been mapped to Zoo_shut_up and Zoo_display.
+
+<H3> Shadow classes </H3>
+<p>
+It is possible to create Python classes which act as 'wrappers' around C++ classes. Here is a Python
+wrapper class for the C++ Zoo class:
+<PRE>
+
+from zoo import *
+
+class Zoo:
+	def __init__(self):
+		self.this = new_Zoo()
+		
+	def shut_up(self, animal):
+		Zoo_shut_up(self.this, animal)
+		
+	def display(self):
+		Zoo_display(self.this)
+		
+
+</PRE>
+Now, we can very easily write:
+<PRE>
+
+&gt;&gt;&gt; z = Zoo()
+&gt;&gt;&gt; z.shut_up('Tiger')
+&gt;&gt;&gt; z.shut_up('Lion')
+&gt;&gt;&gt; z.display()
+Tiger
+Lion
+&gt;&gt;&gt;
+
+</PRE>
+It is even possible  to request SWIG to generate Python shadow classes automatically!
+
+<H2>Conclusion</H2>
+<p>
+SWIG is a useful tool, easy to learn and easy to apply. Though we have only examined SWIG in the
+context of Python scripting, usage with other languages like Perl and Tcl is very similar. The
+SWIG <a href="http://www.swig.org">Home Page</a> is the definitive source for more information.
+
+
+       
+ 
+
+
+
+
+
+<!-- *** BEGIN copyright *** -->
+<P> <hr> <P> 
+<H5 ALIGN=center>
+
+Copyright &copy; 2000, Pramode C.E and Gopakumar C.E<BR> 
+Published in Issue 49 of <i>Linux Gazette</i>, January 2000</H5>
+<!-- *** END copyright *** -->
+
+<!--startcut ==========================================================-->
+<P> <HR> <P>
+<!-- *** BEGIN navbar *** -->
+<A HREF="index.html"><IMG ALT="[ Table of Contents ]" 
+	SRC="../gx/indexnew.gif" WIDTH=163 HEIGHT=60 ALIGN=bottom ></A>
+<A HREF="../index.html"><IMG ALT="[ Front Page ]" 
+	SRC="../gx/homenew.gif" WIDTH=163 HEIGHT=60 ALIGN=bottom></A>
+<A HREF="orr.html"><IMG ALT="[ Prev ]" SRC="../gx/back2.gif" WIDTH=41 HEIGHT=60 ALIGN=bottom></A>
+<A HREF="../faq/index.html"><IMG ALT="[ Linux Gazette FAQ ]" 
+	SRC="./../gx/dennis/faq.gif"WIDTH=163 HEIGHT=60 ALIGN=bottom></A>
+<A HREF="silva.html"><IMG ALT="[ Next ]" SRC="../gx/fwd.gif" WIDTH=41 HEIGHT=60 ALIGN=bottom  ></A>
+<!-- *** END navbar *** -->
+</BODY></HTML>
+<!--endcut ============================================================-->

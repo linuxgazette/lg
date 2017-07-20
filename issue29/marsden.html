@@ -1,0 +1,325 @@
+<!--startcut ==========================================================-->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML>
+<head>
+<title>EMACSulation LG #29</title>
+<link rev="made" href="mailto:emarsden@mail.dotcom.fr">
+<meta name="keywords"
+      content="emacs, emacsclient, gnuserv, gnuclient, gnudoit, remote invocation"
+<meta name="description"
+      content="Emacsclient/gnuserv provide a remote invocation mechanism
+for Emacs, allowing programs to send commands to an Emacs process on the
+local machine or across the network.">
+<meta name="author" content="Eric Marsden">            
+<meta name="generator" content="Emacs">
+</head>
+
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#A000A0"
+ALINK="#FF0000">
+<!--endcut ============================================================-->
+
+<H4>
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+
+<center>
+<H1><font color="maroon">EMACSulation</font></H1>
+<h4>by <a href="mailto:emarsden@mail.dotcom.fr">Eric Marsden</a>
+</h4>
+</center>
+
+
+<blockquote><small>
+
+   This column is devoted to making the best use of Emacs, text editor
+   extraordinaire. Each issue I plan to present an Emacs extension
+   which can improve your productivity, make the sun shine more brightly
+   and the grass greener.
+
+</small></blockquote>
+
+<p><HR> <P> 
+
+<h1>Emacs as a server</h1>
+
+<p> Many people meet Emacs as the default program launched by Elm to edit
+    an email message. Starting up Emacs in this way is a bit of a pain,
+    because of the delay and memory use, but also because the fresh Emacs
+    doesn't share buffers and a kill ring (storage for cut/copied text)
+    with other invocations. Rather than starting up a new Emacs for each
+    letter, you can set the environment variable <tt>EDITOR</tt> to
+    <tt>emacsclient</tt>.
+
+<p> The Emacs server mechanism allows one Emacs process to service editing
+    requests from other applications. To enable it you need to add a line
+    like <tt>(server-start)</tt> in <tt>~/.emacs</tt>. When you say
+    <tt>emacsclient filename</tt>, the program searches for an Emacs
+    process (launching one if necessary) and sends it a message asking it
+    to edit <tt>filename</tt>. The caller process (the shell for example)
+    is blocked while the file is being edited. When you're finished type
+    <tt>C-x #</tt> and the client will be unblocked.
+
+    
+<h2>Gnuserv</h2>
+
+<p> Gnuserv is a more sophisticated remote invocation mechanism for Emacs,
+    written by <a href="http://hplbwww.hpl.hp.com/people/ange/">Andy
+    Norman</a> (also the author of <a
+    href="http://linuxgazette.net/issue26/marsden.html">ange-ftp</a>).
+    It allows arbitrary Emacs Lisp commands to be sent to an Emacs process
+    running either on the local machine or on another machine on the
+    network.
+
+<ol>
+<li> If you're using XEmacs everything is already set up; you will only
+     need to add a <tt>(gnuserv-start)</tt> to your <tt>~/.emacs</tt>.
+     
+<li> Obtain the gnuserv-2.1alpha RPM from Red Hat contrib, or <a
+     href="http://cgi.debian.org/www-master/debian.org/Packages/unstable/editors/gnuserv.html">
+     the .deb</a> for Debian Hamm and skip to 6&nbsp;;
+
+<li> Download the <a
+     href="http://hplbwww.hpl.hp.com/people/ange/gnuserv/">source</a>&nbsp;;
+
+<li> Edit <tt>config.h</tt> (I suggest using <tt>#define
+     DONT_USE_LITOUT</tt>) and <tt>gnuserv.h</tt>, where you choose the
+     communication method (the default is Internet domain <a
+     href="http://www.lowtek.com/sockets/">sockets</a>, which is necessary
+     if you want to be able to do the remote stuff)&nbsp;;
+
+<li> Put the file <tt>gnuserv.el</tt> somewhere in Emacs' load path. Let's
+     assume you have an <tt>~/elisp/</tt> directory where you put your
+     favorite Emacs Lisp extensions; an alternative is to copy gnuserv.el
+     to a site-wide Emacs Lisp directory such as
+     <tt>/usr/lib/emacs/site-lisp</tt> (type <tt>C-h v load-path</tt> in
+     Emacs to see a list of possiblities)&nbsp;;
+
+<li> Add something like this to your <tt>~/.emacs</tt>&nbsp;:
+
+<pre>
+    (setq load-path (cons (expand-file-name "~/elisp") load-path))
+    (autoload 'gnuserv-start "gnuserv" "Better Emacs server support")
+    (setq gnuserv-frame (current-frame))
+    (gnuserv-start)
+</pre>
+
+<p> The second line tells Emacs that the function <tt>gnuserv-start</tt> is
+    defined in a file called gnuserv.el, which Emacs will load on demand.
+    The third line inhibits the default behaviour of opeing a new frame for
+    each new file edited (leave this out if you prefer). The last line
+    fires up the server.
+
+</ol>    
+
+
+<p> To check that everything is working, type
+
+<pre><tt>
+    ~$ gnuclient &lt;filename&gt;
+</tt></pre>
+
+<p> which asks Emacs to open <tt>&lt;filename&gt;</tt>, just like
+    emacsclient. If this doesn't work (with a message like ``Refused
+    connection'' or ``Broken pipe''), skip down to the <a
+    href="#security">Security section</a>. You can also send off an
+    arbitrary bit of Emacs Lisp&nbsp;:
+
+<pre>    
+    ~$ gnudoit '(message "Hi there, %s!" (user-full-name))'
+
+</pre>
+
+
+<h2>Applications</h2>
+
+<p> Now you can do all sorts of silly things. You could get two Emacsen on
+    networked machines to play ping pong, echoing messages back and forth.
+    You could use Emacs as a CGI script server, profiting from its powerful
+    library without incurring the overhead of launching an interpreter for
+    each script (a little like the <a
+    href="http://www.FastCGI.com/">FastCGI</a> mechanism). For example,
+    let's hack together an external interface to Emacs' builtin
+    psychologist&nbsp;:
+
+    
+<pre>
+     (defun eliza-start ()
+       "Fire up the doctor."
+       (interactive)
+       (doctor)
+       ;; We only have to type return once under this interface.
+       (re-search-backward " twice" nil t)
+       (replace-match "")
+       (goto-char (point-max))
+       (buffer-substring (point-min) (point-max)))
+
+     (defun eliza-continue (str)
+       "Send a string to the doctor and return her response."
+       (interactive)
+       (switch-to-buffer "*doctor*")
+       (insert "\n" str "\n")
+       (doctor-read-print)
+       (save-excursion
+         (re-search-backward "\n\n\\(\\(.+\n?\\)+\\)\n\n")
+         (match-string 1)))
+
+     (defun eliza-cleanup ()
+       "Pay the bill and leave."
+       (interactive)
+       (let ((buf (get-buffer "*doctor*")))
+          (if buf (kill-buffer buf))))
+</pre>
+
+<p> This can be used from the command line (for CGI use you'd have to
+    think about the trickier question of concurrent accesses) with a script
+    such as
+
+<pre>
+     #! /bin/sh
+     
+     gnudoit '(eliza-start)'
+     while read line
+     do
+         gnudoit "(eliza-continue \"$line\")"
+     done
+     gnudoit '(eliza-cleanup)'
+</pre>
+
+<p> You might even find constructive uses for the gnuserv technology, like
+    starting <a href="http://www.Gnus.org/">Gnus</a> (an Emacs news/email
+    client) and ange-ftp transfers from a ``network Emacs'', so that your
+    primary Emacs isn't affected by networking delays. You could also
+    communicate with Emacs from a crontab, telling it to fetch some web
+    pages with Emacs/w3, or send someone an email. You could use
+    Netscape's third party <a
+    href="http://developer.netscape.com/software/sdks/index.html?content=mailnews.html">
+    email/news API</a> to invoke Emacs instead of the builtin mail and news
+    clients. It might also be useful for sending commands to Emacs from a
+    <a href="http://www.plig.org/xwinman/">window manager</a> menu.
+
+
+<h2>Security considerations<a name="security"></A></h2>
+
+<p> More and more Linux distributions use good <a
+    href="http://ciac.llnl.gov/ciac/documents/ciac2316.html">X security</a>
+    as set up out of the box. You will notice for example that when you su
+    to root on a modern system, you will no longer be able to launch X
+    clients, because the X server is protected by an <a
+    href="http://www.xs4all.nl/~zweije/xauth.html">xauth</a> cookie.
+
+<p> While allowing access to your X display is bad enough (someone could
+    capture all your keystrokes, for example), giving remote access to your
+    Emacs process is much more worrying, since Emacs can execute arbitrary
+    commands under your id, delete files, send insulting email to the
+    President of the United States, etc.
+
+<p> Since release 2.1, gnuserv is able to use MIT-MAGIC-COOKIE-1
+    authentication for remote requests. This protocol uses the contents of
+    your <tt>~/.Xauthority</tt> file, as described in the xauth(1) man page.
+    Gnuserv requires a cookie for display number 999, which you can create
+    as follows (blade is the name of the machine)&nbsp;:
+
+<pre>    
+      ~$ xauth add blade:999 . `cat /etc/passwd | md5sum` 
+      ~$ xauth list
+      blade/unix:0  MIT-MAGIC-COOKIE-1  bc1d627babdbabe9d1f288d2b57c348f
+      blade:999  MIT-MAGIC-COOKIE-1  d89570b20925d401c05a79be67159cae
+</pre>
+
+<p> (<tt>`cat /etc/passwd | md5sum`</tt> is just a convenient way of
+    generating a cookie; on most Linux systems you will be able to use the
+    <a
+    href="http://hegel.ittc.ukans.edu/topics/linux/man-pages/man1/mcookie.1.html">mcookie</a>
+    command, or you can bake a cookie by hand). Now you should be able to
+    use gnuclient/gnudoit on the local machine. The next step is to
+    transfer the cookie to each remote machine from which you plan to
+    access Emacs, with a command such as&nbsp;:
+
+<pre>    
+      ~$ xauth extract - blade:999 | rsh remotehost.edu xauth merge -
+</pre>
+
+<p> If you don't run X you will have to fall back to a host-based access
+    control system&nbsp;: the environment variable <tt>GNU_SECURE</tt> is
+    assumed to point to a file which contains a list of machines which are
+    authorized to open connections to your Emacs process. Finally, if your
+    machine isn't networked, you've probably already skipped to the next
+    section.
+
+
+<h2>How does it work?</h2>
+
+<p> Your command takes a fairly convoluted route to reach Emacs. There are
+    four parties involved in a transaction&nbsp;: the ``client'', or
+    program which wants a service from Emacs (Elm for example), the
+    gnuclient program (which runs on the requesting machine), the gnuserv
+    process (which runs on the machine running Emacs), and of course the
+    Emacs process itself. They communicate as indicated by the following
+    diagram&nbsp;:
+
+<p> <img src="./gx/marsden/gnuserv-arch.gif" alt="Communication diagram (3 kB)">
+
+<p> The fragile aspect of the system is that if the gnuserv program dies
+    for some reason, everything grinds to a halt. An alternative
+    communication method which would involve fewer working parts could be
+    inspired from the Netscape remote invocation protocol. The gnuclient
+    capabilities would be added directly to Emacs, and a gnudoit request
+    would look something like
+
+<pre>
+    emacs -remote -lisp '(message "Hi")'
+</pre>
+
+<p> The new Emacs process would search for an existing Emacs process to
+    which it could dispatch the request, or service it directly. The
+    disadvantage is that each request would be slower, since an Emacs needs
+    to be forked each time. The image is most often in the disk cache, so
+    this wouldn't be catastrophically slow (it works OK with Mozilla, which
+    is <a
+    href="http://x5.dejanews.com/getdoc.xp?AN=202452924&CONTEXT=896094230.406519988&hitnum=1">far
+    bigger</a> than Emacs).
+
+     
+<h2>Next time ...</h2>
+
+<p> I've received a fair bit of email asking how to customize various
+    aspects of Emacs, so I'll try to scratch the surface of this vast topic
+    next month, and discuss the Customize package. Don't hesitate to
+    contact me at <tt>&lt;emarsden@mail.dotcom.fr&gt;</tt> with comments,
+    corrections or suggestions (what's <em>your</em> favorite
+    couldn't-do-without Emacs extension package?). <code>C-u 1000 M-x
+    hail-emacs</code> !
+
+<p> <b>PS</b> : Emacs isn't in any way limited to Linux, since
+    implementations exist for many other operating systems (and some
+    systems which only halfway operate). However, as one of the leading
+    bits of free software, one of the most powerful, complex and
+    customizable, I feel it has its place in the <i>Linux Gazette</i>.
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<A HREF="../issue25/marsden.html">EMACSulation #1, February 1998</A><br>
+<A HREF="../issue26/marsden.html">EMACSulation #2, March 1998</A><br>
+<A HREF="../issue27/marsden.html">EMACSulation #3, April 1998</A>
+<P> <hr> <P>
+<center><H5>Copyright &copy; 1998, Eric Marsden <BR> 
+Published in Issue 29 of <i>Linux Gazette</i>, June 1998</H5></center>
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<A HREF="./index.html"><IMG ALIGN=BOTTOM SRC="../gx/indexnew.gif" 
+ALT="[ TABLE OF CONTENTS ]"></A>
+<A HREF="../index.html"><IMG ALIGN=BOTTOM SRC="../gx/homenew.gif"
+ALT="[ FRONT PAGE ]"></A>
+<A HREF="./hamilton.html"><IMG SRC="../gx/back2.gif"
+ALT=" Back "></A>
+<A HREF="./prelz.html"><IMG SRC="../gx/fwd.gif" ALT=" Next "></A>
+<P> <hr> <P> 
+<!--startcut ==========================================================-->
+</BODY>
+</HTML>
+<!--endcut ============================================================-->

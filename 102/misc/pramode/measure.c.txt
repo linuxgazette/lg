@@ -1,0 +1,87 @@
+
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <assert.h>
+
+#define ATHLON
+#include "perf.h"
+#define N 150000000 /* 150Mb */
+#define BLKSIZE 64
+
+char A[N];
+
+void initialize()
+{
+    int i, j, k;
+    for(i = 0; i < N; i++) 
+        A[i] = 1;
+		
+}
+
+void action_slow()
+{
+    int i, j, k, r = N/BLKSIZE, m;
+
+    for(i = 0; i < BLKSIZE; i++) {
+        for(j = 0, k = i; j < r; j++, k+=BLKSIZE) {
+            m = A[k];
+        }
+    }
+}
+
+void action_fast()
+{
+    int i, r;
+
+    for(i = 0; i < N; i++)
+        r = A[i];				 
+}
+
+/*
+ * Before running this program, the 
+ * kernel module has to be loaded. 
+ * A character special file called `perf'
+ * should be created with the major number
+ * returned by `register_chrdev' in the
+ * kernel module.
+ */
+
+main()
+{
+    unsigned int count[2] = {0,0}, ev[2];
+    int fd = open("perf", O_RDWR);
+    int r;
+	
+    assert(fd >= 0);
+	
+    /* First, select the event to be
+     * monitored
+     */
+
+    r = ioctl(fd, EVSEL, 0); /* Event Select 0 */
+    assert(r >= 0);
+	
+    ev[0] = DCACHE_MISS | USR | ENABLE;
+    ev[1] = 0;
+    r = write(fd, ev, sizeof(ev));
+    assert(r >= 0);
+
+    r = ioctl(fd, EVCNT, 0); /* Select Event Counter 0 */
+    assert(r >= 0);
+
+    initialize();
+
+    r = read(fd, count, sizeof(count));
+    assert(r >= 0);
+    printf("low = %x, high = %x\n", count[0], count[1]);
+    action_fast();
+    r = read(fd, count, sizeof(count));
+    assert(r >= 0);
+    printf("low = %x, high = %x\n", count[0], count[1]);
+    printf("\n-----------------------\n");
+    action_slow();
+    r = read(fd, count, sizeof(count));
+    assert(r >= 0);
+    printf("low = %x, high = %x\n", count[0], count[1]);
+}

@@ -1,0 +1,105 @@
+#!/bin/sh
+# rawrite.sh
+# script to create boot disks for
+# OpenBSD (floppyXX.fs), linux (bootXX.img)
+# or DOS using diskette images
+#
+#
+# Allan Peda
+# Aug. 3, 2000
+# apeda@interpublic.com
+#
+# released under the GPL
+# http://www.gnu.org/
+
+TEMP=`getopt -o d:f:hn -n $0 -- "$@"`
+if [ $? != 0 ]; then
+    echo "getopt (1) problem... terminating" >&2
+    exit 1
+fi
+
+eval set -- "$TEMP"
+
+HELPMSG="
+\n
+RAWRITE option information:\n
+\n
+\t        -f <file>: specify disk image file\n
+\t        -d <drive>: specify diskette drive to use;\n
+\t                must be either A or B\n
+\t        -n: don't wait for user to insert diskette --\n
+\t                assumes diskette is waiting in selected drive\n
+\t        -h: print this help message and exit\n
+\n
+"
+
+<P> PROMPT=1
+FLOP=""
+while true ; do
+    case "$1" in
+	# the drive (letter or device is ok)
+	-d) case $2 in
+		a|A|fd0|"/dev/fd0") FLOP='/dev/fd0' ; shift 2 ;;
+		b|B|fd1|"/dev/fd1") FLOP='/dev/fd1' ; shift 2 ;;
+		"")  echo "Please supply a device or drive letter." ;  exit 1  ;;
+		*)   echo "Please supply a device or drive letter."  ; exit 1  ;;
+	    esac ;;
+	# the disk image
+	-f) FILE=$2 ; shift 2 ;;
+	-h) echo -e $HELPMSG ; exit ;;
+	-n) PROMPT=0 ; shift ;;
+	--) shift ; break ;;
+	*)  echo "Use 'rawrite -h' for instructions." ; exit 1 ;;
+   esac
+done
+
+# if these values were not supplied, prompt for them
+if [ x$FILE = x ]; then
+    echo -n "Enter disk image source file name: "
+    read FILE
+    if [ ! -f $FILE ] || [ -z $FILE ]; then
+	echo -e "No such file or directory\n" >&2
+	exit 1
+    fi
+fi
+
+if [ x$FLOP = x ]; then
+    echo -n "Enter target diskette drive: "
+    read FLOP
+    case $FLOP in
+		a|A|fd0|"/dev/fd0") FLOP='/dev/fd0' ; shift 2 ;;
+		b|B|fd1|"/dev/fd1") FLOP='/dev/fd1' ; shift 2 ;;
+		*) echo "Drive was '$FLOP'; must be A,B,fd0, or fd1"
+		    exit 1 ;;
+    esac
+fi
+
+# read first loop
+while true ; do
+    if [ $PROMPT != 0 ]; then
+	echo "Please insert a formatted diskette into device $FLOP and press 
+-ENTER- :"
+	read
+    else
+	break
+    fi
+    # if device is not ready keep prompting
+    head -c0 $FLOP 2>/dev/null >/dev/null
+    PROMPT=$?
+done
+
+file $FILE | grep -q compressed
+if [ $? = 0 ]; then
+    gzip -cd $FILE | dd of=$FLOP bsÅ92
+    exit $?
+fi
+
+<P> file $FILE | grep -q 'boot sector'
+if [ $? = 0 ]; then
+    dd if=$FILE of=$FLOP bsÅ92
+    exit $?
+fi
+
+echo "File $FILE is unreadable, or in unknown format." >&2
+exit 1
+

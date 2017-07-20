@@ -1,0 +1,162 @@
+#!/usr/bin/perl
+
+#########################################################################
+#	Author: Robert Stagner						#
+#	Name: sendMeIP.pl						#
+#	Version: 0.20							#
+#	Synopsis: sendMeIP.pl <connect ¦ disconnect>			#
+#									#
+#									#
+#	Description: The purpose of this program is to:			#
+#	1) Provide a connection/disconnection to the Internet via a 	#
+#	   shell program (/usr/sbin/ppp-on, or ppp-off).		#
+#	2) Capture the dynamically generated IP address from the 	#
+#	   ISP service and,						#
+#	3) Send the returned IP Address to a pre-defined e-mail address	#
+#	   so that a remote connection can be made to this computer.	#
+#									#
+#	This program can be executed as a stand-alone application, or	#
+#	as a part of a CronJob. If you plan to use this program within	#
+#	a cronjob, the author has found the following statements to be 	#
+#	useful within crontab (executed as root):			#
+#									#
+#	0 8 * * 1,2,3,4,5 perl /usr/local/bin/sendMeIP.pl connect	#
+#	15 12 * * 1,2,3,4,5 perl /usr/local/bin/sendMeIP.pl disconnect	#
+#									#
+#	These two statements were added to **root's** crontab.		#	
+#									#
+#	Options:							#
+#		connect		This option allows a connection to be	#
+#				established to the Internet via a	#
+#				modem.					#
+#									#
+#		disconnect	This option disconnects a previously	#
+#				established connection to the Internet	#
+#									#
+#	Reqirements:							#
+#		This program requires the existence of and access to 	#
+#		/usr/sbin/ppp-on, /usr/sbin/ppp-off, /sbin/ifconfig,	#
+#		/usr/sbin/chat, and sendmail. It is assumed that all	#
+#		the necessary configuration has already taken place for #
+#		ppp-on, ppp-off, and chat.				#
+#									#
+#	See Also:							#
+#		ppp-on, ppp-off, chat, ifconfig, crontab, and sendmail	#	
+#########################################################################
+
+# Counter used to provide a delay while the ppp connection is established
+$COUNT = 1;
+
+# Check for the existence of options
+if (!$ARGV[0] || $ARGV[0] !~ m/(connect|disconnect)/i) {
+	print "Usage: sendMeIP.pl <connect | disconnect>\n";
+	exit -1;
+}
+
+# Call and execute connection/disconnection to the Internet
+&pppConnection($ARGV[0]);
+
+# Caputre the dynamically created remote IP Address
+$assignedIPAddress = &captureIPAddress;
+
+# Send the IP Address via e-mail
+&sendMail($assignedIPAddress);
+
+
+############################ BEGIN Subroutines ##########################
+
+#########################################################################
+#	Synopsis:	captureIPAddress 				#
+#	Descripton:							#
+#		To capture the dynamically created IP Address using a	#
+#		call to the /sbin/ifconfig program.  A regular ex-	#
+#		pression is used to test for the existence or non-ex	#
+#		istence of the IP Address. If the IP Address has not 	#
+#		yet been written to the ifconfig output and the count	#
+#		variable is less than 60, then continue trying to cap-	#
+#		ture the IP Address. Otherwise there is a successful	#
+#		capture or failure.					#
+#									#
+#########################################################################
+sub captureIPAddress {
+	my $captureIFCONFIG;
+	$captureIFCONFIG = qx#/sbin/ifconfig#;
+	
+	if ($captureIFCONFIG =~ /inet addr:(\d+\.\d+.\d+\.\d+)\s*P-t-P.*/) {
+		my $assignedIPAddress = "$1";
+		print "IP Address capture successful: $assignedIPAddress.\n"; 
+		return ($assignedIPAddress);
+	}
+	elsif (($captureIFCONFIG !~ /inet addr:(\d+\.\d+.\d+\.\d+)\s*P-t-P.*/)
+&& ($COUNT < 60)) {
+
+		$COUNT++;
+		sleep 1;
+		&captureIPAddress;
+	}
+	else {
+		print "Houston, we have a problem in capturing the IP Address.\n"; 
+		exit -2;
+	}
+}
+
+#########################################################################
+#	Synopsis:	pppConnection ("connect | disconnect")		#
+#	Description:							#
+#		To establish a connection/disconnection to the Internet	#
+#		via a shell script.					#	
+#									#
+#########################################################################
+sub pppConnection {
+	my $action = shift;
+	my $returnMessage;
+	
+	# path to PPP connection script (on and off)
+	my $pppOn = '/usr/sbin/ppp-on';
+	my $pppOff = '/usr/sbin/ppp-off';
+
+	if ($action eq "connect") {
+		system("$pppOn");
+	}
+	elsif ($action eq "disconnect") { 
+		$returnMessage = qx#$pppOff#;
+		print "$returnMessage\n";
+		exit 0;
+	}
+	else { 
+		print "Problem connecting or disconnecting with the modem.\n";
+		exit -3;	
+	}
+}
+
+#########################################################################
+#	Synopsis:	sendMail("$assignedIPAddress")			#
+#	Description:							#
+#		To pass the captured IP Address to an e-mail message	#
+#		sent through /usr/sbin/sendmail.			#
+#									#
+#########################################################################
+sub sendMail {
+	my $assignedIPAddress = shift;
+	my $mailService =  location of your mail program: mine is "/usr/sbin/sendmail";
+	my $from = "Your Name <yourLocalEmail\@host.com>";
+	my $to = "Your Name <yourWorkEmail\@host.com>";
+
+	die "Trouble sending mail: $!" unless (-e $mailService);
+
+	open(SENDMAIL, "|$mailService -oi -t") or die "Trouble sending mail:
+$!"; 
+
+	print SENDMAIL <<"EOMAIL";
+From: $from 
+To: $to 
+Subject: An Important Message About your.computer
+
+Use the following IP Address to establish a connection with
+your.computer : $assignedIPAddress
+
+EOMAIL
+	close(SENDMAIL);
+	print "The e-mail message has been sent.\n";
+	return 1;
+}

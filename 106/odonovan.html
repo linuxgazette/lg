@@ -1,0 +1,580 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Intrusion Detection with Tripwire LG #106</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="murray.html" >&lt;-- prev</A> | <A HREF="oregan.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Intrusion Detection with Tripwire</h1>
+<p id="by"><b>By <A HREF="../authors/odonovan.html">Barry O'Donovan</A></b></p>
+
+<p>
+<h2>Intrusion Detection with Tripwire</h2>
+
+<h3>1. Introduction</h3>
+
+A little over two years ago I was hacked. Someone broke into a web server I
+was administrating that had only Apache and OpenSSH running publically, and
+all packages were up-to-date. The hacker replaced my <code>ps</code> binary
+with his own to hide his processes, added a new service that was executed
+from the binary &#034;<code>/bin/crond&nbsp;</code>&#034; (the space is
+intentional - it makes it look like a normal and an expected process in
+a running-processes listing and a normal binary in a directory listing).
+The &#034;<code>crond&nbsp;</code>&#034; process gathered usernames and
+passwords and stored them in a text file in the directory
+&#034;<code>/dev/pf0&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;/&nbsp;&nbsp;
+/</code>&#034;, (5 and 2 spaces respectively), which also contained a
+root shell. The chances of me finding and identifying this intrusion
+would have been extremely remote if I had not been running Tripwire.
+
+<p>
+Tripwire is a file integrity checker for UNIX/Linux based operating systems
+and works as an excellent intrusion detection system. It will not prevent an
+intrusion; for this see my previous articles on <a
+href="http://linuxgazette.net/103/odonovan.html">setting up firewalls</a> and
+<a href="http://linuxgazette.net/105/odonovan.html">securing a Linux
+distribution</a> for help. 
+
+<p>
+The idea behind Tripwire is quite simple: it first creates a
+&#034;baseline&#034; database of the state of the files and directories on
+your system and then on subsequent runs it compares the current state of the
+files and directories against this baseline identifying any deletions,
+additions or changes. The files and directories to be checked are decided by
+a &#034;policy&#034; file. This file also defines what attributes to compare;
+this can include access, inode and modification timestamps, owner and group
+IDs, permissions, file size and type, MD5 and SHA hash values, etc.
+
+<p>
+In this article I will guide you through the process of getting and
+installing Tripwire, configuring it and setting it up to run on a daily
+basis. In the final section I will mention a few additional steps you can
+take to ensure the integrity of your Tripwire database and thus your file
+system.
+
+<h3>2. Acquiring and Installing Tripwire</h3>
+
+The easiest method of installing Tripwire is to use a vendor supplied
+package (I have checked and these are available for RedHat/Fedora Core, SuSE,
+Mandrakesoft and Debian). The advantages of using these is that the policy
+file will be already created and configured for the system you are using.
+Make sure to use official packages for your distribution to ensure they have not
+been trojaned. 
+
+<p>
+If you cannot locate a precompiled package for your distribution, then you
+can download the latest source code from <a 
+href="http://sourceforge.net/projects/tripwire/" 
+>http://sourceforge.net/projects/tripwire/</a>. The version available at 
+time of going to press was
+2.3.1-2. This version is dated March 2001 and when I tried to compile
+it on my system I got a myriad of errors. The sources do not use
+the autoconf/automake build system and this may be the main cause of
+the errors. I have decided to place the resolution of these problems
+outside the scope of this article given the availability of precompiled
+packages for many distributions.
+
+<h3>3. An Overview of Tripwire's Files</h3>
+
+The operation of Tripwire is controlled by a configuration file and a
+policy file; both of these files are encoded and signed before use
+for security reasons. These files <em>usually</em> reside in 
+<code>/etc/tripwire</code>. The plain text versions are called
+<code>twcfg.txt</code> and <code>twpol.txt</code>, and the encoded and
+signed versions are called <code>tw.cfg</code> and <code>tw.pol</code>. 
+The plain-text version of the configuration file contains key-value pairs 
+including the following required variables (default values for my 
+distribution shown):
+<pre>
+POLFILE         = /etc/tripwire/tw.pol
+DBFILE          = /var/lib/tripwire/$HOSTNAME.twd
+REPORTFILE      = /var/lib/tripwire/report/$HOSTNAME-$DATE.twr
+SITEKEYFILE     = /etc/tripwire/site.key
+LOCALKEYFILE    = /etc/tripwire/$HOSTNAME-local.key
+</pre>
+
+<p>
+The <code>POLFILE</code>, <code>DBFILE</code> and
+<code>REPORTFILE</code> dictate the locations of the policy file, the
+database file and the report file respectively. A report file is 
+generated each time Tripwire is used to check the integrity of the
+file system and its name is determined by both the hostname and current 
+date. The <code>SITEKEYFILE</code> and <code>LOCALKEYFILE</code> variables 
+hold the locations of the two key files; site keys are used for signing
+files that can be used on multiple systems within an organisation such
+as the policy and configuration files, while the local key is used for
+files specific to this system such as the database file.
+
+<p>
+Ensure that the <code>$HOSTNAME</code> environment variable is correctly
+set to your system's hostname before using any of Tripwire's commands. Also, 
+the <code>HOSTNAME</code> variable in <code>twpol.txt</code> 
+<strong>must</strong> be set correctly so that it matches the system's
+hostname. If you are unsure of what the system's hostname is set to, then
+execute <code>echo $HOSTNAME</code> on the command line.
+
+<p>
+Other configuration file values we will use are shown here followed
+by a description of each:
+<pre>
+EDITOR                 =/bin/vi
+MAILNOVIOLATIONS       =true
+EMAILREPORTLEVEL       =3
+REPORTLEVEL            =3
+MAILMETHOD             =SENDMAIL
+MAILPROGRAM            =/usr/sbin/sendmail -oi -t
+</pre>
+
+<dl>
+<dt><code>EDITOR</code>
+<dd>When updating the database after files have been added, removed or
+altered, a &#034;ballot-box&#034; styled form must be completed by
+placing an &#039;x&#039; opposite the files which we have changed and
+do not indicate an intrusion; this variable sets the editor to use for
+this process.
+<dt><code>MAILNOVIOLATIONS</code>
+<dd>Tripwire e-mails a report whenever a violation was found. This
+option tells Tripwire to always e-mail a report whether a violation was
+found or not. This is useful as it shows the system administrator that
+Tripwire is running as expected.
+<dt><code>EMAILREPORTLEVEL</code> and <code>REPORTLEVEL</code>
+<dd>The amount of information Tripwire includes in its report file and
+e-mail. Valid values range from 0 to 4 with the default being 3.
+<dt><code>MAILMETHOD</code> and <code>MAILPROGRAM</code>
+<dd>The mail method can either be <code>SMTP</code> (in which case
+additional variables have to be set to indicate the SMTP host and port)
+or <code>SENDMAIL</code> (in which case we include the
+<code>MAILPROGRAM</code> variable).
+</dl>
+
+<p>
+There are a number of other options and these are explained in the man
+page: <code>TWCONFIG(4)</code>.
+
+<p>
+Creating your own policy file is a long and tedious task that is
+also outside the scope of this article. If you get a packaged version of
+Tripwire for your distribution then the policy file should already be
+created. The policy file is essentially a list of rules and
+associated files which should be checked by Tripwire; the rules
+indicate the severity of a violation. The text version of the file
+itself is quite readable and is worth a look to fully understand how
+Tripwire works. Also, irrespective of your distribution, you will find
+that Tripwire generates a lot of the following errors when checking the
+filesystem:
+<pre>
+File system error.
+Filename: XXXXXXXXXXXXX
+No such file or directory
+</pre>
+For each of these errors there is an entry for the named file in the
+policy file but this file does not exist on your system. You will
+have to edit the policy file and comment out these
+lines.
+
+<p>
+Tripwire comes with four binary files:
+<dl>
+<dt><strong><code>tripwire</code></strong>
+<dd>The main file; used for initialising the database, checking the
+integrity of the file system, updating the database and updating the
+policy.
+<dt><strong><code>twadmin</code></strong>
+<dd>Tripwire's administrative and utility tool; used for creating and
+printing configuration files, replacing and printing a policy file,
+generating site and local keys and other encryption related functions.
+<dt><strong><code>twprint</code></strong>
+<dd>Used to print the reports and database in human-readable format.
+<dt><strong><code>siggen</code></strong>
+<dd>Generates the various hashes that Tripwire supports for checking
+the integrity of files.
+</dl>
+
+<h3>4. Initialising the Keys and Database</h3>
+
+<p>
+In this section we will set Tripwire up so that you can use it on a
+daily basis to check your systems integrity. I am assuming that the
+current working directory is <code>/etc/tripwire</code> and that the
+following files exist in the specified paths:
+<table>
+<tr>
+    <td align="center"><code>/etc/tripwire/twcfg.txt</code>:
+</td><td> plain-text version of the configuration file</td>
+</tr>
+<tr>
+    <td align="center"><code>/etc/tripwire/twpol.txt</code>:
+</td><td> plain-text version of the policy file</td>
+</tr>
+</table>
+
+<p>
+The first step is to generate the keys to be used when
+signing the database, policy file and configuration file.
+You will be asked for a passphrase for each of the local and site keys;
+it should be greater than 8 characters and include punctuation symbols
+as well as alphanumeric characters.
+
+<pre class="code">
+[root@home /etc/tripwire]# twadmin --generate-keys --site-keyfile ./site.key
+
+(When selecting a passphrase, keep in mind that good passphrases typically
+have upper and lower case letters, digits and punctuation marks, and are
+at least 8 characters in length.)
+
+Enter the site keyfile passphrase: XXXXXXXXXXXXXXXXXX
+Verify the site keyfile passphrase: XXXXXXXXXXXXXXXXXX
+Generating key (this may take several minutes)...Key generation complete.
+
+[root@home /etc/tripwire]# twadmin --generate-keys --local-keyfile ./$HOSTNAME-local.key
+
+Enter the local keyfile passphrase: XXXXXXXXXXXXXXXXXX
+Verify the local keyfile passphrase: XXXXXXXXXXXXXXXXXX
+Generating key (this may take several minutes)...Key generation complete.
+[root@home /etc/tripwire]#
+</pre>
+
+<p>
+Now that we have generated our keys, we need to sign the configuration 
+and policy files (after editing them as required):
+
+<pre class="code">
+[root@home /etc/tripwire]# twadmin --create-cfgfile --cfgfile ./tw.cfg --site-keyfile ./site.key \
+    twcfg.txt
+Please enter your site passphrase: XXXXXXXXXXXXXXXXXX
+Wrote configuration file: /etc/tripwire/tw.cfg
+
+[root@home /etc/tripwire]# twadmin --create-polfile --cfgfile tw.cfg --site-keyfile site.key twpol.txt
+Please enter your site passphrase: XXXXXXXXXXXXXXXXXX
+Wrote policy file: /etc/tripwire/tw.pol
+[root@home /etc/tripwire]# 
+</pre>
+
+<strong>Do not leave the plain-text versions of the configuration and 
+policy files on your hard drive.</strong> Move them onto a floppy disk or
+encrypt them using a utility such as GPG. Also ensure that the permissions of 
+the signed files are set such that they are only readable/writable by root:
+<pre class="code">
+[root@home /etc/tripwire]# chmod 0600 tw.cfg tw.pol
+</pre>
+
+<p>
+The last job we must do to complete the set-up is create the baseline 
+database:
+
+<pre class="code">
+[root@home /etc/tripwire]# tripwire --init --cfgfile ./tw.cfg --polfile ./tw.pol \
+    --site-keyfile ./site.key --local-keyfile ./home.barryodonovan.com-local.key
+Please enter your local passphrase:
+Parsing policy file: /etc/tripwire/tw.pol
+Generating the database...
+*** Processing Unix File System ***
+Wrote database file: /var/lib/tripwire/$HOSTNAME.twd
+The database was successfully generated.
+[root@home /etc/tripwire]#
+</pre>
+
+<h3>5. Integrity Checking</h3>
+
+Now that Tripwire is installed, configured and the baseline database has 
+been created, we can get on with the business of checking the integrity 
+of the file system:
+
+<pre class="code">
+[root@home /etc/tripwire]# tripwire --check
+Parsing policy file: /etc/tripwire/tw.pol
+*** Processing Unix File System ***
+Performing integrity check...
+Wrote report file: /var/lib/tripwire/report/$HOSTNAME-20040823-210750.twr
+... ... ...
+Total objects scanned:  52387
+Total violations found:  0
+</pre>
+
+<p>
+Each violation (an addition, removal or change) is reported to 
+<code>stdout</code> and written to the report file as indicated. On this
+occasion I have assumed the default locations of the configuration and
+policy files. I could have specified these explicitly on the command line
+as I have been doing with switches such as <code>--cfgfile</code>, etc.
+
+<p>
+Your goal should be to set this up to run on a daily basis. This can be 
+done as a cron or an Anacron job; Anacron is the better choice when 
+the computer is not on 24/7. Using either cron or Anacron, the output 
+should be e-mailed to the root user on each run of Tripwire.
+
+<p>
+In the case of Anacron, create a file in <code>/etc/cron.daily/</code>
+called (for example) <code>tripwire-check</code> containing:
+
+<pre class="code">
+#!/bin/bash
+
+/usr/sbin/tripwire --check
+</pre>
+
+<p>
+and ensure that it is executable (<code>chmod u+x 
+/etc/cron.daily/tripwire-check</code>). If you want to use a cron job, then
+add the following line to root's crontab to perform the check every day at 
+3am (<code>crontab -e</code>):
+
+<pre class="code">
+00 03 * * * /usr/sbin/tripwire --check
+</pre>
+
+<h3>6. Updating the Database</h3>
+
+When any file that Tripwire checks changes, you must update the Tripwire 
+database so that it reflects the new information for the file. This can 
+be done as part of the integrity checking process by using the interactive 
+switch (&#039;<code>-I</code>&#039;) or by using the database update mode 
+of the <code>tripwire</code> command:
+
+<pre class="code">
+[root@home /etc/tripwire]# tripwire --update --twrfile /var/lib/tripwire/report/$HOSTNAME-20040823-210750.twr
+    &lt; At this point you will be asked to choose which file records to update in the &gt;    
+    &lt; database via the ballot-box mechanism. Unless you specified otherwise, vi     &gt;
+    &lt; will be the editor chosen. If you have not used vi before then I suggest you  &gt;
+    &lt; change it to a pico, nedit or whatever you prefer. Add/remove the x's from    &gt;
+    &lt; the ballot boxes, save and exit                                               &gt;                                                       
+Please enter your local passphrase: XXXXXXXXXXXXXXX
+Wrote database file: /var/lib/tripwire/home.barryodonovan.com.twd
+[root@home /etc/tripwire]#
+</pre>
+
+<p>
+As you can see from the command line above, you must specify a report 
+file to be used when updating the database. Choose the most recently 
+generated report file. If you find yourself having to constantly update 
+the same non-critical files, then feel free to update the policy so as 
+to exclude those files.
+
+<p>
+If any changes are found you will be presented with a &#034;ballot-box&#034; 
+styled form that must be completed by placing an &#039;x&#039; opposite the 
+violations that are safe to be updated in the database (for example you 
+updated the Apache web server yesterday and Tripwire is reporting a change in 
+the binary <code>/usr/sbin/httpd</code> as would be expected). If anything
+has changed that you cannot directly account for then you should check it out
+as it may indicate that someone has broken into your system.
+
+<h3>7. Updating the Policy</h3>
+
+The <code>tripwire</code> command has a policy update mode which means that a
+change in policy does not require us to reinitialise the database. The policy 
+update mode simply synchronises the existing database with the new policy file.
+The new policy file expected is the plain-text version - Tripwire will then 
+ask for the local and site passphrases, synchronise the database and sign both
+the new policy file and the database.
+
+<pre class="code">
+tripwire --update-policy --cfgfile ./tw.cfg --polfile ./tw.pol --site-keyfile ./site.key \
+    --local-keyfile ./$HOSTNAME-local.key new_policy_file.txt
+</pre>
+
+<p>
+Again, you <strong>should not</strong> leave the plain-text version of the 
+policy file on the system.
+
+<h3>8. Securing Tripwire</h3>
+
+Using Tripwire as an intrusion detection system is only as effective as the 
+security of Tripwire itself. There are a number of procedures you can follow
+to ensure maximum security:
+
+<ul>
+<li> ensure that no plain text copies of the configuration file or the 
+policy file exist on the system
+<li> ensure the access modes of the Tripwire binaries are 0500 
+(i.e. <code>-r-x------</code>); as root execute: <code>chmod 0500 
+/usr/sbin/tripwire /usr/sbin/twadmin /usr/sbin/twprint /usr/sbin/siggen</code>
+<li> ensure the access modes of the configuration directory and the database 
+and report directory are 0700 (i.e. <code>-rwx------</code>) and similarly for 
+its contents; as root execute: <code>chmod -R u=rwX,go-rwx /var/lib/tripwire</code> 
+- the capital &#039;X&#039; in the permissions sets the execute (or access if 
+a directory) bit if the file already has it set or if it is a directory.
+</ul>
+
+<p>
+The last procedure is something that I would consider a &#039;must&#039; 
+rather than a &#039;should&#039;. Tripwire's database must be secure for 
+an integrity check to be sufficiently trustworthy. If you are not updating 
+the database on a regular occasion (such as on a server, etc) then you can
+keep the database on removable media without too much inconvenience. This 
+can be as simple as leaving a write-protected floppy cantaining the database
+in the floppy drive, or a re-writable CD in a CD-ROM drive (read-only drive).
+If the database changes then you can update the database on these mediums by
+write-enabling the floppy or erasing and burning the new database to the 
+CD-RW; but an attacker will be unable to remove or alter the database in 
+anyway.
+
+<p>
+A second solution would be to keep the database on another machine and 
+download it as required. This could be as simple as using <code>wget</code>
+to fetch the database from a web server just prior to running the integrity
+check and removing it afterwards. For example, change the Anacron script to:
+
+<pre class="code">
+#!/bin/bash
+
+# switch to the database directory as specified by the Tripwire configuration file
+cd /var/lib/tripwire
+
+# download the database from a password protected directory (.htaccess)
+wget http://www.someserver.com/private/$HOSTNAME.twd --http-user=username --http-passwd=password
+
+# perform the integrity check
+/usr/sbin/tripwire --check
+
+# remove the database
+rm -f $HOSTNAME.twd
+</pre>
+
+<p>
+You can use <code>scp</code>, <code>rsync</code>, etc in a similar fashion.
+
+<h3>9. Further Resources</h3>
+
+A standard installation of Tripwire comes with many man pages which provide
+all the information you should need:
+<ul>
+<li> <code>TRIPWIRE(8)</code> - (i.e. execute <code>man 8 tripwire</code> to 
+view this man page)
+<li> <code>TWINTRO(8)</code> - an introduction to Tripwire
+<li> <code>TWADMIN(8)</code>
+<li> <code>TWPRINT(8)</code>
+<li> <code>SIGGEN(8)</code>
+<li> <code>TWCONFIG(8)</code> - information on the Tripwire configuration file
+<li> <code>TWPOLICY(8)</code> - information on the Tripwire policy file
+<li> <code>TWFILES(8)</code> - information on the various Tripwire files
+</ul>
+
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<p>
+<! -- REPLACE THE FOLLOWING WITH AUTHOR'S ~200x200 PIC. -->
+<img align="left" alt="[BIO]" src="../gx/authors/odonovan.jpg" class="bio">
+<em>
+
+<! -- BIO GOES HERE -->
+
+Barry O'Donovan graduated from the National University of Ireland, Galway
+with a B.Sc. (Hons) in computer science and mathematics. He is currently
+completing a Ph.D. in computer science with the <a
+href="http://www.ihl.ucd.ie/">Information Hiding Laboratory</a>, University
+College Dublin, Ireland in the area of audio watermarking.
+
+<p> Barry has been using Linux since 1997 and his current flavor of choice
+is Fedora Core. He is a member of the <a href="http://www.linux.ie/">Irish
+Linux Users Group</a>. Whenever he's not doing his Ph.D. he can usually be
+found supporting his finances by doing some work for <a 
+href="http://www.openhosting.ie/" title="An Irish based web hosting and web 
+design company">Open Hosting</a>, in the pub with friends or running in the local 
+park.
+</em>
+<br clear="all">
+<!-- *** END bio *** -->
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2004, Barry O'Donovan. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 106 of Linux Gazette, September 2004
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="murray.html" >&lt;-- prev</A> | <A HREF="oregan.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">September 2004 (#106)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/2003/sit3-shine.7-2.gif" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

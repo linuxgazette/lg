@@ -1,0 +1,196 @@
+<!DOCTYPE html PUBLIC '-//W3C//DTD XHTML 1.0 Transitional//EN'
+		 'http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd'>
+<html xmlns='http://www.w3.org/1999/xhtml' lang='utf-8' xml:lang='utf-8'>
+<head>
+<title>2-cent Tip: ext2 fragmentation</title>
+<meta http-equiv='Content-Type; charset=utf-8' />
+<link rel='stylesheet' type='text/css' href='../../../lg.css' />
+</head>
+<body>
+<a href="../../../"><img alt="Linux Gazette" src="../../../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" /></a><img alt="Tux" src="../../../gx/tux_86x95_indexed.png" id="tux" /><p id="fun">...making Linux just a little more fun!</p><div class='content articlecontent'><a name="top"></a><h3>2-cent Tip: ext2 fragmentation</h3>
+<p>
+<b><p>
+Paul Sephton [paul at inet.co.za]
+
+</p>
+</b><br />
+<b>Thu, 04 Jun 2009 01:52:01 +0200</b>
+</p>
+
+<p>
+Hi, all
+</p>
+
+<p>
+Just thought I'd share this 2c tip with you (now the mailing list is up
+- yay!).
+</p>
+
+<p>
+I was reading a forum where a bunch of fellows were griping about e2fs
+lacking a defragmentation tool.  Now, we all know that fragmentation is
+generally quite minimal with ext2/ext3, since the file system does some
+fancy stuff deciding where to write new files.  The problem though, is
+when a file grows over time, it is quite likely going to fragment,
+particularly if the file system is already quite full.
+</p>
+
+<p>
+There was a whole lot of griping, and lots of "hey you don't need
+defragging, its ext3 and looks after iteself, wait for ext4", etc.  Not
+a lot of happy campers.
+</p>
+
+<p>
+Of course, Ted Ts'o opened the can of worms by writing 'filefrag', which
+now lets people actually <em>see</em> the amount of fragmentation.  If not for
+this, probably no-one would have been complaining in the first place!
+</p>
+
+<p>
+I decided to test a little theory, based on the fact that when the file
+system writes a new file for which it already knows the size, it will do
+it's utmost to make the new file contiguous.  This gives us a way of
+defragging files in a directory like so:
+</p>
+
+<pre>
+#!/bin/sh
+# Retrieve a list for fragmented files, #fragments:filename
+flist() {
+  for i in *; do
+    if [ -f $i ]; then
+      ff=`filefrag $i`
+      fn=`echo $ff | cut -f1 -d':'`
+      fs=`echo $ff | cut -f2 -d':' | cut -f2 -d' '`
+      if [ -f $fn -a $fs -gt 1 ]; then echo -e "$fs:$fn"; fi
+    fi
+  done
+}
+ 
+# Sort the list numeric, descending
+flist | sort -n -r |
+(
+# for each file
+  while read line; do
+    fs=`echo $line | cut -f 1 -d':'`
+    fn=`echo $line | cut -f 2 -d':'`
+# copy the file up to 10 times, preserving permissions
+    j=0;
+    while [ -f $fn -a $j -lt 10 ]; do
+      j=$[ $j + 1 ]
+ 
+      TMP=$$.tmp.$j
+      if ! cp -p "$fn" "$TMP"; then
+        echo copy failed [$fn]
+        j=10
+      else
+# test the new temp file's fragmentation, and if less than the
+# original, move the temp file over the original
+        ns=`filefrag $TMP | cut -f2 -d':' | cut -f2 -d' '`
+        if [ $ns -lt $fs ]; then
+          mv "$TMP" "$fn"
+          fs=$ns
+          if [ $ns -lt 2 ]; then j=10; fi
+        fi
+      fi
+    done
+    j=0;
+# clean up temporary files
+    while [ $j -lt 10 ]; do
+      j=$[ $j + 1 ]
+ 
+      TMP=$$.tmp.$j
+      if [ -f $TMP ]; then
+        rm $TMP
+      else
+        j=10
+      fi
+    done
+  done
+)
+# report fragmentation
+for i in *; do if [ -f $i ]; then filefrag $i; fi; done
+</pre>
+
+<p>
+Basically, it uses the 'filefrag' utility and 'sort' to determine which
+files are fragmented the most.  Then, starting with the most fragmented
+file, it copies that file up to 10 times.  If the copied file is less
+fragmented than the original, the copy gets moved over the original.
+Given ext2's continuous attempt to create new files as unfragmented,
+there's a good chance with this process, that you end up with a
+directory of completely defragmented files.
+</p>
+
+<p>
+For example, prior and after running the script:
+<pre>
+root@pdev:/u/dumpsite# for i in *; do if [ -f $i ]; then filefrag $i;
+fi; done
+MenuMaker-0.17.tar.gz: 1 extent found
+OOo_1.1.1_LinuxIntel_install.tar.gz: 2 extents found, perfection would
+be 1 extent
+binutils-2.15.91-20040904-1.tar.gz: 1 extent found
+binutils-2.15.tar.bz2: 2 extents found, perfection would be 1 extent
+cairo-1.6.4.tar.gz: 24 extents found, perfection would be 1 extent
+cairo-1.8.2.tar.gz: 3 extents found, perfection would be 1 extent
+firefox-1.0.2.installer.tar.gz: 2 extents found, perfection would be 1
+extent
+install_flash_player_10_linux.tar.gz: 30 extents found, perfection would
+be 1 extent
+install_flash_player_9_linux.tar.gz: 62 extents found, perfection would
+be 1 extent
+ktechlab-svn-latest.tar.bz2: 16 extents found, perfection would be 1
+extent
+libgal2.0_6-1.99.11-2mdk.i586.rpm: 1 extent found
+libgal2.0_6-1.99.11-2mdk.i586.tgz: 1 extent found
+libsigc++-2.0.17.tar.bz2: 1 extent found
+pixman-0.11.8.tar.gz: 8 extents found, perfection would be 1 extent
+pixman-0.12.0.tar.gz: 2 extents found, perfection would be 1 extent
+pl-5.6.64.tar.gz: 33 extents found, perfection would be 1 extent
+powertop-1.10.tar.gz: 7 extents found, perfection would be 1 extent
+pycairo-1.4.12.tar.gz: 9 extents found, perfection would be 1 extent
+sloccount-2.26.tar.gz: 3 extents found, perfection would be 1 extent
+swaret-1.6.2-noarch-1.tgz: 1 extent found
+wine-1.1.5-i486-1kjz.tgz: 43 extents found, perfection would be 1 extent
+ximian-connector-1.4.7.2-0.ximian.6.1.i386.tgz: 1 extent found
+ 
+ 
+root@pdev:/u/dumpsite# ~/defrag.sh 
+MenuMaker-0.17.tar.gz: 1 extent found
+OOo_1.1.1_LinuxIntel_install.tar.gz: 2 extents found, perfection would
+be 1 extent
+binutils-2.15.91-20040904-1.tar.gz: 1 extent found
+binutils-2.15.tar.bz2: 1 extent found
+cairo-1.6.4.tar.gz: 1 extent found
+cairo-1.8.2.tar.gz: 1 extent found
+firefox-1.0.2.installer.tar.gz: 1 extent found
+install_flash_player_10_linux.tar.gz: 1 extent found
+install_flash_player_9_linux.tar.gz: 1 extent found
+ktechlab-svn-latest.tar.bz2: 1 extent found
+libgal2.0_6-1.99.11-2mdk.i586.rpm: 1 extent found
+libgal2.0_6-1.99.11-2mdk.i586.tgz: 1 extent found
+libsigc++-2.0.17.tar.bz2: 1 extent found
+pixman-0.11.8.tar.gz: 1 extent found
+pixman-0.12.0.tar.gz: 1 extent found
+pl-5.6.64.tar.gz: 1 extent found
+powertop-1.10.tar.gz: 1 extent found
+pycairo-1.4.12.tar.gz: 1 extent found
+sloccount-2.26.tar.gz: 1 extent found
+swaret-1.6.2-noarch-1.tgz: 1 extent found
+wine-1.1.5-i486-1kjz.tgz: 1 extent found
+ximian-connector-1.4.7.2-0.ximian.6.1.i386.tgz: 1 extent found
+</pre>
+
+<p>
+Have fun,
+Paul
+</p>
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_tips.html#mb-2_cent_tip__ext2_fragmentation">Back</a><hr width="50%" align="left" /><p><br /></p></div>
+</body>
+</html>

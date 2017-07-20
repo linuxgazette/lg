@@ -1,0 +1,1515 @@
+<BODY>
+<HEAD>
+<TITLE>
+Graphics Muse
+</TITLE>
+</HEAD>
+
+<BODY text="#000000" bgcolor="#ffffff"
+	vlink="#fa3333" alink="#33CC33" link="#0000FA">
+
+<!-- =============================================================
+		This Page Designed by Michael J. Hammel.
+		Permission to use all graphics and other content for private,
+		non-commerical use is granted provided you give me (or the 
+		original authors/artists) credit for the work.
+
+		CD-ROM distributors and commercial ventures interested in 
+		providing the Graphics Muse for a fee must contact me,
+		Michael J. Hammel (mjhammel@csn.net), for permission.
+     ============================================================= !-->
+
+<A NAME="musings">
+<table>
+<tr>
+<td>
+<H2>More...</H2>
+<BR clear=both>
+<IMG SRC="../gx/hammel/musings.gif" ALT="Musings" ALIGN="left" 
+	HSPACE="0" VSPACE="0" WIDTH="247" HEIGHT="52">
+</td>
+</table>
+</A>
+<BR clear=both>
+
+
+<table>
+<tr><td>
+	<H3>BMRT</H3>
+	<td rowspan=2 bgcolor=#000000>
+		<IMG SRC="./gx/hammel/plank.jpg" ALT="Gritz Sample 1" ALIGN="middle" 
+			HSPACE="0" VSPACE="0" WIDTH="305" HEIGHT="227">
+		<BR clear=both>
+		<CENTER>
+		<FONT color=#ffffff size=1>Image courtesy of Larry Gritz</FONT>
+		</CENTER>
+<tr><td>
+<OL>
+	<LH><B> Part II:  
+        Renderman Shaders 
+		<B></LH>
+	<LI><A HREF="#review">A quick review</A>
+	<LI><A HREF="#what">What is a shader?</A>
+	<LI><A HREF="#compiling">Compiling shaders</A>
+	<LI><A HREF="#types">Types of shaders</A>
+	<LI><A HREF="#syntax">Shader language syntax</A>
+		<OL TYPE=a>
+			<LI><A HREF="#names">Shader names</A>
+			<LI><A HREF="#variables">Variables and scope</A>
+			<LI><A HREF="#data-types">Data types and expressions</A>
+			<LI><A HREF="#functions">Functions</A>
+			<LI><A HREF="#statements">Statements</A>
+			<LI><A HREF="#coordinates">Coordinate systems</A>
+		</OL>
+	<LI><A HREF="#format">Format of a shader file</A>
+	<LI><A HREF="#texture-maps">A word about texture maps</A>
+	<LI><A HREF="#examples">Working examples</A>
+		<OL TYPE=a>
+			<LI><A HREF="#examples-1">Colored Mesh pattern</A>
+			<LI><A HREF="#examples-2">Adding opacity - a wireframe shader</A>
+			<LI><A HREF="#examples-3">A simple paper shader</A>
+			<LI><A HREF="#examples-4">A texture mapped chalk board</A>
+			<LI><A HREF="#examples-5">Displacement map example</A>
+		</OL>
+</OL></td>
+</table>
+
+<IMG SRC="../gx/hammel/cleardot.gif" ALT="indent" ALIGN="left" 
+	VSPACE="5" WIDTH="1" HEIGHT="1">
+<BR clear=both>
+<table width=100%>
+<tr>
+	<td width="100%" align=right>
+	<FONT size=1>
+	&copy 1996 <A HREF="mailto:mjhammel@csn.net">Michael J. Hammel</A>
+	</FONT></td>
+<tr>
+	<td bgcolor="#000000" cellpadding=0 cellspacing=0 valign=top>
+		<IMG SRC="../gx/hammel/cleardot.gif" ALT="indent" ALIGN="left" 
+			HSPACE="0" WIDTH="0" HEIGHT="0"></td>
+</table>
+
+<P>
+
+<A NAME="review"></A>
+<H2>1. A quick review</H2>
+&nbsp; &nbsp; &nbsp;
+Before we get started on shaders, lets take a quick look back at RIB files.
+RIB files are ASCII text files which describe a 3D scene to a RenderMan
+compliant renderer such as BMRT.  A RIB file contains descriptions of
+objects - their size, position in 3D space, the lights that illuminate them
+and so forth.  Objects have surfaces that can be colored and textured,
+allowing for reflectivity, opacity (or conversely, transparency),
+bumpiness, and various other aspects.
+<BR>
+&nbsp; &nbsp; &nbsp;
+An object is instanced inside AttributeBegin/AttributeEnd requests (or
+procedures in the C binding).  This instancing causes the current graphics
+state to be saved so that any changes made to the graphics state (via the
+coloring and texturing of the object instance) inside the
+AttributeBegin/AttributeEnd request will not affect future objects.  The
+current graphics state can be modified, and objects colored and textured,
+with special procedures called <I>shaders</I>.
+
+<BR>
+&nbsp; &nbsp; &nbsp;
+<B>Note:</B>  
+Keep in mind that this is not a full fledged tutorial and I won't be
+covering every aspect of shaders use and design.  Detailed information can
+be found in the texts listed in the bibliography at the end of this
+article.
+
+
+<P>
+
+<A NAME="what"></A>
+<H2>2. What is a shader?</H2>
+&nbsp; &nbsp; &nbsp;
+In the past, I've often used the terms <I>shading</I> and <I>texturing</I>
+interchangeably.  Darwyn Peachy, in his 
+<FONT COLOR="#335533">
+<U><I>Building Procedural Textures</I></U>
+</FONT>
+chapter in the text <B>Texturing and Modeling:  A Procedural Approach</B>,
+says that these two concepts are actually separate processes:
+<BLOCKQUOTE>
+	Shading is the process of calculating the color of a pixel
+	from user-specified surface properties and the shading model.
+	Texturing is a method of varying the surface properties from
+	point to point in order to give the appearance of surface
+	detail that is not actually present in the geometry of the
+	surface.
+		[<A HREF="#ref1">1</A>]
+</BLOCKQUOTE>
+A shader is a procedure called by the renderer to apply colors and textures
+to an object.  This can include the surface of objects like block or spheres, 
+the internal space of a solid object, or even the space between objects
+(the atmosphere).  Although based on Peachy's description would imply that
+shaders only affect the coloring of surfaces (or atmosphere, etc), shaders
+handle both shading and texturing in the RenderMan environment.  
+
+<P>
+
+<A NAME="compiling"></A>
+<H2>3. Compiling shaders</H2>
+&nbsp; &nbsp; &nbsp;
+RIB files use filenames with a suffix of ".rib".  Similarly, shader files
+use the suffix ".sl" for the shader source code.  Unlike RIB files, however,
+shader files cannot be used by the renderer directly in their source
+format.  They must be compiled by a shader compiler.  In the BMRT package
+the shader compiler is called <I>slc</I>. 
+<BR>
+&nbsp; &nbsp; &nbsp;
+Compiling shaders is fairly straightforward - simply use the slc program
+and provide the name of the shader source file.  For example, if you have a
+shader source file named myshader.sl you would compile it with the
+following command:
+&nbsp;&nbsp;&nbsp;
+<CODE>
+	slc myshader.sl
+</CODE>
+<BR>
+You must provide the ".sl" suffix - the shader source file cannot be
+specified using the base portion of the filename alone.
+When the compiler has finished it will have created the compiled shader in
+a file named myshader.so 
+in the current directory.  A quick examination of
+this file shows it to be an ASCII text file as well, but the format is
+specific for the renderer in order for it to implement its graphics state
+stack.
+Note:  the filename extension of ".so" used by BMRT (which is different
+than the one used by PRMan) does not signify a binary object file, like
+shared library object files.  The file is an ASCII text file.  Larry says
+he's considering changing to a different extension in the future to avoid
+confusion with shared object files.
+<BR>
+&nbsp; &nbsp; &nbsp;
+Note that in the RIB file (or similarly when using the C binding) 
+the call to the shader procedure is done in the following manner:
+<BR>
+<PRE>
+               AttributeBegin
+                  Color [0.9 0.6 0.6]
+                  Surface "myshader"
+                  ReadArchive "object.rib"
+               AttributeEnd
+</PRE>
+This example uses a <I>surface</I> shader (we'll talk about shader types in a
+moment).  The name in double quotes is the name of the shader procedure
+which is not necessarily the name of the shader source file.  
+Since shaders are procedures they
+have procedure names.  In the above example the procedure name is
+<I>myshader</I>.  This happens to the be same as the base portion (without
+the suffix) of the shader source filename.  The shader compiler doesn't
+concern itself with the name of the source file, however, other than to
+know which file to compile.  The output filename used for the .so file is
+the name of the procedure.  So if you name your procedure differently than
+the source file you'll get a differently named compiled .so file.  Although
+this isn't necessarily bad, it does make it a little hard to keep track of
+your shaders.  In any case, the name of the procedure is the name used in
+the RIB (or C binding) when calling the shader.  In the above example,
+"myshader" is the name of the procedure, not the name of the source file.
+
+
+<P>
+
+<A NAME="types"></A>
+<H2>4. Types of shaders</H2>
+&nbsp; &nbsp; &nbsp;
+According to the <B>RenderMan Companion</B> [<A HREF="#ref2">2</A>]
+<BLOCKQUOTE>
+	The RenderMan Interface specifies six types of shaders, distinguished
+	by the inputs they use and the kinds of output they produce.
+</BLOCKQUOTE>
+The text then goes on to describe the following shader types:
+<OL>
+	<LI>Light source shaders
+	<LI>Surface shaders
+	<LI>Volume shaders
+	<LI>Displacement shaders
+	<LI>Transformation shaders
+	<LI>Imager shaders
+</OL>
+Most of these can only have one instance of the shader type in the graphics
+state at any one time.  For example, there can only be one surface shader
+in use for any object or objects at a time.  The exception to this are
+light shaders, which may have many instances at any one time, some of which
+may not be actually turned on for some objects.
+<P>
+<B><FONT COLOR="#335533">
+Light Source Shaders
+</FONT></B>
+<BR>
+&nbsp; &nbsp; &nbsp;
+Light sources in the RenderMan Shading Language are provided a position and
+direction and return the color of the light originating from that light and
+striking the current surface point.  The RenderMan specification provides
+for a set of default light shaders that are very useful and probably cover
+the most common lighting configurations an average user might encounter.
+These default shaders include ambient light (the same amount of light
+thrown in all directions), distant lights (such as the Sun), point lights,
+spot lights, and area lights.  All light sources have an intensity that
+defines how bright the light shines.  Lights can be made to cast shadows or not
+cast shadows.  The more lights that cast shadows you have in a scene the
+longer it is likely to take to render the final image.  During scene design
+and testing its often advantagous to keep shadows turned off for most lights.
+When the scene is ready for its final rendering turn the shadows back on.
+
+<BR>
+&nbsp; &nbsp; &nbsp;
+Ambient light can be used to brighten up a generally dark image but the
+effect is "fake" and can cause an image to be washed out, losing its
+realism.  Ambient light should be kept small for any scene, say with an
+intensity of no more than 0.03.  Distant lights provide a light that shines
+in one direction with all rays being parallel.  The Sun is the most common
+example of a distant light source.  Stars are also considered distant
+lights.  If a scene is to be lit by sunlight it is often considered a good 
+idea to have distant lights be the only lights to cast shadows.  Distant
+lights do not have position, only direction.
+
+<BR>
+&nbsp; &nbsp; &nbsp;
+Spot lights are the familiar lights which sit at a particular location in
+space and shine in one generalized direction covering an area specified by 
+a cone whose tip is the spot light.  A spot lights intensity falls off
+exponentially with the angle from the centerline of the cone.  The angle is
+specified in <I>radians</I>, not degress as with POV-Ray.  Specifying the
+angle in degrees can have the effect of severly over lighting the area
+covered by the spot light.  Point lights also fall off in intensity, but do
+so with distance from the lights location.  A point light shines in all
+directions at once so does not contain direction but does have position.
+
+<BR>
+&nbsp; &nbsp; &nbsp;
+Area lights are series of point lights that take on the shape of an object
+to which they are attached.  In this way a the harshness of the shadows
+cast by a point light can be lessened by creating a larger surface of
+emitted light.  I was not able to learn much about area lights so can't
+really go into detail on how to use them here.
+
+<BR>
+&nbsp; &nbsp; &nbsp;
+Most light source shaders use one of
+two illumination functions:  illuminate() and solar().  Both provides ways
+of integrating light sources on a surface over a finite cone.  illuminate()
+allows for the specification of position for the light source, while
+solar() is used for light sources that are considered very distant, like
+the Sun or stars.  I consider the writing of light source shaders to be a
+bit of an advanced topic since the use of the default light source shaders
+should be sufficient for the novice user to which this article is aimed.
+Readers should consult <B>The RenderMan Companion</B> and <B>The RenderMan
+Specification</B> for details on the use of the default shaders.
+
+<P>
+<B><FONT COLOR="#335533">
+Surface Shaders
+</FONT></B>
+<BR>
+&nbsp; &nbsp; &nbsp;
+Surface shaders are one of the two types of shaders novice users will make
+use of most often (the other is displacement shaders).  Surface shaders are
+used to determine the color of light reflected by a given surface point  
+in a particular direction.  Surface shaders are used to create wood
+grains or the colors of an eyeball.  They also define the opacity of a
+surface, ie the amount of light that can pass through a point (the points
+transparency).  A point that is totally opaque allows no light to pass
+through it, while a point that is completely transparent reflects no light.
+
+<BR>
+&nbsp; &nbsp; &nbsp;
+The majority of the examples which follow will cover surface shaders.  One
+will be a displacement shader.
+
+<P>
+<B><FONT COLOR="#335533">
+Volume Shaders
+</FONT></B>
+<BR>
+&nbsp; &nbsp; &nbsp;
+A volume shader affects light traveling to towards the camera as it passes
+though and around objects in a scene.  Interior volume shaders determine
+the effect on the light as it passes through an object.  Exterior volume
+shaders affect the light in the "empty space" around an object.
+Atmospheric shaders handle the space between objects.  Exterior 
+and interior volume
+shaders differ from atmospheric shaders in that the latter operate on all
+rays originating from the camera (remember that ray tracing traces the
+lights ray in reverse from nature - from camera to light source).  
+Exterior and interior shaders work only on secondary rays, those rays
+spawned by the <I>trace()</I> function in shaders.  
+Atmospheric shaders are used
+for things like fog and mist.  Volume shaders are a slightly more advanced
+topic which I'll try to cover in a future article.
+
+<P>
+<B><FONT COLOR="#335533">
+Displacement Shaders
+</FONT></B>
+<BR>
+&nbsp; &nbsp; &nbsp;
+The texture of an object can vary in many ways, from very smooth to very
+bumpy, from smooth bumps to jagged edges.  With ordinary surface shaders a
+texture can be simulated with the use of a <I>bump map</I>.  Bump maps
+perturb the normal of a point on the surface of an object so that the point
+appears to be raised, lowered, or otherwised moved from its real location.
+A bump map describes the variations in a surfaces orientation.
+Unfortunately, this is only a trick and the surface point is not really
+moved.  For some surfaces this trick works well when viewed from the proper
+angle.  But when seen edge on the surface variations disapper - the edge is
+smooth.  A common example is an orange.  With a bump map applied the orange
+appears to be pitted over its surface.  The edge of the sphere, however, is
+smooth and the pitting effect is lost.  This is where displacement shaders
+come in.
+
+<BR>
+&nbsp; &nbsp; &nbsp;
+In <B>The RenderMan Interface Specification</B>[<A HREF="#ref3">3</A>] 
+it says
+<BLOCKQUOTE>
+	The displacement shader environment is very similar to a surface shader,
+	except that it only has access to the geometric surface parameters.
+	[A displacement shader] computes a new P [point] and/or a new N
+	[normal for that point].
+</BLOCKQUOTE>
+
+A displacement shader operates across a surface, modifying the physical
+location of each point.  These modifications are generally minor and of a
+type that would be much more difficult (and computationally expensive) to
+specify individually.  It might be difficult to appreciate this feature
+until you've seen what it can do.  
+Plate 9 in [<A HREF="#ref4">4</A>] shows an ordinary cylinder modified with
+the <I>threads()</I> displacement shader to create the threads on the base
+of a lightbulb.   <B>Figures 1-3</B> shows a similar (but less sophisticated) 
+example.
+Without the use of the displacement shader, each thread
+would have to be made with one ore more individual objects.  Even if the
+computational expense for the added objects were small, the effort required
+to model these objects correctly would still be significant.  Displacement
+shaders offer procedural control over the shape of an object.
+
+<P>
+<table>
+<tr>
+	<td bgcolor=#000000 align=center valign=top width=33%>
+		<IMG SRC="./gx/hammel/cylinder.jpg" ALT="Ordinary cylinder" ALIGN="middle" 
+			HSPACE="0" WIDTH="148" HEIGHT="209">
+	<td bgcolor=#000000 align=center valign=top width=33%>
+		<IMG SRC="./gx/hammel/cylnorms.jpg" 
+			ALT="Ordinary cylinder with Normals modified" ALIGN="middle" 
+			HSPACE="0" WIDTH="148" HEIGHT="209">
+	<td bgcolor=#000000 align=center valign=top width=33%>
+		<IMG SRC="./gx/hammel/cyldisp.jpg" 
+			ALT="Cylinder with true displacments" ALIGN="middle" 
+			HSPACE="0" WIDTH="151" HEIGHT="209">
+<tr>
+	<td align=center bgcolor=#AAAAAA>
+		<FONT color=#ffffff>
+			<A HREF="./source/cylinder.rib">An ordinary cylinder</A>
+		</FONT>
+	<td align=center bgcolor=#AAAAAA>
+		<FONT color=#ffffff>
+			<CENTER>
+			<A HREF="./source/cylnorms.rib">Same cylinder with modified normals</A>
+			</CENTER>
+			<BR>
+			Note that in this case the renderer attributes have not been
+			turned on.  The edges of the cylinder are flat, despite the
+			apparent non-flat surface.
+		</FONT>
+	<td align=center bgcolor=#AAAAAA>
+		<FONT color=#ffffff>
+			<A HREF="./source/cyldisp.rib">Same cylinder with true displacements</A>
+			<BR>
+			In this image the renderer attributes have been turned on.  The
+			edges of the cylinder reflect the new shape of the cylinder.
+		</FONT>
+<tr>
+	<td align=center >
+		<B>Figure 1</B>
+	<td align=center >
+		<B>Figure 2</B>
+	<td align=center >
+		<B>Figure 3</B>
+</table>
+
+<BR>
+&nbsp; &nbsp; &nbsp;
+An important point to remember when using displacement shaders with
+BMRT is that, by default, displacements are not turned on.  Even if 
+a displacement shader is called the points on the surface only have
+their normals modified by the shader.  In order to do the "true 
+displacement", two renderer attribute options must be set:
+<PRE>
+     Attribute "render" "truedisplacement" 1
+     Attribute "displacementbound" "coordinatesystem" 
+               "object" "sphere" 2
+</PRE>
+The first of these turns on the true displacement attribute so that
+displacement shaders actually modify the position of a point on the
+surface.  The second specifies how much the bounding box around the
+object should grow in order to enclose the modified points.  
+How this works is that the attribute tells the renderer how much the
+bounding box is likely to grow <I>in object space</I>.  The renderer can't
+no before hand how much a shader might modify a surface, so this statement
+provides a maximum to help the renderer with bounding boxes around
+displacement mapped objects.  Remember that bounding boxes are used help
+speed up ray-object hit tests by the renderer.  Note that you can compute
+the possible change caused by the displacement in some other space, such as
+world or camera.  Use whatever is convenient.  The "sphere" tag lets the
+renderer know that the bounding box will grow in all directions evenly.
+Currently BMRT only supports growth in this manner, so no other values
+should be used here.
+
+<P>
+<B><FONT COLOR="#335533">
+Transformation and Imager Shaders
+</FONT></B>
+<BR>
+&nbsp; &nbsp; &nbsp;
+BMRT doesn't support Transformation Shaders (neither does Pixar's PRMan
+apparently).  Apparently transformation shaders are supposed to operate on
+geometric coordinates to apply "non-linear geometric transformations".
+According to [<A HREF="#ref5">5</A>]
+<BLOCKQUOTE>
+	The purpose of a transformation shader is to modify a coordinate system.
+</BLOCKQUOTE>
+It is used to deform the geometry of a scene without respect to any
+particular surface.  This differs from a displacement shader because the
+displacement shader operates on a point-by-point basis for a given surface.
+Transformation shaders modify the current transform, which means they
+can affect all the objects in a scene.
+
+<BR>
+&nbsp; &nbsp; &nbsp;
+Imager shaders appear to operate on the colors of output pixels which to me
+means the shader allows for color correction or other manipulation after a
+pixels color has been computed but prior to the final pixel output to file
+or display.  This seems simple enough to understand, but why you'd use them
+I'm not quite sure.  Larry says that BMRT supports Imager shaders but PRMan
+does not.  However, he suggests the functionality provided is probably
+better suited to post-processing tools, such as XV, ImageMagick or the Gimp.
+
+<P>
+
+<A NAME="syntax"></A>
+<H2>5. Shader language syntax</H2>
+&nbsp; &nbsp; &nbsp;
+So what does a shader file look like?  They are very similar in format to a
+C procedure, with a few important differences.  The following is a very
+simplistic surface shader:
+<PRE>
+        surface matte (
+                 float Ka = 1;
+                 float Kd = 1;
+        )
+        {
+          point Nf;
+
+          /*
+           * Calculate the normal which is facing the
+           * direction that points towards the camera.
+           */
+          Nf = faceforward (normalize(N),I);
+
+          Oi = Os;
+          Ci = Os * Cs * (Ka * ambient() + Kd * diffuse(Nf));
+        }
+</PRE>
+This is the matte surface shader provided in the BMRT distribution.  The
+matte surface shader happens to be one of a number of required shaders that
+<B>The RenderMan Interface Specification</B> says a RenderMan compliant 
+renderer must provide.  
+
+<P>
+<A NAME="names"></A>
+<B><FONT COLOR="#335533">
+Shader procedure names
+</FONT></B>
+<BR>
+&nbsp; &nbsp; &nbsp;
+The first thing to notice is the procedure type and name.  In this case the
+shader is a surface shader and its name is "matte".  When this code is
+compiled by slc it will produce a shader called "matte" in a file called
+"matte.so".  Procedure names can be any name that is not a reserved RIB
+statement.  Procedure names may contain letters, numbers and underscores.
+They may not contain spaces.
+
+<P>
+<A NAME="variables"></A>
+<B><FONT COLOR="#335533">
+Variables and scope
+</FONT></B>
+<BR>
+&nbsp; &nbsp; &nbsp;
+There are a number of different kinds of variables that are used with
+shaders:  Instance variables, global variables, and local variables.  
+Instance variables are the variables used as parameters to the shader.
+When calling a shader these variables are declared (if they have not
+already been declared) and assigned a value to be used for that instance of
+the shader.  For example, the matte shader provides two parameters that can
+have appropriate values specified when the shader is instanced within the 
+RIB file.  Lets say we have a sphere for which we will shade using the
+matte shader.  We would specify the instance variables like so:
+<PRE> 
+        AttributeBegin
+           Declare "Kd" "float"
+           Declare "Ka" "float"
+           Surface "matte" "Kd" 0.5 "Ka" 0.5
+           Sphere 1 -.5 .5 360 
+        AttributeEnd
+</PRE> 
+The values specified for Kd and Ks are the instance variables and the 
+renderer will use these values for this instance of the shader.  Instance
+variables are generally known only to the shader upon the initial call for
+the current instance.
+<BR>
+&nbsp; &nbsp; &nbsp;
+Local variables are defined within the shader itself and as such are only
+known within the shader.  In the example matte shader, the variable Nf is a
+point variable as has meaning and value only within the scope of the shader
+itself.  Other shaders will not have access to the values Nf holds.
+Local variables are used to hold temporary values required to compute the
+values passed back to the renderer.  These return values are passed back as
+global variables.
+<BR>
+&nbsp; &nbsp; &nbsp;
+Global variables have a special place in the RenderMan environment.  The
+only way a shader can pass values back to the renderer is through global
+variables.  Some of the global variables that a shader can manipulate are
+the surface color (Cs), surface opacity (Os), the normal vector for the
+current point (N) and the incident ray opacity
+(Oi).  Setting these values within the shader affects how the renderer
+colors surface points for the object which is being shaded.  The complete
+list of global variables that a particular shader type can read or modify
+is listed in tables in the <B>RenderMan Interface Specification</B>
+[<A HREF="#ref6">6</A>].
+Global variables are global in the sense that they pass values between the
+shader and the renderer for the current surface point, but they cannot be
+used to pass values from one objects shader to another.
+
+<P>
+<A NAME="data-types"></A>
+<B><FONT COLOR="#335533">
+Data types and expressions
+</FONT></B>
+<BR>
+&nbsp; &nbsp; &nbsp;
+Shaders have access to only 4 data types: one scalar type, two vector
+types, and a string type.  A string can be defined and used by a shader, but
+it cannot be modified.  So an instance variable that passes in a string
+value cannot be modified by the shader, nor can a local string variable be
+modified once it has been defined.
+<BR>
+&nbsp; &nbsp; &nbsp;
+The scaler type used by shaders is called a <I>float</I> type.  Shaders must use
+float variables even for integer calculations.  The </I>point</I> type is a
+a 3 element array of float values which describe a point in some space.
+By default the point is in <I>world space</I> in BMRT (PRMan uses camera
+space by default), but it is possible to
+convert the point to object, world, texture or some other space within the
+shader.  On point can be transformed to a different space using the
+<I>transform</I> statement.  For example:
+<PRE>
+       float y = ycomp(transform("object",P));
+</PRE>
+will convert the current point to object space and return the Y component
+of the new point into the float variable y.  The other vector type is also
+a 3 element array of float values that specify a color.  A <I>color</I>
+type variable can be defined as follows:
+<PRE>
+       color Cp = color (0.5, 0.5, 0.5);
+</PRE>
+<BR>
+&nbsp; &nbsp; &nbsp;
+Expressions in the shading language follow the same rules of precedence
+that are used in the C language.  The only two expressions that are new to
+shaders are the Dot Product and the Cross Product.  The Dot Product is 
+used to measure the angle between two vectors and is denoted by a period
+(.).  Dot Products work on point variables.
+The Cross Product is often used to find the normal vector
+at a point given two nonparallel vectors tangent to the surface at a given
+point.  The Cross Product only works on points, is denoted by a caret (^)
+and returns a point value.
+
+<P>
+<A NAME="functions"></A>
+<B><FONT COLOR="#335533">
+Functions
+</FONT></B>
+<BR>
+&nbsp; &nbsp; &nbsp;
+A shader need not be a completely self contained entity.  It can call
+external routines, known as functions.  The RenderMan Interface
+Specificatoin predefines a large number of functions that
+are available to shader authors using BMRT.  The following list is just
+a sample of these predefined functions:
+<UL>
+	<LI>Math functions such as sin(), cos(), pow(), exp(), sqrt() and log().
+	<LI>Math functions such as min(), max() and clamp().
+	<LI>Derivative functions Du(), Dv(), and Deriv() which have versions
+		which work on float, color, and point values.
+	<LI>A noise() function for random value.
+	<LI>Geometric functions like area(), length() and distance().
+	<LI>Color functions like mix() which mixes two of its arguments based on 
+		a third argument.
+	<LI>Shading and Lighting functions such as specular() and phong()
+	<LI>Texture map functions for using texture maps within shaders
+</UL>
+This is not a comprehensive list, but it provides a sample of the
+functions available to the shader author.  Many functions operate on more
+than one data type (such as points or colors).  Each can be used to
+calculate a new color, point, or float value which can then be applied to
+the current surface point.
+<BR>
+&nbsp; &nbsp; &nbsp;
+Shaders can use their own set of functions defined locally.  In fact, its
+often helpful to put functions into a function library that can be included
+in a shader using the #include directive.  For example, the 
+<A HREF="http://www.cgrg.ohio-state.edu/~smay/RManNotes/index.html">
+RManNotes Web site</A>
+provides a function library called "rmannotes.sl" which contains a
+<I>pulse()</I> function that can be used to create lines on a surface.  If
+we were to use this function in the matte shader example, it might look
+something like this:
+<PRE>
+        #include "rmannotes.sl"
+
+        surface matte (
+                 float Ka = 1;
+                 float Kd = 1;
+        )
+        {
+          point Nf;
+          float fuzz = 0.05
+          color Ol;
+
+          /*
+           * Calculate the normal which is facing the
+           * direction that points towards the camera.
+           */
+          Nf = faceforward (normalize(N),I);
+
+          Ol = pulse(0.35, 0.65, fuzz, s);
+          Oi = Os*Ol;
+          Ci = Os * Cs * (Ka * ambient() + Kd * diffuse(Nf));
+        }
+</PRE>
+The actual function is defined in the rmmannotes.sl file as
+<PRE>
+  #define pulse(a,b,fuzz,x) (smoothstep((a)-(fuzz),(a),(x)) - \
+                             smoothstep((b)-(fuzz),(b),(x)))
+</PRE>
+A shader could just as easily contain the #defined value directly without
+including another file, but if the function is useful shader authors may
+wish to keep them in a separate library similar to rmmannotes.sl.  In this
+example, the variable s is the left-to-right component of the current
+texture coordinate.  "s" is a component of the <I>texture space</I>, which
+we'll cover in the section on coordinate systems.  "s" is a global variable
+which is why it is not defined within the sample code.
+
+<P>
+Note:  This particular example might not be very useful. It is just meant to 
+show how to include functions from a function library.
+
+<P>
+&nbsp; &nbsp; &nbsp;
+Functions are only callable by the shader, not directly by the renderer.
+This means a function cannot be used directly in a RIB file or referenced
+using the C binding to the RenderMan Interface.  Functions cannot be
+recursive - they cannot call themselves.  Also, all variables passed to
+functions are passed by reference, not by value.  It is important to
+remember this last item so that your function doesn't inadvertantly make 
+changes to variables you were not expecting.
+
+<P>
+<A NAME="statements"></A>
+<B><FONT COLOR="#335533">
+Statements
+</FONT></B>
+<BR>
+&nbsp; &nbsp; &nbsp;
+The shading language provides the following statements for flow control:
+<UL>
+	<LI><B>if-then-else</B>
+	<LI><B>while (</B>boolean expression<B>)</B>  <I>statement</I>
+	<LI><B>for (</B>expr; boolean expr; expr<B>)</B> <I>statement</I>
+	<LI><B>break [</B>n<B>]</B> - "n" is the number of nested levels to exit from
+	<LI><B>continue [</B>n<B>]</B> - 
+				"n" is the number of nested levels to exit from
+	<LI><B>return </B> expression
+</UL>
+All of these act just like their C counterparts.
+
+<P>
+<A NAME="coordinates"></A>
+<B><FONT COLOR="#335533">
+Coordinate Systems
+</FONT></B>
+<BR>
+&nbsp; &nbsp; &nbsp;
+There are number of coordinate systems used by RenderMan.  Some of these I
+find easy to understand by themselves, others are more difficult -
+especially when used within shaders.  In a shader, the surface of an object
+is mapped to a 2 dimensional rectangular grid.  This grid runs from
+coordinates (0,0) in the upper left corner to (1,1) in the lower right
+corner.  The grid is overlayed on the surface, so on a rectangular patch
+the mapping is obvious.  On a sphere the upper corners of the grid map to
+the same point on the top of the sphere.  This grid is known as
+<I>parameter space</I> and any point in this space is referred to by the
+global variables <I>u</I> and <I>v</I>.  For example, a point on the
+surface which is in the exact center of the grid  would have (u,v)
+coordinates (.5, .5).
+
+<BR>
+&nbsp; &nbsp; &nbsp;
+Similar to parameter space is <I>texture space</I>.  Texture space is a
+mapping of a texture map that also runs from 0 to 1, but the variables used
+for texture space are <I>s</I> and <I>t</I>.  By default, texture space is
+equivalent to parameter space unless either vertex variables (variables 
+applied to vertices of primitive objects like patches or polygons) or the 
+TextureCoordinates statement have modified the texture space of the primitive 
+being shaded.  Using the default then, a texture map image would have its upper
+left corner mapped to the upper left corner of the parameter space grid
+overlying the objects surface, and the lower right corner of the image
+would be mapped to the lower right corner of the grid.  The image would
+therefore cover the entire object.  Since the texture space does not have
+to be equivalent to parameter space it would be possible to map an image to
+only a portion of an object.  Unfortunately, I didn't get far enough this
+month to provide an example of how to do this.  Maybe next month.
+
+<BR>
+&nbsp; &nbsp; &nbsp;
+There are other spaces as well:  world space, object space, and shader space.
+How each of these affects the shading and texturing characteristics is not
+completely clear to me yet.  Shader space is the default space in which
+shaders operate, but points in shader space can be transformed to world or
+object space before being operated on.  I don't know exactly what this
+means or why you'd want to do it just yet
+
+<P>
+
+<A NAME="format"></A>
+<H2>6. Format of a shader file</H2>
+&nbsp; &nbsp; &nbsp;
+Shader files are fairly free form, but there are
+methodologies that can be used to make writing shaders easier and the code
+more understandable.  In his 
+RManNotes [<A HREF="#ref7">7</A>], Stephen F. May writes
+<BLOCKQUOTE>
+	One of the most fundamental problem solving techniques is "divide and
+	conquer." That is, break down a complex problem into simpler parts; 
+	solve the simpler parts; then combine those parts to
+	solve the original complex problem. 
+	<P>
+	In shaders, [we] break down complicated surface patterns and textures into
+	layers. Each layer should be fairly easy to write (if not, then we can 
+	break the layer into sub-layers). Then, [we] combine the layers by 
+	compositing. 
+</BLOCKQUOTE>
+
+The basic structure of a shader is similar to a procedure in C - the shader
+is declared to be a particular type (surface, displacement, and so forth)
+and a set of typed parameters are given.  Unlike C, however, shader
+parameters are required to have default values provided.  In this way a
+shader may be instanced without the use of any instance variables.  If any
+of the parameters are specified with instance variables then the value in
+the instance variable overrides the parameters default value.  An
+minimalist shader might look like the following:
+<PRE>
+        surface null ()
+        {
+        }
+</PRE>
+In fact, this is exactly the definition of the null shader.  Don't ask me
+why such a shader exists.  I'm sure the authors of the specification had a
+reason.  I just don't know what it is.  Adding a few parameters, we start
+to see the matte shader forming:
+<PRE>
+        surface matte (
+                 float Ka = 1;
+                 float Kd = 1;
+        )
+        {
+        }
+</PRE>
+The parameters Ka and Kd have their default values provided.  Note that Ka
+is commonly used in the shaders in Guido Quaroni's archive of shaders to
+represent a scaling factor for ambient light.  Similarly, Kd is used to
+scale diffuse light.  These are not global variables, but they are well
+known variables, much like "i", "j", and "k" are often used as counters in
+C source code (a throwback to the heady days of Fortran programming).
+
+<BR>
+&nbsp; &nbsp; &nbsp;
+After the declaration of the shader and its parameters comes the set of
+local variables and the shader code that does the "real work".  Again, we 
+look at the matte shader:
+<PRE>
+        #include "rmannotes.sl"
+
+        surface matte (
+                 float Ka = 1;
+                 float Kd = 1;
+        )
+        {
+          point Nf;
+          float fuzz = 0.05
+          color Ol;
+
+          /*
+           * Calculate the normal which is facing the
+           * direction that points towards the camera.
+           */
+          Nf = faceforward (normalize(N),I);
+
+          Ol = pulse(0.35, 0.65, fuzz, s);
+          Oi = Os*Ol;
+          Ci = Os * Cs * (Ka * ambient() + Kd * diffuse(Nf));
+        }
+</PRE>
+Nothing special here.  It looks very much like your average C procedure.
+Now we get into methodologies.  May [<A HREF="#ref8">8</A>] shows us how a
+layered shader's psuedo-code might look:
+<PRE>
+        surface banana(...)
+        {
+          /* background (layer 0) */
+          surface_color = yellow-green variations;
+
+          /* layer 1 */
+          layer = fibers;
+          surface_color = composite layer on surface_color;
+
+          /* layer 2 */
+          layer = bruises;
+          surface_color = composite layer on surface_color;
+
+          /* layer 3 */
+          layer = bites;
+          surface_color = composite layer on surface_color;
+
+          /* illumination */
+          surface_color = illumination based on surface_color 
+                          and illum params;
+
+          /* output */
+          Ci = surface_color;
+        }
+</PRE>
+What is happening here is that the lowest level applies yellow-and green
+colors to the surface, after which a second layer has fiber colors
+composited (blended or overlayed) in.  This continues for each of 4 defined
+layers (0 through 3) plus an illumination calculation to determine the
+relative brightness of the current point.  Finally, the newly computed
+surface color is ouput via a global variable.
+Using this sort of methodology makes writing a shader much easier as well
+as allowing other shader authors to debug and/or extend the shader in the
+future.  A shader file is therefore sort of bottom-up design, where the
+bottom layers of the surface are calculated first and the topmost layers
+are computed last.
+
+<P>
+
+<A NAME="texture-maps"></A>
+<H2>7. A word about texture maps</H2>
+&nbsp; &nbsp; &nbsp;
+As discussed earlier, texture maps are images mapped from 0 to 1 from left
+to right and top to bottom upon a surface.  Every sample in the image is
+interpolated between 0 and 1.  The mapping does not have to apply to the
+entire surface of an object, however, and when used in conjunction with the
+parameter space of the surface (the u,v coordinates) it should be possible
+to map an image to a section of a surface.
+<BR>
+&nbsp; &nbsp; &nbsp;
+Unfortunately, I wasn't able to determine exactly how to use this knowledge
+for the image I submitted to the IRTC this month.  Had I figured it out
+in time, I could have provided text labels on the bindings of the books in
+the bookcases for that scene.  Hopefully, I'll figure this out in time for
+the next article on BMRT and can provide an example on how to apply texture
+maps to portions of surfaces.
+<P>
+
+
+<A NAME="examples"></A>
+<H2>8. Working examples</H2>
+<BR>
+&nbsp; &nbsp; &nbsp;
+The best way to actually learn how to write a shader is to get down and
+dirty in the bowels of a few examples.  All the references listed in the
+bibliography have much better explanations for the exaples I'm about to 
+describe, but these should be easy enough to follow for novices.
+<P>
+
+<A NAME="examples-1"></A>
+<FONT size=3>
+<A HREF="./source/crosstile.sl">
+<B>A colored cross pattern</B></A>
+</FONT>
+<BR>
+&nbsp; &nbsp; &nbsp;
+This example is taken verbatim from RManNotes by Stephen F. May.
+The shader creates a two color cross pattern.  In this example the pattern
+is applied to a simple plane (a bilinear patch).  Take a look at the 
+<A HREF="./source/crosstile.sl">source code</A>.
+<PRE>
+        color surface_color, layer_color;
+        color surface_opac, layer_opac;
+</PRE>
+<table>
+<tr>
+	<td valign=top>
+		The first thing you notice is that this shader defines two local
+		color variables: surface_color and layer_color.  
+		The layer_color variable is used to compute the current layers color.
+		The surface_color variable is used to composite the various layers 
+		of the shader.  Two other variables, surface_opacity and
+		layer_opacity, work similarly for the opacity of the current layer.
+		<BR>
+		&nbsp; &nbsp; &nbsp;
+		The first layer is a verticle stripe.  The shader defines the color
+		for this layer and then determines the opacity for the current point
+		by using a function called <I>pulse()</I>.  This is a function
+		provided by May in his "rmannotes.sl" function library.  The pulse()
+		function allows the edges of the stripes in this shader to flow
+		smoothly from one color to another (take a look at the edges of
+		the stripes in the
+		sample image).  pulse() uses the fuzz variable to determine how
+		fuzzy the edges will be.
+		Finaly, for each layer the layers color and opacity
+		are blended together to get the new surface color.  The <I>blend()</I>
+		function is also part of rmannotes.sl and is an extension of the
+		RenderMan Interface's mix() function, which mixes color and opacity 
+		values.
+
+	<td valign=top>
+		<table>
+		<tr>
+			<td align=center bgcolor=#000000>
+				<IMG SRC="./gx/hammel/crosstile.jpg" 
+					ALT="Tiled cross pattern" ALIGN="middle" 
+					HSPACE="0" WIDTH="121" HEIGHT="151">
+				<BR clear=both>
+				<FONT color=#ffffff>Figure 4</FONT>
+				</td>
+		<tr>
+			<td bgcolor=#AAAAAA align=center>
+				<A HREF="./source/crosstile.rib">
+				RIB Source code for this example</A>
+				</td>
+		</table>
+</table>
+&nbsp; &nbsp; &nbsp;
+Finally, the incident rays opacity global variable is set along
+with its color.
+<PRE>
+        Oi = surface_opac;
+        Ci = surface_opac * surface_color;
+</PRE>
+These two values are used by the renderer to compute
+pixel values in the output image.
+<P>
+
+<A NAME="examples-2"></A>
+<A HREF="./source/RCScreen.sl">
+<FONT size=3><B>Adding opacity - a wireframe shader</B></FONT>
+</A>
+<BR>
+<table>
+<tr>
+	<td valign=top>
+	&nbsp; &nbsp; &nbsp;
+	This example is taken from the RenderMan Companion.  It shows how a shader
+	can be used to cut out portions of a solid surface.  We use the first
+	example as a backdrop for a sphere that is shaded with the screen() shader
+	from the RenderMan Companion text (the name of the shader as used here is
+	slightly different because it is taken from the collection of shaders from 
+	Guido Quaroni, who changed the names of some shaders to reflect their
+	origins).  First lets look at the sceen using the "plastic" shader
+	(which comes as a default shader in the BRMT distribution).  Figure 5 shows
+	how this scene renders.  The sphere is solid in this example.  The
+	RIB code for this contains the following lines:
+<PRE>
+        AttributeBegin
+           Color [ 1.0 0.5 0.5 ]
+           Surface "plastic"
+           Sphere 1 -1 1 360 
+        AttributeEnd
+</PRE>
+	In Figure 6 the sphere has been changed to a wireframe surface.  The
+	only difference between this scene and Figure 5 is the surface shader used.
+	For Figure 6 the rib code looks like this:
+<PRE>
+        AttributeBegin
+           Color [ 1.0 0.5 0.5 ]
+           Surface "RCScreen"
+           Sphere 1 -1 1 360 
+        AttributeEnd
+</PRE>
+	The rest of the RIBs are exactly the same.  Now lets look at the 
+	<A HREF="./source/RCScreen.sl">screen() shader code</A>.
+<PRE>
+surface 
+RCScreen(
+  float Ks   = .5, 
+  Kd         = .5, 
+  Ka         = .1, 
+  roughness  = .1,
+  density    = .25,
+  frequency  = 20;
+  color specularcolor = color (1,1,1) )
+{
+   varying point Nf = 
+           faceforward( normalize(N), I );
+
+   point V = normalize(-I);
+</PRE>
+
+	<td valign=top>
+		<table>
+		<tr>
+			<td align=center bgcolor=#000000>
+				<IMG SRC="./gx/hammel/wireframe1.jpg" 
+					ALT="A Wireframed sphere - without wireframe" ALIGN="middle" 
+					HSPACE="0" WIDTH="139" HEIGHT="152">
+				<BR clear=both>
+				<FONT color=#ffffff>Figure 5</FONT>
+				</td>
+		<tr>
+			<td bgcolor=#AAAAAA align=center>
+				<A HREF="./source/wireframe1.rib">
+				RIB Source code for this example</A>
+				</td>
+		<tr>
+			<td align=center bgcolor=#000000>
+				<IMG SRC="./gx/hammel/wireframe2.jpg" 
+					ALT="A Wireframed sphere - with wireframe" ALIGN="middle" 
+					HSPACE="0" WIDTH="138" HEIGHT="152">
+				<BR clear=both>
+				<FONT color=#ffffff>Figure 6</FONT>
+				</td>
+		<tr>
+			<td bgcolor=#AAAAAA align=center>
+				<A HREF="./source/wireframe2.rib">
+				RIB Source code for this example</A>
+				</td>
+		<tr>
+			<td align=center bgcolor=#000000>
+				<IMG SRC="./gx/hammel/wireframe3.jpg" 
+					ALT="A Wireframed sphere - thinner grid lines" ALIGN="middle" 
+					HSPACE="0" WIDTH="138" HEIGHT="152">
+				<BR clear=both>
+				<FONT color=#ffffff>Figure 7</FONT>
+				</td>
+		<tr>
+			<td bgcolor=#AAAAAA align=center>
+				<A HREF="./source/wireframe3.rib">
+				RIB Source code for this example</A>
+				</td>
+		</table>
+
+</table>
+
+<PRE>
+   if( mod(s*frequency,1) < density || 
+       mod(t*frequency,1) < density )
+      Oi = 1.0;
+   else 
+      Oi = 0.0;
+   Ci = Oi * ( Cs * ( Ka*ambient() + Kd*diffuse(Nf) ) + 
+               specularcolor*Ks* specular(Nf,V,roughness));
+}
+</PRE>
+
+
+<BR>
+&nbsp; &nbsp; &nbsp;
+The local variable V is defined to be the normalized vector for the
+incident light rays direction.  The incident light ray direction is the
+direction from which the camera views the current surface coordinate.
+This value is used later to compute the specular highlight to be used on
+the portion of the surface which will not be cut out of the sphere.
+
+<BR>
+&nbsp; &nbsp; &nbsp;
+The next thing the shader does is to compute the modulo of the s component
+of the texture space times the frequency of the grid lines of the
+wireframe.  This value is always less than 1 (the modulo of s*frequency is
+the remainder left for n*1 < s*frequency for some value n).  If this value
+is also less then the density then the current coordinate on the surface is
+part of the visible wireframe that traverses the surface horizontally.
+Likewise, the same modulo is computed for t*frequency and if this value is
+also less than the density then the current coordinate point is on one of
+the visible verticle grid lines of the wireframe.  Any point for which the
+module of either of these is greater than the density is rendered
+completely transparent.  The last line computes the grid lines based on the
+current surface color and a slightly metallic lighting model. 
+<BR>
+&nbsp; &nbsp; &nbsp;
+The default value for the density is .25, which means that approximately
+1/4 of the surface will be visible wireframe.  Changing the value with an
+instance variable to .1 would cause the the wireframe grid lines to become 
+thinner.  Figure 7 shows an example of this.  Changing the frequency to a
+smaller number would cause fewer grid lines to be rendered.
+
+<P>
+
+<A NAME="examples-3"></A>
+<A HREF="./source/MJH3HolePaper.sl">
+<FONT size=3><B>A simple paper shader</B></FONT>
+</A>
+<BR>
+&nbsp; &nbsp; &nbsp;
+While working on my entry for the March/April 1997 round of the IRTC I
+wrote my first shader - a shader to simulate 3 holed notebook paper.  This
+simplistic shader offers some of the characteristics of the previous
+examples in producing regularly spaced horizontal and verticle lines plus
+the added feature of fully transparent circular regions that are positioned
+by instance variables.
+&nbsp; &nbsp; &nbsp;
+We start by defining the parameters needed by the shader.  There are quite
+a few more parameters than the other shaders.  The reason for this is that
+this shader works on features which are not quite so symmetrical.  You can
+also probably chalk it up to my inexperience.  
+<PRE>
+   color hcolor       = color "rgb" (0, 0, 1);
+   color vcolor       = color "rgb" (1, 0, 0);
+   float hfreq        = 34;
+   float vfreq        = 6;
+   float skip         = 4;
+   float paper_height = 11;
+   float paper_width  = 8.5;
+   float density      = .03125;
+   float holeoffset   = .09325;
+   float holeradius   = .01975;
+   float hole1        = 2.6;
+   float hole2        = 18;
+   float hole3        = 31.25;
+</PRE>
+
+The colors of the horizontal and vertical lines come first.  There are, by
+default, 34 lines on the paper with the first 4 "skipped" to give the small
+header space at the top of the paper.  The vertical frequency is used to
+divide the paper in n equal vertical blocks across the page.  This is used
+to determine the location of the single verticle stripe.  We'll look at
+this again in a moment.
+<BR>
+&nbsp; &nbsp; &nbsp;
+The paper height and width are used to map the parameter space into the
+correct dimensions for ordinary notebook paper.  The density parameter is
+the width of each of the visible lines (horizontal and vertical) on the
+paper.  The hole offset defines the distance from the left edge of the
+paper to the center point of the 3 holes to be punched out.  The holeradius is
+the radius of the holes and the hole1-hole3 parameters give the horizontal
+line over which the center of that hole will live.  For example, for hole1
+the center of the hole is 2.6 horizontal stripes down.  Actually, the
+horizontal stripes are created at the top of equally sized horizontal
+blocks, and the hole1-hole3 values are number of horizontal blocks to
+traverse down the paper for the holes center.
+Now lets look at how the lines are created.
+
+<table>
+	<td valign=top width=60%>
+<PRE>
+   surface_color = Cs;
+</PRE>
+	This line simply initializes a local variable to the current color of
+	the surface.  We'll use this value in computing a new surface color
+	based on whether the point is on a horizontal or vertical line.
+<PRE>
+/*
+ * Layer 1 - horizontal stripes.  
+ * There is one stripe for every
+ * horizontal block.  The stripe is 
+ * "density" thick and starts at the top of
+ * each block, except for the first "skip" 
+ * blocks.
+ */
+tt = t*paper_height;
+for ( horiz=skip; horiz&lthfreq; horiz=horiz+1 )
+{
+   min = horiz*hblock;
+   max = min+density;
+   val = smoothstep(min, max, tt);
+   if ( val != 0 && val != 1 )
+      surface_color = mix(hcolor, Cs, val);
+}
+</PRE>
+This loop runs through all the horizontal blocks on the paper
+(defined by the hfreq parameter) and determines if the point
+lies between the top of the block and the top of the block plus
+the width of a horizontal line (specified with the density parameter).
+
+	<td align=center valign=top width=39%>
+		<table>
+		<tr>
+			<td align=center bgcolor=#000000>
+				<IMG SRC="./gx/hammel/paper1.jpg" 
+					ALT="3 Holed paper" ALIGN="middle" 
+					HSPACE="0" WIDTH="122" HEIGHT="174">
+				<BR clear=both>
+				<FONT color=#ffffff>Figure 8</FONT>
+				</td>
+		<tr>
+			<td bgcolor=#AAAAAA align=center>
+				<A HREF="./source/paper.rib">
+				RIB Source code for this example</A>
+				</td>
+		<tr>
+			<td align=center bgcolor=#000000>
+				<IMG SRC="./gx/hammel/paper2.jpg" 
+					ALT="3 Holed paper - thicker lines" ALIGN="middle" 
+					HSPACE="0" WIDTH="122" HEIGHT="174">
+				<BR clear=both>
+				<FONT color=#ffffff>Figure 8</FONT>
+				</td>
+		</table>
+</table>
+
+The smoothstep() function is part of the standard RenderMan functions
+and returns a value that is between 0 and 1, inclusive, that shows where
+"tt" sits between the min and max values.  If this value is not at
+either end then the current surface point lies in the bounds of a
+horizontal line.  The point is given the "hcolor" value mixed with the
+current surface color We mix the colors in order to allow
+the edges of the lines to flow smoothly between the horizontal lines
+color and the color of the paper.  In other words, this allows for
+antialiasing the horizontal lines.  The problem with this is - it doesn't
+work.  It only aliases one side of the line, I think.  In any case, you can
+see from Figure 8 that the result does not quite give a smooth, 
+solid set of lines.
+
+<BR>
+&nbsp; &nbsp; &nbsp;
+An alternative approach would be to change the mix() function call (which
+is part of the RenderMan shading lanague standard functions) to a more
+simple mixture of the line color with the value returned by smoothstep().
+This code would look like this: 
+<PRE>
+   min = horiz*hblock;
+   max = min+density;
+   val = smoothstep(min, max, tt);
+   if ( val != 0 && val != 1 )
+      surface_color = val*hcolor;
+</PRE>
+Alternatively, the line color could be used on its own, without combining
+it with the value returned from the smooth step.  This gives a very jagged
+line, but the line is much darker even when used with smaller line
+densities.  The result from using the line color alone (with a smaller line
+density) can be seen in Figure 9.
+
+<PRE>
+   /* Layer 2 - vertical stripe */
+   ss = s*paper_width;
+   min = vblock;
+   max = min+density;
+   val = smoothstep(min, max, ss);
+   if ( val != 0 && val != 1 )
+      surface_color = mix(vcolor, Cs, val);
+</PRE>
+This next bit of code does exactly the same as the previous code
+except it operates on the vertical line.  Since there is only one
+verticle line there is no need to check every vertical block, only
+the one which will contain the visible stripe (which is specified
+with the vblock parameter).
+		
+<BR>
+&nbsp; &nbsp; &nbsp;
+Finally we look at the hole punches. The center of the holes are computed
+relative to the left edge of the paper:
+<PRE>
+   shole = holeoffset*paper_width;
+   ss  = s*paper_height;
+   tt  = t*paper_height;
+   pos = (ss,tt,0);
+</PRE>
+Note that we use the papers height for converting the ss,tt variables into
+the scale of the paper width and height.  Why?  Because if we used the
+width for ss we would end up with eliptical holes.  There is probably a
+better way to deal with this problem (of making the holes circular) but
+this method worked for me.
+
+<BR>
+&nbsp; &nbsp; &nbsp;
+For each hole, the current s,t coordinates distance from the hole
+centers is computed.  If the distance is less than the holes radius then
+the opacity for the incident ray is set to completely transparent.
+
+<PRE>
+   /* First Hole */
+   thole = hole1*hblock;
+   hpos  = (shole, thole, 0);
+   Oi = filterstep (holeradius*paper_width, 
+                     distance(pos,hpos));
+
+   /* Second Hole */
+   thole = hole2*hblock;
+   hpos = (shole, thole, 0);
+   Oi *= filterstep (holeradius*paper_width, 
+                      distance(pos,hpos));
+
+   /* Third Hole */
+   thole = hole3*hblock;
+   hpos = (shole, thole, 0);
+   Oi *= filterstep (holeradius*paper_width, 
+                      distance(pos,hpos));
+</PRE>
+Filterstep is, again, a standard function in the RenderMan specification.
+However, this function was not documented by either the RenderMan Interface
+Specification or the RenderMan Companion.  According to Larry Gritz
+<BLOCKQUOTE>
+The filterstep() function is identical to step, except that it is
+analytically antialiased.  Similar to the texture() function,
+filterstep actually takes the derivative of its second argument, and
+"fades in" at a rate dependent on how fast that variable is changing.
+In technical terms, it returns the convolution of the step function
+with a filter whose width is about the size of a pixel.  So, no
+jaggies. 
+</BLOCKQUOTE>
+Thus, using filterstep() helped to antialias the edges of the holes
+(although its not that obvious from such a small image given in Figures 8
+and 9).  I didn't try it, but I bet filterstep() could probably be used to
+fix the problems with the horizontal and vertical lines.
+
+<P>
+
+<A NAME="examples-4"></A>
+<A HREF="./source/PXDecal.sl">
+<FONT size=3><B>A textured mapped chalkboard</B></FONT>
+</A>
+<BR>
+&nbsp; &nbsp; &nbsp;
+This simple texture map example is used in my <I>Post Detention</I> image
+which I entered in the March/April 1997 IRTC.  The actual shader is taken
+from the archive collection by Guido Quaroni, and the shader  originally
+comes from Larry Knott (who I presume works at Pixar).  I didn't add an
+image of this since all you would see would be the original image mapped on a
+flat plane, which really doesn't show anything useful.  If you want to take
+a look at the chalkboard in a complete scene, take a look at the 
+<A HREF="more-musings.html#1">companion article</A>
+in this months Graphics Muse column.
+<BR>
+&nbsp; &nbsp; &nbsp;
+Like the other shader examples, this one is fairly straightforward.  An
+image filename is passed in the <I>texturename</I> parameter.  Note that
+image files must be TIFF files for use with BMRT.  The texture coordinates
+are used to grab a value from the image file which is then combined with
+the ambient and diffuse lighting for the incident ray.  If a specular
+highlight has been specified (which it is by default in the Ks parameter)
+then a specular highlight is added to the incident ray.  Finally, the
+output value, Ci, is combined with the surfaces opacity for the final color
+to be used by the current surface point.
+<P>
+
+<A NAME="examples-5"></A>
+<A HREF="./source/RCThreads.sl">
+<FONT size=3><B>Displacement map example</B></FONT>
+</A>
+<BR>
+&nbsp; &nbsp; &nbsp;
+We've already seen an example of displacement maps using the threads()
+shader.  Lets take a quick look at the shader code:
+<PRE>
+   magnitude = (sin( PI*2*(t*frequency + 
+                     s + phase))+offset) * Km;
+</PRE>
+Here, the displacement of the surface point is determined by using a
+phased sinusoidal.  The t variable determines the position lengthwise
+across the surface and s is used to cause the spiraling effect.  The next
+bit of code
+<PRE>
+   if( t > (1-dampzone)) 
+      magnitude *= (1.0-t) / dampzone;
+   else if( t < dampzone )
+      magnitude *= t / dampzone;
+</PRE>
+causes the ends of the surface, in our case a cylinder, to revert to the 
+original shape.  For our example that means this forces the shader to leave
+the ends circular.  This helps to keep the object that has been threaded in
+a shape that is easily joined to other objects.  In the RenderMan
+Companion, the threaded cylinder is joined to a glass bulb to form a
+light bulb.  Finally, the last two lines
+<PRE>
+   P += normalize(N) * magnitude;
+   N = calculatenormal(P);
+</PRE>
+cause the point to be moved and the normal for the new point to be
+calculated.  In this way the point visually appears to have moved, which
+indeed it has.
+
+<P>
+Next month I planned on doing the 3rd part of this 3 part BMRT series.  I
+think taking 2 months between articles worked well for me this time since
+it allowed me a little more time to dig deeper.  Plan on the final article
+on BMRT in this series in the July issue of the Graphics Muse.  Till then,
+happy rendering.
+
+<table width=100%>
+<tr>
+	<td bgcolor="#000000" cellpadding=0 cellspacing=0 valign=top>
+		<IMG SRC="../gx/hammel/cleardot.gif" ALT="indent" ALIGN="left" 
+			HSPACE="0" WIDTH="0" HEIGHT="0"></td>
+</table>
+
+<OL>
+	<LH><B>Bibliography</B></LH>
+	<LI> 
+		<A NAME="ref1"></A>
+		Ebert, Musgrave, Peachy, Perlin, Worley.
+			<I>Texturing and Modeling:  A Procedural Approach</I>,
+			5-6; AP Professional (Academic Press), 1994
+	<LI> 
+		<A NAME="ref2"></A>
+		Upstill, Steve.
+			<I>The RenderMan Companion - A Programmer's Guide to
+				Realistic Computer Graphics</I>,
+			277-278; Addison Wesley, 1989
+	<LI> 
+		<A NAME="ref3"></A>
+			<I>The RenderMan Interface Specification, Version 3.1</I>
+			112-113; Pixar, Septermber 1989
+	<LI> 
+		<A NAME="ref4"></A>
+		Upstill, Steve.
+			<I>The RenderMan Companion - A Programmer's Guide to
+				Realistic Computer Graphics</I>,
+			color plates section; Addison Wesley, 1989
+	<LI> 
+		<A NAME="ref5"></A>
+		Upstill, Steve.
+			<I>The RenderMan Companion - A Programmer's Guide to
+				Realistic Computer Graphics</I>,
+			279; Addison Wesley, 1989
+	<LI> 
+		<A NAME="ref6"></A>
+			<I>The RenderMan Interface Specification, Version 3.1</I>
+			110-114; Pixar, Septermber 1989
+	<LI> 
+		<A NAME="ref7"></A>
+			<A HREF="http://www.cgrg.ohio-state.edu/~smay/RManNotes/WritingShaders/intro.html#method">
+			<I>RManNotes</I></A>
+			"Writing RenderMan Shaders - Why follow a methodolgy?"; 
+			Stephen F. May, Copyright &copy 1995, 1996
+	<LI> 
+		<A NAME="ref8"></A>
+			<A HREF="http://www.cgrg.ohio-state.edu/~smay/RManNotes/WritingShaders/intro.html#approach">
+			<I>RManNotes</I></A>
+			"Writing RenderMan Shaders - The Layered Approach"; 
+			Stephen F. May, Copyright &copy 1995, 1996
+</OL>
+
+
+<table width=100%>
+<tr>
+	<td bgcolor="#000000" cellpadding=0 cellspacing=0 valign=top>
+		<IMG SRC="../gx/hammel/cleardot.gif" ALT="indent" ALIGN="left" 
+			HSPACE="0" WIDTH="0" HEIGHT="0"></td>
+<tr>
+	<td align=right>
+		<FONT size=1>
+		&copy 1996 by <A HREF="mailto:mjhammel@csn.net">Michael J. Hammel</A>
+		</FONT>
+</table>
+
+</BODY>
+</HTML>
+ 

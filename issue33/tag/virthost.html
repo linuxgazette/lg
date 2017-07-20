@@ -1,0 +1,215 @@
+<!--startcut ======================================================= -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<html><head>
+<META NAME="generator" CONTENT="lgazmail v1.1preC">
+<TITLE>The Answer Guy 33: "Virtual Hosting" inetd based services using 
+	TCP Wrappers</TITLE> 
+<!-- ORIGINAL SUBJECT:
+chroot, twist, and other rescue-boot fun 
+JTD SUBTITLE:
+
+-->
+</head>
+
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#A000A0"
+ALINK="#FF0000">
+<H4>"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+<P> <hr> <P>
+<!-- ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::: -->
+<H1 align="center"><A NAME="answer">
+	<img src="../../gx/dennis/qbubble.gif" alt="" border="0" align="middle">
+	<a href="../index.html">The Answer Guy</a>
+	<img src="../../gx/dennis/bbubble.gif" alt="" border="0" align="middle">
+</A></H1> 
+<BR>
+<H4 align="center">By James T. Dennis,
+	<a href="mailto:tag@lists.linuxgazette.net">tag@lists.linuxgazette.net</a>
+	<BR>Starshine Technical Services, <A HREF="http://www.starshine.org/">http://www.starshine.org/</A> 
+</H4>
+<p><hr><p>
+<!--endcut ========================================================= -->
+<H3><img src="../../gx/dennis/qbub.gif" alt="(?)"
+width="50" height="28" align="left" border="0"
+>"Virtual Hosting" inetd based services using TCP Wrappers</H3>
+<p><strong>From Nick Moffitt on 23 Sep 1998 </strong></p>
+<!-- begin body -->
+
+<strong><p>
+Hullo thar!
+</p></strong>
+
+<strong><p>
+You mentioned that you might mail me some example conf files
+to show me how you did all those nifty things we talked about on
+Saturday.  I'm actually working on setting up a chrooted system for
+public use here at Penguin, so any examples would be keen (and no, I
+haven't searched through the answer guy archives yet).
+</p></strong>
+
+
+<blockquote><img src="../../gx/dennis/bbub.gif" alt="(!)"
+width="50" height="28" align="left" border="0"
+>[Question stems from a discussion over beer and pizza at one
+of the local user's groups events in my area.  It relates to 
+using TCP Wrappers to launch different services or different 
+variations of a given service depending on the <EM>destination</EM>
+address of the incoming request.  Normally TCP Wrappers, all those
+funny looking "/usr/bin/tcpd" references in your /etc/inetd.conf
+file, is used to limit which hosts can connect to a service by
+matching against the <EM>source</EM> address]
+</blockquote>
+
+
+<blockquote>Here's a couple of trivial examples (I don't have a 
+copy of 'chrootuid' handy on this box, but you can find
+it at cs.purdue.edu's "COAST" security tools archive).
+</blockquote>
+
+
+<table width="90%" bgcolor="#FFFFCC" border="1"><tr><td><pre>
+# hosts.allow	This file describes the names of the hosts which are 
+#		allowed to use the local INET services, as decided
+#		by the '/usr/sbin/tcpd' server.
+# $Revision: 1.2 $ by $Author: lg $ on $Date: 2002/10/09 22:24:28 $
+#
+in.ftpd: 127.0.0.1: ALLOW
+in.ftpd@192.168.1.127: jimd@192.168.1.2: ALLOW
+in.ftpd: ALL: DENY
+in.telnetd@192.168.1.127: ALL: twist /bin/echo "Not Available\: Go Away!"
+in.ftpd: 192.168.1.: ALLOW
+ALL: 127.0.0.1
+ALL: 192.168.1.
+</pre></td></tr></table>
+
+
+<blockquote>
+These are order dependent.  The first rule that matches
+will be one one that tcpd uses --- so the ALL: rules at the 
+bottom are significant.  If I put them first -- they'd
+over-ride the more specific ones --- whereas here, they
+don't.
+</blockquote>
+
+
+<blockquote>
+In this case my "normal" IP address on eth0 is 192.168.1.3
+(canopus.starshine.org).  For playing with tcpd I add an
+eth0:1 alias (ifconfig eth0:1 192.168.1.127).    That would
+work as easily if it was a second interface --- ethernet,
+PPP or whatever.
+</blockquote>
+
+
+<blockquote>
+Now, if I telnet localhost or telnet to canopus, everything
+works fine.  But if I telnet to the ...127 address it tells
+me to go away.  The hosts_options and the hosts_access(5)
+man pages list a number of replacement operators like %a
+for the source IP address of the request and %d for the 
+"daemon" name (argv[0] of the process).  These parameters
+can be used in the shell commands.
+</blockquote>
+
+
+<blockquote>
+Note that the "twist" option is completely different 
+than the "spawn" option.  "spawn" seems to imply "ALLOW"
+and spawns a process that is run <EM>in addition to</EM> the 
+service.  This process is spawned with it's standard 
+file descriptors all set to /dev/null --- so it doesn't
+interact with the user at all.
+</blockquote>
+
+
+<blockquote>
+The twist option runs an alternative to the requested
+service.  Thus, if you request my web server I might
+"twist" that into a cat command what will spit out an 
+HTTP redirect with a simple 'echo' or 'cat' command
+like so:
+</blockquote>
+
+
+
+<blockquote><blockquote><code>
+www@192.168.64.127: ALL: twist /bin/cat /root/web.redirect
+</code></blockquote></blockquote>
+
+
+<blockquote>
+I don't know of a way to to call for <EM>both</EM> a twist
+and a spawn -- but you can write a script (or better,
+a small C wrapper) to run the desired "spawn" commands
+in the background (with outputs directed to /dev/null,
+of course).
+</blockquote>
+
+
+<blockquote>
+Naturally, of course, you'll want to follow proper coding
+practices for "hostile" environments when you're writing
+something that will be "exposed" to the Internet.
+</blockquote>
+
+
+<blockquote>
+Matt Bishop, at the UC Davis has some excellent papers on
+this topic, and presents his own, more robust,
+implementations of the system(), and popen() library calls
+--- which are called msystem(), and mpopen() in his library.
+</blockquote>
+
+
+<blockquote>
+Matt's site is at: 
+<A HREF="ftp://nob.cs.ucdavis.edu/pub/sec-tools"
+	>ftp://nob.cs.ucdavis.edu/pub/sec-tools</A>
+(I think there's a web site there, too).
+</blockquote>
+<!-- end body -->
+<!--startcut ======================================================= -->
+<P> <hr> <P>
+<H5 align="center"><a href="http://www.linuxgazette.net/copying.html"
+	>Copyright &copy;</a> 1998, James T. Dennis <BR>
+Published in <I>Linux Gazette</I> Issue 33 October 1998</H5>
+<P> <hr> <P>
+<!--::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::-->
+<table width="98%"><tr valign="center" align="center">
+<td rowspan="3"><A HREF="../lg_answer33.html"><IMG
+        SRC="../../gx/dennis/answernew.gif"
+        ALT="[ Answer Guy Index ]"></A></td>
+  <td><A HREF="floppy.html">floppy</a>
+  <td><A HREF="autocad.html">autocad</a>
+  <td><A HREF="scsi.html">scsi</a>
+  <td><A HREF="samba_pdc.html">samba_pdc</a>
+  <td><A HREF="virthost.html">virthost</a>
+</tr><tr valign="center" align="center">
+  <td><A HREF="emacs_cc.html">emacs_cc</a>
+  <td><A HREF="ipmasq.html">ipmasq</a>
+  <td><A HREF="tty.html">tty</a>
+  <td><A HREF="shuffle.html">shuffle</a>
+  <td><A HREF="connect.html">connect</a>
+</tr><tr valign="center" align="center">
+  <td><A HREF="hostavail.html">hostavail</a>
+  <td><A HREF="desqview.html">desqview</a>
+  <td><A HREF="catch22.html">catch22</a>
+  <td><A HREF="thanks2.html">thanks2</a>
+  <td><A HREF="typo.html">typo</a>
+</tr></table>
+<P> <hr> <P>
+<!--::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::-->
+<A HREF="../index.html"><IMG SRC="../../gx/indexnew.gif"
+        ALT="[ Table Of Contents ]"></A>
+<A HREF="../../index.html"><IMG SRC="../../gx/homenew.gif"
+        ALT="[ Front Page ]"></A>
+<A HREF="../lg_bytes33.html"><IMG SRC="../../gx/back2.gif"
+        ALT="[ Previous Section ]"></A>
+<A HREF="../vrenios.html"><IMG SRC="../../gx/fwd.gif"
+        ALT="[ Next Section ]"></A>
+<!--::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::-->
+</body>
+</html>
+<!--endcut ========================================================= -->
+
+

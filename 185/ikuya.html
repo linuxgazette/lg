@@ -1,0 +1,441 @@
+<!DOCTYPE html
+	PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+	 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="utf-8" xml:lang="utf-8">
+<head>
+<title>Applying Yum Package Updates to Multiple Servers Using Fabric LG #185</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link rel="stylesheet" href="../lg.css" type="text/css" media="screen, projection"  />
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="../lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="../lg.rdf" />
+<!-- link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" / -->
+<link rel="shortcut icon" href="../favicon.ico" />
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+</head>
+<body>
+
+<a href="../">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+<div id="navigation">
+<table summary="masthead" width="100%">
+<tr>
+<td align="center" colspan="3" style="font-size: 10px; font-weight: bold">
+<a href="../index.html">Home</a>
+<a href="http://linuxgazette.net">Main Site</a>
+<a href="../faq/index.html">FAQ</a>
+
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/listinfo/">Mailing Lists</a>
+<a href="../jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+<hr width="99%" style="border: 1px inset #000033">
+</td>
+</tr>
+<tr>
+<td width="40%" align="left" style="font-size: 10px; font-weight: bold">
+The Free International Online Linux Monthly
+</td>
+<td width="20%" align="center" style="font-size: 10px; font-weight: bold">
+ISSN: 1934-371X
+</td>
+<td width="40%" align="right" style="font-size: 10px; font-weight: bold">
+Main site: <a href="http://linuxgazette.net">http://linuxgazette.net</a> 
+</td>
+</table>
+</div>
+
+
+<div id="breadcrumbs1">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">April 2011 (#185)</a> &gt; 
+Article
+
+</div>
+
+<div class="articlecontent1">
+<div class="content">
+
+<div id="previousnexttop">
+<A HREF="grebler1.html" >&lt;-- prev</A> | <A HREF="levine.html" >next --&gt;</A>
+</div>
+
+<h1>Applying Yum Package Updates to Multiple Servers Using Fabric</h1>
+<p id="by"><b>By <a href="../authors/ikuya.html">Ikuya Yamada</a> and <a href="../authors/takefuji.html">Yoshiyasu Takefuji</a></b></p>
+
+<h3>Introduction</h3>
+<p>
+ Administrators of multiple servers know that updating software packages
+can be a tedious task. It requires a log in, followed by the execution of a
+"yum update" or something similar for each server. Although several tools
+exist for enabling administrators to update packages automatically,
+including <em>yum-updatesd</em> and <em>yum-cron</em>, updating the
+packages without confirmation possibly leads to further issues.</p>
+
+<p>
+  For instance, Yum completely ignores the dependencies of software
+compiled from the source. If the compiled software has strict version
+requirements against the update of packages, it may not function properly
+after the update. Furthermore, even if the package is installed using
+Source RPM with custom compile options, it is overwritten by a new package
+and the features specified in the compile options are disabled.</p>
+
+<p>
+In this article, we introduce a Python-based short script that enables
+administrators to easily apply command-line package updates to multiple
+servers. Using this script, the administrator can manually confirm which
+packages are to be updated. Internally, this script executes a "yum
+check-update" in sequence in order to verify the presence of package
+updates and displays a prompt that allows the administrator to select
+whether the package updates are to be performed.</p>
+
+<p>
+ The proposed script uses a relatively new Python library called <a
+href="http://www.fabfile.org"><em>Fabric</em></a>, which allows users to
+execute commands at multiple remote servers via SSH. Therefore, the script
+needs to connect to the user's remote servers via SSH.</p>
+
+<p>
+  Although we tested the script on CentOS 5.5 Linux, administrators using
+other RedHat-based distributions can also use this script.</p>
+
+<h3>Example of Error Caused by Yum</h3>
+<p>
+In this section, we will provide an actual example for demonstrating the
+issue that arises in the Yum package update. <em>Postfix</em>, which is a
+common mail server, implements <em>MySQL</em>
+ support from recent versions. However, the Postfix package provided by the
+default Yum repository does not include this feature, and hence, many users
+install Postfix from the Source RPM.</p>
+
+<p>
+ Let us assume that the server has a previous version of Postfix installed
+from the Source RPM and uses the configuration given in <a href="http://www.postfix.org/MYSQL_README.html">Postfix MySQL Howto</a>
+.</p>
+
+<pre>
+# sudo rpm -ivh PREVIOUS_POSTFIX_SOURCE_RPM_URL
+# cd /usr/src/redhat/
+# sudo vim SPEC/postfix.spec
+&lt; %define MYSQL 0
+&gt; %define MYSQL 1
+# rpmbuild -ba SPEC/postfix.spec
+# rpm -ivh RPMS/x86_64/postfix-VERSION_NUM.x86_64.rpm
+</pre>
+
+<p>
+  After executing the "yum -y update", Yum detects and installs the newer
+version of Postfix.</p>
+
+<pre>
+Loaded plugins: downloadonly, fastestmirror
+Loading mirror speeds from cached hostfile
+(snip)
+=======================================================================================================
+ Package                   Arch                     Version                     Repository        Size
+=======================================================================================================
+Updating:
+ postfix                   x86_64                   2:2.3.3-2.1.el5_2           base             3.7 M
+
+Transaction Summary
+=======================================================================================================
+Install       0 Package(s)
+Upgrade       1 Package(s)
+(snip)
+Running Transaction
+  Updating       : postfix                                                                         1/2 
+warning: /etc/postfix/main.cf created as /etc/postfix/main.cf.rpmnew
+  Cleanup        : postfix                                                                         2/2 
+
+Updated:
+  postfix.x86_64 2:2.3.3-2.1.el5_2                                                                     
+
+Complete!
+</pre>
+<p>
+ Because the installed package does not contain the MySQL support, Postfix
+starts to output the following errors in <em>/var/log/maillog</em>
+ after it is restarted.</p>
+
+<pre>
+Feb 18 00:31:29 jango postfix/master[29981]: warning: process /usr/libexec/postfix/local pid 6189 exit status 1
+Feb 18 00:31:29 jango postfix/master[29981]: warning: /usr/libexec/postfix/local: bad command startup -- throttling
+Feb 18 00:32:29 jango postfix/local[6191]: fatal: unsupported dictionary type: mysql
+</pre>
+<p>
+ If it is not confirmed whether the updated package works properly, the Yum
+package update may occasionally result in server failure. Therefore, we
+recommend the use of our proposed script instead of the automatic package
+update provided by <em>yum-updatesd</em> and <em>yum-cron</em>
+.</p>
+
+<h3>Installing Fabric</h3>
+<p>
+The proposed script requires several software packages. First, the <a
+href="http://fedoraproject.org/wiki/EPEL">EPEL software repository</a>
+needs to be installed. Administrators using a Linux distribution based on
+RedHat Enterprise Linux 5 can install the repository using the following
+command. Installation instructions can also be found <a
+href="http://fedoraproject.org/wiki/EPEL/FAQ#howtouse">here</a>.</p>
+
+<pre>
+# sudo rpm -Uvh http://download.fedora.redhat.com/pub/epel/5/i386/epel-release-5-4.noarch.rpm
+</pre>
+<p>
+  Next, several software packages need to be installed.</p>
+
+<pre>
+# sudo yum -y install gcc python26 python26-devel python26-distribute
+</pre>
+<p>
+ Now, <em>Fabric</em> can be installed using <em>easy_install</em>
+, which also installs the required Python libraries using the following
+command.</p>
+
+<pre>
+# sudo easy_install-2.6 fabric
+</pre>
+<h3>Script</h3>
+<p>
+ The proposed script is given below. As <em>Fabric</em> uses <em>fabfile.py</em>
+ as its default file name, the script should be entered into fabfile.py.</p>
+
+<pre>
+# cd INSTALL_DIR
+# vim fabfile.py
+
+#!/usr/bin/env python2.6
+
+from fabric.api import env, run, sudo
+from fabric.contrib.console import confirm
+
+env.warn_only = True
+
+def update():
+    if run("yum check-update").return_code != 0:
+        if confirm("execute yum update?", default=False) == True:
+            sudo("yum -y update", pty=True)
+</pre>
+<p>
+ As mentioned above, the script executes a <em>yum check-update</em> in
+each remote server and displays a prompt that enables the user to select
+whether to execute the <em>yum update</em>. Note that
+<em>env.warn_only</em> is a necessary component; this is because yum
+returns a non-zero status code if it finds any package updates, which
+<em>Fabric</em> incorrectly recognizes as an error and responds by shutting
+the execution down.</p>
+
+<p>
+ Now, the script can be executed. <em>fab</em> is the command that receives
+the target Python function name as an argument and runs the function. In
+this case, the function name is <em>update</em> , and thus, the command is
+as follows.</p>
+
+<pre>
+# fab -H HOST_NAME1,HOST_NAME2 update
+</pre>
+<p>
+  After executing the above command, the script checks for the presence of
+package updates and outputs the following. As can be seen, if package
+updates exist, the user can choose whether to perform the updates after
+confirming the packages that are to be updated.</p>
+
+<pre>
+[qui-gon.ikuya.net] Executing task 'update'
+[qui-gon.ikuya.net] run: yum check-update
+[qui-gon.ikuya.net] out: Loaded plugins: fastestmirror
+[qui-gon.ikuya.net] out:
+[qui-gon.ikuya.net] out: bind-libs.x86_64                        30:9.3.6-4.P1.el5_5.3            updates
+(snip)
+[qui-gon.ikuya.net] out: udev.x86_64                             095-14.21.el5_5.1                updates
+
+Warning: run() encountered an error (return code 100) while executing 'yum check-update'
+
+execute yum update? [y/N]
+</pre>
+<p>
+  The user name and password can be optionally specified using -u and -p
+options, respectively.</p>
+
+<pre>
+# fab -u USER_NAME -p PASSWORD -H HOST_NAME1,HOST_NAME2 update
+</pre>
+<p>
+ The target remote server addresses can also be specified using the <em>env.hosts</em>
+ variable in fabfile.py.</p>
+
+<pre>
+#!/usr/bin/env python2.6
+
+from fabric.api import env, run, sudo
+from fabric.contrib.console import confirm
+
+env.warn_only = True
+
+<em>env.hosts = [
+    "HOST_NAME1",
+    "HOST_NAME2"
+]</em>
+
+def update():
+    if run("yum check-update").return_code != 0:
+        if confirm("execute yum update?", default=False) == True:
+            sudo("yum -y update", pty=True)
+</pre>
+<p>
+  Using the above script, the user can run the update without specifying
+the remote server addresses.</p>
+
+<pre>
+# fab update
+</pre>
+<h3>Conclusion</h3>
+<p>
+ This article proposed a short script that enables server administrators to
+easily apply package updates to remote servers. The script uses a Python
+library called <em>Fabric</em>
+, and executes package updates in sequence. </p>
+
+<p>
+ Note that <em>Fabric</em> is a generic Python library and can be used to
+automate numerous other server administration tasks. If you want to learn
+more about Fabric, please refer to <a href="http://www.fabfile.org">the
+official documentation</a> .</p>
+
+
+<br clear="all" />
+
+<table align='center' cellspacing='10'>
+<tr>
+<td>
+<script type='text/javascript'>
+digg_url = 'http://linuxgazette.net/185/ikuya.html';
+digg_title = 'Applying Yum Package Updates to Multiple Servers Using Fabric';
+digg_bodytext = '<p>  Administrators of multiple servers know that updating software packages can be a tedious task. It requires a log in, followed by the execution of a "yum update" or something similar for each server. Although several tools exist for enabling administrators to update packages automatically, including <em>yum-updatesd</em> and <em>yum-cron</em>, updating the packages without confirmation possibly leads to further issues.</p> ';
+digg_topic = 'linux_unix';
+</script>
+<script src="http://digg.com/tools/diggthis.js" type="text/javascript"></script>
+</td>
+<td>
+<a name="fb_share" type="box_count" href="http://www.facebook.com/sharer.php">Share</a>
+<script src="http://static.ak.fbcdn.net/connect.php/js/FB.Share" type="text/javascript"></script>
+</td>
+<td>
+<a href="http://twitter.com/home?status=Currently%20reading:%20http://linuxgazette.net/185/ikuya.html%20at%20Linux%20Gazette%20%23linuxgazette" title="Click to share this post on Twitter"><img src="../gx/twitter.png" width="50" height="85" border="0"></a>
+</td>
+</tr>
+</table>
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:185/ikuya.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<H4>Ikuya Yamada</H4>
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/authors/ikuya.jpg" class="bio">
+</p>
+
+<em>
+<p>
+Ikuya Yamada is an entrepreneur and an experienced software engineer.
+ Currently, he is the founder and the CTO of Studio Ousia Inc., a
+ software R&D company founded in 2007 in Tokyo. He is also a senior
+ visiting researcher at the Keio Research Institute at SFC from 2010.
+ Prior to Studio Ousia, he was the CTO of a listed Japanese software
+ company named Fractalist Inc. and previously the founder and the CEO of
+ a software R&D company called Newrong Inc., which was acquired by
+ Fractalist Inc. in 2005. He obtained his B.S. (2006) and M.S. (2010)
+ from Keio University.
+</p>
+
+
+
+</em>
+
+<br clear="all">
+
+
+<H4>Yoshiyasu Takefuji</H4>
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/2002/note.png" class="bio">
+</p>
+
+<em>
+<p>
+Yoshiyasu Takefuji was heavily involved in developing a unix based color
+workstation in 1983 at University of South Florida. Recently he has been
+monitoring three Linux servers to see the behavior of DOS attacks. He is
+a chair of SecurityExpo in Japan since 2004 and also a chair of OECD
+TrustE security product evaluation committee chair in Japan, and advisor
+of Japan Network Security Association and CMU in Japan.
+</p>
+</em>
+
+<br clear="all">
+
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2011, Ikuya Yamada and Yoshiyasu Takefuji. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication License</a>
+unless otherwise noted in the body of the article.
+<!-- Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc. -->
+</p>
+
+<p>
+Published in Issue 185 of Linux Gazette, April 2011
+</p>
+
+</div>
+
+<div id="previousnextbottom">
+<A HREF="grebler1.html" >&lt;-- prev</A> | <A HREF="levine.html" >next --&gt;</A>
+</div>
+
+</div>
+</div>
+
+<script src="http://www.google-analytics.com/urchin.js"
+type="text/javascript">
+</script>
+<script type="text/javascript">
+_uacct = "UA-1204316-1";
+urchinTracker();
+</script>
+
+
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+</body>
+</html>
+

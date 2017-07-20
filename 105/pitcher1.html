@@ -1,0 +1,450 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Dude, Where's my System? LG #105</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="pitcher.html" >&lt;-- prev</A> | <A HREF="price.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Dude, Where's my System?</h1>
+<p id="by"><b>By <A HREF="../authors/pitcher.html">Lew Pitcher</A></b></p>
+
+<p>
+<p>Recently, I changed over to an "always on" ADSL<sup>[<a name=
+"back_1" href="#footnote_1">1</a>]</sup> connection from an
+"on-demand" dialup one, and I now have an opportunity to host a
+number of internet services from my home server. The one problem I
+have is that, while my internet is "always on", my ISP occasionally
+renegotiates the IP address of my ADSL connection, making my
+internet services difficult to find. Up until now, I've played
+"hide and seek" with my server, searching for it among a multitude
+of alternate addresses each time my ISP changes the address.</p>
+
+<p>Now, I <em>could</em> spend a bit of money to lease my own
+domain name, and subscribe to one of those 'dynamic DNS' services
+that let you point your domain name at an ever-changing IP address,
+but I don't need a permanent domain name right now, and I've got other
+options.</p>
+
+<p>My ISP provides web site hosting for their subscribers, with the
+usual upload and download volume caps to discourage extensive web
+hosting. I don't need their host for my content, but it
+<em>does</em> make a handy 'rendezvous' site to gain access to my
+system. All I have to do is arrange for my PPPoE<sup>[<a name=
+"back_2" href="#footnote_2">2</a>]</sup> client<sup>[<a
+name="back_3" href="#footnote_3">3</a>]</sup> to rewrite my
+personal web page on my ISP's server every time my ISP gives me a
+new IP address. If PPPoE can populate that web page with my
+system's new IP address, I'll always be able to find my system from
+the outside by looking at my webpage on my ISP's server.</p>
+
+<p>Simple, yes?</p>
+
+<h3>Simple, yes!</h3>
+
+<p>The first thing I needed to do was to arrange for my PPPoE
+client to be able to pass each new IP address on to something that
+would update my external webpage.</p>
+
+<p>To do this, I modified my <b><tt>/etc/ppp/ip-up</tt></b><sup>[<a
+name="back_4" href="#footnote_4">4</a>]</sup> script to
+execute a new script (<b><tt>/etc/ppp/ip-up.webpage</tt></b>),
+passing it the PPP 'local' address assigned by my ISP to my end of
+my PPPoE ADSL connection. The <b><tt>/etc/ppp/ip-up</tt></b> script
+would then write the webpage and get it to my ISP.</p>
+
+<p>This was a simple change (a literal 'one-liner') in
+<b><tt>/etc/ppp/ip-up</tt></b></p>
+
+<blockquote>
+<pre>
+#!/bin/sh
+#
+# ip-up interface-name tty-device speed local-IP remote-IP ipparm
+#       $1             $2         $3    $4       $5        $6
+#
+# (NB: ipparm is string from ipparm parameter in pppd options)
+#
+# This file /etc/ppp/ip-up is run by pppd when there's a
+# successful ppp connection.
+#
+# The environment is cleared before executing this script
+# so the path must be reset.
+#
+PATH=/usr/bin:/usr/sbin:/usr/local/bin:/sbin:/bin
+export PATH
+#
+umask 033
+echo "$4" &gt;/var/run/$1.ip
+#
+<font color="green">#
+# Build redirect webpage, put it on ISP's webserver
+<b>/etc/ppp/ip-up.webpage "$4"</b>
+#</font>
+/usr/bin/logger -i -t /etc/ppp/ip-up "$1 [$4] connected to ISP [$5]"
+# Done...
+</pre>
+</blockquote>
+
+<h3>The Harder Part</h3>
+
+<p>Now that I had arranged for my PPPoE client to run a script, I
+had to build the script it would run. The script would have to
+build an HTML document that would redirect the reader to my
+server's IP address, and FTP that document to my ISP's web server.
+It would have to preserve the internal security of my system by
+refraining from exposing my ISP userid and password to local users,
+and should do this with simple tools and a minimum of
+programming.</p>
+
+<p>The security aspects were satisfied by making the script
+'execute only'<sup>[<a name="back_5" href=
+"#footnote_5">5</a>]</sup>, so no local user could read it's
+contents, and by ensuring that no password was exposed to
+<tt>ps(1)</tt><sup>[<a name="back_6" href=
+"#footnote_6">6</a>,<a name="back_7" href=
+"#footnote_7">7</a>]</sup> as a command line argument. The HTML
+was built through a simple "here document"<sup>[<a name="back_8"
+href="#footnote_8">8</a>]</sup> fed into a
+<tt>cat(1)</tt><sup>[<a name="back_9" href=
+"#footnote_9">9</a>]</sup> command that created a temporary
+file of HTML. The new IP address was written into the HTML through
+the shell variable substitution process that occurs with "here
+document" processing. Finally, the temporary file was transmitted
+to my ISP using a command line <tt>ftp(1)</tt><sup>[<a name=
+"back_10" href="#footnote_10">10</a>]</sup> command, with
+<em>its</em> parameters all passed through another "here document".
+This second "here document" permitted me to pass the user name and
+password into the FTP client without exposing them on a command
+line.</p>
+
+<p>The <a href=
+"misc/pitcher/ip-up.webpage.txt"><b><tt>/etc/ppp/ip-up.webpage</tt></b></a>
+script (below) is primitive and not very elegant, but it gets the
+job done.</p>
+
+<blockquote>
+<pre>
+#!/bin/bash
+
+# Validate that we get 1 and only 1 parameter
+case $# in
+  1) ;;
+  *) /usr/bin/echo Usage: $0 ip-address-or-dns-name
+     exit 1 ;;
+esac
+# the $1 parameter is the IP address assigned to our system
+
+# Establish today's date (for html)
+DATE=`/usr/bin/date`
+
+# allocate empty tempfile, terminate if unable to allocate
+TEMPFILE=`/usr/bin/mktemp /tmp/$1=XXXXXX` || exit 2
+
+# build webpage (redirect) html into tempfile
+# NB: $1 is our local IP address, passed in from ip-up
+#     $DATE is the current date and time
+#     With the "here document", these variables will
+#     be substituted into the stream by the shell
+/usr/bin/cat &gt;$TEMPFILE &lt;&lt;END
+&lt;html&gt;
+&lt;head&gt;
+&lt;!-- $DATE --&gt;
+&lt;meta http-equiv="refresh" content="0;url=http://$1/"&gt;;
+&lt;/head&gt;
+&lt;/html&gt;
+END
+
+# send webpage (redirect html) to webserver
+#  ISP_ADDRESS is FTP address of ISP's web server
+#  ISP_USERID  is my userid at ISP's FTP server
+#  ISP_PASSWD  is my password at ISP's FTP server
+#  NB: ISP_USERID, ISP_PASSWD set as local environment
+#      vars so that they don't appear as parameters
+#      in local 'ps ax' listings
+#      With the "here document", these variables will
+#      be substituted into the stream by the shell
+ISP_ADDRESS=webserver.isp.com
+ISP_USERID=username
+ISP_PASSWD=password
+
+/bin/ftp -n &lt;&lt;STOP
+open $ISP_ADDRESS
+user $ISP_USERID $ISP_PASSWD
+ascii
+put $TEMPFILE index.htm
+bye
+STOP
+
+# delete tempfile
+/bin/rm -f $TEMPFILE
+
+# terminate
+exit 0
+</pre>
+</blockquote>
+
+<h3>Olly-olly, Outs in free!</h3>
+
+<p>Now, when my ISP changes my IP address, my PPPoE server invokes
+<b><tt>/etc/ppp/ip-up</tt></b>, giving it my new IP address. This
+script invokes my <b><tt>/etc/ppp/ip-up.webpage</tt></b> script,
+which builds and installs a redirect webpage at my ISP's webserver
+that points at my new IP address. All <em>I</em> have to do is
+browse a specific web page on my ISP's webserver, and I'll be
+redirected to my webpage on my server.</p>
+
+<p>So, with a little scripting, and the resident automation in my
+Linux system, I've now got a way to find my server from the
+outside, no matter which IP address my ISP gives it. I guess you
+could say that my server has given up the game of "hide and seek",
+and is playing other games now.</p>
+
+<hr>
+<h4>Footnotes</h4>
+
+<dl>
+<dt><b>[<a name="footnote_1" href="#back_1">1</a>] -
+ADSL</b></dt>
+
+<dd>ADSL (or "Asymmetrical Digital Subscriber Line") is a
+technology that permits an ISP to offer high speed internet
+connectivity over regular phone lines <em>without</em> impacting
+the regular use of the phone line. In other words, I can surf the
+internet <em>while</em> my wife chats with her friends over the
+phone.</dd>
+
+<dd><br></dd>
+<dt><b>[<a name="footnote_2" href="#back_2">2</a>] -
+PPPoE</b></dt>
+
+<dd>PPPoE (or "PPP over Ethernet") is a low level protocol that
+some ISPs use to deliver TCP/IP connectivity on ADSL lines. Since
+PPPoE uses PPP (the regular 'dial up' services) to manage the ADSL
+connection, all the PPP facilities and management tools work with a
+PPPoE-enabled ADSL line. This includes things like the
+<tt>/etc/ppp/ip-up</tt> script.</dd>
+
+<dd><br></dd>
+<dt><b>[<a name="footnote_3" href="#back_3">3</a>] - my
+PPPoE client</b></dt>
+
+<dd>is the "Roaring Penguin" PPPoE daemon that can be found at <a
+href=
+"http://www.roaringpenguin.com/penguin/open_source_rp-pppoe.php">http://www.roaringpenguin.com/penguin/open_source_rp-pppoe.php</a>.
+In the Slackware 9.0 Linux distribution that I run, the Roaring
+Penguin PPPoE daemon is contained in the
+<tt>rp-pppoe-3.5-i386-1.tgz</tt> package. However, to use this
+PPPoE daemon, you also need a PPP daemon; Slackware 9.0 uses the
+ANU PPP daemon found at <a href=
+"ftp://cs.anu.edu.au/pub/software/ppp/">ftp://cs.anu.edu.au/pub/software/ppp/</a>,
+and in Slackware package <tt>ppp-2.4.1-i386-2.tgz</tt>.</dd>
+
+<dd><br></dd>
+<dt><b>[<a name="footnote_4" href="#back_4">4</a>] -
+<tt>/etc/ppp/ip-up</tt></b></dt>
+
+<dd>The <tt>/etc/ppp/ip-up</tt> script is executed by the PPP
+daemon when ever it establishes a TCP/IP environment over the PPP
+link. Several parameters are given to the <tt>ip-up</tt> script,
+including the IP address assigned to our end of the PPP connection.
+I use this script to trigger the construction of the web page that
+gets placed on my ISP's server, and I use the supplied IP address
+in the contents of the web page.</dd>
+
+<dd><br></dd>
+<dt><b>[<a name="footnote_5" href="#back_5">5</a>] -
+"execute only"</b></dt>
+
+<dd>Scripts, like other executable files, can be set to be
+executable without being readable by using a
+"<tt>chmod&nbsp;ug=x&nbsp;<em>scriptname</em></tt>" command. I want
+this because I don't want users on my system to be able to snoop
+through the text of the script to find my logon and password.</dd>
+
+<dd><br></dd>
+<dt><b>[<a name="footnote_6" href="#back_6">6</a>] -
+<tt><em>xx(y)</em></tt> notation</b></dt>
+
+<dd>Ancient Unix notation that indicates the documentation for
+topic <b><em>xx</em></b> can be found in section <b><em>y</em></b>
+of the printed or online manual. Most Linux users can read this
+documentation using the "<tt>man <em>y xx</em></tt>" syntax from
+the command line, as in "<tt>man 1 ps</tt>".</dd>
+
+<dd><br></dd>
+<dt><b>[<a name="footnote_7" href="#back_7">7</a>] -
+<tt>ps(1)</tt></b></dt>
+
+<dd><tt>ps</tt> lists the particulars of all running processes. If
+given the correct options, it will show the entire command line
+used to invoke the process. I avoid placing userids and passwords
+into command lines as someone could snoop them out by running
+<tt>ps</tt> at the proper moment. Call me paranoid, but even
+paranoids have enemies. ;-)</dd>
+
+<dd><br></dd>
+<dt><b>[<a name="footnote_8" href="#back_8">8</a>] - "here
+document"</b></dt>
+
+<dd>A "here document" is a special form of redirection that routes
+text embedded in a script directly into a program's input. The
+shell can perform parameter expansion, command substitution, and
+arithmetic substitution on the contents of the "here document"
+before the resulting text is given to the program. This makes "here
+documents" ideal for my use, because I can have the shell customize
+the text as necessary without depending on complex editor
+commands.</dd>
+
+<dd><br></dd>
+<dt><b>[<a name="footnote_9" href="#back_9">9</a>] -
+<tt>cat(1)</tt></b></dt>
+
+<dd><tt>cat</tt> is a utility that con<em>cat</em>enates files
+together, and outputs the resulting file to stdout. If no input
+files are named, <tt>cat</tt> will read it's input from stdin. This
+feature makes <tt>cat</tt> a handy, but dumb, text editor, and
+that's how I use it here.</dd>
+
+<dd><br></dd>
+<dt><b>[<a name="footnote_10" href="#back_10">10</a>] -
+<tt>ftp(1)</tt></b></dt>
+
+<dd>The command line FTP client works in this environment, but it
+would have been better if it had some scripting ability. I use a
+"here document" to pass in the FTP commands, so as to avoid
+exposing my ISP access password on the command line. However, with
+the "here document" approach, the <tt>ftp(1)</tt> client won't
+abort the interaction if an FTP command goes wrong, and there is no
+way to detect or act on a command failure from within the "here
+document". So, I take a chance that the FTP script will work each
+and every time without fail.</dd>
+</dl>
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/2002/note.png" class="bio">
+
+<!-- 
+If the author has sent his pic, save it to the right directory
+and enable the line below.
+
+<img align="left" alt="[BIO]" src="../gx/authors/pic.jpg" class="bio">
+
+-->
+
+<em>
+
+<! -- BIO GOES HERE -->
+
+Canadian by birth, and living in Brampton, Ontario, I am a career techie
+working at a major Canadian bank. For over 25 years, I've programmed on
+all sorts of systems, from Z80 CP/M up to OS/390. Primarily, I develop
+OS/390 MVS applications for banking services, and have incorporated
+Linux into my development environment.
+
+</em>
+<br clear="all">
+<!-- *** END bio *** -->
+
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2004, Lew Pitcher. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 105 of Linux Gazette, August 2004
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="pitcher.html" >&lt;-- prev</A> | <A HREF="price.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">August 2004 (#105)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

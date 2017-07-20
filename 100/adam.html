@@ -1,0 +1,448 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Fvwm and Session Management LG #100</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="lg_bytes.html" >&lt;-- prev</A> | <A HREF="collinge.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Fvwm and Session Management</h1>
+<p id="by"><b>By <A HREF="../authors/adam.html">Thomas Adam</A></b></p>
+
+<p>
+<!-- no headers -->
+
+<!-- Title of article: Fvwm and Session Management -->
+
+<!-- START -->
+
+<!-- Introduction -->
+<h2>Introduction</h2>
+
+<p>With all the hype and attention surrounding desktop managers such as <a
+  href="http://www.kde.org" target="_blank">KDE</a> and 
+<a  href="http://www.gnome.org" target="_blank">Gnome</a> you could be 
+wondering "why bother using other window managers when those have got
+everything included in them?" Integrated file managers, nice shiny gadgets,
+etc. The answer is simple. Both KDE and Gnome take up vast amounts of memory,
+and if, like me, you have aging hardware, you often look for <a
+  href="http://xwinman.org/" target="_blank">alternatives</a> that will make
+your system usable.</p>
+
+<p>You might think that, as KDE and Gnome have everything the user ever wanted,
+why bother changing? Or to put it another way, is there some way that I can
+emulate some of what KDE and Gnome do, at less memory cost. The answer is
+"yes". One of the most requested features from users over the years has to be
+about the use of session managers, which is the focus of this article.</p>
+
+<!-- end: Introduction -->
+
+<!-- What is session management? -->
+<h2>What is session management?</h2>
+
+<p>Session management allows the state of applications that are running to be
+saved and remembered. This includes attributes such as the size of the
+windows, their geometry (location on screen), and which page/desk it was on (if
+you're using a virtual window manager which supports those).</p>
+
+<p>It works by the session manager handing out client-IDs. The application to
+which this is given to is usually the main window, and any other sub windows
+do not get any (these sub windows, we call <i>transient windows</i>), since
+they are event-driven specific and only show when such events within the
+application are triggered.</p>
+
+<p>However, the parent window has to register itself directly with the session
+manager so that the session manager knows the originating window so that any
+transient windows that can be attached. Such a window has a property called:
+<i>WM_CLIENT_LEADER</i>. This is used to talk to the session manager. A
+further property <i>WM_WINDOW_ROLE</i> is used by fvwm to define the state of
+the window. These underlying calls come from the X server itself, which 
+communicates them to the window manager that is running.</p>
+
+<p>So a session manager is a program that handles these protocols,
+talking both to the underlying X server and the window manager to determine
+how these windows are to be setup. It is the job of the window manager, if
+running under a session manager, to communicate with the session manager to
+learn of these 'hints'.</p>
+
+<p>There aren't that many true session managers out there. But for those that
+do exist, getting them to work with fvwm can be a challenge. I shall look at 
+each in turn and evaluate their performance.</p>
+
+<!-- end: What is session management --> 
+
+<!-- fvwm -->
+
+<h2>How does fvwm use Session Management</h2>
+
+<p>In order for <a href="http://www.fvwm.org" target="_blank">fvwm</a> to use
+session management, it must be compiled with --enable-sm at ./configure time.
+Once this has been done, you can use any session manager you like.</p>
+
+<p>When fvwm loads up, without the use of a session manager, it looks for a
+defined file, usually: <code>$HOME/.fvwm2rc</code> or:
+<code>$HOME/.fvwm/.fvwm2rc</code></p>
+
+<p>But fvwm, in its configuration file, allows us to define two startup/restart
+sections. One for running under a session manager and the other without. As an
+example, here is a sample InitFunction for fvwm:</p>
+
+<pre>
+   DestroyFunc InitFunction
+   AddToFunc InitFunction
+    + I Module FvwmBanner
+    + I xsetroot -solid cyan
+    + I Exec xterm
+    + I PipeRead 'Wait exec run_parts.rb'
+</pre>
+
+<p>This will load up normally each time fvwm loads without a session manager.
+Yet the session manager specific startup looks like this:</p>
+
+<pre>
+DestroyFunc SessionInitFunction
+AddToFunc SessionInitFunction
+  + I Module FvwmBanner
+</pre>
+
+<p>Thus it allows the user to define separate definitions for instances where
+the user may or may not be using a session manager. It should be noted that if
+running under a session manager that it will only look for the
+<i>SessionInitFunction</i> (and related) sections, and will not run the
+<i>InitFunction</i> sections at all.</p>
+
+<p>It is also a bad idea to launch xterms and other applications from within
+the session functions since this can often interfere with the way that the
+window manager interprets how to handle the window.</p>
+
+<p>In order for us to use the session manager though, we need to ensure that
+it is loaded up in the correct order. Whenever one starts X, whether it is
+from the command-line (startx) or from a graphical display manager such as
+xdm, kdm, gdm, or wdm, a certain file is read: <code>$HOME/.xsession</code>.
+Normally, it might look something like this:</p>
+
+<pre>
+#!/bin/bash
+
+program1 &amp;
+program2 &amp;
+exec fvwm
+</pre>
+
+<p>In order to have the session manager work correctly we have to make sure
+that it is the last program that is executed, hence:</p>
+
+<pre>
+#!/bin/bash
+
+program1 &amp;
+program2 &amp;
+smproxy &amp;
+fvwm
+exec some_session_manager
+</pre>
+
+<p>Making sure that &quot;some_session_manager&quot; above is replaced by the
+actual name of the session manager.</p>
+
+<p><i>smproxy</i> is required since there are some programs which do not
+natively support the program calls that define session management. In such
+instances smproxy will try and sniff them out.</p>
+
+<hr width=80% align=center noshade>
+
+<h2>xsm -- X Session Manager</h2>
+
+<p>This is the original session manager, and is quite limited compared to some
+of the other session managers we'll be looking at. To use it with fvwm, is
+done exactly as described above. Once everything loads, you should see a
+window which looks like the following...</p><br />
+
+<center><img alt="xsm1" src=./misc/adam/xsm1.png><br />
+  <b>Figure 1: xsm's client window</b>
+</center>
+
+<p>This is pretty self-explanatory. By clicking on the 'Load Session' button,
+you can select previous sessions to load. When you initially start X, this is
+what you'll see. You can suppress this window, but to do so, you have to
+create a session.</p>
+
+<center><img alt="xsm2" src=./misc/adam/xsm2.png><br />
+  <b>Figure 2: xsm's control window</b>
+</center>
+
+<p>Figure 2, shows what is presented after everything has loaded. Using this
+window, you can get an idea of the applications that it already recognizes,
+and save the session etc. The only drawback with using xsm is it is very
+limited in the applications it can recognize. If the application is not
+strictly X aware then xsm will not be able to handle it.</p>
+
+<p>To save the state of you session (and hence to see whether xsm can identify
+any more windows, you can press the "checkpoint" button, to get a screen such
+as Figure 3.</p>
+
+<center><img src=./misc/adam/xsm3.png><br />
+  <b>Figure 3: xsm's checkpoint window</b>
+</center>
+
+<p>From here you can enter the name of the session that you want to save. I
+said earlier that you can by-pass Figure 2, by having it load up the session
+name of your choice. Once you have saved the session, edit the file:
+<code>$HOME/.xsession</code> and change the line: <code>exec xsm</code> to:
+    <code>exec xsm -session [name]</code> where '[name]' is the name of the
+    session.</p>
+<p>xsm also causes problems with fvwm in that you have to quit xsm in order to
+save the session, since xsm is the governing process. I found this to be quite
+annoying. I would however, recommend it to anyone who uses simple apps, or to
+someone whom only wants certain apps to run and doesn't want the hassle of
+install Gnome or KDE to use the session features that they have.</p>
+
+<hr width=80% align=center noshade>
+
+<h2>Gnome-Session</h2>
+
+<p>This is the best session manager to use with fvwm. This is because fvwm is
+Gnome-compliant and should work with it well (the specifics of the support is
+to do with EWMH support). Unlike xsm, gnome-session
+handles applications much more efficiently. Under Debian, this can be
+installed by the command: <b>apt-get install gnome-session</b>. Just like xsm,
+the <code>~/.xsession</code> file will need modifying, this time to look like
+this:</p>
+
+<pre>
+#!/bin/bash
+
+program1 &amp;
+program2 &amp;
+exec gnome-session
+</pre>
+
+<p>Be advised that starting 'program1' and 'program2' above, before the
+session manager will cause two instances of the same program to load each time
+you fvwm again since it loads them as normal, and then the session manager
+will load them because it would have (hopefully) save their state. That's just
+something to bear in mind.</p>
+
+<p>When you login to X this time, initially Gnome will load up -- <b>don't
+panic</b>. The pain and suffering won't last for long. What we need to do is
+to replace sawfish or metacity (depending on whether you're Gnome1 or Gnome2)
+with fvwm, while keeping gnome-session running so that when we save the
+session it knows to load fvwm and not some other window manager.</p>
+
+<p>To do that we can try and kick the current window manager out of the way
+and have fvwm replace it directly. The command:</p>
+
+<pre>fvwm --replace &amp;</pre>
+
+<p>...when run in an xterm might do the trick. If not, it will be a case of
+interfacing with gnome-session itself. Oddly enough, there is a Gnome
+application which provides this very interface:
+<code>gnome-session-properties</code>. This is a really useful application for
+tweaking the session manager. But for the purposes of getting fvwm running
+under it we have to explicitly remove either sawfish or metacity.</p>
+
+<center><img src=./misc/adam/gnome1.png><br />
+  <b>Figure 4: gnome-session-properties</b>
+</center>
+
+<p>Figure 4, shows (rather blankly) the programs that it knows about and has
+loaded. Then all that remains is to kill fvwm that was running previously, by
+typing into an xterm:</p>
+
+<pre>killall fvwm</pre>
+
+<p>Then, going back to the session-properties window, select the window
+manager which is running (sawfish or metacity), and clicking on the 'Style'
+button set the active state to <b>Normal</b>. You must then click on 'Apply'.
+What this has done is to ensure that when the session restarts the window
+manager that was previously loaded isn't. Then in an xterm type:</p>
+
+<pre>killall [wm] &amp;&amp; sleep 5s &amp;&amp; fvwm &amp;</pre>
+
+<p>Where [wm] above is either: <i>metacity</i> or <i>sawfish</i>. As soon as
+that has worked, save the session. It should be pointed out that for those
+applications that really aren't session aware, there is an option to have
+gnome-session launch applications, by using the 'startup programs' tab (figure
+4).</p>
+
+<p>There is a known issue with all session managers (Gnome session
+in particular) that causes it to spawn multiple instances of certain programs.
+Noticeably with fvwm is xclock. All the information about which programs to
+launch, etc, are stored in a file, and is a simple task to fix. This <a
+  href=./misc/adam/cprocess.rb.txt>script</a> (written in Ruby) will fix that
+abnormality, should it become annoying. To use it simply do the following:</p>
+
+<pre>
+
+1. copy the script to /usr/local/bin
+2. chmod 711 /usr/local/bin/cprocess.rb
+3. edit the #! line in the script to point to the ruby binary
+4. edit ~/.xsession, and add the following line:
+
+ruby /usr/local/bin/cprocess.rb
+</pre>
+
+<b>before</b> gnome-session loads.
+
+<p>That's really all there is to setting up and using gnome-session with
+fvwm.</p>
+
+<h2>Conclusion</h2>
+
+<p>This has been a very brief look at how different session managers can be
+used with fvwm. There are others out there such as KDE's <b>ksmserver</b> and
+XFCE4's <b>xfce-session</b>, but I have not tried them with fvwm and do not
+know what they are like. Session managers aside, there are also two modules
+of interest native to fvwm, namely: <b>FvwmSave</b> and <b>FvwmSaveDesk</b>.
+While these are not session managers, they do provide functionality very
+similar to them. These will be discussed more fully in other articles next
+month.</p>
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<P>
+<IMG ALT="picture" SRC="../gx/2003/authors/adam.jpg" WIDTH="240" HEIGHT="223" ALIGN="left"  HSPACE="10" VSPACE="10" class="bio">
+<em>
+
+I write the recently-revived series "The Linux Weekend Mechanic", which was
+started by John Fisk (the founder of Linux Gazette) in 1996 and continued
+until 1998.  I'm also a member of The Answer Gang.
+
+<P> I was born in Hammersmith (London UK) in 1983.  When I was 13, I moved to
+the sleepy, thatched roofed, village of East Chaldon in the county of Dorset.
+I am very near the coast (at Lulworth Cove) which is where I used to work.
+
+<P> I first got interested in Linux in 1996 having seen a review of it in a
+magazine (Slackware 2.0). I was fed up with the instability that the then-new
+operating system Win95 had and so I decided to give it a go.
+Slackware 2.0 was great. I have been a massive Linux enthusiast ever
+since.  I ended up with running SuSE on both my desktop and laptop computers.
+
+<P> While at school (<A HREF="www.purbeck.dorset.sch.uk">The Purbeck
+School</A>, Wareham in Dorset), I was actively involved in setting up two
+Linux proxy servers (each running Squid and SquidGuard).  I also set up
+numerous BASH scripts which allowed web-based filtering to be done via
+e-mail, so that when an e-mail was received, the contents of it were added to
+the filter file. (Good old BASH -- I love it)
+
+<P> I am now 18 and studying at University (Southampton Institute, UK), on a
+course called HND Business Information Technology (BIT). So far, it's great.
+
+<P> Other hobbies include reading. I especially enjoy reading plays (Henrik
+Ibsen, Chekhov, George Bernard Shaw), and I also enjoy literature (Edgar Allan
+Poe, Charles Dickens, Jane Austin to name but a few).
+
+<P> I enjoy walking, and often go on holiday to the Lake District, to a place
+called Keswick. There are numerous "mountains", of which "Great Gable" is my
+most favourite.
+
+<P> I am also a keen musician. I play the piano in my spare time. 
+
+<P> I listen to a variety of music. I enjoy listening to
+Rock (My favourite band is "Pavement" (lead singer:
+Stephen Malkmus). I also have a passion for 1960's
+psychedelic music (I hope to purchase a copy of
+"Nuggets" reeeeaaall soon).
+</em>
+<br CLEAR="all">
+<!-- *** END bio *** -->
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2004, Thomas Adam. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 100 of Linux Gazette, March 2004
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="lg_bytes.html" >&lt;-- prev</A> | <A HREF="collinge.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">March 2004 (#100)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/2003/sit3-shine.7-2.gif" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

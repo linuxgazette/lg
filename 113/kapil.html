@@ -1,0 +1,824 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Roll your Desktop into a USB stick/CD LG #113</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="engel.html" >&lt;-- prev</A> | <A HREF="lodato.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Roll your Desktop into a USB stick/CD</h1>
+<p id="by"><b>By <A HREF="../authors/kapil.html">Kapil Hari Paranjape</A></b></p>
+
+<p>
+<h3>Introduction</h3>
+
+<p> Here is a short course (with some excursions) to help you take your
+existing Desktop, roll it into an ISO pipe and smoke a USB stick or CD.
+This is not a task for the faint-hearted - there are no automated scripts
+in here!
+
+<p> Part of the reason for this hands-on approach is that each desktop
+system will have its own quirks, so writing scripts which handle the
+various conditions which might arise is painful. Secondly, there are
+numerous choices possible - you must mix your own. Finally, I must confess
+that I do not feel energetic enough to write the scripts at this point.
+Instead, you have this article!
+
+<p> So if you have spent a lot of time fine-tuning your configuration and want
+to waste some more time putting it onto a (re)movable drive - read on.
+
+<h3>Making a read-only root filesystem</h3>
+
+<p> Since the chosen medium for our ``live'' portable system is a CD or
+USB stick we do not want to write to it often. In fact, in the case
+of a CD-R we can only write to it once. It should be obvious, however,
+that a ``live'' system <em>does</em> need to write <em>something</em> if it is
+to be counted as among the living!
+
+<p> While many mechanisms have been suggested to handle this, <em>we</em>
+will (essentially) follow the system chosen by <a
+href="http://packages.debian.org/bootcd"><tt>bootcd</tt></a>. To do this,
+we need to create a directory <code>/wraith</code>, an archive
+<code>/wraith.cpio.gz</code> and a script <a
+href="misc/kapil/undead.sh.txt">/etc/rcS.d/S01undead.sh</a>.
+
+<p> The contents of the archive are rather system specific so <em>you</em>
+will need to choose its contents. However, if you are <em>really,
+really</em> impatient you can download the
+<a href="misc/kapil/wraith.lst.txt">listing</a>
+of the archive that I use and run the following:
+
+<pre class="code">
+ cd /
+ cat wraith.lst | cpio -o -H crc | gzip -c -9 &gt; /wraith.cpio.gz
+</pre>
+
+Did you get a lot of error messages? No? Are you <em>really</em> sure
+that your system is almost identical to mine? Yes? Then you can skip
+the next subsection.
+
+
+<h3>Choices, choices...</h3>
+
+<p> How does one find out what files need to be written to on a live system?
+One way would be to <code>find</code> all the files that <em>have</em> been written
+to on your current desktop. To do this first find out when the system was
+booted - a good measure of this is when the root filesystem was last mounted.
+So for example
+
+<pre class="code">
+ # Use your real root device in place of /dev/root.
+ last_boot_time=$(dumpe2fs -h /dev/root | \
+  sed -n -e's/Last mount time: * //p')
+</pre>
+
+You may wish to use the log files or the <code>last</code> command instead.
+You only need to know the last boot time approximately; subtract a minute
+or so from it just to be on the safe side - unless you boot the system
+more often than that! Now create a file with that time stamp using the
+<code>touch</code> command:
+
+<pre class="code">
+ touch -d "$last_boot_time" /tmp/lastboot
+</pre>
+
+You can now create the list of all files that were modified since that
+last boot (for simplicity we will only bother with the directories
+<code>/etc</code> and <code>/var</code>; you can add some other directories if
+you so desire):
+
+<pre class="code">
+ find /etc /var -newer /tmp/lastboot &gt; /tmp/changed
+ # And, just for fun...
+ find /home -newer /tmp/lastboot &gt; /tmp/home_changed
+</pre>
+
+Have a look at these lists but don't delete them just yet. You should notice
+that there are three types of files that are written to on a running
+system.
+
+<ul>
+<li> Files that are automatically written to but can be empty at the
+start like log files or the <code>mozilla</code> cache directories.
+<li> Files that have information which we may want
+to change but rarely. Most configuration files fall into this category.
+<li> Automatically generated databases of system information. Since
+our system is going to be ``static'' we actually do not want the
+system to update these databases. Thumb-rule: If the file is large in
+size it probably belongs here!
+</ul>
+
+We will split up our list, <code>/tmp/changed</code>, according to this
+classification: <code>/tmp/write</code> will consist of those files (mostly
+directories) that are empty at boot time but get written to as the system
+runs; <code>/tmp/links</code> will consist of the files that will be
+quasi-static - we will keep a static version of these files at boot time
+but we might want to change them on a running system. We will include the
+third category of files in <code>/tmp/links</code> as well, since we will not
+treat them differently - but ultimately you may want to change this.
+
+<p> We first create a directory to hold the files that will be modifiable
+at run-time - say <code>/wraith</code>. Mount a RAM-based file system on it
+by <code>mount -t tmpfs tmpfs /wraith</code>. <strong>Big Fat
+Warning</strong>: This file system is ephemeral and will be <em>lost</em>
+when you halt the system. If you wish, you can use the directory as-is
+(without the <code>tmpfs</code> mount) during this subsection, but don't
+forget to clean up its contents once you have created the archive as
+explained below.
+
+<p> In <code>/wraith</code>, we will create the top-level directories like
+<code>etc</code>, <code>var</code>, <code>tmp</code> and so on that we will
+want to write to. In these directories we will create the files as per the
+classification above.  First, we'll do the writable but empty files:
+
+<pre class="code">
+ cd /
+ cat /tmp/write | cpio -pdum /wraith
+</pre>
+
+We expect these files to be empty at start-up so we will ``zero''
+them. Do this only to the files for which you don't want to keep the
+contents. For now I assume these are all the files in the list
+<code>/tmp/write</code>:
+
+<pre class="code">
+ for file in $(cat /tmp/write)
+ do
+  if [ -f $file ]
+  then
+   &gt; /wraith/$file
+  fi
+ done
+</pre>
+
+Of course, we also need an empty <code>tmp</code> directory:
+
+<pre class="code">
+ mkdir /wraith/tmp
+ chmod 1777 /wraith/tmp
+</pre>
+
+Next, we create the links.
+
+<pre class="code">
+ cd /
+ for i in $(cat /tmp/links)
+ do
+  dir=$(dirname $i)
+  top=$(echo $dir | cut -f2 -d'/')
+  rest=$(echo $dir | cut -f3- -d'/')
+  name=$(basename $i)
+  mkdir -p /wraith/$dir
+  ln -s /wraith/$top.ro/$rest/$name /wraith/$i
+ done
+ # As a safety measure to ensure that all configuration files
+ # have been created
+ mkdir -p /wraith/etc
+ cd /etc
+ for i in *
+ do
+  ln -s /wraith/etc.ro/$i /wraith/etc/$i
+ done
+</pre>
+
+This is more complicated and needs further explanation. The idea is to
+make the ``static'' versions of the files available under the <code>.ro</code>
+top-level directories. So, for example <code>/wraith/etc/hostname</code> will be
+a link to <code>/wraith/etc.ro/hostname</code>.
+
+<p> To see this at work create <code>etc.ro</code> and <code>var.ro</code> as
+sub-directories in <code>/wraith</code>. For each of these directories (say <code>etc</code>)
+we run a pair of commands like the following. (Warning: Be careful here. If
+you haven't created all the links in <code>/wraith/etc</code> as above you may crash
+your running system).
+
+<pre class="code">
+ mount --bind /etc /wraith/etc.ro
+ mount --bind /wraith/etc /etc
+</pre>
+
+After these mounts, the file <code>/etc/hostname</code> is a link to
+the original <code>hostname</code> file which is now available as
+<code>/wraith/etc.ro/hostname</code>. Since the left-half of this
+link is on the RAM disk we can perform replacement surgery on it:
+
+<pre class="code">
+ vi /etc/hostname.new
+ mv /etc/hostname.new /etc/hostname
+</pre>
+
+On the other hand, if you want to change a file in a sub-directory of
+<code>/etc</code>, it's a little more complicated:
+
+<pre class="code">
+ mkdir /etc/X11.new
+ ln -s /ram/etc.ro/etc/X11/* /etc/X11.new
+ mv /etc/X11.new /etc/X11
+</pre>
+
+After this you can edit the files in <code>/etc/X11</code>. Yes, this is quite
+twisted but (once you get the hang of it) not difficult to
+manage - especially since we expect that we will edit these files
+only rarely. An alternate approach is to create the directory tree under
+<code>/etc</code> in its entirety only leaving links to the files. 
+
+<p> You <em>can</em> use the above mounts to test your choices of
+<code>/tmp/links</code> and <code>/tmp/write</code>, but the real test will
+come later. For now, undo the above mounts by a pair of commands like:
+
+<pre class="code">
+ umount /etc
+ umount /wraith/etc.ro
+</pre>
+
+You can also remove the <code>.ro</code> directories if you like.
+Finally, we create an archive of this directory:
+
+<pre class="code">
+ cd /wraith
+ find . -xdev | cpio -o -H crc | gzip -c -9 &gt; /wraith.cpio.gz
+</pre>
+
+The <code>cpio</code> command will tell you how many 512-byte blocks you
+wrote. If the archive is really large (more than 1MB or so) then you
+probably need to re-do your choices.
+
+
+<h3>Bringing the wraith to life</h3>
+
+<p> We need a mechanism to bring the <code>/wraith</code> directory into
+operation at boot time.  To do this, install a script like the following
+one to run early at boot time. For example you could install the script as
+<code>/etc/rcS.d/S01undead.sh</code>.
+
+<pre class="code">
+ #
+ 
+ # undead.sh Mount and load up the /wraith directory for use
+ #
+ # Version: 0.3  01-Feb-2005  
+ #
+
+ # If this has already been run then don't run it again.
+ # We can't handle two wraiths!
+ [ -f /wraith/live ] &amp;&amp; exit 0
+
+ # Create writable space
+ mount -n -t tmpfs tmpfs /wraith
+
+
+ # Create the directory structure
+ cd /wraith
+ gzip -dc /wraith.cpio.gz | cpio -idum
+ cd /
+
+ # Perform the cross mounts with bind
+ # which is like a directory hard link.
+ cd /wraith
+ for i in *
+ do
+  mkdir $i.ro
+  # We use mount with the -n
+  # To avoid confusing the mtab
+  mount -n --bind /$i /wraith/$i.ro
+  mount -n --bind /wraith/$i /$i
+ done
+ cd /
+
+touch /wraith/live
+
+: exit 
+</pre>
+
+Finally, you edit <code>/etc/fstab</code> so that the root filesystem is
+mounted read-only at the next boot - just change <code>defaults</code> to
+read <code>ro,defaults</code> in the appropriate entry.
+
+
+<h3>Don't stop just yet</h3>
+
+<p> Reboot and that's it! You have a read-only root system... or
+almost. Actually, it is likely that you will find a number of places where
+you didn't create the links you need or created the wrong links. Don't
+worry. You can modify the <code>/wraith.cpio.gz</code> archive to your heart's content.
+Make the changes you need to the ``live'' <code>/wraith</code> directory.
+Now copy all the changes from <code>/wraith</code> into <code>/tmp/ghost</code>. The command
+
+<pre class="code">
+ cd /wraith
+ find . -xdev | grep -E -v '^./((live)|([^/]*\.ro))' &gt; /tmp/list
+</pre>
+
+will generate the newer list of files. You can unpack the older
+archive and compare its list of files with <code>/tmp/list</code>.
+
+<pre class="code">
+ mkdir /tmp/ghost
+ cd /tmp/ghost
+ zcat /wraith.cpio.gz | cpio -idum
+ find . -xdev &gt; /tmp/oldlist
+ wdiff -a /tmp/list /tmp/oldlist
+</pre>
+
+Using the differences you can see what files you need to create in
+<code>/tmp/ghost</code> in order to match it up with the running
+<code>/wraith</code>. You can save your changes by something like
+
+<pre class="code">
+ cd /tmp/ghost
+ find . -xdev | cpio -o -H crc | gzip -c -9 &gt; /tmp/wraith.cpio.gz
+ mv /tmp/wraith.cpio.gz /wraith.cpio.gz
+</pre>
+
+The changes will become automatic at the next boot. Of course, once you
+write the filesystem to a CD, you will have no chance to revise it again!
+
+
+<h3>Undo</h3>
+
+<p> All this looks too complicated and life is too short? Just remove the
+script <code>/etc/rcS.d/S01undead.sh</code>, the archive <code>/wraith.cpio.gz</code>
+and the directory <code>/wraith</code>. You will have your system as pristine
+as before.
+
+
+<h3>Making the initrd</h3>
+
+<p> We want our system to ``run anywhere'' - in particular, we should be
+able to mount our root file system whether it resides on a CD or USB
+stick (or perhaps even hard disk). If we use a CD then on
+most systems this will be on the device <code>/dev/hdb</code> or <code>/dev/hdc</code>.
+The USB stick usually shows up as <code>/dev/sda</code> or
+<code>/dev/sdb</code>. It should be relatively simple to just
+create a kernel which supports IDE CD drives and USB block devices.
+When we boot such a kernel (with the correct <code>root=&lt;device&gt;</code>
+parameter) the system will start up as expected on 90% of all systems
+that one is likely to encounter. If this is OK with you then you
+don't <em>need</em> an initrd so skip the rest of this section and read
+the
+<a href="http://www.digitalhermit.com/linux/Kernel-Build-HOWTO.html">HOWTO</a>
+on building the kernel with IDE CD and US support - don't forget
+support for the ISO 9660 (CD), ext2 and vfat (Win95) file systems.
+
+<p> What about the remaining 10%? That will take 90% of the work as
+usual. One possible solution could be to build <em>all</em> the drivers
+of all possible CD drives, USB readers and the like into the kernel.
+Unfortunately, automatically probing for some of these devices will
+occasionally cause other devices to choke-up. It also seems like a bit
+of a waste to take up such enormous amounts of kernel memory for unused
+drivers. The solution provided by our intrepid kernel hackers is the
+modules+initrd mechanism which allows you to write a script that chooses
+which drivers to load depending on the devices found.
+
+
+<h3>The steps</h3>
+
+<p> The boot loader (see the next section) will load the kernel and the
+initrd into memory. We will use a ``standard''
+<a href="http://packages.debian.org/kernel-image-2.6-686">Debian kernel image</a>
+which has essentially everything modularized (``essentially'' since we
+must have support for at least one file-system built into the kernel
+in order to load the init RAM disk - this could change if I understand
+<code>initramfs</code> better).
+
+<p> After the kernel has done its thing, it sets up the file-system with root
+on the initrd and executes <code>/linuxrc</code> but doesn't quite fully let
+go - when <code>/linuxrc</code> exits, the kernel executes <code>/sbin/init</code>.
+We follow Debian's choices when we visualize the boot process as follows:
+
+<dl compact><dt>
+<b>linuxrc</b><dd> This script doesn't do much since we <em>want</em> the
+kernel to let go and execute <code>/sbin/init</code> (still on the initrd).
+<dt><b>init</b><dd> The program <code>/sbin/init</code> <em>on the initrd</em> is a script
+that will run the following scripts:
+<dl compact><dt>
+<b>loadmodules</b><dd> This script loads the modules necessary to read
+the CD and/or USB stick.
+<dt><b>script</b><dd> This script will provide the subroutine <code>mount_root</code>
+to recognise and mount our chosen file system on <code>/mnt</code>.
+</dl>
+The final steps of <code>init</code> are
+
+<ul>
+<li> Mount the root file system on <code>/mnt</code> and <code>cd</code>
+to it.
+<li> Execute <code>pivot_root</code> which makes the current directory the
+root directory for the kernel and mounts the old root directory at
+<code>/initrd</code>. After this our ``real'' root file-system <em>is</em>
+mounted as root.
+<li> Execute <code>chroot .</code> to change the root device of the
+current process so that <code>/initrd</code> is free to be unmounted. We
+must do this so that the RAM disk is free to be unmounted which frees
+its space for use by other processes.
+<li> Finally execute <code>/sbin/init</code> on the <em>real</em> 
+root file system. This is the ``real'' <code>init</code> program which will
+initialise the live system.
+</ul>
+</dl>
+
+Debian has already provided the package
+<a href="http://packages.debian.org/initrd-tools">initrd-tools</a> which
+automates the building of the initrd. This already creates the
+<code>/linuxrc</code> and <code>/sbin/init</code> needed for the initrd. So we
+only need to provide the scripts <code>loadmodules</code> and
+<code>script</code>.
+
+
+<h3>Driver loading</h3>
+
+<p> Writing these scripts was one of the most complex steps for me as it
+deals with the aspect of Linux that I usually encounter the least - at
+least on a working system - booting! On the other hand, this
+<em>is</em> the job for which most installers and other forms of pre-install
+detection tools have been written. So we follow the ``teacher'' Tom
+Lehrer's dictum:
+
+<pre>
+   Plagiarize,
+   Let no one else's work evade your eyes,
+   Remember why the good Lord made your eyes,
+   So don't shade your eyes,
+   But plagiarize, plagiarize, plagiarize...
+   (Only be sure always to call it please, "research".)
+
+   -- Tom Lehrer, "Lobachevsky"
+</pre>
+
+<p> There is a good IDE driver detection routine that is part of the standard
+Debian initrd. The Knoppix initrd gives us a safe order in which to load
+all the SCSI modules. The Linux-Live initrd has a list of the necessary USB
+modules to boot off a stick. So we put all these together to get routines
+which I call <code>loadmodules_ide</code>, <code>loadmodules_scsi</code> and
+<code>loadmodules_usb</code>. The <code>loadmodules</code> script on the initrd will then
+act as a dispatcher - it will choose which routine to run depending
+on what boot time parameters we give.
+
+<p> Still, we should do <em>some</em> work. So (plagiarising from the
+<a href="http://linux-hotplug.sourceforge.net/">hotplug scripts</a>)
+I also wrote a procedure <code>loadmodules_pci</code>
+that loads only those modules which correspond to devices
+in <code>/sys/bus/pci/devices</code> which match the data found in
+<code>/lib/modules/kernel-version/modules.pcimap</code>. This procedure
+makes use of the <code>sysfs</code> file system that was introduced with Linux
+2.6.x but something similar may be possible using <code>/proc/bus/pci</code> in
+Linux version 2.4.x. The principle is that the kernel <em>does</em>
+provide a list of all the PCI devices that it found; for each such
+device it also provides <em>some</em> device information - the interface for
+this is the <code>sysfs</code> file system or (in 2.4.x) the <code>proc</code> file system.
+On the other hand, each module writer makes a list of all devices that
+the driver is known/expected to work for - the kernel build process writes
+these to <code>modules.pcimap</code>. By matching the two lists we should be
+able to load only those modules which have a matching device. This only
+works with PCI devices but most devices on PC's nowadays
+(including SCSI cards and the USB controller) <em>are</em> PCI devices.
+
+<p> <a href="misc/kapil/loadmodules.txt">Here</a> is the script
+to loadmodules that resulted from the above deliberations. This
+scripts depends on a <a href="misc/kapil/allmod.list.txt">list</a> of
+modules that are related to block devices.
+
+
+<h3>Mounting the root file-system</h3>
+
+<p> The second <a href="misc/kapil/script.txt">script</a> we will use
+provides the routine to mount the root device. Again the <code>sysfs</code>
+file system provided by the 2.6.x Linux kernel comes to the rescue. Under
+<code>/sys/block</code> we find a list of all the block devices on the
+system. If the <code>root=</code> option is given to the kernel we can
+check whether this block device is available. Otherwise we check each
+available block device to find evidence that it is our root file system -
+by checking for the existence of the archive, directory and script that we
+created above.
+
+
+<h3>Using <tt>mkinitrd</tt></h3>
+
+<p> The Debian <a
+href="http://packages.debian.org/initrd-tools">initrd-tools</a> package is
+a collection of scripts and so can be installed on any GNU/linux system
+(for example use the source package directly). The main script is
+<code>mkinitrd</code> which will create the standard Debian initrd. We will
+run this script and make some changes in order to create our ``special''
+initrd. First off all create some directory say
+<code>/tmp/mkinitrd.confdir</code>. In this directory we will create the
+file <code>exe</code> containing the list of executables that we want in
+addition to the ``standard'' ones like <code>/bin/sh</code> - in our case
+we need <code>/bin/grep</code>. Next we create a list of all the additional
+files that we want to include; this is mainly the list of all modules that
+are in some way connected with the use of block devices; <a
+href="misc/kapil/files.txt">here</a> is my list. Finally, we also need a <a
+href="misc/kapil/mkinitrd.conf.txt">configuration file</a>. We are set to
+use <code>mkinitrd</code> with this directory as our configuration
+directory.
+
+<pre class="code">
+mkinitrd -r "" -k -d /tmp/mkinitrd.confdir -o /dev/null
+</pre>
+
+This will tell you the name of the working directory which will be
+something like <code>/tmp/mkinitrd.1234</code>. Now you need to edit the
+<code>/tmp/mkinitrd.1234/initrd/linuxrc.conf</code> file to reflect the
+various file systems that you may use for your root file system.
+Finally, you copy the scripts you created above and generate the
+initrd with <code>mkcramfs</code>.
+
+<pre class="code">
+dir=/tmp/mkinitrd.1234
+rm $dir/initrd/scripts/*
+cp allmod.list $dir/initrd/etc
+cp loadmodules $dir/initrd
+cp script $dir/initrd
+chmod +x $dir/initrd/loadmodules
+chmod +x $dir/initrd/script
+mkcramfs $dir/initrd initrd.img
+</pre>
+
+If you build a kernel with <code>ext2</code> filesystem support instead of
+<code>cramfs</code>, then you need to create an <code>ext2</code> filesystem
+image based on the <code>/tmp/mkinitrd.1234</code> directory instead.
+
+
+<h3>Putting it all together</h3>
+
+<p> We now combine the ideas of the previous two sections. I assume that
+you have managed to make your root filesystem boot in a ``read-only''
+mode and that you are currently running in that mode. I also assume
+that you have created an initrd that can boot on ``any'' machine.
+
+<p> I <em>know</em> that the latter requirement is hard to check given that you
+have access to only one machine at a time. Moreover, it is difficult to
+find friends who will agree if you say ``I have on this floppy an initrd
+and kernel that I would like to test on your system''; those
+few will <em>not</em> remain friends if your kernel+initrd manages to
+fry their system. 
+
+
+<h3>Selecting the boot loader</h3>
+
+<p> In order to boot off a CD or USB stick we need some software that can
+do that. The nominees are <a
+href="ftp://ftp.kernel.org/pub/linux/utils/boot/syslinux/syslinux-2.10.tar.gz"><tt>isolinux</tt></a>,
+<a href="http://elserv.ffm.fgan.de/~lermen/"><tt>loadlin</tt></a> and <a
+href="ftp://alpha.gnu.org/gnu/grub/"><tt>grub</tt></a>... and the winner,
+in this case, is... <code>grub</code>. 
+
+<p> The main file for booting using <code>grub</code> is called <code>stage2</code> or
+<code>stage2_eltorito</code> in the case of booting CD's. When these files
+are properly installed (see below how this is done for CD's), they are
+loaded and run by the booting machine. They look for a configuration
+file <code>/boot/grub/menu.lst</code>. We use a <code>menu.lst</code> file that 
+looks like:
+
+<pre class="code">
+default  0
+
+<p> timeout  5
+
+<p> # Pretty colours
+color cyan/blue white/blue
+
+<p> title  Debian GNU/Linux with myinitrd
+root  (cd)
+kernel  /boot/vmlinuz-2.6.8-2-686 root=auto ro quiet vga=791
+initrd  /boot/initrd.img
+boot
+</pre>
+
+Other than the kernel and the initrd, we need <code>stage2</code> and
+<code>menu.lst</code> in order to complete the list of steps given at the
+beginning.
+
+
+<h3>Making the CD</h3>
+
+<p> First you need a ``pristine'' copy of the root file system.
+If you used the <code>bind</code> mounts procedure to make the root
+file-system read-only, then you can just do
+
+<pre class="code">
+ mkdir /tmp/pristine
+ mount --bind / /tmp/pristine
+</pre>
+
+You then make a compressed tree of this file system:
+
+<pre class="code">
+ mkzftree -x /tmp/pristine /hugeroom
+</pre>
+
+where <code>/hugeroom</code> is some place with a lot of disk space.
+Remove the directories <code>/hugeroom/lost+found</code> and
+<code>/hugeroom/boot</code> from under this directory. Create an empty
+<code>/hugeroom/boot</code> directory to which we copy the kernel image and
+initrd. Into the <code>/hugeroom/boot/grub</code> directory goes the file
+<code>stage2_eltorito</code> along with <code>menu.lst</code>.  These files
+will not be compressed.
+
+<p> We now create the CD image:
+
+<pre class="code">
+ mkisofs -R -J -z -hide-rr-moved -cache-inodes \
+  -b boot/grub/stage2_eltorito -b boot/boot.cat \
+  -boot-info-table -boot-load-size 32 \
+  -no-emul-boot -o mylivecd.iso /hugeroom
+</pre>
+
+Then we blank a CD (if necessary) and write our image to it. For a
+USB stick, we just create a partition and dump the entire image to
+this partition using <code>dd</code>. Since I do not have a system that can
+boot off a USB, I can only check the floppy based boot for such a
+system. Perhaps one of the readers can enlighten me on how this is to
+be handled for USB-booting BIOSes.
+
+
+<h3>What else?</h3>
+
+<p> You'll probably want to add a writable <code>/home</code> directory to
+your system.  You need to further customise <code>wraith.cpio.gz</code> for
+that. Another thing that you probably want to do is to fix the
+<code>/etc/fstab</code> file that goes onto the CD. Other config files may
+also need to be customised; <code>/etc/X11/XF86config-4</code> comes to
+mind - for this to work ``anywhere'' it is best to use the
+<code>vesa</code> driver.  Similarly, use <code>dhcp</code> to configure
+ethernet rather than a hard-coded IP address in
+<code>/etc/network/interfaces</code>.  On most systems there <em>is</em> a
+hard disk and it is shame not to use it. You can set-up a swap partition
+after you boot from the CD - be careful not to trash the host machine
+though!
+
+
+<h3>Afterword</h3>
+
+<p> Today one can find a number of GNU/Linux systems that work off Live
+CD's. There is <a href="http://www.knoppix.net">Knoppix</a> - and then
+there are its <a
+href="http://www.knoppix.net/wiki/Knoppix_Customisations">Klones</a>.
+There is <a href="http://www.lnx-bbc.org">LNX-BBC</a>, <a
+href="http://www.toms.net/rb">tomsrtbt</a>, <a
+href="http://www.ltsp.org">LTSP</a> and even one called <a
+href="http://www.goosee.com/puppy">Puppy</a>! There are the CD-based
+installers for the common distributions. <em>But</em>, I am still not
+satisfied. Each of these make choices that I am not comfortable with.  They
+choose KDE, Gnome or <code>fluxbox</code>, when what <em>I</em> want is
+<code>fvwm</code>; or they choose <code>xmms</code> when what I want is
+<code>alsaplayer</code> (in daemon mode)... and so on.
+
+<p> What's wrong with <a
+href="http://linuxgazette.net/issue87/sunil.html">Sunil's excellent
+article</a> then? - just take a minimal Knoppix-like DSL and re-master it.
+I would object that Knoppix puts everything in a <code>cloop</code> image
+which makes it difficult to read the ``real'' contents of the CD on a
+generic system; further this also makes it difficult to master and/or
+re-master.
+
+<p> There are other approaches like that taken by
+<a href="http://www.gibraltar.at/">Gibraltar</a>,
+<a href="http://packages.debian.org/bootcd"><tt>bootcd</tt></a> or
+<a href="http://packages.debian.org/dfsbuild"><tt>dfsbuild</tt></a> or
+<a href="http://www.linux-live.org"><tt>linux-live</tt></a>.
+
+<p> The first two keep the files in a compressed ISO file-system. That
+makes it usable ``anywhere''. I did try these but for one reason or another
+they didn't work for me. For example they required the installation of
+additional packages on my desktop.
+
+<p> Ultimately, it comes down to this: I'm a terribly nit-picky kind of
+person, and I have spent a lot of time fine-tuning my system and <em>no
+one</em> is allowed to dictate what packages I must install and how they must
+be configured. 
+
+<p class="editorial">[ I <em>like</em> this Kapil guy, and the way he
+thinks. :) -- Ben ]</p>
+
+I enjoy tinkering with such things, and so I must have a system that I
+understand fully. People also mentioned additional kernel features in late
+2.4.x and early 2.6.x that simplify the building of a live CD. Finally,
+isn't it fun to ``roll your own''?
+
+<hr size=2>
+<blockquote><em>This document was translated from the LaTeX Source by
+</em><a href="http://pauillac.inria.fr/~maranget/hevea/index.html"><em>H<font size=2><sup>E</sup></font>V<font size=2><sup>E</sup></font>A</em></a><em>.
+</em></blockquote>
+
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/authors/kapil.jpg" class="bio">
+<em>
+
+Kapil Hari Paranjape has been a ``hack''-er since his punch-card days.
+Specifically, this means that he has never written a ``real'' program.
+He has merely tinkered with programs written by others. After playing
+with Minix in 1990-91 he thought of writing his first program---a
+``genuine'' *nix kernel for the x86 class of machines. Luckily for him a
+certain L. Torvalds got there first---thereby saving him the trouble
+(once again) of actually writing code. In eternal gratitude he has spent
+a lot of time tinkering with and promoting Linux and GNU since those
+days---much to the dismay of many around him who think he should
+concentrate on mathematical research---which is his paying job. The
+interplay between actual running programs, what can be computed in
+principle and what can be shown to exist continues to fascinate him.
+
+</em>
+<br clear="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2005, Kapil Hari Paranjape. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 113 of Linux Gazette, April 2005
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="engel.html" >&lt;-- prev</A> | <A HREF="lodato.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">April 2005 (#113)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/2003/sit3-shine.7-2.gif" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

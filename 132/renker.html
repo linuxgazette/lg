@@ -1,0 +1,609 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Poor Man's Laptop LG #132</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+<a href="../">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="pfeiffer.html" >&lt;-- prev</A> | <A HREF="sevenich.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Poor Man's Laptop</h1>
+<p id="by"><b>By <A HREF="../authors/renker.html">Gerrit Renker</A></b></p>
+
+
+<h2>Introduction</h2>
+
+<pre>
+But you know nowadays
+It's the old man
+He's got all the money
+And a young man ain't got nothin' in the world these days
+
+- The Who `Young Man Blues'
+</pre>
+
+<p>Laptops are fine, if you can afford them. Even if you cannot afford
+one, often enough the situation arises that computer work has to be
+done at home - whether you are studying, doing business charts,
+programming, Web designing....</p>
+
+<p>This article presents a reliable and truly cheap alternative to
+buying a laptop for keeping up with work/study demands.</p>
+
+
+<h3>Scripting, not purchasing</h3>
+
+<img src="misc/renker/le_stick_du_USB.jpg"
+     width="170" height="141" border="0"
+     alt="USB stick image" align="right">
+
+<p>My situation forced me to prepare work at home, but a laptop was far
+too expensive. Perhaps due to the popularity of laptops, it is actually
+<em>much</em> cheaper to buy a second-hand PC. A portable hard drive would
+have been a nice thing, but requires synchronising directory content
+between three locations - the portable drive, the computers at home, and
+those at work.</p>
+
+<p>The solution presented here is possibly the cheapest possible and
+based on an inexpensive USB stick; the required `intelligence' to
+reliably synchronise directories is provided by a set of scripts. Unlike
+hardware-based solutions, this works across different distributions and
+even operating systems.  The principle is simple, but there are a number
+of subtle problems that have been ironed out during three years of use
+(with my second-hand PC) on a daily basis.</p>
+
+
+<h3>Overview</h3>
+
+
+<p>The USB directory synchroniser consists of the following:</p>
+<ol>
+   <li>A <em>central Perl script</em> to track file modification times.</li>
+   <li>A mode of <em>mounting</em> the stick which ensures file integrity.</li>
+   <li><em>Add-ons</em> to the script, such as timestamping, additional archives, and command execution.</li>
+   <li><em>Subsidiary scripts</em> for adding/reading important notes and remote command execution.</li>
+</ol>
+
+<p>This all is too much for one article; hence, the basic functionality
+(first two items) is covered by this article, the remaining items
+follow in a subsequent part.</p>
+
+<p>This part starts with a reduced, but fully functional <a
+href="misc/renker/pack_bare_bones.pl.txt">`bare-bones' script</a>, to
+explain core functionality, how to set up, and how to hack it. When the
+<a href="misc/renker/pack.pl.txt">full script</a> follows in part II,
+its functionality will then be obvious - it is not more complex, but
+just has more bells and whistles.</p>
+
+<p>If you are a Perl hacker, you should feel at liberty to skim through the
+following sections and move on to the more complex version.</p>
+
+
+
+<h2>Reliable archives versus removable media</h2>
+
+<p>The daily archive has a fixed name; mine is called
+`<em>actual.2</em>' and is located in <tt>$flashdir</tt>:</p>
+
+<pre class="code">
+$flashdir =  ${ENV}{'VOL'} || "/vol/flash";
+$tarfile  = "$flashdir/actual.2";
+</pre>
+
+<p>The first line sets the mount point, which can be overridden using
+the <tt>VOL</tt> environment variable. (For example, you could say
+<tt>export VOL=/vol/floppy</tt> and store the archive on a floppy
+disk.)</p>
+
+<p>Mounting happens as with any other filesystem (e.g., hard drive
+partitions), but with one important difference: the system may be able
+to tell when a USB stick is inserted, but it can <em>not</em> reliably
+tell or sync any unflushed file system buffers when the stick is pulled
+out. As convenient as the `storage media' icons are on Gnome/KDE
+desktops, I have found them unsatisfactory for the purpose of archiving:
+more than once I have ended up with corrupt, half-full archives, this
+way.  Therefore, a different alternative is presented here; and there is
+additional provision to make sure that the archive does indeed end up on
+the USB stick.</p>
+
+
+<h3>Mounting the USB stick</h3>
+
+<p>The safest bet, but tedious, is to always <tt>mount(8)</tt> /
+<tt>umount(8)</tt> the stick:</p>
+
+<pre class="code">
+mount -t vfat  /dev/sda1 /vol/flash
+</pre>
+
+<p>USB uses the SCSI subsystem; therefore, in most cases the first USB
+stick stuck into your  computer will appear as <tt>/dev/sda1</tt>; check
+this via <tt>dmesg</tt> and/or in <tt>/var/log/messages</tt>.</p>
+
+<p>A better alternative to manual mounting is the automounter, which
+auto-mounts a directory the first time one tries to access (read) it;
+and umounts automatically after a fixed timeout.</p>
+
+
+<h3>Automatic mounting</h3>
+
+<p>Most, if not all, systems come with the automounter per default
+(<tt>man autofs(8)</tt>); it is started at boot-time via
+<tt>/etc/init.d/autofs</tt>. The automounter is configured via so-called
+`map' files, which designate the mapping from hardware devices (such as
+<tt>/dev/sda1</tt>) to mountpoints.</p> The first file to consider is <a
+href="misc/renker/auto.master.txt">/etc/auto.master</a> which contains
+but one line:</p>
+
+<tt>/vol  /etc/auto.vol      --timeout=20</tt>
+
+<p>This instructs autofs to consult the file <tt>auto.vol</tt> in all
+matters of volatile media. The file <a
+href="misc/renker/auto.vol.txt">/etc/auto.vol</a> then contains the
+actual map; the relevant entry is the following:</p>
+
+<pre class="code">
+flash  -fstype=auto,dirsync,user,umask=000,exec,noatime,shortname=winnt :/dev/sda1
+</pre>
+
+<p>
+The above line can be parsed into three distinct sections: mountpoint under
+<tt>/vol</tt>, mount options, and the device to be mounted. (To create the
+all mountpoints, use <tt>mkdir -vp /vol/{flash,floppy,cdrom}</tt> under
+<tt>bash</tt>; see <a href="misc/renker/auto.vol.txt">the file</a> for the
+configuration of floppy/cdrom).  The fstype is <em>auto</em>matically
+detected; but I can only recommend to stick with vfat: using ext2/3 will
+trigger unpleasant <tt>fsck</tt>-ing at boot time. Important for electronic
+filesystems such as USB sticks are <em>dirsync</em> and <em>noatime</em>, as these
+reduce the number of device accesses (limited by component lifetime). For
+the remaining options, see <tt>mount(8)</tt>.  </p>
+
+<p>After creating and editing these two files (with the correct settings
+for your stick), you should be able to do a `<tt>/etc/init.d/autofs
+restart</tt>' and see contents of your flash directory via `<tt>ls -l
+/vol/flash'</tt>.  If so, you are ready to experiment with <a
+href="misc/renker/pack_bare_bones.pl.txt">the script</a> and its <a
+href="misc/renker/pack.list-example.txt">configuration file</a> (if it
+is copied into <tt>/etc/pack.list</tt>, make sure that you have write
+access). The automounter should best be enabled at boot time (Fedora/RH:
+<tt>chkconfig --list autofs</tt>, Debian: <tt>update-rc.d -n autofs
+defaults</tt>).</p> <p>The script works very well with automounting:
+before doing anything, it will first try to access the
+<tt>$flashdir</tt>.  If it cannot access, after several repeated
+attempts it will give up with a warning message.</p>
+
+<p>The remainder of the article now describes how the script works. (You
+can also see debug output by setting the shell variable <tt>debug</tt>
+to &gt; 4.)  </p>
+
+
+
+<h2>Functioning of the core script</h2>
+
+<p>The <a href="misc/renker/pack_bare_bones.pl.txt">main, bare-bones
+script</a>, which we will now take apart, uses <em>Perl built-ins</em> for
+things that have to run fast (such as traversing directories and
+creating lists), and <em>calls other programs</em> (such as <tt>tar</tt>)
+for everything else.</p>
+
+<p>The following requirements made a script inevitable:</p>
+<ul>
+
+  <li> <em>directories</em>: tar  will happily add <em>all and any
+subdirectories</em>, if one is not very careful. For example, if you
+modified <tt>/usr/src/linux/.config</tt> and use `<tt>find
+/usr/src/linux/ -mtime -1'</tt> to track your latest files,
+<tt>find</tt> will include the directory <tt>/usr/src/linux/</tt> as
+well.  Now, instead of a 10KB tar file, you would end up with 40..100MB
+(which will take painfully long, especially if the PC has USB 1.1).</li>
+
+
+  <li> <em>symlinks</em> are a real pain: you can either choose between
+dereferencing (-h) or without, but both is not possible.</li>
+
+  <li><em>maintainability</em>: it is all well to do `<tt>tar -zcvf
+archive.tgz  someDir</tt>', but gets soon out of hand once a mixture of
+files in different locations is involved</li>
+
+  <li> <em>configurability</em>: re-programming scripts every day is
+tedious, one <em>configuration file</em> is used instead to list all
+relevant files and directories</li>
+
+</ul>
+
+<dl>
+<dt><em><strong>Functional Principle:</strong></em></dt>
+<dd>A configuration file is used to keep track of the important files and directories.</dd> 
+<dd>To take home (on the USB stick) all tracked files home that changed during the last <tt>x</tt> days, 
+    the script is called with the <tt>--days x option</tt>.</dd>
+<dd>At home, the archive is unpacked using the <tt>--unpack</tt> option. 
+    This works in both directions (from home to work, and from work to home).</dd>
+</dl>
+
+<h3>User interaction</h3>
+
+<p>An important program called by this script is <strong>(g)dialog</strong>,
+which provides GUI dialogs (example error box in <a
+href="misc/renker/error-dialog.png">dialog</a> and in <a
+href="misc/renker/error-gdialog.png">gdialog</a>):</p>
+
+<pre class="code">
+$dialog = ($ENV{'DISPLAY'} &amp;&amp; (qx#which gdialog 2&gt;/dev/null#))? "gdialog" : "dialog";
+</pre>
+
+
+<p>On the console, <tt>dialog</tt> is called; under X,  <tt>gdialog</tt>
+is used for the same purposes. The <tt>qx/.../</tt> statement chooses
+dialog in both cases if gdialog is not available. On a Debian system,
+you can install both via <tt>apt-get install dialog zenity</tt> (gdialog
+is in the zenity package); similar for other distros.</p>
+
+<p>For the rest of the <em>user interaction</em>, the pager
+<tt>$less</tt> is used, and we have the logging function:</p>
+
+<pre class="code">
+sub log {
+   printf STDERR "\033[1;34;7m@_\033[m\n";
+}
+</pre>
+
+<p>The funny digits are <em>ANSI escape sequences</em> to colour the
+output (a screenshot is <a
+href="misc/renker/console_listing.png">here</a>); good examples of using
+these can be found elsewhere in LG.  Since Perl already has a
+<tt>log</tt>(-arithm) function, we need to make clear which log we want;
+hence above function will be invoked as <tt>::log()</tt> (which is an
+abbreviation for <tt>main::log()</tt>).</p>
+
+
+<h3>Core blocks of the script</h3>
+
+<p>The bare-bones script can already do the following:</p>
+<ul>
+  <li> <strong>unpack</strong> the archive from USB stick  (<tt>--unpack</tt> option)</li>
+  <li> <strong>create</strong> a new archive   (default when no option is given, <tt>--yes</tt> overwrites)</li>
+  <li> restrict the <b>age</b> of tracked files to <tt>n</tt> days     (<tt>--days n</tt> option)</li>
+  <li> <strong>list</strong> those files in tracked directories that have changed during   the last <tt>n</tt> days
+           (<tt>--list</tt> option)</li>
+</ul>
+
+<p>In increasing order of complexity, we will consider (1) listing, (2)
+un-packing, (3) packing, and (4) building the file list.</p>
+
+
+
+<h3>1) Listing files that have changed</h3>
+
+<p>This is easy, <tt>$see</tt> is true when the <tt>--list</tt> option
+is set:</p>
+
+<pre class="code">
+if ( $see ) {
+   build_list();
+   system "$less $list";
+}
+</pre>
+
+The <tt>build_list()</tt> function hides all the complexity of parsing,
+collating, and checking; it is discussed later. The third line calls our
+pager `<tt>$less</tt>' (<tt>PAGER</tt> environment variable) on the
+newly created <tt>$list</tt>.
+
+<h3>2) Un-packing an archive</h3>
+
+<p>Un-packing is done by invoking the script with the <tt>--unpack</tt>
+option.  On my system, I have found it useful to use the following
+<em>alias</em> (the <tt>pack</tt> script is in <tt>~/bin</tt> and
+<tt>~/.bashrc</tt> contains: <tt>export PATH=~/bin:$PATH</tt>):</p>
+
+<pre class="code">
+alias unpack="pack --unpack"
+</pre>
+
+
+Un-packing is described by the following <em>pseudo-code</em>:
+<ol>
+  <li> check if archive was created on this host  </li>
+  <li> call <tt>unpack()</tt>, a wrapper around `<tt>tar -jxpPvf $tarfile</tt>' </li>
+  <li> display errors encountered in (2), if any </li>
+</ol>
+
+<p>Step (1) is important: if you accidentally left an archive on the
+stick and then, not knowingly, unpack it some days later, it will
+silently overwrite your files with the older files stored in the
+archive. This has happened to me several times, but the remedy is both
+simple and very efficient.</p>
+
+<p>Tar has a rich set of features, stemming from the old days when it
+was used as Tape ARchiver. That is, it supports storing archives on
+several different (tape) volumes and with the <tt>--label=myLabel</tt>
+option, these volume archives can be given individual names. You can
+view the volume name of an archive by using <tt>-t</tt> to list an
+archive, the volume label appears in the first line.  So, in the present
+case, the volume names are simply set to the fully-qualified
+<tt>hostname(1)</tt> of the system. (This assumes that different PCs have
+different <tt>hostname</tt>.)</p>
+
+
+
+
+<h3>3) Archiving what has changed in the past days</h3>
+
+<p>The inverse operation to unpacking is simple, all the complexity is
+in <tt>build_list()</tt>:</p>
+
+<pre class="code">
+  ::log "Creating backup archive file ...";
+  system "tar -jcpPvf $tarfile --label $hostname --files-from=$list 2>$log";
+  if ($? != 0) {
+       unlink $tarfile;
+       error "Tar Problem!\nDeleting archive $tarfile";
+  }
+  ::log "Syncing ...";
+  system "sync; sync;";
+
+  ::log "Testing file integrity:";
+  system "bzip2 -tvv $tarfile";
+</pre>
+
+<p>The <tt>$tarfile</tt> is created with the files from <tt>$list</tt>,
+the volume label is set to the <tt>$hostname</tt>. In case of error, the
+archive is deleted (<tt>unlink</tt>-ed) and an error window will pop up.
+Otherwise, <tt>sync(1)</tt> is called twice to flush filesystem buffers.
+The subsequent file integrity test provides additional protection
+against removing the USB stick before all of the data has been safely
+transferred. (This is a common problem with removable media, and it is
+good to be cautious, here.)</p>
+
+<h3>4a) Building the file list: <em>parsing configuration file</em></h3>
+
+<p>The <tt>build_list()</tt> routine adds intelligent functionality
+around the tar program: it processes the contents of a configuration
+file in such a manner that only files changed in the last few days are
+passed on to tar, without adding unwanted subdirectories, but with full
+expansion of symlinks.</p>
+
+<p>The complexity that this requires is hidden behind recursion (a
+function calling itself again), which is a good working principle, since
+directories are themselves recursive: a sub-sub-directory is a directory
+in a directory is a directory in a directory ... :-)</p>
+
+<p>Let's look at the main loop, which parses the file <tt>$config</tt>.</p>
+
+<pre class="code">
+while(&lt;&gt;) {
+    strip_comments_and_leading_whitespace();
+    next if $line_is_empty;
+
+    my @arr = split;                  # put all single words into @arr
+
+    if ($arr[0] = m/&lt;\s*rec\s*&gt;/i)       {  # line starts with &lt;REC&gt;
+       shift @arr;
+       getLinkedFiles(@arr);
+    } elsif ($arr[0] = m/&lt;\s*link\s*&gt;/i) {  # line starts with &lt;LINK&gt;
+       shift @arr;
+       readLink(@arr);
+    } else {                          # this is a `normal' line
+       foreach (@arr) {
+         if (m#[{*]#) {               # e.g. /home/gerrit/{.bash*,.exrc,bin/*}
+             let_bash_expand_entry();
+         } elsif ( -d ) {             # a single directory: traverse
+             getLinkedFiles($_);
+         } else {                     # a file or a link: just print to list
+             printf "$_\n";
+         }
+       }
+    }
+ }
+</pre>
+
+<p>The configuration file contains file/directory names on each line;
+bash shell-globbing syntax is allowed. (In this case, bash is actually
+used to expand entries.) Configuration lines starting with &lt;LINK&gt;
+mean "<em>I want this symlink to be followed, but I don't care about deep
+directory traversal</em>".  You get the full works of directory traversal
+plus symlink expansion with deep recursion by using the &lt;REC&gt; tag.
+<a href="misc/renker/pack.list-example.txt">Here</a> is an example
+configuration file which illustrates the principle.</p>
+
+<p>The <tt>while()</tt> loop iterates over each line of the
+<tt>$config</tt> file.  The <tt>split</tt> statement separates single
+words into the array <tt>@arr</tt>.  Hence, when a line starts with a
+&lt;LINK&gt; or &lt;REC&gt; tag, we need to remove that tag from
+<tt>@arr</tt> before passing it as argument to one of the functions;
+this is handled by the <tt>shift</tt> statement.  All output from the
+invoked subroutines is redirected to the <tt>TMPLIST</tt> temporary
+file, containing the expanded list of files, resolved symlinks, and
+traversed directories.</p>
+
+<p>We now briefly  look at <tt>getLinkedFiles()</tt>, which maintains a
+hash-list <tt>%KNOWN</tt> to avoid cycles and proceeds differently by
+these cases:</p>
+
+<ul>
+  <li> plain files are just added</li>
+  <li> symlinks are resolved via <tt>readlink_recurse()</tt></li>
+  <li> directories are only added if their contents are all new;
+       otherwise <tt>getLinkedFiles()</tt> is called on the directory contents </li>
+</ul>
+
+<p>The <tt>readlink_recurse()</tt> routine in turn calls
+<tt>getLinkedFiles()</tt> to resolve new file entries; it contains a
+logic to avoid getting lost in symlink loops. This can be a bad trap
+otherwise (try e.g. this: <tt>ln -s a b; ln -s b a; namei a</tt>).</p>
+
+
+
+<h3>4b) Sort out the temporary filelists: build_list()</h3>
+
+<p>To pick those files that have changed during the last <tt>$days</tt>
+days, <tt>build_list()</tt> uses a simple trick: it rewinds the start
+time <tt>$^T</tt> (Perl special variable) of the script by this amount
+in seconds.  This means that, once file modification times are tested,
+Perl already thinks it is executing <tt>$days</tt> back in history:</p>
+
+<tt>$^T -= $days * 24 * 3600;</tt>
+
+<p> The following is the <em>final processing</em> of the file list, refining 
+    <tt>TMPLIST</tt> into <tt>LIST</tt>:</p>
+
+<pre class="code">
+while(&lt;TMPLIST&gt;) {
+    chomp;
+    s#/[^/]+/(\.\.)+/(\S+)#/$2#g;
+    error "FATAL:\n \"$_\"\n--$!\n" unless -e $_;
+
+    next if ( (-M ) >= 0 );
+    print LIST "$_\n" unless $KNOWN{$_}++;
+}
+</pre>
+
+<p>After <tt>chomp()</tt>ing the `<tt>\n</tt>', pathnames containing
+`..' are normalised: for example, <tt>/usr/local/lib/wx/../../bin/wx2
+is</tt> reduced to <tt>/usr/local/bin/wx2</tt>.  If the file does not
+exist (e.g., due to a broken symlink), an error message is produced. (An
+example output is <a href="misc/renker/error-gdialog.png">here</a>.)</p>
+
+<p>The <em>file age test `-M'</em> returns the time since the file
+(<tt>$_</tt>) was last modified; a negative modification age means that
+the file was modified in the future. Relative to the rewound start time
+<tt>$^T</tt>, this means: all files created during the last
+<tt>$days</tt> until now will appear with a negative modification time;
+and thus be added to the list.  Last, the filename is printed into the
+<tt>LIST</tt> unless it has been encountered before (indicated by a
+non-null entry in the hashlist <tt>%KNOWN</tt>).</p>
+
+<p>That's it, the list is built, the file closed, and it's passed on to
+<tt>tar</tt> to create the archive.</p>
+
+
+<h2>Conclusion</h2>
+
+<p>This part of the article has described how to use a USB stick for
+daily directory synchronisation between two non-networked computers. The
+principle has been presented on a scaled-down (but fully functional) <a
+href="misc/renker/pack_bare_bones.pl.txt">script</a>.  The next part
+will introduce additional functionality that simplifies the usage and
+makes it robust for many day-to-day situations.</p>
+
+<p>In summary, using USB sticks for synchronising directories between
+home and workplace is an efficient, workable, and very cost-effective
+solution. Some companies now even give away USB sticks for free, thereby
+contributing to a significant reduction in Total Cost of Ownership (TCO)
+of the solution presented in this article.</p>
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:132/renker.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/2002/note.png" class="bio">
+</p>
+
+<em>
+<p>
+<br clear="all">
+</p>
+</em>
+
+<br clear="all">
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2006, Gerrit Renker. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 132 of Linux Gazette, November 2006
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="pfeiffer.html" >&lt;-- prev</A> | <A HREF="sevenich.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/mailman/listinfo/">Mailing Lists</a>
+<a href="../jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">November 2006 (#132)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

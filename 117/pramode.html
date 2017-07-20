@@ -1,0 +1,622 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>PowerPC Assembly Programming on the Mac Mini LG #117</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="orr.html" >&lt;-- prev</A> | <A HREF="raby.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>PowerPC Assembly Programming on the Mac Mini</h1>
+<p id="by"><b>By <A HREF="../authors/pramode.html">Pramode C.E.</A></b></p>
+
+<p>
+
+<p> The <a href="http://www.apple.com/macmini/">Mac Mini</a> is a very
+compact desktop computer designed by Apple. Based on the PowerPC (PPC) G4
+CPU, the machine is ideal for those who wish to experiment with GNU/Linux
+on a non-Intel platform.  In this article, we will examine how to get
+Ubuntu Linux up and running on the Mac Mini. Assembly language skills on a
+RISC CPU like the PowerPC are very much in demand in the embedded-systems
+industry - and we shall use the  PPC Linux system to do a bit of assembly
+language hacking!
+
+<p align="center">
+<img src="misc/pramode/figure1.jpg">
+</p>
+
+<h3>The Mac Mini Hardware</h3>
+<p>
+The Mac Mini runs on  a PowerPC  CPU having 
+a clock speed of 1.25GHz (a higher-end version is also
+available). Figure 2 shows the output of
+running 'cat /proc/cpuinfo' on my machine:
+
+<pre>
+processor	: 0
+cpu		: 7447A, altivec supported
+clock		: 1249MHz
+revision	: 1.2 (pvr 8003 0102)
+bogomips	: 1245.18
+machine		: PowerMac10,1
+motherboard	: PowerMac10,1 MacRISC3 Power Macintosh 
+detected as	: 287 (Unknown Intrepid-based)
+pmac flags	: 00000000
+L2 cache	: 512K unified
+memory		: 256MB
+pmac-generation	: NewWorld
+</pre>
+
+<p> There is a 40GB IDE hard disk, two USB ports, one
+firewire port, built-in sound and a "slot-loading" CD/DVD drive. 
+The power supply, 
+rated at 85W, is provided as an external 'brick'. The unit does not
+come with a monitor or keyboard - you have to provide 
+them yourself. Both the keyboard and the mouse are USB-based.
+I had no difficulty getting my Microsoft USB mouse detected,
+but I had to try a few different brands before I got my USB keyboard
+working.
+
+<p>
+There are some minor hardware peculiarities - one is the absence
+of an 'eject' button for the CD drive. If you are running Linux
+or MacOS, software eject will work; otherwise, holding the mouse
+button down during the boot process will do the trick. Another 
+idea is to get into 'OpenFirmware' (similar to the CMOS setup
+on the PC) during the boot process by holding down the
+<code>Alt-Windows-O-F</code> keys and
+then executing the 'eject cd' command. Booting from the CD requires
+holding down the 'c' key during powerup.
+
+
+<h3>Installing Ubuntu</h3>
+<p>
+Ubuntu Linux has a PowerPC edition; the CD image can be
+downloaded from <a
+href="http://ubuntulinux.org">http://ubuntulinux.org</a>. The Mac Mini
+comes pre-installed with MacOS X in the single partition which occupies the
+whole of the hard disk. The first step, then, is to run the installation CD and
+get OS X into a smaller partition (say 20 GB). Once this is
+done, you can boot with the Ubuntu installation CD and create
+a few partitions for Linux to work with. The rest of the Ubuntu
+installation process will proceed very smoothly and you will
+have a MacOS X/Linux dual boot system working perfectly. 
+
+<h3>Tweaking Ubuntu</h3>
+<p>
+Ubuntu is a nice end-user distro; but developers will have to
+put in some effort to get their favourite tools working.
+I had to do an:
+
+<pre>
+apt-get install gcc
+</pre>
+
+to have 'gcc' working. I downloaded the 2.6.8.1 kernel from <a
+href="http://kernel.org">kernel.org</a> and tried compiling it with
+
+<pre>
+make menuconfig
+</pre>
+
+which failed because the 'ncurses-devel' package was missing. The 
+problem was solved by getting <code>ncurses-5.4.tgz</code> from a GNU FTP site
+and installing it from source. 
+
+<p>
+Once the kernel compilation process is over, you will see
+a file called 'vmlinux' under the root of the kernel source tree.
+This has to be copied to the '/boot' directory under a different
+name, e.g. 'mykernel'. PowerPC systems use the 'yaboot' boot
+loader whose configuration file '/etc/yaboot.conf' looks similar
+to LILO's config file. Here is what I added to my 'yaboot.conf':
+
+<pre>
+image=/boot/mykernel
+	label=mykernel
+	read-only
+	initrd=/boot/initrd.img
+	append="quiet splash"
+</pre>
+
+The 'ybin' program has to be executed to install the boot
+loader.
+
+
+<h3>Learning PowerPC Assembly</h3>
+<p>
+The PowerPC is more of a processor specification rather 
+than a processor. Originally developed by an Apple-IBM-Motorola
+alliance, there are a lot of processors in the market which
+can be called PowerPCs; the Mac Mini uses a processor called
+7447A. PowerPC chips are often used in embedded devices
+as well as in high-end servers. 
+
+<p>
+Understanding the architecture and the assembly language 
+of a microprocessor is crucial in tasks which involve
+low level interaction with the machine - like designing/debugging
+operating systems, compilers, embedded applications, etc. 
+The Mac Mini running GNU/Linux can be used by universities and 
+engineering colleges to provide computer architecture
+education to its students. We shall examine the basics
+of PowerPC assembly language programming in the rest of this
+article, mostly with a view towards understanding the code which
+GCC generates.
+
+
+<h3>Getting Started</h3>
+<p>
+The PowerPC is a Reduced Instruction Set Computer (RISC).  All instructions
+are encoded uniformly in 4 bytes and the only instructions which access
+memory are load and store instructions. There is a large register set
+consisting of 32 integer registers, 32 floating point registers, a
+condition register (CR), a link register (LR) and a few others. Programmers
+familiar with the x86 instruction set will note the absence of special
+registers like the stack pointer - the idea is that one of the general
+purpose registers itself can be used as a stack pointer. An Application
+Binary Interface (ABI) defines the conventions to be adopted; the SVR4 ABI,
+which ppc32 Linux follows, requires GPR1 (General Purpose Register 1) to be
+used as a stack pointer. Also, the ABI requires arguments to a function to
+be passed in registers starting with GPR3. A function can freely modify
+GPR3 to GPR12 - the caller is expected to save them if necessary. 
+
+<p>
+<a href="misc/pramode/listing1.txt">Listing 1</a> shows a  simple 
+assembly language program. Let's see what each of the 
+instructions does. 
+
+<p>
+The instruction:
+
+<pre>
+li 4, 0x10
+</pre>
+
+loads the immediate (constant) value 0x10 to the general purpose register
+4; x86 programmers may be bothered by the use of pure numbers to represent
+registers rather than more meaningful names like r0, r1 etc. The instruction:
+
+<pre>
+add 4, 4, 5
+</pre>
+
+may be thought of as doing the algebraic operation:
+
+<pre>
+r4 = r4 + r5
+</pre>
+
+That is, sum the contents of general purpose registers 4 and 5 and store the
+result in GPR4. The instruction:
+
+<pre>
+addi 4, 4, 5
+</pre>
+
+does the operation:
+
+<pre>
+r4 = r4 + 5
+</pre>
+
+ie, simply add the constant value 5 to contents of register r4.
+
+<p>
+The 'stwu' (store word and update) instruction is a bit
+tricky. The general format is:
+
+<pre>
+stwu rS, d(rA)
+</pre>
+
+The instruction stores the contents of register rS into a memory location
+whose effective address has been computed by taking d+rA. At the same time, rA
+is updated to become equal to the effective address. Note that the general
+purpose register R1 is taken to be the stack pointer, so 'stwu 1, -16(1)'
+stores the contents of the stack pointer register to a position at offset
+-16 from the current top of stack and decrements the stack pointer by 16.
+A sample interaction with 'gdb' shows that this is indeed the case.
+
+<p>
+What remains is the instruction 'blr' which should be read as 
+'branch to link register'. The Link Register (LR) is a special
+register which holds the return address during a subroutine call.
+Our 'main' was called from a standard library 'start' routine; LR
+will have the address of the instruction which main should return
+to. Doing a 'blr' will result in execution getting transferred
+to the address contained in the Link Register.
+
+<h3>Using GDB to trace programs</h3>
+<p>
+The GNU Debugger helps us  single-step through assembly
+language programs; we will also be able to examine the
+contents of memory locations and registers after executing
+each instruction. First, we have to compile the program
+like this:
+
+<pre>
+cc -g listing1.s
+</pre>
+
+and invoke gdb:
+
+<pre>
+gdb ./a.out
+</pre>
+
+Here is a sample interaction with GDB:
+
+<pre class="code">
+Breakpoint 1, main () at listing1.s:5
+5		li 4, 0x10
+Current language:  auto; currently asm
+(gdb) s
+6		li 5, 0x20
+(gdb) s
+7		add 4, 4, 5 
+(gdb) p/x $r4
+$1 = 0x10
+(gdb) p/x $r5
+$2 = 0x20
+(gdb) s
+8		addi 4, 4, 5
+(gdb) p/x $r4
+$3 = 0x30
+(gdb) s
+9		stwu 1, -16(1)
+(gdb) p/x $r4
+$4 = 0x35
+(gdb) p/x $r1
+$5 = 0x7ffff8e0
+(gdb) x/4xb 0x7ffff8e0-16
+0x7ffff8d0:	0x7f	0xff	0xf9	0x44
+(gdb) s
+main () at listing1.s:10
+10		addi 1, 1, 16
+(gdb) p/x $r1
+$6 = 0x7ffff8d0
+(gdb) x/4xb $r1
+0x7ffff8d0:	0x7f	0xff	0xf8	0xe0
+(gdb) p/x $lr
+$7 = 0xfebf100
+(gdb) s
+main () at listing1.s:11
+11		blr
+(gdb) s
+0x0febf100 in __libc_start_main () from /lib/libc.so.6
+</pre>
+
+The 's' (step) command is used for stepping through one
+instruction. We can print the value of a register, say, GPR4
+by doing 'print $r4' or 'p/x $r4' (print in hex). The contents of
+a memory location can be printed by executing a 'x/4xb' command. 
+We note that executing the 'blr' instruction resulted in control getting
+transferred to the location 0x0febf100 - this is the address
+which the Link Register (LR) was holding.
+
+<p>
+The GDB command 'disas' (short form for 'disassemble') can be used
+to view the assembly code in a better way - here is the output
+obtained by running 'disas main':
+
+<pre class="code">
+(gdb) disas main
+Dump of assembler code for function main:
+0x100003d0 &lt;main+0&gt;:	li	r4,16
+0x100003d4 &lt;main+4&gt;:	li	r5,32
+0x100003d8 &lt;main+8&gt;:	add	r4,r4,r5
+0x100003dc &lt;main+12&gt;:	addi	r4,r4,5
+0x100003e0 &lt;main+16&gt;:	blr
+</pre>
+
+<p>
+The 'objdump' command too can be used to disassemble the 
+machine code.
+
+<h3>Subroutine Call</h3>
+<p>
+Branching to a subroutine results in the return address being stored in the
+Link Register - if this subroutine calls another one, the current address
+in LR will be lost, unless it is saved on the stack. <a
+href="misc/pramode/listing2.txt">Listing 2</a> shows a simple C program and
+<a href="misc/pramode/listing3.txt">Listing 3</a> is part of its assembly
+language translation obtained by running:
+
+<pre>
+gcc -S -fomit-frame-pointer listing2.c
+</pre>
+
+Let's try to work out the code line by line.
+
+<p>
+The first line of 'main' simply decrements the stack pointer
+by 16 and stores the old value at that location. We are
+basically building a stack frame to hold the local variables
+defined within the function. Let's say the initial value of
+the stack pointer is 1000; after the first line, it becomes
+984. The next instruction, 'mflr 0' copies the contents of the
+link register to general purpose register 0 which is then stored
+onto the stack by the 'stw' instruction at a location whose 
+address is found by adding 20 to the value of the stack pointer
+register r1 (ie, location 1004).  
+
+<p>
+The next two lines copy the number 3 to r0 and then stores it
+at the location whose effective address is computed by adding
+8 to the contents of r1 (ie, location 992); this is the variable 'm' defined
+in our C program. The 'load word and zero' (lwz) instruction
+loads the register r3 with the value of 'm' and executes a 'branch and
+link' to function 'fun'. The 'bl' instruction transfers control to
+the function 'fun' and at the same time loads the Link Register with
+the address of the instruction immediately after the 'bl' in 'main'.
+We note that the old value of LR (which is the address to which 
+'main' is to return to) is overwritten, but that is not a problem
+because we have already saved this value on the stack.
+
+<p>
+The function 'fun' sets up its own stack frame and copies the
+value it received in register r3 onto the stack thereby creating
+the local variable 'x'. This is then copied into r9, incremented
+and copied to r3 (the instruction 'mr 3, 0' copies the value in
+r0 to r3). The function returns by doing a 'blr' - the stack
+pointer is adjusted back to its initial value before the return
+is executed.
+
+<p>
+Back in 'main', the value in r3 (the return value) is copied
+to the variable 'm' stored on the stack. The old value of the link
+register saved on the stack is copied to r0 after which the
+'mtlr' (move to link register) instruction transfers it to LR.
+The function then returns by doing a 'blr'. The entire sequence
+of events can be understood clearly by stepping through the
+code using GDB.
+
+
+<h3>Invoking System Calls</h3>
+<p>
+The 'arch/ppc/kernel/misc.S' file under the PPC32 Linux kernel source
+tree defines a data structure called a 'sys_call_table' which holds
+pointers to all the system calls defined in the kernel. Here is a
+part of this array:
+
+<pre>
+	.data
+	.align 4
+_GLOBAL(sys_call_table)
+	.long sys_restart_syscall /* 0 */
+	.long sys_exit
+	.long ppc_fork
+	.long sys_read
+</pre>
+
+We note that the address of the fork function is stored in slot 2 of 
+this array - the system call number of 'fork' is therefore 2. It's possible
+to write a simple assembly language program which invokes 'fork' - the idea
+is to execute the 'sc' instruction after storing the call number in r0 and
+any arguments in r3, r4 etc. <a href="misc/pramode/listing4.txt">Listing
+4</a> demonstrates the idea. The program goes in a loop (by using the
+'branch' instruction, 'b') after invoking 'fork'. If we run 'ps ax' on
+another console, we would be able to see two copies of 'a.out' running -
+proof that 'fork' has indeed been invoked!
+
+
+<h3>Taking the address of a variable</h3>
+<p>
+<a href="misc/pramode/listing5.txt">Listing 5</a> is a simple C program in
+which we store the address of a local variable in a pointer and then
+dereference the pointer to modify the pointed-to object. <a
+href="misc/pramode/listing6.txt">Listing 6</a> is part of the assembly
+language translation obtained by calling 'gcc -S -fomit-frame-pointer'. We
+see that the assembly code is not doing anything special. The situation is
+a bit different when we try to take the address of a global object. The
+problem is that because each instruction (opcode + operands) is encoded in
+32 bits, it is impossible to store a 32 bit address as part of the operand
+of a PowerPC instruction - we will have to split the address into two parts
+and add them up in a 32 bit register using two instructions. <a
+href="misc/pramode/listing7.txt">Listing 7</a> is part of the assembly
+output that we would get if the variable 'i' in Listing 5 had been defined
+as a global.
+
+<p>
+Let's compile the code into an 'a.out' and execute the command:
+
+<pre>
+nm ./a.out
+</pre>
+
+'nm' shows you the names and addresses of all the globally visible symbols
+in your program; on my machine, I see that the variable 'i' has been 
+assigned the address 0x100108a8. Split up into two parts and expressed in
+decimal, the most significant 16 bits is 4097 and the least significant
+16 bits is 2216. Coming back to the assembly language program, the two lines
+we are interested in are:
+
+<pre>
+lis 9, i@ha
+la 0, i@l(9)
+</pre>
+
+A disassembled listing of the program displays these lines as:
+
+<pre>
+lis r9, 4097
+addi r0, r9, 2216
+</pre>
+
+The assembler has encoded the 'load algebraic' instruction as an 'add'
+which has the same effect; this is something very common in PowerPC
+assembly programming.  The notation 'i@ha' results in the higher 16 bits of
+the address of 'i' getting extracted and 'i@l' yields the lower 16 bits.
+The 'load immediate shifted' (lis) instruction loads 4097 into the most
+significant bits of r9 and the add instruction simply combines it with the
+lower 16 bits of the address of 'i'. 
+
+
+<h3>Smashing the stack</h3>
+<p>
+PowerPC programs too are vulnerable to the same buffer overflow
+attacks so common on x86 architectures. A function saves the
+contents of the Link Register on the stack if it calls some
+other function; it is very easy to overflow a buffer and overwrite
+this return address. <a href="misc/pramode/listing8.txt">Listing 8</a>
+shows a C program in which we overflow the buffer 'a' - we are adding 12 to
+the contents of a[13]. Reading the assembly code produced by doing
+
+<pre>
+cc -S -fomit-frame-pointer listing8.c
+</pre>
+
+tells us that <code>a[13]</code> refers to the memory location where
+the Link Register has been saved. Adding 12 to it results in the
+function returning back to its caller (main) with the next 3 
+instructions skipped ('m++' takes 3 instructions and each instruction
+is encoded in 4 bytes). So the program prints 57 instead of 
+58. <a href="misc/pramode/listing9.txt">Listing 9</a> shows the relevant
+assembly code segment. 
+
+
+<h3>Further Reading</h3>
+<p>
+We have just had a glimpse into the fascinating world of
+assembly language programming - 
+readers interested in Computer Architecture should refer to
+the book 'Computer Organization and Design - The Hardware/Software
+Interface' by Patterson and Hennessy to get some idea
+of the amazing techniques used by microprocessor designers
+to convert a slice of silicon to a marvel of engineering.
+
+<p> IBM Developerworks routinely publishes articles on POWER CPU
+architecture and programming. If you would like to learn how to do this,
+start off with an introduction to the PowerPC assembly language programming
+at <a
+href="http://www-106.ibm.com/developerworks/library/l-ppc/">http://www-106.ibm.com/developerworks/library/l-ppc/</a>.
+There is also a short article on the Mac Mini from an embedded perspective
+at <a
+href="http://www-128.ibm.com/developerworks/power/library/pa-macmini1/">http://www-128.ibm.com/developerworks/power/library/pa-macmini1/</a>.
+If you wish to load Debian on your Mac Mini, you might like to consult
+<a href="http://www.sowerbutts.com/linux-mac-mini/">http://www.sowerbutts.com/linux-mac-mini/</a>.
+
+<p>
+Many PowerPC CPU's come with a fast SIMD unit called the Altivec -
+refer to<a href="http://www-128.ibm.com/developerworks/power/library/pa-unrollav1/">http://www-128.ibm.com/developerworks/power/library/pa-unrollav1/</a> 
+to learn more about Altivec optimizations. If you are developing
+multithreaded applications, 
+<a href="http://www-128.ibm.com/developerworks/library/pa-atom/">http://www-128.ibm.com/developerworks/library/pa-atom/</a> will tell
+you how to implement atomic operations in PPC assembly.
+
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<P>
+<img ALIGN="LEFT" ALT="[BIO]" SRC="../gx/2002/note.png" class="bio">
+<em>
+
+As a student, I am constantly on the lookout for fun
+and exciting things to do with my GNU/Linux machine. As
+a teacher, I try to convey the joy of experimentation,
+exploration, and discovery to my students. You can read about
+my adventures with teaching and learning <a
+href="http://www.livejournal.com/users/pramode_ce">here</a>.
+
+</em>
+<br CLEAR="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2005, Pramode C.E.. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 117 of Linux Gazette, August 2005
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="orr.html" >&lt;-- prev</A> | <A HREF="raby.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">August 2005 (#117)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

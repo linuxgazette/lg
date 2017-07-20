@@ -1,0 +1,366 @@
+#include "myaudio.h"
+static int speaker_ioctl(struct inode *inode, struct file *file,
+		       unsigned int cmd, unsigned long arg)
+{
+  int val, ret; /* , *arg; */
+  audio_buf_info bufinfo;
+  count_info cinfo;
+  unsigned long flags;		/* To save the flags for pushf; cli;  */
+  val = -EINVAL;
+
+  switch (cmd)
+    {
+    case OSS_GETVERSION:
+#ifdef SPKDBG
+      printk("Sound version ioctled");
+#endif SPKDBG
+      return put_user(SOUND_VERSION, (int *)arg);
+
+    case SNDCTL_DSP_SYNC:   /*reset buffers*/
+      sync_output();
+
+#ifdef SPKDBG
+      printk("Sync ioctled");
+#endif SPKDBG
+      return 0;
+
+    case SNDCTL_DSP_POST:  /* Basically means sleep till sync */
+
+#ifdef SPKDBG
+      printk("post ioctled");
+#endif SPKDBG
+      return 0; /* Mandatorily on a test basis- I would have preferred sync_output() */
+
+    case SNDCTL_DSP_RESET: /*reset dsp*/
+      sync_output();
+
+#ifdef SPKDBG
+      printk("reset ioctled");
+#endif SPKDBG
+      return 0;
+
+    case SNDCTL_DSP_GETFMTS: /*return in val,dsp format mask */
+
+#ifdef SPKDBG
+      printk("format query ioctled");
+#endif SPKDBG
+      return put_user(AFMT_U8, (int *)arg);
+
+
+    case SNDCTL_DSP_SETFMT: /*set dsp format mask and return val*/
+
+#ifdef SPKDBG
+      printk("set format ioctled");
+#endif SPKDBG
+      return put_user(AFMT_U8, (int *)arg);
+
+    case SNDCTL_DSP_GETISPACE: /*output in audio_buf_info (include/soundcard.h) amount of unused internal buffer space - invalid for o/p only device*/
+      return -EINVAL;
+
+    case SNDCTL_DSP_GETOSPACE: /*same as above but valid */
+      if (!(file->f_mode & FMODE_WRITE))
+	return -EINVAL;
+
+      spin_lock_irqsave(lock, flags);
+
+      bufinfo.fragsize = buffer_length;
+      bufinfo.bytes = buffer_length - (data_ptr - data_buffer);
+      bufinfo.fragstotal = 1;
+      bufinfo.fragments = (data_ptr == data_buffer) ? 1 : 0;
+      spin_unlock_irqrestore(lock, flags);
+
+#ifdef SPKDBG
+      printk("o/p space query ioctled");
+#endif SPKDBG
+
+      return copy_to_user((void *)arg, &bufinfo, sizeof(bufinfo)) ? -EFAULT : 0; /* :) lifted that gimmick from es1370.c  */
+
+    case SNDCTL_DSP_NONBLOCK: /*set non-blocking flag in the dev structs */
+      file->f_flags |= O_NONBLOCK;
+
+#ifdef SPKDBG
+      printk("non block flag ioctled");
+#endif SPKDBG
+      return 0;
+
+    case SNDCTL_DSP_GETCAPS:  /* we have no duplex, real time, trigger or mmapping. So there - return 0 */
+
+#ifdef SPKDBG
+      printk("GETCAPS ioctled");
+#endif SPKDBG
+      return 0;
+
+    case SOUND_PCM_WRITE_RATE:  /* returns speed in val in Hz */
+
+#ifdef SPKDBG
+      printk("PCM_WRITE_RATE ioctled");
+#endif SPKDBG
+
+      return put_user(22050, (int *)arg);
+
+    case SOUND_PCM_READ_RATE:   /*returns read speed in val. Want to return -EINVAL */
+
+#ifdef SPKDBG
+      printk("PCM_READ_RATE ioctled");
+#endif SPKDBG
+
+      return -EINVAL;
+
+    case SNDCTL_DSP_STEREO:    /* returns and sets the number of channels aske d for (1,2)*/
+      get_user_ret(val, (int *)arg, -EFAULT);
+      if (val>0) return -EINVAL;
+
+#ifdef SPKDBG
+      printk("DSP_STEREO ioctled");
+#endif SPKDBG
+      return put_user(0, (int *)arg);
+
+    case SOUND_PCM_WRITE_CHANNELS:  /* returns and sets the number of channels requested for (0,1) */
+
+#ifdef SPKDBG
+      printk("PCM_WRITE_CHANNELS ioctled");
+#endif SPKDBG
+
+      return put_user(0, (int *)arg);
+
+    case SOUND_PCM_READ_CHANNELS: /* We return 1 (mono) here */
+
+#ifdef SPKDBG
+      printk("PCM_READ_CHANNELS ioctled");
+#endif SPKDBG
+      return put_user(1, (int *)arg);
+
+    case SOUND_PCM_READ_BITS:     /* sets and returns bits per sample */
+
+#ifdef SPKDBG
+      printk("PCM_READ_BITS ioctled");
+#endif SPKDBG
+      return put_user(8, (int *)arg);
+
+    case SNDCTL_DSP_SETDUPLEX:    /* no need to support */
+
+#ifdef SPKDBG
+      printk("SETDUPLEX ioctled");
+#endif SPKDBG
+      return -EINVAL;
+    case SNDCTL_DSP_PROFILE:       /* no need to support */
+
+#ifdef SPKDBG
+      printk("DSP_PROFILE query ioctled");
+#endif SPKDBG
+      return -EINVAL;
+    case SNDCTL_DSP_GETODELAY:      /* I think that this is simply the time it takes for the damned thing to stop playing when told to stop */
+    if (!(file->f_mode & FMODE_WRITE))
+	return -EINVAL;
+      spin_lock_irqsave(lock, flags);
+      val = (data_buffer ==data_ptr) ? 1 : 0; 
+      spin_unlock_irqrestore(lock, flags);
+
+#ifdef SPKDBG
+      printk("GETODELAY ioctled");
+#endif SPKDBG
+      return put_user(val, (int *)arg); 
+
+      /********** from dma_ioctl ****************/
+    case SNDCTL_DSP_GETIPTR:
+
+#ifdef SPKDBG
+      printk("GETIPTR ioctled");
+#endif SPKDBG
+      return -EINVAL;
+
+    case SNDCTL_DSP_GETOPTR:         /*we need to support this URGENTLY something called a cinfo struct is set */
+      if (!(file->f_mode & FMODE_WRITE))
+
+#ifdef SPKDBG
+      printk("GETOPTR ioctled");
+#endif SPKDBG
+	return -EINVAL;
+      spin_lock_irqsave(lock, flags);
+      cinfo.bytes = data_ptr - data_buffer; /* number of bytes read  */
+      cinfo.blocks = 1;	/* number of buffer frags */
+      cinfo.ptr = data_ptr;
+      spin_unlock_irqrestore(lock, flags);
+      return copy_to_user((void *)arg, &cinfo, sizeof(cinfo));
+
+    case SNDCTL_DSP_GETBLKSIZE:
+      return put_user(32000 /*(unsigned) buffer_length*/, (int *)arg);
+    default:
+
+      return val;
+    }
+  return put_user(val, (int *)arg);
+}
+
+static ssize_t speaker_write(struct file *file, const char *buf, size_t count, loff_t *ppos)
+{
+  
+	if(count < 0) return -EINVAL;
+
+
+	if (!count)		/* Flush output */
+	{
+		  sync_output();
+		  return 0;
+	}
+
+	while(canplay){
+	  if(file->f_flags & O_NONBLOCK) return -EAGAIN;
+#ifdef SPKDBG
+	  printk("<1> sleeping current process");
+#endif
+	  schedule();
+	  /*interruptible_sleep_on(&wait);*/
+#ifdef SPKDBG
+	  printk("<1> Process awoken");
+#endif
+	  if(signal_pending(current))  return -ERESTARTSYS;
+	}
+
+	if (!canplay)
+	  {
+	  count = (count <=32000 ? count : 32000);
+	  if(copy_from_user((void *)data_buffer, buf, count))
+		   return -EFAULT;
+	     data_ptr = data_buffer;
+	     buffer_length = count;
+	     timeout=count*1193180/pit_counter/sampling_factor;
+	     canplay = 1;
+
+#ifdef SPKDBG
+	     printk("<1> %i bytes written", count);     
+#endif
+
+	  return count;
+	  }
+
+	return 0;	/* The idea is to return 0 bytes and leave the problem to the client */
+}
+	  
+
+static ssize_t speaker_read(struct file *file, char *buf, size_t count, loff_t *ppos)
+{
+
+#ifdef SPKDBG
+  printk("sound device read ");
+#endif SPKDBG
+
+  return -EINVAL;
+}
+
+
+static int speaker_open(struct inode *inode, struct file *file)
+   {
+  /*Check for re-entrancy*/
+     if(virgin >= 2) return -EBUSY;
+     virgin =1;
+
+#ifdef SPKDBG
+      printk("Sound Device opened....");
+#endif SPKDBG
+     return 0;
+
+   }
+
+static void speaker_close(struct inode *inode,struct file *file)
+   {
+     virgin = 0;
+
+#ifdef SPKDBG
+      printk("Sound device closed");
+#endif SPKDBG
+    
+   }
+
+static int fops_sync_output(struct inode *inode, struct file *file)
+{
+  sync_output();
+  return 0;
+}
+
+
+void sync_output()
+{
+  canplay = 0;
+  data_ptr = data_buffer;
+  buffer_length = 0;
+
+}
+
+int helper_get_pit_count(void)
+{
+  long ntsc=1193180;
+  return ntsc/HZ;
+}
+
+
+
+
+
+
+
+void helper_set_pit_count(int counter)
+{
+  cli();
+  outb(0x36,0x43);
+
+  outb((char)(counter & 0xff),0x40);
+
+  outb((char)(counter >> 8),0x40);
+  sti();
+}
+
+
+int init_module(void)
+{
+  
+  /* Initailize all global variables */
+  if((device_major=register_sound_dsp(&speaker_fops, -1))<0)
+    {
+      printk(KERN_WARNING "Cannot get device dsp device allocation");
+      return device_major;
+    }
+
+
+  virgin=0; /*  Just in case you didn't know....... ;)  */
+  berio=0; /*set to 8 for 16 bit mono */
+  canplay = 0;
+  sampling_factor = 1; /* ie; counter = 22Khz / sampling_factor; */
+  pit_counter = 54;
+
+  /*allocate room for our 32KB buffer */
+  data_buffer = (long) kmalloc(32000, GFP_KERNEL);  /*this is assuming that kmalloc NEVER FAILS */
+
+
+  timer_idt_ptr = setvect(0x20,(long)myhandler);
+  old_pit_counter = helper_get_pit_count();
+  temp_pit_counter = compensation_count = old_pit_counter/pit_counter;
+
+  helper_set_pit_count(pit_counter);
+
+  printk("<1>Hopefully, irq0 has been hooked from vector 20 to %p  \n",myhandler); 
+  return 0;
+
+}
+
+void cleanup_module(void)
+{
+  helper_set_pit_count(old_pit_counter);
+  setvect(0x20,timer_idt_ptr);
+
+  unregister_sound_dsp(device_major);
+
+  kfree((void *)data_buffer);
+
+  printk("<1>Phew! Graceful exit!!!!! \n irq0 reset to %p \n",(void *)timer_idt_ptr);
+}
+
+MODULE_AUTHOR("Cherry George Mathew, berryplumis@yahoo.com");
+MODULE_DESCRIPTION("Sound Driver for the pc speaker");
+
+
+
+
+
+
+

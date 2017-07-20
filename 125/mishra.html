@@ -1,0 +1,317 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Implementing a Simple Char Device in Linux LG #125</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="howell.html" >&lt;-- prev</A> | <A HREF="pfeiffer.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Implementing a Simple Char Device in Linux</h1>
+<p id="by"><b>By <A HREF="../authors/mishra.html">Ranjeet Mishra</A></b></p>
+
+<p>
+<h3>Device</h3>
+
+<p>
+For the purpose of this article, let's consider a <em>device</em> to be a
+virtual represention, within Linux, of hardware that one would like to
+drive by using a piece of software. In the Linux world, devices are
+implemented in the form of modules. By using modules, we can
+provide device functionality that can be accessed from userspace.
+
+<p>
+A userspace entry point to a device is provided by a file node in the
+<strong>/dev</strong> directory. As we know, most of the things in Linux
+world are represented in the form of files. We can do [<strong>ls
+-l</strong>] on any device file, which will report the device type -
+character or block device, as well as its major number and minor number.
+
+<p>
+The <em>type of device</em> indicates the way data is written to a device. For
+a character device, it's done serially, byte by byte, and for a block
+device (e.g., hard disk) in the form of chunks of bytes - just as the name
+suggests.
+
+<p>
+The <em>major number</em> is assigned at the time of registering the device
+(using some module) and the kernel uses it to differentiate between various
+devices. The <em>minor number</em> is used by the device driver programmer
+to access different functions in the same device.
+ 
+<p>
+Looking at the number of files in the <strong>/dev</strong>
+directory, one might think that a very large number of devices are up and
+running in the system, but only few might be actually present and running.
+This can be seen by executing [<strong>cat /proc/devices</strong>]. (One can
+then see the major numbers and names of devices that are passed at the time of
+registering.)
+
+
+<h3>Modules</h3>
+
+Every device requires a module. Information about the currently loaded
+modules can be extracted from the kernel through [<strong>cat
+/proc/modules</strong>]. A module is nothing more than an object file that
+can be linked into a running kernel; to accomplish this, Linux provides the
+[<strong>insmod</strong>] utility. As an example, let's say that my
+module's object file is called <strong>my_dev.o</strong>; we can link it to
+the kernel using [<strong>insmod my_dev.o</strong>]. If
+<strong>insmod</strong> is successful we can see our module's entry using
+[<strong>cat /proc/modules</strong>], or [<strong>lsmod</strong>]. We can
+remove the module using the <strong>rmmod</strong> utility, which takes the
+object file name as an argument.
+
+
+<h3>Writing a Module to register a Char device</h3>
+
+<p>
+First of all, we should know the basics of generating a module object file.
+The module uses kernel space functions and since the whole kernel code is
+written inside the <strong>__KERNEL__</strong> directive we need to define
+it at time of compiling, or in our source code. We need to define the
+<strong>MODULE</strong> directive before anything else because Module
+functions are defined inside it. In order to link our module with the
+kernel, the version of the running kernel should match the version which
+the module is compiled with, or [<strong>insmod</strong>] will reject the
+request. This means that we must include the [include] directory present in
+the Linux source code of the appropriate version.  Again, if my module file
+is called my_dev.c, a sample compiler instruction could be [<strong>gcc
+-D__KERNEL__ -I/usr/src/linux.2.6.7/linux/include -c my_dev.c</strong>]. A
+<strong>-D</strong> is used to define any directive symbol. Here we need to
+define __KERNEL__, since without this kernel-specific content won't be
+available to us.
+
+
+<p>
+The two basic functions for module operations are
+<strong>module_init</strong> and <strong>module_exit</strong>. The insmod
+utility loads the module and calls the function passed to module_init, and rmmod
+removes the module and calls function passed to module_exit. So inside
+module_init, we can do whatever we wish using our kernel API. For
+registering the char device, the kernel provides
+<strong>register_chrdev</strong> which takes three arguments, namely: the
+major number, the char string (which gives a tag name to the device), and
+the file operations struct address which defines all the stuff we would
+like to do with our char device. <strong>struct file_operations</strong> is
+defined in <strong>$(KERNELDIR)/linux/include/fs.h</strong> which declares
+the function pointers for basic operations like open, read, write, release,
+etc.  One needs to implement whatever functions are necessary for the
+device. Finally, inside the function passed to module_exit, we should free
+the resources using <strong>unregister_chrdev</strong> which will be called
+when we do <strong>rmmod</strong>.
+
+<p>
+Below is the code listing where the device is nothing but an 80
+byte chunk of memory.
+
+<h3>Program Listing</h3>
+<ul>
+<li>
+<a href="misc/mishra/Makefile.txt">Makefile</a>
+<li>
+<a href="misc/mishra/my_dev.c.txt">my_dev.c</a>
+<li>
+<a href="misc/mishra/my_dev.h.txt">my_dev.h</a>
+</ul>
+
+<h3>Playing with the char device</h3>
+
+<p>
+Load the device using [<strong>insmod my_dev.o</strong>]. Look for the
+entry through /proc/modules and /proc/devices.  Create a file node in /dev
+directory using [<strong>mknod /dev/my_device c 222 0</strong>]. Look
+inside the code, we have given the major number as 222. You might think
+that this number may clash with some other device - well, that's correct,
+but I have checked whether this number is already occupied by some other
+device. One could use dynamic allocation of the major number; for that we
+have to pass 0 as the argument.
+ 
+<p>
+Now we can read the data in the device using [<strong>cat
+/dev/my_device</strong>] and can write to our device using [<strong>echo
+"something" &gt; /dev/my_device</strong>]. We can also write full-fledged
+userspace code to access our device using standard system calls of open,
+read, write, close, etc. Sample code is presented below.
+
+<pre>
+-------------------------------------------
+/* Sample code to access our char device */
+
+#include&lt;stdio.h&gt;
+#include&lt;unistd.h&gt;
+#include&lt;sys/types.h&gt;
+#include&lt;sys/stat.h&gt;
+#include&lt;fcntl.h&gt;
+
+int main()
+{
+	int fd=0,ret=0;
+	char buff[80]="";
+	
+	fd=open("/dev/my_device",O_RDONLY);
+	
+	printf("fd :%d\n",fd);
+	
+	ret=read(fd,buff,10);
+	buff[ret]='\0';
+	
+	printf("buff: %s ;length: %d bytes\n",buff,ret);
+	close(fd);
+}
+
+-------------------------------------------
+<strong>Output</strong>
+fd: 3
+buff: hi from kernel ;length: 14 bytes
+-------------------------------------------
+</pre>
+
+<h3>Conclusion</h3>
+
+[ Note: a tarball containing all the code in this article can be downloaded <a href="misc/mishra/my_dev.tgz">here</a>. ]
+
+<p>
+In this article I have tried to show how to use the kernel functions to
+register a character device, and how to invoke it from userspace. There are
+many issues that have not been touched upon here, such as the concurrency
+problem where we need to provide a semaphore for the device to do mutual
+exclusion as more than one process may try to access it. I will try to
+cover these issues in my future articles.
+
+
+</p>
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:125/mishra.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<!-- *** BEGIN bio *** -->
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/2002/note.png" class="bio">
+
+<!-- 
+If the author has sent his pic, save it to the right directory, delete the
+line above, and uncomment the line below.
+
+<img align="left" alt="[BIO]" src="../gx/authors/pic.jpg" class="bio">
+
+-->
+</p>
+<p>
+<em>
+
+<p>
+I am from New Delhi, India and am a great Linux fan and love the way
+Linux gives freedom to control the hardware gizmos. I am using Linux
+since the start of the new millennium but started digging into kernel
+sources recently after completing the B-Tech from IIT-Guwahati.
+It all began with a desire to create modules to control the peripheral
+devices and since then there is no turning back.
+</p>
+
+<p>
+I would like to share my experiences and any interesting thing that
+comes across me during this Linux journey through Linux Gazette
+Articles.
+</p>
+
+</em>
+</p>
+<br clear="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2006, Ranjeet Mishra. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 125 of Linux Gazette, April 2006
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="howell.html" >&lt;-- prev</A> | <A HREF="pfeiffer.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">April 2006 (#125)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

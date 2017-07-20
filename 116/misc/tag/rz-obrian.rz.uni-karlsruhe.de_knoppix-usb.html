@@ -1,0 +1,101 @@
+<html>
+<head>
+<meta name="description" content="HOWTO modify KNOPPIX to boot from USB-Stick">
+<meta name="keywords" content="Linux Debian KNOPPIX USB memory stick boot">
+<title>
+Boot KNOPPIX from an USB Memory Stick
+</title>
+</head>
+<body>
+<h1>Boot KNOPPIX from an USB Memory Stick</h1>
+<h2>What you'll need:</h2>
+<ul>
+<li><a href="http://www.knoppix.net/">Knoppix</a> or an already <a href="http://www.knoppix.net/docs/index.php/KnoppixCustomizations">stripped down version</a></li>
+<li>USB Memory Stick</li>
+<li>Computer capable of booting from USB</li>
+<li>kernel with cloop-support</li>
+<li>syslinux</li>
+</ul>
+<p>
+<h2>Preparing everything:</h2>
+I used <a href="http://www.damnsmalllinux.org/">Damn Small Linux</a> for this (it's only 51MB and has fluxbox ;-), but every other stripped down Knoppix version should do (if you have enough space on your memory stick).<br>
+You can also strip down your own version of knoppix (see the <a href="http://www.knoppix.net/docs/index.php/FaqCustomising">Knoppix Customising FAQ).</a><br>
+<p>
+<h2>Modifying miniroot.gz:</h2>
+First you need to modify the boot-image (KNOPPIX/boot.img). Mount it (mount -o loop boot.img /mnt) and copy everything in a directory (e.g. ~/knoppix-usb/bootdisk). You need to modify <b>linuxrc</b> in <b>miniroot.gz</b> and put the relevant usb modules in <b>modules/usb/</b>.<p>
+Now use gunzip to uncompress miniroot.gz and then mount it (mount -o loop miniroot /mnt). Open <b>linuxrc</b> with your editor. You need to load the relevant usb-modules and <b>make sure to sleep some time</b>, because the modules need some time to recognize your USB Memory stick. I put the relevant parts before the scsi modules are loaded to make sure, that my USB Memory Stick will be /dev/sda:
+<pre>
+# load usb-modules first (so that memory-stick becomes /dev/sda1)
+# uncomment for USB 2.0 support (experimental)
+#insmod -f /modules/usb/ehci-hcd.o
+insmod -f /modules/usb/usbcore.o
+insmod -f /modules/usb/usb-uhci.o
+insmod -f /modules/usb/uhci.o
+insmod -f /modules/usb/usb-ohci.o
+insmod -f /modules/usb/usb-storage.o
+# need to sleep because it takes some time to register things
+ash -c "sleep 4"
+</pre>
+<p>
+Now you need to make sure, that your root-fs is mounted to /cdrom: I commented out the section in <b>linuxrc</b> where a CDROM is searched and put the following lines in:
+<pre>
+# mount /dev/sda1 (memorystick to cdrom)
+FOUND_KNOPPIX="/dev/sda1"
+mount -t vfat /dev/sda1 /cdrom
+</pre>
+You can get my modified linuxrc <a href="linuxrc">here</a><p>
+Now we still need the usb modules (that aren't on the miniroot). Mount the compressed KNOPPIX file (insmod cloop file=PATH/KNOPPIX && mount -t iso9660 /dev/cloop /cdrom) and copy the following files under /cdrom/lib/modules/$KERNELVERSION/kernel/drivers/usb/ to /mnt/modules/usb/:<br>
+<b>ehci-hcd.o uhci.o usb-ohci.o usb-storage.o usb-uhci.o  usbcore.o</b><br>
+Now you're finished modifying miniroot. Umount it and gzip the file again.
+<p>
+<h2>Preparing the Memory Stick</h2>
+Create a fat-partition on your stick and format it with mkfs.vfat<br>
+Mount the memory stick<br>
+Copy the files from ~/knoppix-usb/bootdisk/ on the memory stick (that should include your modified miniroot.gz)<br>
+Copy the other files from your modified knoppix to the memory stick (the most important is KNOPPIX/KNOPPIX)<br>
+The layout on your Memory Stick should look like this:
+<pre>
+sh-2.05b# ls -lR
+.:
+total 1576
+-rw-r--r--    1 root     root           54 Apr 27 12:48 autorun.bat
+-rw-r--r--    1 root     root           47 Apr 27 12:48 autorun.inf
+-rw-r--r--    1 root     root          180 Apr 27 12:48 boot.msg
+-rw-r--r--    1 root     root         1759 Apr 27 12:48 f2
+-rw-r--r--    1 root     root          256 Apr 27 12:48 german.kbd
+dr-xr--r--    2 root     root         4096 Apr 27 12:48 knoppix
+-rw-r--r--    1 root     root         3262 Apr 27 12:48 knoppix.ico
+-r--r--r--    1 root     root         7836 Apr 27 12:51 ldlinux.sys
+-rw-r--r--    1 root     root        34395 Apr 27 12:48 logo.16
+-rw-r--r--    1 root     root       607866 Apr 27 14:03 miniroot.gz
+-rw-r--r--    1 root     root         2402 Apr 27 12:48 syslinux.cfg
+-rw-r--r--    1 root     root       921602 Apr 27 12:48 vmlinuz
+
+./knoppix:
+total 50820
+-rw-r--r--    1 root     root         2048 Apr 27 12:48 boot.cat
+-rw-r--r--    1 root     root      1474560 Apr 27 12:48 boot.img
+-rw-r--r--    1 root     root     50553629 Apr 27 04:48 knoppix
+-rw-r--r--    1 root     root           27 Apr 27 12:48 mkfloppy.bat
+</pre>
+
+Now you need to get the Memory Stick bootable: umount it and run '<b>syslinux /dev/sda1</b>' (or /dev/sd?1 depending on your system).
+<p>
+<h2>The ugly part: booting</h2>
+If you're lucky your computer will boot out of the box when you select <b>USB ZIP</b> as a bootdevice. Otherwise read on...<p>
+<ul>
+<li>You can try the other USB Boot Options (Floppy, CD-ROM, Harddisk), if still nothing happens you might have to enable USB Keyboard Support in your BIOS (needed on some motherboards with AMI BIOS and a Via chipset, including  Epia-m and Shuttle mv42n).</li>
+<li>On some broken boards (like my Epia-M...) you need to plug the memory stick in without any power (remove your power plug), otherwise the BIOS might not recognize the memory stick.</li>
+<li>If your BIOS boots from the Memory Stick, but you can see only sequences of ones and zeroes, you can try an alternative bootsector from <a href="http://www.8ung.at/spblinux/">spblinux</a>. As the site is sometimes down you can download the bootsector <a href="spb2_mbr.sec">here</a>(Version 1.01). Just put this one on /dev/sda and try it out (<b>dd if=spb2_mbr.sec of=/dev/sda</b>). Many thanks to Christian Ostheimer for his great work (I didn't believe anymore in booting from USB, but his spblinux made it possible ;-)</li>
+</ul>
+<p>
+You can get my modified Damn Small Linux <a href="damnsmall-0.3.6-usb.tar">here (52 MB)</a>
+<p>
+Comments to: <a href="mailto:an@droi.de">Matthias M&uuml;ller</a>
+<hr>
+<small>
+Last update:
+Sun Jun  1 20:45:48 CEST 2003
+</small>
+</body>
+</html>

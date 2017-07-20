@@ -1,0 +1,413 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Re-compress your gzipp'ed files to bzip2 using a Bash script (HOWTO) LG #123</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="lg_mail.html" >&lt;-- prev</A> | <A HREF="jesslyn.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Re-compress your gzipp'ed files to bzip2 using a Bash script (HOWTO)</h1>
+<p id="by"><b>By <A HREF="../authors/bechtel.html">Dave Bechtel</A></b></p>
+
+<p>
+<!-- <p>
+Hi. :)  This is my first attempt at an article for The One True Linux Gazette
+(.net, folks!), so please be gentle.
+</p> -->
+
+<p>
+If you were incredibly lucky (like me), perhaps you received an external USB
+hard drive for Christmas.  Or perhaps you have one lying around already,
+with plenty of free space.  And perhaps you also read the <a
+href="http://it.slashdot.org/article.pl?sid=05/12/26/1625225&amp;tid=185&amp;tid=218">recent
+Slashdot article about compression software</a> and have lots of fairly
+sizable gzipped files laying about.
+</p>
+
+<p>
+After reading the comments in that article, I was dismayed to learn that my
+favorite compression tool of choice (gzip) has no error-correction
+capabilities.  While I deem it to be the best all-around for quick backups
+with a decent compression ratio, gzip will choke if it gets a data error on
+restore - and there's something to be said for data integrity.
+</p>
+
+<p>
+So, having this nice shiny new USB external drive and some time on my hands, I
+wrote a Bash utility script to re-compress gzip files to bzip2, using the
+external drive.  It takes an order of magnitude longer to compress, but at
+least I'll save some space and have a hope of recovering the compressed data
+if things go wrong... Right??
+</p>
+
+<p>
+My particular external drive is a 120-gig that came factory-formatted as a
+single FAT32 partition.  Now, any Linux guru worth their salt knows that this
+thing practically <strong>begs</strong> to be customized, since Fat32 has a
+2GB(Linux) or 4GB(Windows) filesize limit - depending on who's writing to
+it.
+</p>
+
+<p>
+So, I fired up my Knoppix HD install and repartitioned it. 
+Nothing fancy, just good old fdisk.
+</p>
+
+<p>Here's how it looks now:</p>
+
+<pre>
+$ fdisk -l /dev/sdb
+
+Disk /dev/sdb: 255 heads, 63 sectors, 14593 cylinders
+Units = cylinders of 16065 * 512 bytes
+
+   Device Boot    Start       End    Blocks   Id  System
+/dev/sdb1   *         1         1      8032   83  Linux
+/dev/sdb2             2     14593 117210240    f  Win95 Ext'd (LBA)
+/dev/sdb5             2        18    136552   82  Linux swap
+/dev/sdb6            19      4999  40009882    c  Win95 FAT32 (LBA)
+/dev/sdb7          5000      5622   5004247   83  Linux
+/dev/sdb8          5623     14593  72059557   83  Linux
+</pre>
+
+<p>
+(I did make a note of the fact that the factory-default was one big type "c",
+in case I needed to go back to that.)
+</p>
+
+<p>
+Notice the 40GB Fat32 partition.  In my other life (sssshhh!) I run Windows
+2000 Professional - and was forcibly reminded that everything after Windows
+ME has a 32GB partition size limit for formatting Fat32.  Note that the
+limitation is on <strong>formatting</strong> - not
+<strong>accessing</strong> - this is by design, and Microsoft has
+publically admitted it.
+</p>
+
+<p>
+After going through several free Windows tools for formatting and repartitioning
+(and running into a brick wall), I eventually gave up on Windows 2000 formatting the
+thing.  The vendor has a utility on their website to restore the drive to
+factory-default partitioning, but that doesn't really help my intended use of
+the drive.  I could have formatted it in Windows 98, but that's no fun - and it
+would need a separate driver for the OS to recognize the drive.
+</p>
+
+<p>
+So, rather than give up a perfectly usable 8GB, good old Linux to the rescue
+again:
+</p>
+
+<pre>
+$ mkdosfs -F 32 -v -n wdfat40 /dev/sdb6
+</pre>
+
+<p>
+and reboot.
+</p>
+
+<p>
+Presto!  Windows 2000 recognizes the drive just fine now, and it passes all the
+chkdsk tests.  And for all you dual-booters out there, a wonderful utility
+exists called Ext2IFS ( <a
+href="http://www.fs-driver.org/">http://www.fs-driver.org/</a> ).  This
+allows NT-based systems like Windows 2000 to access ext2/ext3 partitions just
+like a regular drive - read/write, so no need for NTFS!
+</p>
+
+<p>
+The Linux partitions were formatted like so:
+</p>
+
+<pre>
+mke2fs -j -c -m1 -v /dev/sdbX
+</pre>
+
+<p>
+Here are the /etc/fstab entries I created for the drive, BTW:
+</p>
+
+<pre>
+/dev/sdb6  /mnt/wdfat40  auto
+defaults,noauto,noatime,user,suid,noexec,uid=dave 0 0
+/dev/sdb7  /mnt/wdlinux  ext3 defaults,noauto,noatime,rw 0 0
+/dev/sdb8  /mnt/wdvast  ext3 defaults,noauto,noatime,rw 0 0
+</pre>
+
+<p>
+Note the "uid=dave" in that first line.  That's so my non-root user account
+will have write access to the drive by default.
+</p>
+
+<p>
+Now onto the good part - the "<a
+href="misc/bechtel/rezip.txt"><tt>rezip</tt></a>" <code>Bash</code> script.
+</p>
+
+<p>
+At first, I started out by writing a fairly basic script with a simple
+function call and manually-entered filenames.  Then I sat down and took
+another look at it - and practically rewrote it from scratch, with some
+features that occurred to me after several test runs.
+</p>
+
+<p>
+<code>rezip</code> Currently Features:
+
+<ul>
+<li> Uses a simple text file of paths and filenames for input -- so you can save
+the results of "find" to a file, run rezip, and the files will be
+re-compressed one at a time, with a running log and no user intervention (as
+long as there's free space on the destination drive.)  Example:
+
+<pre>
+$ find /mnt/bkps -name \*.gz &gt; ~/rezipp-files.txt &amp;&amp; rezip
+</pre>
+
+<li> Automatically sorts the files to process by size, so the biggest files are
+last.  This allows more work to get done up front.  (Believe me, this is a
+consideration when your fastest computer is a 900MHz AMD Duron)
+
+<li> Skips files less than 50MB in size (user defined)
+
+<li> Recreates existing directory structure on the external drive and leaves the
+original .gz file in place
+
+<li> By default, does not overwrite existing .bz2 files so previous work doesn't
+get run over.  This feature was added after I found a bug where ^C won't stop
+the script right away, and several hours of .bz2 output were lost. :(
+
+<p>
+<strong>Note</strong>: if you abort the script and then re-run it, you have to manually
+delete the last (partial) .bz2 file it was working on, or that will be skipped
+as well.  This is where the log comes in handy. :)
+</p>
+
+<li> Heavily commented and fairly easy-to-understand (I hope!) source code
+
+<li> Generates a log file, including start/end times per-file
+
+<li> ...And last but not least, rezip is released under a GPL license. :)
+</ul>
+
+<p>
+-- KNOWN BUG(s):
+</p>
+
+<ul>
+<li> The PROPER way to kill "rezip" when it is running, is to press Ctrl-Z, then
+type
+
+<pre>
+$ kill %jobnumber
+</pre>
+
+-- Example:
+
+<pre>
+ ^Z
+[1]+  Stopped                 rezip
+'  kill %1 '
+ [1]+  Terminated              rezip
+</pre>
+
+<br>
+If you DON'T do it that way, trust me - wacky things can happen.  I.e., it will
+skip to the next file, and gzip/bzip2 will still be running in the background.
+Don't use ^C. 
+
+<li> The logger function (logecho) has trouble echoing stars (" * "), even when
+they are quoted.
+
+<li> The log file can get fairly large after several runs.  If you want to reset
+it, either "rm" it or
+
+<pre>
+$ &gt;rezip.log
+</pre>
+
+will reset it to 0 length.
+
+<br>
+<strong>WARNING</strong>: If .gz files that were listed in rezipp-files.txt
+are deleted/moved between runs, you MUST re-do the "find" before
+re-running.  Otherwise, unexpected results will probably occur.
+
+<li> Tried adding a feature to log if a recompress failed, after a test run
+encountered a bad .gz file.  (This was a pain, and required several re-runs
+with a short, known-bad gzip file, looking up things in the bash man page, and
+much experimentation.  It logs the error now, but fails to notify the user
+that the job failed.)
+
+<li> To create a known-bad .gz file of your own to test:
+
+<pre>
+$ dd if=any-gz-file-more-than-20MB.gz of=KNOWNBAD.gz bs=1M count=21
+</pre>
+
+and redo your "find" to include it.
+<br>
+
+This creates a .gz file that is a <em>partial</em> copy of the complete
+one, and will cause gzip to abend with "Unexpected end of file." Set the
+"skipsize" variable to 20000 and run rezip, and it should log the error.
+If you can fix the script so that it notifies the user as well, let me
+know. ;-)
+</ul>
+
+<p>
+During the course of writing the script, I had hard-coded most of the
+defaults, such as the size of files to skip, the log file name, etc.  These
+were eventually changed to be variables before the script was published for LG
+- so that you, the end-user, can have More Control (TM) over its actions. ;-)
+</p>
+
+<p>
+I encourage everyone to READ THE SOURCE CODE before running rezip.  You may
+find it handy to view it in an editor that colorizes or highlights executable
+syntax, such as ' mcedit ' or ' jstar '.
+</p>
+
+<p>
+Comments, feature requests, bug reports, etc., are welcome.
+</p>
+
+<p>
+( Don't forget to ' chmod +x rezip ' and put it somewhere in your $PATH -
+/usr/local/bin is suggested. )
+</p>
+
+
+</p>
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:123/bechtel.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<!-- *** BEGIN bio *** -->
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/authors/bechtel.jpg" class="bio">
+</p>
+<em>
+
+<p>
+Bio: Born in 1972, Dave Bechtel grew up programming in Basic with Apple ][e's,
+TI99 4/A, IBM PC (640K!) and a Tandy 1000SX, none of which actually had hard
+drives -- 360K floppy only.  And we LIKED IT! ;-)
+</p>
+
+<p>
+Eventually left BASIC behind, and moved on to programming in REXX and Bash.
+</p>
+
+<p>
+Got interested in Linux around 1997.  Started with Red Hat and went on to
+SuSE, tried several other distros and a *BSD or two, and has now settled on
+Knoppix/Debian/Ubuntu, in roughly that order.  Currently living in Lake
+Zurich, IL.
+</p>
+
+<p>
+Likes: Computers, motorcycles, Linux, reading and watching sci-fi (currently
+Star Trek TOS, Stargate, and Battlestar Galactica)
+</p>
+
+</em>
+<br clear="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2006, Dave Bechtel. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 123 of Linux Gazette, February 2006
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="lg_mail.html" >&lt;-- prev</A> | <A HREF="jesslyn.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">February 2006 (#123)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

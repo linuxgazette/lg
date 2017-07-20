@@ -1,0 +1,344 @@
+^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~
+Queue-R-Mail-HOWTO	Queue Remote Mail + Deliver Local Mail (V8)
+			Designed for sendmail 8.6.12
+
+	Author:		Leif Erlingsson <Leif.Erlingsson@mailbox.swipnet.se>
+	First written:	19 Sep 1995	Version:	1.0
+	Last updated:	19 Sep 1995	Version:	1.01
+
+Update History:
+
+	1.01	/usr/src/sendmail.8.6.12/cf/cf/obj/elijah.smtp.cf section
+		lacked the following items:
+
+		< OcTrue
+		> OcFalse
+
+		Consequences:	None, if You updated the .mc and .m4 files
+		as instructed, and performed 'make' on them. Big if You
+		edited /etc/sendmail.cf directly --- omitting this change
+		would make the patch NOT WORK. Remote mail would be
+		delivered same as local, immediately.
+
+		Updated By:	Leif.Erlingsson@mailbox.swipnet.se
+
+^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~
+If all the below instructions is followed, it even works during boot!
+REMOTE MAIL will not be delivered from the mail queue unless a user
+executes sendmail -q.
+
+At the end of the document is some suggested edits to
+/var/X11R6/lib/fvwm/system.fvwmrc to give some menu support for this
+for the benifit of Linux hackers and others! Some of those edits assume
+that other homemade programs are available, so study and implement YOUR way!
+
+Designed for sendmail 8.6.12
+
+/Leif Erlingsson, home:  			work:
+Tel:    +46 8 604 0995  			Tel:	+46 8 764 8495
+Fax:    +46 8 604 0995 (ask 1'st)		Fax:	+46 8  29 4975
+E-mail:	Leif.Erlingsson@mailbox.swipnet.se	E-mail: leierl@rsv.svskt.se
+
+[No, I'm not a sendmail expert. Yes, I'm reading the "sendmail" book from
+cover to cover.]
+
+============================================================================
+| The Configuration Changes Neccessary to Make Sendmail Deliver Local Mail |
+| ***Now*** While Stashing Remote Mail in The Queue Until "I Say So":      |
+============================================================================
+
+^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~
+Create system mail queue and hideaway for system mail queue files
+to be used while starting the sendmail daemon during system boot:
+
+mkdir -p /var/spool/mqueue /var/spool/mqueue.hide
+chmod 0700 /var/spool/mqueue /var/spool/mqueue.hide
+
+
+^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~
+Start the sendmail daemon section of /etc/rc.d/rc.M heavily re-programmed:
+
+The below section starts the sendmail daemon so that it won't process
+"expensive" mail the first time around. And so "delivery runs" are NOT
+performed every 15 minutes. The -os flag makes ALL mail queued (that
+doesn't mean it can't be delivered immediately all the same).
+
+Delivery happens when any user runs "sendmail -q".
+
+# Start the sendmail daemon:
+if [ -x /usr/sbin/sendmail ]; then
+  # If the queue isn't empty, stash away the queued items in mqueue.hide...
+  mqquery=`/usr/sbin/sendmail -bp`	# mqquery=`/usr/bin/mailq`
+  if [ ! "${mqquery}" = "Mail queue is empty" ]; then
+    mv /var/spool/mqueue/* /var/spool/mqueue.hide
+  fi
+  echo "Starting sendmail daemon (/usr/sbin/sendmail -bd -os -q)..."
+  echo "[Special note: As configured on this system, REMOTE MAIL is queued only!!!]..."
+  /usr/sbin/sendmail -bd -os -q		# "15m" removed from off the "-q" flag!
+  if [ ! "${mqquery}" = "Mail queue is empty" ]; then
+    echo "[/var/spool/mqueue wasn't empty, now being copied back from mqueue.hide!!!]..."
+    sleep 2; mv /var/spool/mqueue.hide/* /var/spool/mqueue
+  fi
+fi
+#
+# There is an alternative solution, but this approach queues *only* ALL MAIL,
+# LOCAL TOO. It goes like this, and doesn't need any /var/spool/mqueue.hide,
+# nor all the reconfiguration of sendmail.cf that will follow further below:
+#
+# # Start the sendmail daemon:
+# if [ -x /usr/sbin/sendmail ]; then
+#   echo "Starting sendmail daemon (/usr/sbin/sendmail -bd -osdq) [queue only mode]..."
+#   /usr/sbin/sendmail -bd -osdq	# NOT EQ "-bd -q 15m", the "standard" flags! )
+# fi
+
+
+^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~
+/usr/src/sendmail.8.6.12/cf/cf/obj/elijah.smtp.cf = /etc/sendmail.cf
+changes. This is for information only, the real editing should be done
+in the files:
+			sendmail.8.6.12/cf/cf/yourhostname.smtp.mc
+			sendmail.8.6.12/cf/mailer/local.m4
+			sendmail.8.6.12/cf/mailer/smtp.m4
+			sendmail.8.6.12/cf/ostype/linux.m4    (Use Your OS!)
+< # After the edits:
+> # Before the edits:
+
+< OcTrue
+> OcFalse
+
+< Msmtp,                P=[IPC], F=mDFMuXe, S=11/31, R=21, E=\r\n,
+> Msmtp,                P=[IPC], F=mDFMuX, S=11/31, R=21, E=\r\n,
+
+< Mesmtp,               P=[IPC], F=mDFMuXae, S=11/31, R=21, E=\r\n,
+> Mesmtp,               P=[IPC], F=mDFMuXa, S=11/31, R=21, E=\r\n,
+
+< Mrelay,               P=[IPC], F=mDFMuXae, S=11/31, R=61, E=\r\n,
+> Mrelay,               P=[IPC], F=mDFMuXa, S=11/31, R=61, E=\r\n,
+
+^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~
+Very simple makescript		sendmail.8.6.12/cf/cf/make_yourhostname:
+
+	#!/bin/sh
+
+	# ALT 1:	m4 yourhostname.smtp.mc > obj/yourhostname.smtp.cf 
+	# ALT 2:	pmake yourhostname.smtp.cf
+
+	m4 yourhostname.smtp.mc > obj/yourhostname.smtp.cf
+
+^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~
+The above /etc/sendmail.cf changes can be entered like described in the
+following passages in the here listed .mc and .m4 files:
+
+		/usr/src/sendmail.8.6.12/cf/cf/yourhostname.smtp.mc
+		/usr/src/sendmail.8.6.12/cf/mailer/local.m4
+		/usr/src/sendmail.8.6.12/cf/mailer/smtp.m4
+		/usr/src/sendmail.8.6.12/cf/ostype/linux.m4   (Use Your OS!)
+
+^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~
+/usr/src/sendmail.8.6.12/cf/cf/yourhostname.smtp.mc
+
+dnl # Defer Delivery to "expensive" mailers until next time the queue is
+dnl # processed using "OcTrue" and make sure smtp mailers are "expensive".
+dnl # (The "sendmail" book, Chapter 30: Options, "Oc - Don't connect to expensive
+dnl # mailers".)			/ Leif.Erlingsson@mailbox.swipnet.se
+define(`confCON_EXPENSIVE', `True')
+define(SMTP_MAILER_FLAGS, e)
+MAILER(local)dnl
+MAILER(smtp)dnl
+
+^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~
+/usr/src/sendmail.8.6.12/cf/mailer/local.m4
+
+[SECURITY PATCH		THIS PATCH DOESN'T MAKE ANY DIFFERENCE FOR OUR     ]
+[			PRESENT PURPOUSES, BUT IT HIGHTENS SECURITY!       ]
+
+# MODIFICATION BY Leif.Erlingsson@mailbox.swipnet.se:
+# According to the "sendmail" book, chapter 19, "The Queue", page 249,
+# "Overview of the Queue" and chapter 26, "Delivery Agents", page 385,
+# "Paths of Working Directories (V8 only): D=" and for tigthest possible
+# queue security, queue (/var/spool/mqueue) permissions is set to 0700
+# and in the below Mprog line Paths of working directories is set to
+# D=$z:/tmp:/
+#					/ Leif.Erlingsson@mailbox.swipnet.se
+#
+Mlocal,		P=LOCAL_MAILER_PATH, F=CONCAT(`lsDFM', LOCAL_MAILER_FLAGS), S=10, R=20/40,
+		A=LOCAL_MAILER_ARGS
+Mprog,		P=LOCAL_SHELL_PATH, F=CONCAT(`lsDFM', LOCAL_SHELL_FLAGS), S=10, R=20/40, D=$z:/tmp:/,
+		A=LOCAL_SHELL_ARGS
+
+^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~
+/usr/src/sendmail.8.6.12/cf/mailer/smtp.m4
+
+[The code isn't really changed in                                          ]
+[/usr/src/sendmail.8.6.12/cf/mailer/smtp.m4, it's just the below comments  ]
+[that is added, so they appear in the resulting sendmail.cf file above the ]
+[following lines, that are not modified:                                   ]
+
+# If any F= below contains the e flag, this is an 'expensive mailer'.
+# (The "sendmail" book, Chapter 30: Options, "Oc - Don't connect to expensive
+# mailers".)				/ Leif.Erlingsson@mailbox.swipnet.se
+
+[Unchanged lines...                                                        ]
+
+Msmtp,          P=[IPC], F=CONCAT(mDFMuX, SMTP_MAILER_FLAGS), S=11/31, R=ifdef(`_ALL_MASQUERADE_', `11/31', `21'), E=\r\n,
+                ifdef(`_OLD_SENDMAIL_',, `L=990, ')ifdef(`SMTP_MAILER_MAX', `M=SMTP_MAILER_MAX, ')A=IPC $h
+Mesmtp,         P=[IPC], F=CONCAT(mDFMuXa, SMTP_MAILER_FLAGS), S=11/31, R=ifdef(`_ALL_MASQUERADE_', `11/31', `21'), E=\r\n,
+                ifdef(`_OLD_SENDMAIL_',, `L=990, ')ifdef(`SMTP_MAILER_MAX', `M=SMTP_MAILER_MAX, ')A=IPC $h
+Mrelay,         P=[IPC], F=CONCAT(mDFMuXa, SMTP_MAILER_FLAGS), S=11/31, R=61, E=\r\n,
+                ifdef(`_OLD_SENDMAIL_',, `L=2040, ')A=IPC $h
+
+^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~
+/usr/src/sendmail.8.6.12/cf/ostype/linux.m4    (or whatever ostype You have)
+
+define(`LOCAL_MAILER_PATH',`/usr/bin/procmail')dnl
+dnl		`LOCAL_MAILER_FLAGS',`ShP' results in F=lsDFMShP, but I don't
+dnl		want the "S" flag, it's a security risc, see "sendmail",
+dnl		chapter 18, "The A= of Deliver Agents", page 234, so....
+define(`LOCAL_MAILER_FLAGS',`hP')dnl
+dnl		`LOCAL_MAILER_FLAGS',`hP' results in F=lsDFMhP.
+dnl		For this to work, /usr/bin/procmail must be SUID root!
+define(`LOCAL_MAILER_ARGS',`procmail -d $u')dnl
+define(`QUEUE_DIR', /var/spool/mqueue)dnl
+
+^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~
+
+#### sendmail.cf Done. ####
+
+THAT'S THE sendmail.cf MODIFICATIONS. BUT I THINK I'D BETTER INCLUDE MY
+COMPLETE  /usr/src/sendmail.8.6.12/cf/cf/yourhostname.smtp.mc  IN CASE
+YOU HAVE ANY TROUBLE WITH THIS SETUP:
+
+^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~
+MY COMPLETE /usr/src/sendmail.8.6.12/cf/cf/yourhostname.smtp.mc:
+
+include(`../m4/cf.m4')
+VERSIONID(`@(#)cf/cf/yourhostname.smtp.mc	1.1 (Swipnet) 18/9/95')dnl
+
+# MODIFICATION:
+# Defer Delivery to "expensive" mailers until next time the queue is
+# processed using "OcTrue" and make sure smtp mailers are "expensive".
+# (The "sendmail" book, Chapter 30: Options, "Oc - Don't connect to expensive
+# mailers".)				/ Leif.Erlingsson@mailbox.swipnet.se
+dnl # done further down:	define(`confCON_EXPENSIVE', `True')
+dnl # done further down:	define(SMTP_MAILER_FLAGS, e)
+define(PSEUDONYMS, `localhost yourhostname yourhostname.swipnet.se')
+define(ALIAS_FILE, /etc/aliases)
+define(GENERICFROM, /etc/xaliases)
+dnl # default: # define(confTEMP_FILE_MODE, 0600)
+dnl # See "sendmail", chapter 19, "The Queue", page 251, "The Data (Message Body)
+dnl # File: df". For tigthest possible security, the F option should specify 0600.
+OSTYPE(linux)
+DOMAIN(mailbox.hidden)
+EXPOSED_USER(Mailer-Daemon)
+EXPOSED_USER(postmaster)
+EXPOSED_USER(operator)
+EXPOSED_USER(oracle)
+EXPOSED_USER(rsv)
+EXPOSED_USER(demo)
+EXPOSED_USER(leierl)
+EXPOSED_USER(ftp)
+EXPOSED_USER(ulf)
+dnl # Defer Delivery to "expensive" mailers until next time the queue is
+dnl # processed using "OcTrue" and make sure smtp mailers are "expensive".
+dnl # (The "sendmail" book, Chapter 30: Options, "Oc - Don't connect to expensive
+dnl # mailers".)			/ Leif.Erlingsson@mailbox.swipnet.se
+define(`confCON_EXPENSIVE', `True')
+define(SMTP_MAILER_FLAGS, e)
+MAILER(local)dnl
+MAILER(smtp)dnl
+dnl MAILER(pop)dnl
+dnl # continues in ../domain/Yourhostname.m4
+
+^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~
+
+============================================================================
+| Menu support suggestions:                                                |
+============================================================================
+
+^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~
+As promised, here follows some suggested edits to
+/var/X11R6/lib/fvwm/system.fvwmrc to give some menu support SLIP/PPP TCP/IP
+for the benifit of Linux hackers and others! Some of those edits assume
+that other homemade programs are available, so study and implement YOUR way:
+
+^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~
+/var/X11R6/lib/fvwm/system.fvwmrc:
+
+
+Popup "Internet"			# Added in Utilities menu below #
+	Title	"Internet"
+	Exec	"Ip (dial up internet)"	xterm -geometry 66x12+586+0 -font 7x14 -T "Ip (dial up internet)" -n Ip -e perl -le 'system "echo; sleep 1; /sbin/dip /etc/swipnet.dip; sleep 65535";' &
+	Nop	""
+	Exec	"Netscape"	exec netscape &
+	Nop	""
+	Exec	"Mailq (check mail queue)"	xterm -geometry 75x12+586+0 -font 7x14 -T "Mailq (check mail queue)" -n Mailq -e perl -le 'system "echo; sleep 1; /usr/bin/mailq; sleep 10";' &
+	Nop	""
+	Exec	"Really send mail (smtp)"	xterm -geometry 75x12+586+0 -font 7x14 -T "Really send mail (smtp)" -n Sendmail-q -e perl -le 'system "echo; sleep 1; /usr/bin/mailq; echo sendmail -q ...; /usr/sbin/sendmail -q; /usr/bin/mailq; sleep 10";' &
+	Nop	""
+	Exec	"Noip (offline again)"	xterm -geometry 66x12+586+0 -font 7x14 -T "Noip (offline again)" -n Noip -e perl -le 'system "echo; sleep 1; /sbin/dip -l cua1 -k; sleep 7";' &
+EndPopup
+#
+#	HOMEMADE STUFF REFERENCED ABOVE:	/etc/swipnet.dip
+
+# This menu will fire up some very common utilities
+Popup "Utilities"
+	Title	"Utilities"
+	Exec	"Top"		exec rxvt  -font 7x14 -T Top -n Top -e top &
+	Exec	"Calculator"	exec xcalc &
+	Exec	"Xman"		exec xman &
+	Exec	"Xmag"		exec xmag &
+	Exec	"Oclock"	exec oclock &
+	Nop	""
+	Popup	"Applications"	Applications
+	Nop	""
+	Popup	"Shells"	Shells
+	Nop	""
+	Popup	"Floppy"	Floppy
+	Nop	""
+	Popup	"Internet"	Internet	# Popup added HERE #
+	Nop	""
+	Popup	"Games"		Games
+	Nop	""
+	Popup	"Screensaver"	Screensaver
+	Nop	""
+	Popup	"Lock Screen"	Screenlock
+	Nop	""
+	Popup	"Modules"	Module-Popup
+	Nop	""
+	Popup	"Exit Fvwm"	Quit-Verify
+	Nop	""
+	Popup	"SHUT DOWN"	Shtdwn-Verify
+	Nop	""
+	Refresh "Refresh Screen"
+EndPopup
+
+^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~
+
+[copyright notice from the HOWTO-INDEX document.  This is the current
+copyright information covering both the Linux HOWTO documents and the
+mini-HOWTO documents -- John M. Fisk <fiskjm@ctrvax.vanderbilt.edu>]
+
+5.  Copyright
+
+Unless otherwise stated, Linux HOWTO documents are copyrighted by
+their respective authors. Linux HOWTO documents may be reproduced and
+distributed in whole or in part, in any medium physical or electronic,
+as long as this copyright notice is retained on all copies. Commercial
+redistribution is allowed and encouraged; however, the author would
+like to be notified of any such distributions.
+
+All translations, derivative works, or aggregate works incorporating
+any Linux HOWTO documents must be covered under this copyright notice.
+That is, you may not produce a derivative work from a HOWTO and impose
+additional restrictions on its distribution. Exceptions to these rules
+may be granted under certain conditions; please contact the Linux
+HOWTO coordinator at the address given below.
+
+In short, we wish to promote dissemination of this information through
+as many channels as possible. However, we do wish to retain copyright
+on the HOWTO documents, and would like to be notified of any plans to
+redistribute the HOWTOs.
+
+If you have questions, please contact Greg Hankins, the Linux HOWTO
+coordinator, at
+gregh@sunsite.unc.edu via email, or at +1 404 853 9989.

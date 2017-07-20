@@ -1,0 +1,247 @@
+<!--startcut ==========================================================-->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML>
+<HEAD>
+<title>Remote Compilation Using SSH and Make Issue 21</title>
+</HEAD>
+<BODY BGCOLOR="#fff0e8" TEXT="#301400" LINK="#0000FF" VLINK="#0020F0"
+ALINK="#FF0000">
+<!--endcut ============================================================-->
+
+<H4>
+&quot;Linux Gazette...<I>making Linux just a little more fun!</I>&quot;
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H2>Remote Compilation Using SSH and Make</H2>
+<H4>By John R. Daily,
+<a href="mailto:jdaily@bbn.com">jdaily@bbn.com</a></H4>
+</center>
+<P><HR><P>
+
+  <H3>
+    Problem
+  </H3>
+
+<P>
+Occasionally I use my Linux machine at home to write code that I
+intend to compile on a remote machine.
+<P>
+While maintaining open <TT>ftp</TT> and <TT>telnet</TT> connections to
+the remote machine to handle the transfer and compilation steps is a
+manageable solution, I decided to explore <TT><A
+HREF="#ssh">ssh</A></TT> and <TT><A HREF="#make">make</A></TT> to
+develop a more automated method.
+<P>
+The benefits of my solution:
+<UL>
+<LI> No need to remember which files have been modified.
+<LI> Ability to use Emacs' compilation capabilities to move to errors in
+   the source.  <LI> As mentioned above, no need to use <TT>ftp</TT>
+and <TT>telnet</TT>, and hence no
+   benefit to keep an open dialup connection when not compiling.
+<LI> Automate, automate, automate. Laziness is a virtue.
+</UL>
+
+<H3>
+Overview of Solution
+</H3>
+<P>
+My first step was to set up <TT>ssh</TT> and related tools in order to
+allow
+secure copying of files to my remote system. While setting up a
+<TT>.rhosts</TT>
+file is a (barely) acceptable solution, my IP address and name is
+different each time I dial in, and it would be rather awkward to
+change the remote system's <TT>.rhosts</TT> file each time I dialed
+in.
+<P>
+<TT>ssh</TT> allows me to use a much more secure form of
+authentication to copy
+files and execute remote commands.
+<P>
+Once I had <TT>ssh</TT> behaving properly, I used Emacs' <TT>info</TT> facility to
+explore implicit rules in makefiles, and wrote a simple makefile to
+handle the file transfers and remote compilation.
+<P>
+As an example of the intended effect, assume my remote machine is
+called "remote" (and my local machine "local"), and I've just modified
+a source file called <TT>daemon.c</TT>. I would like to execute the
+following commands in an automated fashion (note that <TT>scp</TT> is
+a secure copy command packaged with <TT>ssh</TT>, and that the
+<TT>-C</TT> option specifies compression, useful for dialup connections):
+<PRE>
+scp -C daemon.c jdaily@remote:~/source-directory
+ssh -C remote "cd source-directory && make"
+</PRE>
+
+<H3>
+Implementation
+</H3>
+<P>
+First, I needed <TT>sshd</TT> running on the remote system to handle my secure
+connections. Fortunately, <TT>sshd</TT> was already running on the remote
+system in question, but according to the man pages, it can be run as
+any user, and is restricted to handling connections for that user
+(which should be quite sufficient for our needs).
+<P>
+Then, I needed to install the <TT>ssh</TT> toolset on my local machine. Again,
+ideally these would be installed in a public binary directory such as
+<TT>/usr/local/bin</TT>, but any user can install them in his/her
+home directory.
+
+<P>
+I also wanted a key which would allow me to authenticate myself
+between systems, and which would eliminate the need to type my
+password each time I tried to run one of the <TT>ssh</TT> commands. For this, I
+just ran <TT>ssh-keygen</TT>, and made sure to not give a pass
+phrase, so that
+none would be needed to use my private key to establish the
+connection.
+
+<PRE>
+[jdaily@local ~]$ ssh-keygen 
+Initializing random number generator...
+Generating p:  ............++ (distance 186)
+Generating q:  ......................................++ (distance 498)
+Computing the keys...
+Testing the keys...
+Key generation complete.
+Enter file in which to save the key (/home/jdaily/.ssh/identity): &lt;CR&gt;
+Enter passphrase: &lt;CR&gt;
+Enter the same passphrase again: &lt;CR&gt;
+Your identification has been saved in /home/jdaily/.ssh/identity.
+Your public key is:
+1024 35 718535638573954[...] jdaily@local
+Your public key has been saved in /home/jdaily/.ssh/identity.pub
+</PRE>
+
+<P>
+Once I had a public key, I used <TT>scp</TT> to copy it to the remote machine.
+
+<PRE>
+[jdaily@local ~]$ scp -C ~/.ssh/identity.pub jdaily@remote:~/.ssh/key
+jdaily's password: &lt;entered my remote password&gt;
+</PRE>
+<P>
+Then I logged into the remote host and copied the key file into
+<TT>~/.ssh/authorized_hosts</TT>. If that file already existed, I
+would have
+appended the key file.
+<P>
+Following all this, I could run <TT>ssh</TT> and <TT>scp</TT> without needing either a
+password or a pass phrase to connect to <TT>remote</TT>.
+<P>
+Now I needed a makefile to automate my system. Ideally, the files on
+the remote machine would be checked to see if they were older than the
+files on my local machine, and if so, they would be copied over. To
+simplify matters, I decided to keep a record of the "last transferred
+date" for each file by touching a corresponding file each time I
+copied a source file over.
+<P>
+As an example, when I transferred a newer copy of <TT>daemon.c</TT>
+over, I touched <TT>daemon.ct</TT> in the same directory. Any
+transfer of a <TT>.h</TT> file would be marked by the creation of a
+file with a <TT>.ht</TT> suffix.
+<P>
+After poking around the <TT>info</TT> file for <TT>make</TT>, I came
+up with the following makefile.
+<PRE>
+TRANSFER=scp
+REXEC=ssh
+SSHFLAGS=-C # Compress data
+REMOTE=jdaily@remote:~/source-directory
+FILES=debug.ht messages.ht client.ct daemon.ct queue.ct queue.ht
+
+%.ht : %.h
+	$(TRANSFER) $(SSHFLAGS) $&lt; $(REMOTE)
+	touch $@
+
+%.ct : %.c
+	$(TRANSFER) $(SSHFLAGS) $&lt; $(REMOTE)
+	touch $@
+
+all-done: $(FILES)
+	$(REXEC) $(SSHFLAGS) remote "cd source-directory && make"
+	touch all-done
+</PRE>
+<P>
+This had one limitation in particular; I was unable to specify
+command-line arguments for <TT>make</TT> on the remote machine without writing
+them directly into the makefile on my local system.  While this was
+fine for the current application, I decided to generalize it by
+creating a <TT>run-make</TT> shell script, which would handle the remote
+execution of make after calling make on the local system.
+<P>
+Here is my <TT>run-make</TT> shell script:
+<PRE>
+#!/bin/sh
+
+make
+echo ssh -C remote \"cd source-directory \&\& make $*\"
+ssh -C remote "cd source-directory && make $*"
+</PRE>
+<P>
+I then removed the line from my makefile which remotely ran <TT>make</TT>.
+<P>
+Here's the output from a successful compilation sequence.
+
+<PRE>
+cd ~/source-directory/
+./run-make
+scp -C debug.h jdaily@remote:~/source-directory
+touch debug.ht
+scp -C messages.h jdaily@remote:~/source-directory
+touch messages.ht
+scp -C client.c jdaily@remote:~/source-directory
+touch client.ct
+scp -C daemon.c jdaily@remote:~/source-directory
+touch daemon.ct
+scp -C queue.c jdaily@remote:~/source-directory
+touch queue.ct
+scp -C queue.h jdaily@remote:~/source-directory
+touch queue.ht
+touch all-done
+ssh -C remote "cd source-directory && make "
+gcc -Wall -Wstrict-prototypes -Wmissing-prototypes -g -c queue.c
+gcc -Wall -Wstrict-prototypes -Wmissing-prototypes -g -DPORT=3000 -o daemon daemon.c queue.o -lsocket -lthread
+gcc -Wall -Wstrict-prototypes -Wmissing-prototypes -g -DPORT=3000 -o client client.c -lsocket
+
+Compilation finished at Sat Aug  9 01:22:19
+</PRE>
+
+<H3>
+Tools
+</H3>
+<A NAME="ssh">
+<TT>ssh</TT> is a secure replacement for such tools as <TT>rsh</TT>,
+<TT>rlogin</TT>, and <TT>rcp</TT>. It can be found at
+<A HREF="http://www.cs.hut.fi/ssh">http://www.cs.hut.fi/ssh</A>.
+<P>
+<A NAME="make">
+<TT>make</TT> is a standard Unix utility. GNU's <TT>make</TT> comes with most, if not
+all, Linux distributions.
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<center><H5>Copyright &copy; 1997, John R. Daily<BR> 
+Published in Issue 21 of the Linux Gazette, September 1997</H5></center>
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<A HREF="./index.html"><IMG ALIGN=BOTTOM SRC="../gx/indexnew.gif" 
+ALT="[ TABLE OF CONTENTS ]"></A>
+<A HREF="../index.html"><IMG ALIGN=BOTTOM SRC="../gx/homenew.gif"
+ALT="[ FRONT PAGE ]"></A>
+<A HREF="./icewm.html"><IMG SRC="../gx/back2.gif"
+ALT=" Back "></A>
+<A HREF="./spare.html"><IMG SRC="../gx/fwd.gif" ALT=" Next "></A>
+<P> <hr> <P> 
+<!--startcut ==========================================================-->
+</BODY>
+</HTML>
+<!--endcut ============================================================-->
+

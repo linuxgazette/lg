@@ -1,0 +1,194 @@
+#include <linux/module.h>
+
+#include <rtai.h>
+#include <rtai_sched.h>
+#include <rtai_fifos.h>
+#innclude <rtai_lxrt.h>
+
+#include <asm/io.h>
+
+#include <pthread.h>
+
+#include <stdio.h>
+#include <math.h>
+
+#define FIFO 0
+#define BASE 0x378
+#define CPU_CLOCK 1675888202.0 /* Enter your Cpu clock frequency*/
+#define Kp 3
+#define Ki 0.01
+#define set_point_speed 0 /* Enter set point speed*/
+#define TIMERTICKS 5000000              /*5ms*/
+
+volatile int stop = 0;
+
+static float cofk,Vm_sin=5,Vm_tri=10;/*Vm_=Vmax*//*n, no.of samples taken=400*/
+sataic int eof[100],n=400,rt_speed;
+
+static RTIME tick_period,now;
+
+unsigned int cpu_clock_count;
+static float Vsin_k [100], Vtri_k [100];
+static float Mag_level_Var_sin=64.0, Mag_level_Var_tri=256.0;/*Magnitude levels
+*/
+
+void* rt_task_pid(void *arg) {
+        RT_TASK *task;
+        static int n=0,k=0,sum=0;
+        task = rt_task_init(nam2num("rtl0"), 4, 4096, 0);
+        rt_task_make_periodic(task, now + tick_period, tick_period);
+        rt_make_hard_real_time();
+        while(!stop) {
+                eof[k]=set_point_speed - rt_speed;
+                while(n<=k) {
+                        sum=sum + eof[n];
+                        n++;
+                }
+               cofk=Kp*(eof[k]+(Ki/Kp)*sum);
+               if(cofk>0) Vm_sin=Vm_sin+0.5;
+               else if(cofk<0) Vm_sin=Vm_sin-0.5;
+               n=0;
+               k++; sum=0;
+               if (k==99) k=0;
+               rt_task_wait_period(); /*5ms*/
+        }
+        rt_make_soft_real_time();
+        rt_task_delete(task);
+}
+
+void* rt_task_out_put(void *arg) {
+        RT_TASK *task;
+        static int i;
+        task = rt_task_init(nam2num("rtl1"), 2, 4096, 0);
+        iopl(3);
+        rt_make_hard_real_time();
+        while(!stop) {
+                if(Vtri_k [i]>=Vsin_k [i]) {
+                       outb(0x1,0x378);
+                       rt_sleep(nano2count(50000)); /*50us*/
+                }
+                       else if(Vtri_k [i]<Vsin_k [i]) {
+                       outb(0x0,0x378);
+                              rt_sleep(nano2count(50000)); /*50us*/
+                       }
+                i++; 
+                if(i==99) i=0;
+        }
+        rt_make_soft_real_time();
+        rt_task_delete(task);
+}
+
+/*The Feed back Task*/
+void* rt_task_in_put (void *arg)
+{
+        RT_TASK *task;
+        task = rt_task_init(nam2num("rtl3"), 3, 4096, 0);
+        iopl(3);
+        rt_task_make_periodic(task, now + tick_period, tick_period);
+        rt_make_hard_real_time();
+        while(!stop) {
+                rt_speed=CPU_CLOCK*60/(float)cpu_clock_count;
+                rtf_get(FIFO, &cpu_clock_count, sizeof(cpu_clock_count));
+                rt_task_wait_period(); /*Tc =5ms*/
+        }
+        rt_make_soft_real_time();
+        rt_task_delete(task);
+}
+
+/*To Generate Sine Wave*/
+void *rt_task_sin (void *arg) {              
+        RT_TASK *task;
+        static float f = 50, td, t, Vsin_t, s; /*frequency =50Hz*/  /*s = 
+        Step size*/  /* td = Time delay between two samples*/
+        static float Auto_correction;
+        static int i,j;
+        task = rt_task_init(nam2num("rtl1"), 1, 4096, 0);
+        s = 2*Vm_sin/Mag_level_Var_sin;
+        td = 1/(f*n);
+        Auto_correction = (Mag_level_Var_tri - Mag_level_Var_sin)/2;
+        rt_make_hard_real_time();
+        while (!stop) {
+                t = i*td;
+                Vsin_t = Vm_sin*sin(2*M_PI*f*t);
+                Vsin_k [j] = (Vsin_t+Vm_sin)/s + Auto_correction;
+                rt_sleep(nano2count(50000));    /*50us*/
+                i++; j++
+                if(i == (n-1)) i=0; if(j==99) j=0;
+        }
+        rt_make_soft_real_time();
+        rt_task_delete(task);
+}
+
+
+/*To Generate Triangular Wave*/
+void *rt_task_tri (void *arg)
+{
+        RT_TASK *task;
+        static float f=100, td, Vtri_t, s, t;/*frequency =100Hz*/  /*s = Step 
+        size*/  /* td = Time delay between two samples*/
+        static float SLOPE;
+        static int i,j;
+        task = rt_task_init(nam2num("rtl2"), 0, 4096, 0);
+        SLOPE = 4*Vm_tri*f;
+        td=1/(f*n);
+        s=2*Vm_tri/Mag_Control_Var_tri;
+        rt_make_hard_real_time();
+        while (!stop) {
+                t=i*td;
+                if (Vtri_k [j] = Mag_Control_Var_tri) {
+                        Vtri_t = 1 * SLOPE * t;
+                        Vtri_k [j] = (Vtri_t+Vm_tri)/s - Mag_Control_Var_tri/2;
+                        rt_sleep(nano2count(25000));        /*25us*/
+                        i++; 
+                }
+                else {
+                        Vtri_k [j]= 0.0;
+                        i=1;
+                }
+                j++;
+                if(j==99) j=0;
+        }
+        rt_make_soft_real_time();
+        rt_task_delete (task);
+}
+
+/*You can Customize*/
+/*Print Real Time Speed*/
+void* task_show_report(void *arg)
+{
+        while(!stop) {
+                printf("%d\n",rt_speed);
+        }
+}
+*/
+
+int main ()
+{
+        RT_TASK *task;
+        pthread_t th0,th1,th2,th3,th4;
+
+        task = rt_task_init(nam2num("main"), 10, 4096, 0);
+        if(task == 0) exit(1);
+        rt_set_periodic_mode();
+        tick_period = start_rt_timer(nano2count(TIMERTICKS));
+        now = rt_get_time();
+
+        pthread_create(&th0, 0, rt_task_pid, 0);
+        pthread_create(&th1, 0, rt_task_in_put, 0);
+        pthread_create(&th2, 0, rt_task_out_put, 0);
+        pthread_create(&th3, 0, rt_task_sin, 0);
+        pthread_create(&th4, 0, rt_task_tri, 0);
+
+        getchar();
+        stop = 1;
+
+        pthread_join(th0, 0);
+        pthread_join(th1, 0);
+        pthread_join(th2, 0);
+        pthread_join(th3, 0);
+        pthread_join(th4, 0);
+        stop_rt_timer();
+        rt_busy_sleep(10000000);
+        rt_task_delete(task);
+        return 0;
+}

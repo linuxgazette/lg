@@ -1,0 +1,838 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Lock It Down With Arno's iptables-firewall LG #114</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="kapil.html" >&lt;-- prev</A> | <A HREF="okopnik.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Lock It Down With Arno's iptables-firewall</h1>
+<p id="by"><b>By <A HREF="../authors/keeling.html">S. Keeling</A></b></p>
+
+<p>
+<h3>Executive Summary</h3>
+
+<p>This describes my experiences in transitioning from a homebuilt iptables
+firewall script<a href="#ii"><sup>ii</sup></a> to &quot;Arno's iptables-firewall&quot; (AIF)<a href="#v"><sup>v</sup></a>, from
+Arno van Amersfoort (<img src="misc/keeling/arnova.png">).  AIF can produce
+a robust iptables based firewall, even when wielded by a relative newcomer
+to iptables firewalls.  The time between reading the documentation and
+dropping it into place could be as little as an hour.
+
+<h3>Caveats</h3>
+
+<p>AIF is described in Arno's README as &quot;Arno's iptables firewall
+- Single- &amp; multi-homed firewall script with DSL/ADSL
+support&quot;.  It is (C) Copyright 2001-2005 by Arno van Amersfoort.
+It's free software, licenced under the GNU General Public License.
+
+<p>If you decide you want to try using this, I <b>strongly</b>
+recommend you READ THE FAQ on Arno's website, especially if you join
+the mailing list in hope of support.  Arno points out in there that if
+you haven't done so, your pleas for assistance will be cheerfully
+ignored until you do.
+
+<p>Of course, considering this is the Twenty-first Century:
+
+<pre class="code">
+  I AM NOT ADVISING YOU TO DO THIS!  IF YOU DO THIS AND IT BREAKS
+  SOMETHING, YOU GET TO KEEP BOTH PIECES.  I EXPRESSLY, AND
+  VIGOROUSLY, DENY ANY RESPONSIBILITY FOR ANY NEGATIVE RESULTS YOU OR
+  ANYONE ELSE MAY SUFFER FROM YOUR HAVING DONE THIS.  THE FOLLOWING IS
+  WRITTEN FOR ITS ENTERTAINMENT VALUE ONLY!  TELL YOUR MOTHER YOU'RE
+  ABOUT TO DO THIS PRIOR TO DOING IT. 
+</pre>
+
+<p>[fscking lawyers (no, that's not a typo)...  Sorry for shouting.]
+
+<p><b>When I started writing this, I was working with version
+1.8.2</b>, which is apparently over a year old.  At Arno's suggestion,
+I've since upgraded to the latest release, version 1.8.3-RC3 (April 9,
+2005).  So, if I've missed anything important in updating this, that's
+why it may appear confused.  Certain example listings were left alone,
+but I've tried to cover the important bits of the latest version.
+
+<p>Some of Arno's comments on my original article are as follows:
+
+<em>
+<pre class="code">
+   Thanks for the article. I like it a lot.
+   
+   May I suggest to have a look at the latest 1.8.3RC3 (instead of 1.8.2a
+   stable, which is over 1 year old)? It has a lot (and I mean A LOT)
+   [of] improvements like:
+<ul>
+  <li>80-character long README &amp; config file (one of your bothers).
+    Furthermore the config file layout is improved a lot. 
+  <li>DMZ support (ie. to shield WiFi nets).
+  <li>Multiple external (internet) interfaces.
+  <li>Multiroute NAT (for load balancing internet connections).
+  <li>MAC address filtering.
+  <li>Full (transparent) proxy support.
+  <li>The execute bit isn't set anymore on this version's config file
+    either. ;-)
+  <li><strong>...and...</strong>
+  <li>version <code>1.8.4-stable</code>, with even more improvements, will
+  be out soon.
+</ul>
+</pre>
+</em>
+
+<p>Nice guy, that Arno.  When I started on this, I (mis)corrected his
+usage of &quot;DRDOS&quot; to &quot;DDoS&quot; (or &quot;Distributed
+Denial of Service&quot;<a href="#xi"><sup>xi</sup></a>), and that was the wrong thing to do.  He
+actually means &quot;Distributed Reflection Denial Of Service&quot;,
+something I'd never heard of. I took his advice. For me, just
+getting config files with eighty character long lines is a terrific
+improvement.
+
+<p><b>Many thanks to the helpful and patient staff at LG</b> for all
+their support in producing this article, and the same to Arno van
+Amersfoort for having made any of it possible.
+
+<h3>Preface</h3>
+
+<p>My situation is this (which is not to suggest you need to be doing
+something similar):
+
+  <ul>
+
+    <li>I run a personal workstation (laptop) with Debian
+    &quot;stable&quot;<a href="#ix"><sup>ix</sup></a> loaded on it.</li>
+
+    <li>The lion's share of my connectivity is done via dialup, connected
+    to my ISP.</li>
+
+    <li>I do connect up to other machines locally (friends, work, family),
+    via ethernet (and a four-port hub or crossover cable).</li>
+
+    <li>I prefer to remove firewall functionality (take it down) when no
+    interfaces are up.  Similarly, I see no point in starting the
+    firewall at boot time when there's no interfaces up.  I like my
+    firewall to be started either when pppd starts, or when ethN is
+    configured.  When they're taken down, the firewall should go
+    down.</li>
+
+    <li>I run some local services which traditionally would be exploited by
+    black hats:
+
+    <ul>
+
+      <li>identd: fauxident.py<a href="#iii"><sup>iii</sup></a> produces just enough identd-ish
+        information to placate the CVS servers I've dealt with.</li>
+
+      <li>MaraDNS<a href="#iv"><sup>iv</sup></a>: A caching-only nameserver.</li>
+
+      <li>ssh: When connecting locally to other machines, I allow sshd
+        to run, accepting logins.</li>
+
+      <li>email: Popped by fetchmail.  Outgoing is via exim.</li>
+
+      <li>chrony: An NTP daemon which connects up to [012].pool.ntp.org
+        to manage system time.</li>
+
+    </ul>
+
+  </ul>
+
+<p>Previously, I'd used a handcrafted set of iptables commands which
+pretty much ruthlessly, and blindly, locked everything out through
+sheer brute force.  Anything the firewall saw that wasn't connected to
+an ESTABLISHED or RELATED IP process previously initiated by my
+actions, was simply logged and dropped.
+
+<p>This is generally not difficult to do, but at times, it is.  How to
+let NTP servers' replies back in?  I struggled with that for months.
+Googling for help on that produced so many conflicting examples (some
+of which worked, some not), it was infuriating.  I was always on the
+lookout for an alternative.  I wanted something somewhat like my
+existing setup, but more robust, more suspicious, more dynamic, and
+smarter overall about networking than I am.
+
+<p>Over the years, I've tried things others suggested, but they always
+seemed a bit wrong.  I don't want the thing to fire up an X Window GUI
+forcing me to point and click my way through the configuration.  If I
+<em>already</em> knew everything there was to know about TCP/IP and
+networking, that might be helpful, but I don't.  Besides, that's just
+not how I do things.  I want something with few moving parts, all of
+which have their own home directories, and which can be expected to
+stay there.  I don't want the thing to fail some morning because
+somebody changed some obscure library I'd never heard of<a href="#vi"><sup>vi</sup></a>.
+
+<p>On &quot;Sun Jan 9 12:18:45 MST 2005&quot;<a href="#i"><sup>i</sup></a>, I found mention of
+&quot;Arno's iptables-firewall&quot; (AIF).  Now that I've finally
+taken some time to get it working and try it out, I'm happy to say
+it appears to be just what I was looking for.  Arno's system is
+intended for far more complicated setups than my own (for instance, it
+supports NAT and VPNs), but it easily scales down to my needs.  It
+thinks of an external (connected to the internet) and an internal
+(LAN) interface.  In fact, the latest release has been updated to
+handle multiple external interfaces.
+
+<h3>Installation</h3>
+
+<p>It's not difficult.  You should be able to get the mechanics of
+this done in half an hour, depending on how careful you want to be.
+Budget an hour for the job since there's some reading to do beforehand.
+
+<p>Go to his download page and grab it.  It's ~54 kilobytes.  It'll be in
+the form of a tarball (gzipped tar archive).  <code>cd</code> to somewhere
+safe, make a new directory to hold it, and extract it:
+
+<pre class="code">
+   cd
+   mkdir ~/dwn
+   cd ~/dwn
+   tar xzf /path/to/arno-iptables-firewall-1.8.3-rc3.tgz
+</pre>
+
+<p>That creates a new directory, ~/dwn/arno-iptables-firewall-1.8.3-RC3:
+
+<pre>
+   total 276
+   drwxrwxr-x    2 keeling  keeling      4096 Apr  9 06:20 ./
+   drwxr-xr-x   27 keeling  keeling      4096 Apr 18 10:50 ../
+   -rw-r--r--    1 keeling  keeling     20063 Apr  9 06:20 CHANGELOG
+   -rwxr-xr-x    1 keeling  keeling     13580 Apr  9 06:20 fwfilter*
+   -rw-r--r--    1 keeling  keeling     18010 Apr  9 06:20 gpl_license.txt
+   -rw-rw-r--    1 keeling  keeling      1467 Apr  9 06:20 iana-reserved-nets.txt
+   -rw-rw-r--    1 keeling  keeling     31674 Apr  9 06:20 iptables-firewall.conf
+   -rw-r--r--    1 keeling  keeling     29755 Apr  9 06:20 iptables-firewall.conf.example
+   -rwxr-xr-x    1 keeling  keeling    112070 Apr  9 06:20 rc.iptables*
+   -rw-r--r--    1 keeling  keeling     16887 Apr  9 06:20 README
+   -rw-r--r--    1 keeling  keeling      2318 Apr  9 06:20 syslog.conf.Debian
+   -rw-r--r--    1 keeling  keeling      1202 Apr  9 06:20 syslog.conf.RedHat
+</pre>
+
+<p>They're all flat ASCII text files.  Now, read the README.  It
+starts out by mentioning it's free software, licenced under the GNU
+General Public License.  It goes on to explain what the various files
+are for.  One of the most welcome things to me in the latest version
+is Arno has chopped the line length in most of his stuff to a much
+more readable eighty characters or so.  He appears to like lines that
+are about a hundred characters long, and displaying them in an eighty
+character wide xterm (or console) made them very difficult to read.
+Mostly, that's no longer a problem.  You'll still see remnants of
+this, in his actual firewall script for example.
+
+<p>Following the file descriptions, he lists &quot;Some IMPORTANT
+(security) information&quot;.  Following that is a &quot;Quick
+setup&quot; section, a section on WHAT TO DO IN THE CONFIG FILE, and
+some info you may need in rebuilding your kernel if it doesn't already
+have iptables support (:-O really?!?  I haven't seen any distributions
+supplying pre-compiled kernels without iptables support, or maybe this
+is in case you're having trouble rolling your own...  I'll have to go
+back and re-read that bit sometime).
+
+<p>The old version flatly refused to work if you were using a 2.2.x
+kernel and ipchains.  The latest version detects 2.2.x and ipchains
+and continues (I haven't tested this).
+
+<p>The README used to suggest installation instructions you might use,
+but perhaps he's blended those into the other sections?  I notice
+there's also a bit at the top of the firewall script itself.  However,
+I suggest you use common sense and figure out how you need it done for
+your system.  They're just a couple of scripts and config files.  How
+difficult can it be?  :-)
+
+<p>On the other hand...
+
+
+<h3>What I Did - Configuration</h3>
+
+<p>As root:
+
+<pre class="code">
+   $ cp rc.iptables /etc/init.d
+   $ vi /etc/init.d/rc.iptables
+</pre>
+
+<p>A few lines into the file, you'll see CONFIG_FILE.  Change that to
+say:
+
+<pre class="code">
+   CONFIG_FILE=/etc/firewall/iptables-firewall.conf
+</pre>
+
+<p>Now make it executable (Arno suggests this should be 700; you decide):
+
+<pre class="code">
+   $ chmod 744 /etc/init.d/rc.iptables
+</pre>
+
+<p>If necessary:
+
+<pre class="code">
+   $ chown root:root /etc/init.d/rc.iptables
+</pre>
+
+<p>Now make a home for the config file(s):
+
+<pre class="code">
+   $ mkdir /etc/firewall
+   $ chmod 755 /etc/firewall
+   $ cp iptables-firewall.conf /etc/firewall
+   $ chmod 600 /etc/firewall/iptables-firewall.conf
+   $ vi /etc/firewall/iptables-firewall.conf
+</pre>
+
+<p>If you're going to use them, you now want to create
+iptables-blocked-hosts, iptables-custom-rules, and
+iptables-mac-addresses (make sure those are the names mentioned, down
+at the bottom, in the config file).  I notice they're commented out in
+the latest version's config file.  These need to be at least one blank
+line long, so vi them, insert a carriage return, save, and exit.
+
+<p>Now go back to the top of iptables-firewall.conf, inserting the
+important stuff telling AIF how it should do things for your system.
+This part gets a little hairy, so you might like to peruse the mailing
+list archives to see if you can find explanations of how to do this
+correctly.  The FAQ also mentions a few little syntactical nits that
+it might help to know.  I went with Arno's suggestion and changed as
+little as I could.  There are lots of comments explaining what things
+do and when you might want to use them.
+
+<p><b>Yes, that is a little vague.</b> Sorry, but this bit is the
+so-called kernel of what you need to learn about iptables for AIF to
+work for you the way you want it to work.  What is it you want to do,
+and what is there that you have to work with?  DSL/ADSL?  Dialup ppp?
+WiFi from a broadband modem?  What ports do you want to open up to the
+crackers?  Do you know what you're doing with iptables, or are you a
+dilettante like me?
+
+<p>You do want to tell it what your external interface is:
+
+<pre class="code">
+   EXT_IF=&quot;ppp+&quot;
+</pre>
+
+in my case ("ppp+" covers ppp0, ppp1, ppp2, etc.)  Then:
+
+<pre class="code">
+   INT_IF=&quot;eth0&quot;
+</pre>
+
+takes care of my NIC along with:
+
+<pre class="code">
+   INTERNAL_NET=&quot;192.168.1.0/24&quot;
+</pre>
+
+<p>One of the things mentioned in the FAQ is you don't want or need
+&quot;127.0.0.1&quot; (the loopback interface) mentioned anywhere.
+&quot;Ah, so I guess I don't need to do anything about my caching
+nameserver?  Uhh...&quot; Well, the MaraDNS man page has a good
+section on this. Later.
+
+<p>Also, you might like to take my chmod commands above with a grain
+of salt.  I don't see a great deal of point in locking things down so
+group and other can't read them.  However, that is how Arno suggests
+they be.  You make up your own mind.  To me, if a config file doesn't
+contain any sensitive information, it's a little silly to make it
+owner:group read-only.
+
+
+<h3>What I Did - Implementation</h3>
+
+<p>Once you've solved the config file problem, you then need to figure
+out how you want it executed.  If you want it to come up at boot time,
+you'll need init script links in /etc/rcN.d directories.  Arno
+mentions how to do this at the top of the firewall script itself.  You
+can do it by hand, but most distributions have some sort of tool you
+can use to manage those links.
+
+<p>For my purposes, I wanted it controlled by interface
+initialization, and that fits well with Debian's /etc/ppp/ip-up.d/
+system.  Any script in that directory will be run when the interface
+is brought on line and configured.  There's also /etc/ppp/ip-down.d/
+which works similarly in reverse.
+
+<p>Now, take a look in /etc/network.  Just like ppp, there are if-up.d
+&quot;-ish&quot; (among others) directories in there too.
+
+<p>In my case, I created the script /etc/ppp/ip-up.d/00iptables_firewall.
+It needs only two lines: the &quot;shebang&quot;, and a line to call
+rc.iptables:
+
+<pre class="code">
+   #!/bin/sh
+   /etc/init.d/rc.iptables start
+</pre>
+
+<p>Now, &quot;chmod 744 /etc/ppp/ip-up.d/00iptables_firewall&quot;.
+Similarly, you need a script in /etc/ppp/ip-down.d that will take the
+firewall down when the interface goes down:
+
+<pre class="code">
+   #!/bin/sh
+   # if [ ! &quot;$(/sbin/ifconfig | /bin/grep eth0)&quot; ]; then
+      /etc/init.d/rc.iptables stop
+   # fi
+</pre>
+
+<p>Notice the commented out lines.  When I started on this, that did a
+sanity check first: if, by chance, I happen to have both ppp0 and ethN
+up and connected, it would be a little silly to take down the firewall
+if only one of the interfaces was being taken down.  However, now that
+I think about it, that might be a little dumb.  I'm still re-thinking
+that bit.
+
+<p>Make sure that file's executable too.
+
+<p>The last thing you <b>might want</b> to do is tweak
+/etc/syslog.conf to tell syslogd to send firewall related messages to
+/var/log/firewall.  In the latest version, this is optional.  Arno was
+kind enough to include a couple of examples of syslog.conf that you
+can work with.  I just did this: look for the first instance of
+&quot;kern.*&quot; and change that to &quot;kern.!=debug&quot;, then
+add a new line that points kern.=debug at /var/log/firewall.  Now, I
+have:
+
+<pre>
+   auth,authpriv.*                 /var/log/auth.log
+   *.*;auth,authpriv.none          -/var/log/syslog
+   #cron.*                         /var/log/cron.log
+   daemon.*                        -/var/log/daemon.log
+   kern.!=debug                    -/var/log/kern.log
+   lpr.*                           -/var/log/lpr.log
+   mail.*                          -/var/log/mail.log
+   user.*                          -/var/log/user.log
+   uucp.*                          /var/log/uucp.log
+
+   # Logging for iptables
+   kern.=debug                     -/var/log/firewall
+</pre>
+
+<p>Once you change /etc/syslog.conf, you need to touch the new logfile
+(<b>only do this if it doesn't already exist</b>):
+
+<pre class="code">
+   $ touch /var/log/firewall
+</pre>
+
+<p>and you need to cycle syslogd to make it re-read its config file:
+
+<pre class="code">
+   $ kill -HUP $(pidof syslogd)
+</pre>
+
+<p>If you don't have &quot;pidof&quot;, you'll have to determine
+syslogd's PID and insert that there instead.  &quot;ps fax | grep
+syslogd&quot; says this:
+
+<pre>
+   (0) keeling /home/keeling_ ps fax | grep syslogd
+     242 ?        S      0:00 /sbin/syslogd
+   30307 pts/2    S      0:00          |       \_ grep syslogd
+</pre>
+
+<p>so you need to say &quot;kill -HUP 242&quot;
+
+<p><b>If you've done the syslog.conf fiddle,</b> make sure you've set
+&quot;FIREWALL_LOG=/var/log/firewall&quot; and
+&quot;LOGLEVEL=debug&quot; in /etc/firewall/iptables-firewall.conf.
+Hopefully, you have logrotate on your system, else the log file will
+just grow and grow, eventually filling your filesystem.
+
+<p>This is &quot;/etc/logrotate.d/firewall&quot;:
+
+<pre class="code">
+   /var/log/firewall {
+           rotate 7
+           daily
+           compress
+           notifempty
+           create 0640 root adm
+           delaycompress
+           create
+   }
+</pre>
+
+<p>Now, you should be good to go.  I would suggest the first (few?)
+time(s), you should run /etc/init.d/rc.iptables by hand (&quot;chmod
+644 /etc/ppp/ip-up.d/00iptables_firewall&quot; first, bring up the
+connection, then run &quot;/etc/init.d/rc.iptables start&quot;).  It
+spits out quite a few messages mentioning what it's doing.  You should
+peruse that output (see the example below), ensuring it's doing what
+you want.  This is also when you'll get a chance to do something about
+any errors found in the config file.  &quot;iptables -nL | less&quot;
+will show the firewall rules.  &quot;tail -f /var/log/firewall&quot;
+will show you the effect of those rules.
+
+<p>If you can't figure out how to make AIF do something you did
+before, Arno has thought about that and made exceptions possible.
+Take the iptables rule you used before and stuff it into iptables-
+custom-rules.  Of course, <b>be warned</b> that this may compromise
+whatever AIF is attempting to do for you.  However, if you were doing
+it before, you're probably no worse off now than you were.
+
+<p>In my case, when I was using the older version, I had this in my
+/etc/firewall/iptables-custom-rules to make chrony/NTP work:
+
+<pre class="code">
+   # man iptables says using a name that must be resolved via remote
+   # DNS is a Really Bad Idea.  Sigh.
+   # 
+   iptables -t filter -I INPUT -s 0.pool.ntp.org -m tcp -p tcp --dport 123 -j ACCEPT
+   iptables -t filter -I INPUT -s 1.pool.ntp.org -m tcp -p tcp --dport 123 -j ACCEPT
+   iptables -t filter -I INPUT -s 2.pool.ntp.org -m tcp -p tcp --dport 123 -j ACCEPT
+</pre>
+
+<p>With the new version, however, I've commented those out and used
+&quot;HOST_OPEN_TCP&quot; in the config file instead:
+
+<pre class="code">
+   HOST_OPEN_TCP=&quot;0.pool.ntp.org&gt;123 1.pool.ntp.org&gt;123 2.pool.ntp.org&gt;123&quot;
+</pre>
+
+<h3>AIF In Action</h3>
+
+<p>Take a look at what it's doing.  Here's an example of rc.iptables
+output:
+
+<pre>
+   Arno's IPTABLES Firewall Script v1.8.3-RC3
+   ---------------------------------------------------------------
+   Sanity checks passed...OK
+   Detected IPTABLES module... Loading additional IPTABLES modules:
+   All IPTABLES modules loaded!
+   Setting default secure policies.
+   
+   External (internet) interface(s) (EXT_IF)   : ppp+
+   ---------------------------------------------------------------
+   Configuring /proc/.... settings
+   Enabling anti-spoof with rp_filter.
+   Disabling the logging of martians.
+   Disabling the acception of ICMP-redirect messages.
+   Setting the max. amount of simultaneous connections to 4096 (default).
+   Enabling reduction of the DoS'ing ability.
+   Disabling ECN (Explicit Congestion Notification).
+   Using loglevel debug for syslogd.
+   Flushing rules in the filter table.
+
+   Setting up firewall rules
+   -------------------------
+   Accepting packets from the local loopback device.
+   Enabling setting the maximum packet size via MSS.
+   Enabling mangling TOS.
+   Logging of INVALID packets enabled.
+   Reading custom IPTABLES rules from /etc/firewall/iptables-custom-rules
+   Logging of ICMP flooding enabled.
+   Setting up INPUT policy for internal interface(s) eth0
+   Logging of stealth scans (nmap probes etc.) enabled.
+   Logging of packets with bad TCP-flags enabled.
+   Logging of fragmented packets enabled.
+   Logging of access from reserved addresses enabled.
+   Setting up anti-spoof rules.
+   Logging of DHCP broadcasts disabled.
+   Logging of probable &quot;lost connections&quot; disabled.
+   Logging of explicitly blocked hosts enabled.
+   Logging of denied local output connections enabled.
+   Logging of denied LAN (forward) output connections enabled.
+   Packets will NOT be checked for private source addresses.
+   Denying the whole world to send ICMP-requests(ping).
+   Logging of dropped ICMP-request(ping) packets enabled.
+   Logging of dropped other ICMP packets enabled.
+   Logging of possible stealth scans enabled.
+   Logging of (other) connection attempts to PRIVILEGED TCP ports enabled.
+   Logging of (other) connection attempts to PRIVILEGED UDP ports enabled.
+   Logging of (other) connection attempts to UNPRIVILEGED TCP ports enabled.
+   Logging of (other) connection attempts to UNPRIVILEGED UDP ports enabled.
+   Logging of other IP protocols (non TCP/UDP/ICMP) connection attempts enabled.
+   Setting up FORWARD policy for internal interface(s) eth0:
+    Allowing all TCP ports
+    Allowing all UDP ports
+    Allowing all IP protocols
+   Security is ENFORCED for the external interface(s) in the FORWARD chain.
+   (Re)loading list of BLOCKED hosts (blackhole) from /etc/firewall/iptables-blocked-hosts
+
+   Apr 18 14:47:12 All firewall rules applied.
+</pre>
+
+<p>Woof!  You should see the &quot;iptables -nL&quot; output!  Some of
+this stuff, I'd only vaguely heard of.  Take a gander into the
+rc.iptables script itself to see all that it's doing.  First, the
+&quot;Sanity checks&quot;, then it modprobes all the necessary kernel
+modules (again, some of which I'd never heard of).  Arno's doing all
+the obscure:
+
+<pre class="code">
+  echo ${some_integer} &gt; /proc/sys/net/blah/blah
+</pre>
+
+<p>that I've never managed to either take the time to understand or
+find a decent reference for.  Finally, he defines various firewall
+rulesets.
+
+<p>One of the neat things about this is, instead of the fairly bland:
+
+<pre>
+   Mar 16 07:24:38 localhost kernel: IN=ppp0 OUT= MAC= \
+      SRC=xxx.xxx.xx.xx DST=xxx.xxx.xxx.xx LEN=48 TOS=0x00 \
+      PREC=0x00 TTL=102 ID=59091 DF PROTO=TCP SPT=3946 DPT=6348 \
+      WINDOW=64240 RES=0x00 SYN URGP=0
+</pre>
+
+<p>I now see things like this:
+
+<pre>
+   Apr  6 12:41:06 localhost kernel: Connection attempt (UNPRIV): \
+      IN=ppp0 OUT= MAC= SRC=xx.xxx.xxx.xxx DST=xxx.xxx.xxx.xx LEN=48 \
+      TOS=0x00 PREC=0x00 TTL=109 ID=28712 DF PROTO=TCP SPT=4194 DPT=15118 \
+      WINDOW=65535 RES=0x00 SYN URGP=0 
+</pre>
+
+<p>which is pretty slick.  It explains what it is it saw.
+&quot;UNPRIV&quot; means the destination port (DPT) is higher than port
+1024 (see /etc/services).
+
+<p>Other interesting stuff:
+
+<pre>
+   Apr 18 20:22:42 localhost kernel: Possible DRDOS TCP attempt: \
+      IN=ppp0 OUT= MAC= SRC=xxx.xxx.xxx.xxx DST=xxx.xxx.xxx.xx \
+      LEN=576 TOS=0x00 PREC=0x00 TTL=63 ID=48819 DF PROTO=TCP SPT=110 \
+      DPT=4345 WINDOW=5840 RES=0x00 ACK URGP=0 
+</pre>
+
+<p>That came in on pop3/TCP (&quot;grep 110 /etc/services&quot;) looking
+for some port I don't have (4345).
+
+<p>Among the things you get in AIF, Arno includes
+&quot;fwfilter&quot;, a shell script you can use to massage the
+logfile entries.  I'm already running something else called
+fwlogwatch<a href="#viii"><sup>viii</sup></a>, but I decided to try this anyway.  Arno supplies
+instructions inside the script explaining how it's to be used.  I
+created a short script in /etc/cron.daily/fwfilter:
+
+<pre class="code">
+   #! /bin/sh
+   #
+   #  /etc/cron.daily/fwfilter - arno's iptables-firewall activity
+   #  monitoring script.
+   # 
+
+   FWFILTER=/path/to/arno's/fwfilter
+   FWLOG=/var/log/firewall
+   DAY=&quot;$(/bin/date '+%b %e' --date=yesterday)&quot;
+   
+   if [ -f &quot;${FWFILTER}&quot; -a -f &quot;${FWLOG}&quot; ]; then
+      /bin/grep &quot;${DAY}&quot; ${FWLOG} | ${FWFILTER}
+   fi
+</pre>
+
+<p>When the system runs its daily cron jobs, this slurps in the
+firewall log looking for entries from yesterday, pipes them through to
+Arno's fwfilter script, and the output is mailed to root.  The result
+is quite pretty and informative.  <b>Log file entries are colorized by
+type.</b> The mutt mail program can show ANSI escape sequence color
+with &quot;set allow_ansi=yes&quot;, but you really ought to see the
+output in (eg.) rxvt or xterm.
+
+<p>Note, depending on your installed version of awk, you may need to
+fiddle with the fwfilter script prior to using it.  See the variable
+&quot;AWK_BIN&quot;.  If &quot;which awk&quot; (or better, &quot;dpkg
+-l | grep awk&quot;, or &quot;rpm -qf $(which awk)&quot;) mentions
+&quot;mawk&quot;, you'll need to install gawk for fwfilter to work.
+
+<h3>D'enouement</h3>
+
+<p>I think it was a success.  I haven't lost anything, other than a
+little time.  All the things I could do before, I can still do now.  I
+see log records of other, more esoteric events, that I hadn't noticed
+before.  That's the sort of thing I do want to hear about.
+
+<p>I've since had the chance to drop this into the computer I'm
+rebuilding for a friend as well.  It's worked pretty well, hasn't
+interfered with the two computers' ability to communicate with each
+other, and was easy to implement.  So far, I've nothing but praise for
+AIF.  It's just what I've been hunting for for a long time.
+
+<p>Arno's system is easy to use, can probably scale to fit any
+situation, and can do it in the hands of a relative newcomer to
+firewalls.  If you can read, you can benefit from Arno's firewall.
+
+<p>If you do try this, and you like it as much as I do, take his
+advice in the README and donate to his favourite charities.
+
+<p><b>Rock on, Arno.  Bravo.  Thank you very much!</b>
+
+<hr>
+
+<pre>
+<a name="i"></a> [i] Yes, I do know exactly when it was that I ran across a mention of
+    AIF.  I have a short perl script that saves, datestamps, and
+    formats as htmls any cuts+pastes that I do during my surfing
+    activities ( <a href="misc/keeling/dstamp.perl.txt">here</a>).
+<hr width="20%">
+<a name="ii"></a> [ii] My script implementing my old, hand-crafted rules is <a href="misc/keeling/old-fw.sh.txt">here</a>.
+<hr width="20%">
+<a name="iii"></a> [iii] The official URL for fauxident is:
+     <a href="http://www.alcyone.com/software/fauxident/">http://www.alcyone.com/software/fauxident/</a> 
+
+      Its author is Erik Max Francis <a href="http://www.alcyone.com/max/">http://www.alcyone.com/max/</a> 
+<hr width="20%">
+<a name="iv"></a> [iv]  MaraDNS is by Sam Trenholme <a href="http://www.samiam.org">http://www.samiam.org</a> 
+<hr width="20%">
+<a name="v"></a> [v]   Arno's iptables-firewall: <a href="http://rocky.molphys.leidenuniv.nl/">http://rocky.molphys.leidenuniv.nl/</a> 
+      Freshmeat homepage:  <a href="http://freshmeat.net/projects/iptables-firewall/?topic_id=151">http://freshmeat.net/projects/iptables-firewall/?topic_id=151</a>
+
+      Arno's mailing list: <img src="misc/keeling/firewall_list.png">
+                    <a href="https://lists.btito.net/mailman/listinfo/firewall">https://lists.btito.net/mailman/listinfo/firewall</a> 
+<hr width="20%">
+<a name="vi"></a> [vi]  This happened to me with XCDRoast.  All of a sudden, I could no
+      longer do backups.  That's why I now make my own archives with
+      afio, use mkisofs to stuff them into an ISO image, followed by
+      cdrecord to burn that to a CD.
+<hr width="20%">
+<a name="viii"></a> [viii] fwlogwatch is from Boris Wesslowski <img
+src="misc/keeling/boris.png">,
+RUS-CERT <a href="http://cert.uni-stuttgart.de">http://cert.uni-stuttgart.de</a> 
+<hr width="20%">
+<a name="ix"></a> [ix] Debian &quot;stable&quot;, at this time (Woody), installs with a
+     2.2.x kernel.  iptables demands 2.4 and up, and the old version
+     of Arno's firewall did too.  The latest appears to handle either.
+<hr width="20%">
+<a name="x"></a> [x] AIF thinks external interface (the Internet) and internal
+    interface (your LAN).  AIF only armours the external.  It doesn't
+    do much of anything to the internal interface other than making
+    sure anything from it is allowed out.  So, testing whether eth0 is
+    up before taking down the firewall is likely the wrong thing to
+    do.  I've since disabled that test to verify.
+<hr width="20%">
+<a name="xi"></a> [xi] Of course, everyone knows that &quot;DR-DOS&quot; means
+     &quot;Digital Research Disk Operating System&quot; (a la Gary
+     Kildall), right?
+</pre>
+
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/2002/note.png" class="bio">
+
+<!-- 
+If the author has sent his pic, save it to the right directory
+and enable the line below.
+
+<img align="left" alt="[BIO]" src="../gx/authors/pic.jpg" class="bio">
+
+-->
+
+<em>
+
+<p> In 1990, after about a decade of processing seismic data (first as a
+computer operator, then as geophysical technician), I sat down to my first
+personal computer and started teaching myself how to program in C. After a
+couple of months at it, I decided it would make a fairly challenging and
+esthetically pleasing career, so I signed up for a programming course.  I
+graduated with an A average.
+
+<p> Since then, work has taken me from Grande Prairie, Alberta to Khartoum,
+Sudan.  I've worked with SunOS, Solaris, HP-UX, AIX, FreeBSD and OpenBSD.
+I've worked with many different distributions of Linux (SLS, Slackware,
+Debian (twice), Redhat, and SuSE).  I generally program in Perl.  I
+specialize in generic Unix.
+
+</em>
+<br clear="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2005, S. Keeling. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 114 of Linux Gazette, May 2005
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="kapil.html" >&lt;-- prev</A> | <A HREF="okopnik.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">May 2005 (#114)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/2003/sit3-shine.7-2.gif" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

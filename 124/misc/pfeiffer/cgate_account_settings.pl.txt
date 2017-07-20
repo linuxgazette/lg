@@ -1,0 +1,391 @@
+#!/usr/bin/perl -w
+
+# cgate_account_settings.pl - reads CommuniGate server account.settings
+# file, extracts user information and updates it in the OpenLDAP tree.
+# 
+# Copyright (C) 2005, Rene Pfeiffer <lynx@luchs.at>
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#
+# Thu Nov 24 23:27:32 CET 2005	Created script.
+# Fri Nov 25 18:10:55 CET 2005  Added LDAP functionality.
+# Thu Dec 15 14:58:47 CET 2005	uid debugging.
+#
+# Update/synchronisation strategy:
+#
+# - Read files to be processed from path in ARGV
+# - Aquire list of file to open
+#   - Open file from list
+#   - Parse it and extract MaxAccountSize, any active mail forwarding rules
+#     and possibly the real name
+# - Write LDIF file or update via TCP connection to LDAP server
+#
+
+use Carp;
+use DBI;
+use English;
+use Fcntl 'O_RDONLY';
+use Getopt::Long;
+use Net::LDAP;
+use Net::LDAP::Entry;
+use Net::LDAP::Filter;
+use Pod::Usage;
+use strict;
+use Term::ANSIColor qw(:constants);
+use Tie::File;
+use Unicode::String qw(latin1 utf8);
+
+# Getopt::Long
+my $binddn = 'cn=ldapadmin,dc=example,dc=net';
+my $debug  = 0;
+my $help;
+my $passwd = '123456';
+my $size   = 5;
+my $target = 'ldapmaster.example.net';
+my $tport  = 389;
+my $tree   = 'ou=users,ou=accounts,dc=example,dc=net';
+my $verbose= 0;
+
+# File handling
+my $account;
+my @accountfiles;
+my $actual_uid;
+my $line;
+my $regexpline;
+my $maxfiles;
+my @settings;
+
+# Account data
+my $Forward;
+my $MaxAccountSize;
+my $RealName;
+my $Quota;
+
+# LDAP
+my $attribute;
+my $binddn_target;
+my $entry;
+my $filter;
+my $filterobj;
+my $ldap_target;
+my $lres;
+my $maxentries;
+my $mesg;
+my $sizelimit = 0;
+my $tres;
+
+my $update_cn;
+my $update_dn;
+my $update_mailForwardingAddress;
+my $update_mailQuotaSize;
+my $update_uid;
+
+# Program logic
+my $errors = 0;
+my $i;
+my $inserted = 0;
+my $ldap_errors = 0;
+my $processed = 0;
+my $skip = 0;
+my $updated  = 0;
+
+# --------------------------------------------------------------------
+# Let's start
+
+# Print out help message in case the user didn't supply a file
+# with the list of account.settings files to process
+pod2usage(-exitval => 2, -verbose => 2) if ( $#ARGV < 2 );
+
+GetOptions( 'binddn=s' => \$binddn,
+            'debug=i' => \$debug,
+            'help' => \$help,
+	    'passwd=s' => \$passwd,
+	    'sizelimit=i' => \$size,
+	    'target=s' => \$target,
+	    'tport=i' => \$tport,
+	    'tree=s' => \$tree,
+	    'verbose=i' => \$verbose );
+
+$binddn_target = $binddn;
+
+# Print out help message in case the user didn't supply all
+# mandatory parameters
+pod2usage(-exitval => 2, -verbose => 2) if $help;
+
+# Let's rock!
+#
+# Connect to LDAP server
+$ldap_target = Net::LDAP->new( $target, port => $tport, version => 3, async => 1 ) or die "$@";
+
+if ( $debug > 0 ) {
+	print WHITE "Connected to $target.",RESET,"\n";
+	# Limit results in debugging mode
+	$sizelimit = 7;
+	if ( $size > $sizelimit ) {
+		$sizelimit = $size;
+	}
+}
+else {
+	print WHITE "Connected to target server : ",YELLOW,$target,RESET,"\n";
+}
+
+# Bind to LDAP server
+$mesg = $ldap_target->bind( $binddn_target, password => $passwd );
+$mesg->code && die $mesg->error;
+
+# Tie file with paths to an array
+if ( $debug > 0 ) {
+	print WHITE "Opening file >",$ARGV[$#ARGV-1],"<",RESET,"\n";
+}
+tie @accountfiles, 'Tie::File', $ARGV[$#ARGV-1], autochomp => 1, mode => O_RDONLY or die "Could not open file of files!";
+$maxfiles = $#accountfiles;
+
+# Walk through the array of files and process every single one of them
+foreach $account (@accountfiles) {
+	# Watch out for the debug mode
+	if ( ($debug > 0) and ($processed > $sizelimit) ) {
+		next;
+	}
+	# Open file and get contents
+	$skip = 0;
+	tie @settings, 'Tie::File', $account, autochomp => 1, mode => O_RDONLY or $skip = 1;
+	# Clear variables
+	$Forward        = 'x';
+	$MaxAccountSize = 0;
+	$RealName       = 'x';
+	if ( $skip == 0 ) {
+		# Go through options line by line
+		if ( $debug > 5 ) {
+			print WHITE "Processing file $account.",RESET,"\n";
+		}
+		foreach $line (@settings) {
+			if ( $debug > 15 ) {
+				print RED "Current line: <",$line,">",RESET,"\n";
+			}
+			# We don't want to modify the original file, therefore we
+			# copy the actua line to a seperate variable.
+			$regexpline = $line;
+			# Look for presence of quota setting
+			if ( $regexpline =~ m/.*MaxAccountSize.*/is ) {
+				$regexpline     =~ m/\W*MaxAccountSize\W*=\W*(.*);/g;
+				$Quota          = $1;
+				$MaxAccountSize = int(substr($Quota,0,length($Quota)-1));
+				if ( substr($Quota,length($Quota)-1,1) eq 'M' ) {
+					$MaxAccountSize = $MaxAccountSize * 1024 * 1024;
+				}
+				if ( substr($Quota,length($Quota)-1,1) eq 'K' ) {
+					$MaxAccountSize = $MaxAccountSize * 1024;
+				}
+				if ( $debug > 10 ) {
+					print YELLOW "Found quota size : ",$Quota," / ",$MaxAccountSize," bytes",RESET,"\n";
+				}
+			}
+			else {
+				if ( $debug > 15 ) {
+					print YELLOW "No match for MaxAccountSize.",RESET,"\n";
+				}
+			}
+			# Look for presence of real name setting
+			if ( $regexpline =~ m/.*RealName.*/is ) {
+				$regexpline =~ m/\W*RealName\W*=\W*"(.*)";/g;
+				$RealName   = $1;
+				if ( $debug > 10 ) {
+					print YELLOW "Found real name  : <",$RealName,">",RESET,"\n";
+				}
+			}
+			else {
+				if ( $debug > 15 ) {
+					print YELLOW "No match for RealName.",RESET,"\n";
+				}
+			}
+			# Look for any rules in order to extract forwarding addresses
+			if ( $regexpline =~ m/.*Rules.*/is ) {
+				# Check if rule is active
+				if ( $regexpline =~ m/Rules\W*=\W*\(\(1/g ) {
+					$regexpline =~ s/\)/ /g;
+					if ( $regexpline =~ m/.*"Mirror to",(.*)\W,/g ) {
+						$Forward = substr($1,0,255);
+					}
+					if ( $regexpline =~ m/.*"Redirect to",(.*)\W,/g ) {
+						$Forward = substr($1,0,255);
+					}
+					if ( $debug > 10 ) {
+						print YELLOW "Found mailforward: ",$Forward,RESET,"\n";
+					}
+				}
+			}
+			else {
+				if ( $debug > 15 ) {
+					print YELLOW "No match for Rules.",RESET,"\n";
+				}
+			}
+		}
+		# Close file
+		untie @settings;
+		# See if we find a similar entry in the LDAP tree. We extract the uid
+		# from the filename.
+		$actual_uid= $account;
+		$actual_uid=~ s/\.macnt//g;
+		$filter    = sprintf("(uid=%s)",$actual_uid);
+		$filterobj = Net::LDAP::Filter->new($filter);
+		$lres      = $ldap_target->search( base => $tree,
+		                                   scope => 'sub',
+						   sizelimit => 1,
+						   timelimit => 900,
+						   attrs => ['uid','cn','mailQuotaSize','mailForwardingAddress'],
+						   filter => $filter );
+		if ( $lres->count > 0 ) {
+			# We found something
+			$entry                        = $lres->entry(0);
+			$update_uid                   = $entry->get_value("uid");
+			$update_cn                    = $entry->get_value("cn");
+			$update_mailForwardingAddress = $entry->get_value("mailForwardingAddress");
+			$update_mailQuotaSize         = $entry->get_value("mailQuotaSize");
+			# Free search result
+			$mesg = $ldap_target->abandon($lres);
+			$mesg->code && print 'Couldn\'t abandon search result used for uid detection.\n';
+			# Send updates if we have enough data to send to
+			# the LDAP server
+			if ( ($Forward ne 'x') or ($MaxAccountSize > 0) ) {
+				$update_dn = sprintf("uid=%s,%s",$update_uid,$tree);
+				if ( $debug > 0 ) {
+					print YELLOW "Building LDAP update object for uid <",$update_uid,">",RESET,"\n";
+					print YELLOW "Building LDAP update object for dn  <",$update_dn,">",RESET,"\n";
+				}
+				if ( $Forward ne 'x' ) {
+					if ( $debug > 0 ) {
+						print RED "Sending: replace 'mailForwardingAddress' => $Forward",RESET,"\n";
+						$updated++;
+					}
+					else {
+						$mesg = $ldap_target->modify( $update_dn, 
+							replace => { 'mailForwardingAddress' => $Forward } );
+						if ( ! $mesg->code ) {
+							$updated++;
+						}
+						else {
+							print RED "Error: ",$mesg->error,"(",$mesg->error_name,")",RESET,"\n";
+							$ldap_errors++;
+						}
+					}
+				}
+				if ( $MaxAccountSize > 0 ) {
+					if ( $debug > 0 ) {
+						print RED "Sending: replace 'mailQuotaSize' => $MaxAccountSize",RESET,"\n";
+						$updated++;
+					}
+					else {
+						$mesg = $ldap_target->modify( $update_dn,
+							replace => { 'mailQuotaSize' => $MaxAccountSize } );
+						if ( ! $mesg->code ) {
+							$updated++;
+						}
+						else {
+							print RED "Error: ",$mesg->error,"(",$mesg->error_name,")",RESET,"\n";
+							$ldap_errors++;
+						}
+					}
+				}
+			}
+		}
+		$processed = $processed + 1;
+	}
+	else {
+		$errors = $errors + 1;
+	}
+}
+continue {
+	$processed = $processed + 1;
+}
+
+# Show statistics
+print GREEN "Processed files       : ",$maxfiles,RESET,"\n";
+print GREEN "Updated attributes    : ",$updated,RESET,"\n";
+print GREEN "Errors while reading  : ",$errors,RESET,"\n";
+print GREEN "Errors while updating : ",$ldap_errors,RESET,"\n";
+
+untie @accountfiles;
+$ldap_target->unbind;
+
+exit;
+
+__END__
+
+=head1 NAME
+
+cgate_account_settings.pl - reads account.settings files from a CommuniGate server, extracts
+some user information and writes it to a LDAP tree
+
+=head1 SYNOPSIS
+
+cgate_account_settings.pl [OPTIONS] FILE
+
+=head1 DESCRIPTION
+
+This script reads a variable amount of CommuniGate account.settings files, extracts information
+and writes it to an LDAP server containing user structures. The individual account.settings must
+be stored in a single file, one path per line. The file with the list of files is given as the
+first argument.
+
+=head1 OPTIONS
+
+=over 8
+
+=item B<--binddn dn>
+
+The DN to use when binding to the target server.
+
+=item B<--debug n>
+
+Set the debug level. 0 is for production use.
+
+=item B<--help>
+
+Prints this text.
+
+=item B<--passwd password>
+
+The password to use when binding to the target server.
+
+=item B<--size n>
+
+Limit processed entries to n when in debug mode. Defaults to 5, but the
+default number of processed entries is 7. n needs to be bigger than 7 to
+have any effect.
+
+=item B<--target server>
+
+Target server. Defaults to ldapmaster.example.net.
+
+=item B<--tport port>
+
+Indicates the target port for talking to the target server. Defaults to 389.
+
+=item B<--tree dntree>
+
+The DN of the subtree on the target server where the data should be synced to.
+
+=item B<--verbose n>
+
+A verbose level greater than 0 makes the program print more status messages. Defaults to 0.
+
+=head1 BUGS
+
+The script does not use TLS when talking to the LDAP server. You can work around this
+limitation by creating SSH tunnels and using localhost with a different port.
+
+=head1 AUTHOR
+
+R. Pfeiffer <lynx@luchs.at>

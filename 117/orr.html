@@ -1,0 +1,467 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Templating in Python LG #117</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="howell.html" >&lt;-- prev</A> | <A HREF="pramode.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Templating in Python</h1>
+<p id="by"><b>By <A HREF="../authors/orr.html">Mike Orr (Sluggo)</A></b></p>
+
+<p>
+<p>There are several templating systems for Python, but here we'll look at PTL and
+Cheetah. Actually, I lied; we'll focus on some little-known templating features
+of Quixote that aren't PTL <em>per se</em> but are related to it.  These can be used
+to get around some annoyances in PTL.  We'll also compare Cheetah against
+PTL/Quixote to see whether one of the two is more convenient overall, or which niches each
+system works best in.  Both systems can be used standalone in Web or non-Web
+applications.  You can download Quixote at
+<a class="reference" href="http://www.mems-exchange.org/software/quixote/">http://www.mems-exchange.org/software/quixote/</a>, and Cheetah at
+<a class="reference" href="http://cheetahtemplate.org/">http://cheetahtemplate.org/</a>.  Install them via the usual &quot;python setup.py
+install&quot; mantra.</p>
+<div class="section" id="ptl">
+<h2><a name="ptl">PTL</a></h2>
+<p>The Quixote documentation has a thorough <a class="reference" href="http://www.mems-exchange.org/software/quixote/Quixote-2.0.tar.gz/Quixote-2.0/doc/PTL.txt">description</a> of PTL, so we'll just
+give a brief overview here.  A PTL template looks like a Python function, but
+bare expressions are concatenated and used as the implicit return value.
+Here's an example:</p>
+<pre class="literal-block">
+def add [plain] (a, b):
+    answer = a + b 
+    'a plus b equals '
+    answer
+</pre>
+<p>Calling <tt class="literal"><span class="pre">add(2,</span> <span class="pre">3)</span></tt> returns &quot;a plus b equals 5&quot;.  Doing this in ordinary
+Python returns <tt class="literal"><span class="pre">None</span></tt>; the two bare expressions are thrown away.  To build an
+equivalent to this template, you'd have to use <tt class="literal"><span class="pre">StringIO</span></tt> or build a list of
+values and join them.  <em>And</em> you'd have to convert non-string values to
+strings.  So PTL is a much cleaner syntax for functions that &quot;concatenate&quot; a
+return value.</p>
+<p>The <tt class="literal"><span class="pre">[plain]</span></tt> is not valid Python syntax, so you have to put this function in
+a *.ptl module and teach Python how to import it.  Assume your module is
+called <strong>myptl.ptl</strong>.</p>
+<pre class="literal-block">
+$ python
+Python 2.3.4 (#1, Nov 30 2004, 10:15:28)
+[GCC 3.3.4 20040623 (Gentoo Linux 3.3.4-r1, ssp-3.3.2-2, pie-8.7.6)] on linux2
+Type &quot;help&quot;, &quot;copyright&quot;, &quot;credits&quot; or &quot;license&quot; for more information.
+&gt;&gt;&gt; from quixote.ptl import install    # Install PTL import hook
+&gt;&gt;&gt; import myptl
+&gt;&gt;&gt; print myptl.add(2, 3)
+a plus b equals 5
+&gt;&gt;&gt; myptl.add(2, 3)
+'a plus b equals 5'
+</pre>
+<p>One of PTL's features is automatic HTML quoting.  Suppose you had this:</p>
+<pre class="literal-block">
+def greeting [html] (what):
+    &quot;&lt;strong&gt;Hello, %s!&lt;/strong&gt;\n&quot; % what   
+</pre>
+<p>A nice user types 'world' into a form and your function returns:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; print myptl.greeting(&quot;world&quot;)
+&lt;strong&gt;Hello, world!&lt;/strong&gt;
+</pre>
+<p>But say a malicious user types '&lt;script
+type=&quot;text/javascript&quot;&gt;BAD_STUFF&lt;/script&gt;' instead:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; print x.greeting('&lt;script type=&quot;text/javascript&quot;&gt;BAD_STUFF&lt;/script&gt;')
+&lt;strong&gt;Hello, &amp;lt;script type=&amp;quot;text/javascript&amp;quot;&amp;gt;BAD_STUFF&amp;lt;/script&amp;gt;!&lt;/strong&gt;
+</pre>
+<p>PTL escapes it automatically in case you forgot to.  How does it know which
+values to escape?  It escapes everything that's in a bare expression and not
+defined literally in the function: arguments, subroutine return values, and
+global variables.  To protect a string from further escaping, wrap it in an
+<tt class="literal"><span class="pre">htmltext</span></tt> instance:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; from quixote.html import htmltext
+&gt;&gt;&gt; text = htmltext(&quot;&lt;em&gt;world&lt;/em&gt;&quot;)
+&gt;&gt;&gt; print myptl.greeting(text)
+&lt;strong&gt;Hello, &lt;em&gt;world&lt;/em&gt;!&lt;/strong&gt;
+</pre>
+<p>In fact, the return value is itself an <tt class="literal"><span class="pre">htmltext</span></tt> instance:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; myptl.greeting(text)
+&lt;htmltext '&lt;strong&gt;Hello, &lt;em&gt;world&lt;/em&gt;!&lt;/strong&gt;'&gt;
+</pre>
+<p><tt class="literal"><span class="pre">htmltext</span></tt> is mostly string compatible, but some Python library functions
+require actual strings:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; &quot;The universe is a big place.&quot;.replace(&quot;universe&quot;, text)
+Traceback (most recent call last):
+  File &quot;&lt;stdin&gt;&quot;, line 1, in ?
+TypeError: expected a character buffer object
+</pre>
+<p>This is one of the annoyances of PTL.  The other is overquoting.  Sometimes you
+have to use <tt class="literal"><span class="pre">str()</span></tt> and <tt class="literal"><span class="pre">htmltext()</span></tt> to get around these.  Sometimes this is
+a pain in the butt.  It causes <em>parenthesesitis</em>, long lines, obfuscated code,
+makes generic modules dependent on Quixote, etc.  At least htmltext dictionary
+keys match their equivalent string keys.  But if you intend to use the 
+dict as <tt class="literal"><span class="pre">**keyword_args</span></tt>, you'd better <tt class="literal"><span class="pre">str()</span></tt> the keys.</p>
+<p>PTL's third annoyance is the import hook.  It's &quot;magic&quot;, it may break sometime,
+it doesn't play well with other import hooks, and it has a failed-import bug.
+(The latter two are probably Python's fault rather than PTL's.)  The
+failed-import bug is that if you import a module that doesn't exist, the
+variable is set to <tt class="literal"><span class="pre">None</span></tt> rather than raising an ImportError.  This causes a
+cascading error later when you try to access an attribute of it, similar to a
+null pointer dereference in other languages.  You just have to remember that if
+a variable is unexpectedly <tt class="literal"><span class="pre">None</span></tt>, it may mean a failed import.  (This bug
+happens only in some circumstances, but I haven't figured out which.)</p>
+<p>When using PTL with ZODB, the Quixote docs warn to import ZODB <em>before</em> PTL.
+ZODB has its own import hook, and they must be installed in this order or
+you'll get errors.  I discovered the same thing happens with Python's <tt class="literal"><span class="pre">fcntl</span></tt>
+module on the Macintosh.  fcntl doesn't have an import hook, but PTL's hook
+has an unexpected interaction that causes fcntl to fail.  On Mac OS X 10.3
+(Python 2.3.0), fcntl.so is in a separate directory along with other &quot;C&quot;
+extensions.  After installing PTL, <tt class="literal"><span class="pre">import</span> <span class="pre">fcntl</span></tt> finds the deprecated
+FCNTL.py due to the Mac's case-insensitive filesystem.  This is a dummy module
+that has constants but no functions.  So you try to do file locking
+and <em>blammo!</em> 
+AttributeError.  To get around this you have to import fcntl before PTL, or
+put the extension directory at the start of the Python path before importing
+fcntl.  If you're doing this at the start of your application because a
+third-party module later uses fcntl, it can be confusing to future application
+maintainers.  (Python 2.4 supposedly doesn't have this problem because FCNTL.py
+doesn't exist.)</p>
+<p>When the import hook works, it works great.  But you may be leery of it due to
+known or unknown problems.  What alternatives are there?  PTL creates a *.pyc
+file, so once the module has been imported you don't need the hook again unless
+the source changes.  But *.pyc files aren't compatible between Python versions,
+and you may forget to import-with-hook after making changes.  So what <em>other</em>
+alternatives are there?</p>
+</div>
+<div class="section" id="templateio">
+<h2><a name="templateio">TemplateIO</a></h2>
+<p>PTL is built from components that can also be used standalone in ordinary
+Python functions.  This is not covered in the Quixote documentation but can be
+deduced from the source.  Our first example above translates to:</p>
+<pre class="literal-block">
+from quixote.html import TemplateIO
+def add(a, b):
+    tio = TemplateIO()
+    answer = a + b 
+    tio += 'a plus b equals '
+    tio += answer
+    return tio.getvalue()
+
+ &gt;&gt;&gt; import mymodule
+ &gt;&gt;&gt; mymodule.add(2, 3)
+ '2 plus 3 equals 5'
+</pre>
+<p>As you can see, it's similar to <tt class="literal"><span class="pre">StringIO</span></tt> but with a cleaner interface.  It
+also automatically converts the right side to a string.  There's a flag to do
+HTML escaping:</p>
+<pre class="literal-block">
+from quixote.html import TemplateIO, htmltext
+def greeting(what):
+    tio = TemplateIO(html=True)
+    tio += &quot;&amp;&quot;
+    tio += htmltext(&quot;&lt;strong&gt;Hello, %s!&lt;/strong&gt;&quot;) % what
+    return tio.getvalue()
+
+&gt;&gt;&gt; reload(mymodule)
+&gt;&gt;&gt; mymodule.greeting(&quot;&lt;javascript&gt;&quot;)
+&lt;htmltext '&amp;amp;&lt;strong&gt;Hello, &amp;lt;javascript&amp;gt;!&lt;/strong&gt;\n'&gt;
+</pre>
+<p>Here we have to explicitly <tt class="literal"><span class="pre">htmltext()</span></tt> everything we don't want escaped.  Is
+this better or worse than PTL?  Is the TemplateIO syntax better or worse than
+PTL?  That's for you to decide.  I prefer PTL for some modules and TemplateIO
+for others.  TemplateIO is also better for generic modules that shouldn't
+depend on the import hook.  The TemplateIO class resides in
+<em>quixote/html/_py_htmltext.py</em>. (There's also a faster &quot;C&quot; version,
+_c_htmltext.c.)  You can copy the module to your own project (check the license
+first), or write a simple non-escaping TemplateIO in a few lines of code.</p>
+</div>
+<div class="section" id="htmltext">
+<h2><a name="htmltext">htmltext</a></h2>
+<p>_py_htmltext.py also contains other classes and functions used by PTL and
+TemplateIO: <tt class="literal"><span class="pre">htmltext</span></tt>, <tt class="literal"><span class="pre">htmlescape</span></tt>, and <tt class="literal"><span class="pre">stringify</span></tt>.  stringify is a
+function that converts anything to string or unicode, a kind of enhanced
+<tt class="literal"><span class="pre">str()</span></tt>.  htmlescape calls stringify, escapes the result, and returns a
+htmltext object.  But if the argument is already htmltext, htmlescape doesn't
+escape it.  So when we said htmltext protects a string from being escaped,
+we really meant <em>htmlescape</em> treats htmltext specially.</p>
+<p>When you use one of htmltext's &quot;string methods&quot;, it calls htmlescape on its
+arguments.  (Actually it inlines the code, but close enough.)  So where we used
+the <tt class="literal"><span class="pre">%</span></tt> operator in <tt class="literal"><span class="pre">greeting()</span></tt> above, it escaped the right side.  This is
+a common idiom in programs that use htmltext: put the htmltext wrapper on the
+left side of the operator, and let it escape the arguments on the right side:</p>
+<pre class="literal-block">
+result = htmlext(&quot;&lt;em&gt;format string %s %s&lt;/em&gt;&quot;) % (arg1, arg2) 
+
+def em(content):
+    return htmltext(&quot;&lt;em&gt;%s&lt;/em&gt;&quot;) % content
+</pre>
+<p><em>Don't</em> do this unless you really mean it:</p>
+<pre class="literal-block">
+result = htmltext(&quot;&lt;em&gt;%s&lt;/em&gt;&quot; % arg)    # BAD!!! 'arg' won't be escaped.
+</pre>
+<p>It's usually most convenient to put the <tt class="literal"><span class="pre">htmltext()</span></tt> call as close to the
+variable definition or import/input location as possible.  That way you don't
+have to worry about whether it's been wrapped or not.  This can be a problem
+for generic modules that would suddenly depend on Quixote, but again you can
+copy _py_htmltext.py into your project to eliminate that dependency.</p>
+</div>
+<div class="section" id="html">
+<h2><a name="html">html</a></h2>
+<p><tt class="literal"><span class="pre">quixote.html</span></tt> contains a few convenience functions that build
+htmltext objects.  The source is in <a class="reference" href="http://www.mems-exchange.org/software/quixote/Quixote-2.0.tar.gz/Quixote-2.0/html/__init__.py">quixote/html/__init__.py</a>.</p>
+<pre class="literal-block">
+htmltag(tag_name, add_xml_empty_slash=False, css_class=None, **attrs) 
+href(url, text, title=None, **attrs)
+url_with_query(path, **attrs)
+</pre>
+<p>Here are some examples:</p>
+<pre class="literal-block">
+&gt;&gt;&gt; from quixote.html import htmltag, href, url_with_query
+&gt;&gt;&gt; htmltag('table')
+&lt;htmltext '&lt;table&gt;')
+&gt;&gt;&gt; print htmltag('table')
+&lt;table&gt;
+&gt;&gt;&gt; print htmltag('/table')
+&lt;/table&gt;
+&gt;&gt;&gt; print htmltag('table', False, 'foo')
+&lt;table class=&quot;foo&quot;&gt;
+&gt;&gt;&gt; print htmltag('br', True)
+&lt;br /&gt;
+&gt;&gt;&gt; print htmltag('div', False, 'chapter', style=&quot;border-style:raised&quot;, foo=&quot;bar&quot;)
+&lt;div class=&quot;chapter&quot; style=&quot;border-style:raised&quot; foo=&quot;bar&quot;&gt;
+&gt;&gt;&gt; print htmltag('img', src=&quot;foo.jpg&quot;, width=&quot;200&quot;, height=&quot;160&quot;)
+&lt;img src=&quot;foo.jpg&quot; height=&quot;160&quot; width=&quot;200&quot;&gt;
+&gt;&gt;&gt; print href(&quot;foo.html&quot;, &quot;Foo!&quot;, name=&quot;foo&quot;)
+&lt;a href=&quot;foo.html&quot; name=&quot;foo&quot;&gt;Foo!&lt;/a&gt;
+&gt;&gt;&gt; url = url_with_query(&quot;delete_user&quot;, fname=&quot;ben&quot;, lname=&quot;okopnik&quot;)
+&gt;&gt;&gt; print url
+delete_user?fname=ben&amp;amp;lname=okopnik
+&gt;&gt;&gt; print href(url, &quot;Page 2&quot;)
+&lt;a href=&quot;delete_user?fname=ben&amp;amp;lname=okopnik&quot;&gt;Page 2&lt;/a&gt;
+&gt;&gt;&gt; input_dict = {'page': 2, 'printable': 'y'}
+&gt;&gt;&gt; print url_with_query(&quot;display&quot;, **input_dict)
+display?page=2&amp;amp;printable=y
+</pre>
+</div>
+<div class="section" id="cheetah">
+<h2><a name="cheetah">Cheetah</a></h2>
+<p>But what if you really want your template to be a large string with
+placeholders that &quot;looks like&quot; the final output?  PTL is fine for templates
+with lots of calculations and small amounts of literal text, but it's less
+convenient with large chunks of text.  You either have large multiline strings
+in the function, making the expressions hard to find, or you use global
+variables for the literal text.  Sometimes you'd just rather use a
+traditional-looking template like this:</p>
+<pre class="literal-block">
+&lt;html&gt;&lt;head&gt;&lt;title&gt;$title&lt;/title&gt;&lt;/head&gt;&lt;body&gt;
+$content
+&lt;/body&gt;&lt;/html&gt;
+</pre>
+<p>Cheetah does this.  It has a <a class="reference" href="http://cheetahtemplate.org/docs/users_guide_html_multipage/">users' guide</a> (which I mostly wrote), so we'll
+just complete the example without explaining it in detail:</p>
+<pre class="literal-block">
+from Cheetah.Template import Template
+t = Template(file=&quot;mytemplate.tmpl&quot;)
+t.title = &quot;Greetings&quot;
+t.content = &quot;&lt;em&gt;Hello, world!&lt;/em&gt;&quot;
+print str(t)
+&lt;html&gt;&lt;head&gt;&lt;title&gt;Greeting&lt;/title&gt;&lt;/head&gt;&lt;body&gt;
+&lt;strong&gt;Hello, world!&lt;/strong&gt;
+&lt;/body&gt;&lt;/html&gt;
+</pre>
+<p>Cheetah has many features we won't discuss here, but one feature it doesn't
+have is smart escaping.  You can set a built-in filter that escapes all values,
+and you can turn the filter on and off at different points in the template, but
+you can't escape certain values while protecting htmltext values.</p>
+<p>Well, actually you can if you write your own filter. 
+[<a href="misc/orr/my_cheetah_filters.py.txt">text version</a>]</p>
+<pre class="literal-block">
+from Cheetah.Filters import Filter
+from quixote.html import htmlescape
+
+class HtmltextFilter(Filter):
+    &quot;&quot;&quot;Safer than WebSafe: escapes values that aren't htmltext instances.&quot;&quot;&quot;
+    def filter(self, val, **kw):
+        return htmlescape(val)
+</pre>
+<p>Instantiate the template thus:</p>
+<pre class="literal-block">
+t = Template(file=&quot;mytemplate.tmpl&quot;, filter=HtmltextFilter)
+</pre>
+<p>Or put this in the template:</p>
+<pre class="literal-block">
+#from my_filter_module import HtmltextFilter
+#filter $HtmltextFilter
+</pre>
+<p>Sometimes you want to put an HTML table in a Cheetah template, but you don't
+want to type all the tags by hand.  I've written a <tt class="literal"><span class="pre">table</span></tt> module that builds
+a table intuitively, using TemplateIO and htmltext.  Here's the 
+<a href="misc/orr/table.py.txt">source</a>.  The
+module docstring has the complete usage, but here are a few examples:</p>
+<pre class="literal-block">
+import table
+
+# A simple two-column table with headers on the left, no gridlines.
+data = [
+    ('First Name', 'Fred'),
+    ('Last Name', 'Flintstone')]
+print table.ReportTable.build(data)
+
+# A table with headers at the top.
+headers = ['Name', 'Noise Level']
+data = [
+    ('Pebbles', 'quiet'),
+    ('Bam-Bam', 'loud')]
+print table.Table.build(data, headers)
+
+# A table with custom tags.
+data = [
+    ('Fred', 'Flintstone', '555-1212')]
+td = htmltag('td')
+td_phone = htmltag('td', css_class='phone')
+tds = [td, td, td_phone]
+t = table.Table()
+t.table = htmltag('table', css_class='my_table')
+for row in data:
+    t.row(row, tds)  # Match each cell with its corresponding &lt;td&gt; tag.
+print t.finish()
+</pre>
+<p>The output is a htmltext object, which you can set as a placeholder value for
+Cheetah.</p>
+<p><tt class="literal"><span class="pre">quixote.form</span></tt> lets you build forms in a similar way, and the same object
+does form display, validation, getting values, and redisplay after errors.  I
+highly recommend it.  Like everything else here, it can be used standalone
+without the Quixote publisher.</p>
+</div>
+<div class="section" id="other-template-packages">
+<h2><a name="other-template-packages">Other template packages</a></h2>
+<p>PTL and Cheetah use a non-tag syntax for replaceable values, so they work
+just as well for non-HTML output as HTML.  Zope Page Templates (ZPT/TAL) and
+Nevow's template system, among others, use XML-style tags for placeholders.
+This limits their usability for non-HTML output.  I prefer to use one template
+system for all my output rather than one for HTML and another for non-HTML, and
+I hate XML tags.  Those who love XML tags may prefer ZPT or Nevow.  <a
+class="reference" href="http://nevow.org/">Nevow</a> has an interesting way of
+building replacement values via callback functions, which literally
+&quot;put&quot; the value into the template object.  (I wrote about Nevow in a
+previous PyCon <a class="reference"
+href="http://www.linuxjournal.com/node/7541">article</a>.)  More ZPT/TAL
+information is <a class="reference"
+href="http://www.zope.org/DevHome/Wikis/DevSite/Projects/ZPT/FrontPage">here</a>.
+These all can be used without their library's publishing loop.</p>
+<p>I hope this article gave you some ideas on the many ways you can structure a
+template in Python.</p>
+</div>
+
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<P>
+<IMG ALT="picture" SRC="../gx/2003/authors/orr.jpg" WIDTH="235" HEIGHT="333" ALIGN="left"  HSPACE="10" VSPACE="10" class="bio">
+<em>
+Mike is a Contributing Editor at <I>Linux Gazette</I>. He has been a
+Linux enthusiast since 1991, a Debian user since 1995, and now Gentoo.
+His favorite tool for programming is Python.  Non-computer interests include
+martial arts, wrestling, ska and oi! and ambient music, and the international
+language Esperanto.  He's been known to listen to Dvorak, Schubert,
+Mendelssohn, and Khachaturian too.
+</em>
+<br CLEAR="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2005, Mike Orr (Sluggo). Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 117 of Linux Gazette, August 2005
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="howell.html" >&lt;-- prev</A> | <A HREF="pramode.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">August 2005 (#117)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

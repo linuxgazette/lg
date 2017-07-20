@@ -1,0 +1,520 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Experiments with the Linux Kernel: Process Segments LG #112</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="engel.html" >&lt;-- prev</A> | <A HREF="odonovan.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Experiments with the Linux Kernel: Process Segments</h1>
+<p id="by"><b>By <A HREF="../authors/krishnakumar.html">R. Krishnakumar</A></b></p>
+
+<p>
+<h3><a name="s1" id="s1">1. Introduction</a>
+</h3>
+
+<p>Traditionally, a Unix process is divided into segments. The
+standard segments are code segment, data segment, BSS (block
+started by symbol), and stack segment.</p>
+
+<p>The code segment contains the binary code of the program which
+is running as the process (a "process" is a program in execution).
+The data segment contains the initialized global variables and data
+structures. The BSS segment contains the uninitialized global data
+structures and finally, the stack segment contains the local
+variables, return addresses, etc. for the particular process.</p>
+
+<p>Under Linux, a process can execute in two modes - <em>user
+mode</em> and <em>kernel mode</em>. A process usually executes in
+user mode, but can switch to kernel mode by making system calls.
+When a process makes a system call, the kernel takes control and
+does the requested service on behalf of the process. The process is
+said to be running in kernel mode during this time. When a process
+is running in user mode, it is said to be "in userland" and when it
+is running in kernel mode it is said to be "in kernel space". We
+will first have a look at how the process segments are dealt with
+in userland and then take a look at the bookkeeping on process
+segments done in kernel space.</p>
+
+<h3><a name="s2" id="s2">2. Userland's view of the segments</a>
+</h3>
+
+<p>The code segment consists of the code - the actual executable
+program. The code of all the functions we write in the program
+resides in this segment. The addresses of the functions will give
+us an idea where the code segment is. If we have a function
+<code>foo()</code> and let <code>x</code> be the address of
+<code>foo</code> (<code>x = &amp;foo;</code>). we know that
+<code>x</code> will point within the code segment.</p>
+
+<p>The Data segment consists of the initialized global variables of
+a program. The Operating system needs to know what values are used
+to initialize the global variables. The initialized variables are
+kept in the data segment. To get the address of the data segment we
+declare a global variable and then print out its address. This
+address must be inside the data segment.</p>
+
+<p>The BSS consists of the uninitialized global variables of a
+process. To get an address which occurs inside the BSS, we declare
+an uninitialized global variable, then print its address.</p>
+
+<p>The automatic variables (or local variables) will be allocated
+on the stack, so printing out the addresses of local variables will
+provide us with the addresses within the stack segment.</p>
+
+<h3><a name="s3" id="s3">3. A C program</a>
+</h3>
+<!-- 20050220 dsrich - Copied program out, compiled and ran, made compilable print_segments.c.txt file and linked -->
+
+<p>Let's have a look at the following <a href=
+"misc/krishnakumar/print_segments.c.txt">C program</a>:</p>
+
+<pre class="code">
+ 1 #include &lt;stdio.h&gt;
+ 2 #include &lt;stdlib.h&gt;
+ 3 #include &lt;sys/types.h&gt;
+ 4 #include &lt;unistd.h&gt;
+ 5
+ 6 int our_init_data = 30;
+ 7 int our_noinit_data;
+ 8
+ 9 void our_prints(void)
+10 {
+11         int our_local_data = 1;
+12         printf("\nPid of the process is = %d", getpid());
+13         printf("\nAddresses which fall into:");
+14         printf("\n 1) Data  segment = %p",
+15                 &amp;our_init_data);
+16         printf("\n 2) BSS   segment = %p",
+17                 &amp;our_noinit_data);
+18         printf("\n 3) Code  segment = %p",
+19                 &amp;our_prints);
+20         printf("\n 4) Stack segment = %p\n",
+21                 &amp;our_local_data);
+22
+23         while(1);
+24 }
+25
+26 int main()
+27 {
+28         our_prints();
+29         return 0;
+30 }
+</pre>
+We can see that lines 6 and 7 declare two global variables. One is
+initialized and one is uninitialized. Per the previous discussion,
+the initialized variable will fall into the data segment and the
+uninitialized variable will fall into the BSS segment. Lines 14-17
+print the addresses of the variables.
+
+<p>We also know that the address of the function
+<code>our_prints</code> will fall into the code segment, so that if
+we print the address of this function, we will get a value which
+falls into the code segment. This is done in lines 18-19.</p>
+
+<p>Finally we print the address of a local variable. This automatic
+variable's address will be within the stack segment.</p>
+
+<h3><a name="s4" id="s4">4. Execution of a userland program</a>
+</h3>
+
+<p>When we execute a userland program, similar to the one given
+above, what happens is that the shell will <code>fork()</code> and
+<code>exec()</code> the new program. The <code>exec()</code> code
+inside the kernel will figure out what format the binary is in
+(<em>ELF</em>, <em>a.out</em>, etc.) and will call the
+corresponding handler for that format. For example when an ELF
+format file is loaded, the function <code>load_elf_binary()</code>
+from <code>fs/binfmt_elf.c</code> takes care of initializing the
+kernel data structures for the particular process. Details of this
+portion of loading will not be dealt with here, as that in itself
+is a topic for another article :-) The point here is that the code
+which loads the executable into the kernel fills in the kernel
+data structures.</p>
+
+<h3><a name="s5" id="s5">5. Memory-related data structures in the
+kernel</a>
+</h3>
+
+<p>In the Linux kernel, every process has an associated
+<code>struct task_struct</code>. The definition of this struct is
+in the header file <code>include/linux/sched.h</code>. The
+following snippet is from the 2.6.10 Linux kernel source code (only
+the needed fields and a few nearby fields are shown):</p>
+
+<pre class="code">
+struct task_struct {
+        volatile long state;    /* -1 unrunnable, 0 runnable, &gt;0 stopped */
+        struct thread_info *thread_info;
+        atomic_t usage;
+        ...
+        ...
+        ...
+        struct mm_struct *mm, *active_mm;
+        ...
+        ...
+        ...
+        pid_t pid;
+        ...
+        ...
+        ...
+        char comm[16];
+        ...
+        ...
+};
+</pre>
+Three members of the data structure are relevant to us:
+
+<ol>
+<li><code>pid</code> contains the Process ID of the process.</li>
+
+<li><code>comm</code> holds the name of the process.</li>
+
+<li>The <code>mm_struct</code> within the <code>task_struct</code>
+is the key to all memory management activities related to the
+process.</li>
+</ol>
+The <code>mm_struct</code> is defined in
+<code>include/linux/sched.h</code> as:
+
+<pre class="code">
+struct mm_struct {
+        struct vm_area_struct * mmap;           /* list of VMAs */
+        struct rb_root mm_rb;
+        struct vm_area_struct * mmap_cache;     /* last find_vma result */
+        ...
+        ...
+        ...
+        unsigned long start_code, end_code, start_data, end_data;
+        unsigned long start_brk, brk, start_stack;
+        ...
+        ...
+        ...
+};
+</pre>
+Here the first member of importance is the <code>mmap</code>. The
+<code>mmap</code> contains the pointer to the list of VMAs (Virtual
+Memory Areas) related to this process. Full usage of the process
+address space occurs very rarely. The sparse regions used are
+denoted by VMAs. So each VMA will contain information about a
+single region. The VMAs are stored in <code>struct
+vm_area_struct</code> defined in <code>linux/mm.h</code>:
+
+<pre class="code">
+struct vm_area_struct {
+        struct mm_struct * vm_mm;       /* The address space we belong to. */
+        unsigned long vm_start;         /* Our start address within vm_mm. */
+        unsigned long vm_end;           /* The first byte after our end address
+                                           within vm_mm. */
+        ....
+        ....
+        ....
+        /* linked list of VM areas per task, sorted by address */
+        struct vm_area_struct *vm_next;
+        ....
+        ....
+}
+</pre>
+<!-- 20050220 dsrich Commented out the following paragraph, rewrote the start of the next section as segue -->
+<!-- Those were the basics of the memory data structures we needed to 
+get hold of, to progress further into the article. -->
+
+<h3><a name="s6" id="s6">6. Kernel's view of the segments</a>
+</h3>
+
+<p>The kernel keeps track of the segments which have been allocated
+to a particular process using the above structures. For each
+segment, the kernel allocates a VMA. It keeps track of these
+segments in the <code>mm_struct</code> structures.</p>
+
+<p>The kernel tracks the data segment using two variables:
+<code>start_data</code> and <code>end_data</code>. The code segment
+boundaries are in the <code>start_code</code> and
+<code>end_code</code> variables. The stack segment is covered by
+the single variable <code>start_stack</code>. There is no special
+variable to keep track of the BSS segment &mdash; the VMA
+corresponding to the BSS accounts for it.</p>
+
+<h3><a name="s7" id="s7">7. A kernel module</a>
+</h3>
+<!-- 20050220 dsrich Pulled out module code and de-HTML'd, put in misc; did not compile or otherwise check. -->
+
+<p>Let's have a look at the code for <a href=
+"misc/krishnakumar/print_kern_ds.c.txt">a kernel module</a>:</p>
+
+<pre class="code">
+ 1 #include &lt;linux/init.h&gt;
+ 2 #include &lt;linux/kernel.h&gt;
+ 3 #include &lt;linux/module.h&gt;
+ 4 #include &lt;linux/sched.h&gt;
+ 5 #include &lt;linux/mm.h&gt;
+ 6
+ 7 static int pid_mem = 1;
+ 8
+ 9 static void print_mem(struct task_struct *task)
+10 {
+11         struct mm_struct *mm;
+12         struct vm_area_struct *vma;
+13         int count = 0;
+14         mm = task-&gt;mm;
+15         printk("\nThis mm_struct has %d vmas.\n", mm-&gt;map_count);
+16         for (vma = mm-&gt;mmap ; vma ; vma = vma-&gt;vm_next) {
+17                 printk ("\nVma number %d: \n", ++count);
+18                 printk("  Starts at 0x%lx, Ends at 0x%lx\n",
+19                           vma-&gt;vm_start, vma-&gt;vm_end);
+20         }
+21         printk("\nCode  Segment start = 0x%lx, end = 0x%lx \n"
+22                  "Data  Segment start = 0x%lx, end = 0x%lx\n"
+23                  "Stack Segment start = 0x%lx\n",
+24                  mm-&gt;start_code, mm-&gt;end_code,
+25                  mm-&gt;start_data, mm-&gt;end_data,
+26                  mm-&gt;start_stack);
+27 }
+28
+29 static int mm_exp_load(void){
+30         struct task_struct *task;
+31         printk("\nGot the process id to look up as %d.\n", pid_mem);
+32         for_each_process(task) {
+33                 if ( task-&gt;pid == pid_mem) {
+34                         printk("%s[%d]\n", task-&gt;comm, task-&gt;pid);
+35                         print_mem(task);
+36                 }
+37         }
+38         return 0;
+39 }
+40
+41 static void mm_exp_unload(void)
+42 {
+43         printk("\nPrint segment information module exiting.\n");
+44 }
+45
+46 module_init(mm_exp_load);
+47 module_exit(mm_exp_unload);
+48 module_param(pid_mem, int, 0);
+49
+50 MODULE_AUTHOR ("Krishnakumar. R, rkrishnakumar@gmail.com");
+51 MODULE_DESCRIPTION ("Print segment information");
+52 MODULE_LICENSE("GPL");
+</pre>
+
+<p>The module accepts the pid of the process, which it should
+dissect, as its parameter (line 48). The module will go through the
+list of processes in the kernel (32-37), and when it finds the
+required pid, it will call the function '<code>print_mem</code>'
+function which will print the details from the memory management
+related data structures of the kernel.</p>
+
+<h3><a name="s8" id="s8">8. Let us get into execution mode</a>
+</h3>
+
+<p>I ran the C program given in the earlier section and, while it was still
+running, loaded the kernel module with the pid of the process. Please note
+that the program was compiled<em>statically</em> (-static) rather than
+<em>dynamically</em>, to avoid the unnecessary complication of shared
+libraries. Here is what I got:</p>
+
+<pre class="code">
+# ./print_segments &amp;
+Pid of the process is = 3283
+Addresses which fall into:
+ 1) Data  segment = 0x80a000c
+ 2) BSS   segment = 0x80a1a10
+ 3) Code  segment = 0x80481f4
+ 4) Stack segment = 0xbffff8e4
+
+# /sbin/insmod print_kern_ds.ko pid_mem=3283
+
+Got the process id to look up as 3283.
+print_segments[3283]
+
+This mm_struct has 5 vmas.
+
+Vma number 1:
+  Starts at 0x8048000, Ends at 0x80a0000
+
+Vma number 2:
+  Starts at 0x80a0000, Ends at 0x80a1000
+
+Vma number 3:
+  Starts at 0x80a1000, Ends at 0x80c3000
+
+Vma number 4:
+  Starts at 0xb7fff000, Ends at 0xb8000000
+
+Vma number 5:
+  Starts at 0xbffff000, Ends at 0xc0000000
+
+Code  Segment start = 0x8048000, end = 0x809fc38
+Data  Segment start = 0x80a0000, end = 0x80a0ec4
+Stack Segment start = 0xbffffb30
+</pre>
+
+Let's analyze the output. According to the userland program the
+address 0x80a000c should fall into the data segment. This can be
+verified by looking into the information we got from the kernel
+module, on printing the Data segment starting address and VMA
+number 2. For the code segment, it is starting at 0x8048000 as per
+the kernel data structures. Also according to the userland program
+the address 0x80481f4 should fall into the code segment. Hence
+userland and kernel tallies.
+
+<p>Now, lets look at the Stack segment: the userland program says that the
+address 0xbffff8e4 should fall into it and kernel data structures states
+that stack will start from 0xbffffb30. In a 386-based architecture the
+stack grows downwards. The BSS is not stored in any particular variable of
+the kernel, but there is a VMA allocated for the corresponding location
+- from the userland program, the address 0x80a1a10 should come inside the
+BSS, and a look at VMA 3 makes it clear that this is the corresponding
+VMA for the BSS.</p>
+
+<h3><a name="s9" id="s9">9. Gathering Information from /proc</a>
+</h3>
+
+<p>We have been using custom programs to explore the contents of the data
+structures inside the kernel, but the kernel provides a standard interface
+for us to access such information. The memory maps of a particular process
+can be obtained by doing a '<code>cat
+/proc/<em>&lt;pid&gt;</em>/maps</code>' where <em>&lt;pid&gt;</em> should
+be the pid of the process of which we need to get the details about. When I
+ran it, the program used pid 3283; here is the memory map, trimmed to
+fit:</p>
+
+<pre class="code">
+# cat /proc/3283/maps | cut -f1 -d' '
+08048000-080a0000
+080a0000-080a1000
+080a1000-080c3000
+b7fff000-b8000000
+bffff000-c0000000
+ffffe000-fffff000
+</pre>
+A close look at the output shows that the first region corresponds
+to the code segment, the second region matches the data segment,
+the third is the BSS segment and the 5th region corresponds to the
+stack segment.
+
+<h3><a name="s10" id="s10">10. Conclusion</a>
+</h3>
+
+<p>We have looked at the userland perspective of how the segments
+are treated for a program. Then we examined the data structures in
+the kernel which keep track of the segments. We verified that our
+assumptions are correct using userland and kernel programs. Finally
+we used the standard kernel interface to obtain information
+regarding the memory regions of a specific process.</p>
+
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<p>
+
+<img align="left" alt="[BIO]" src="../gx/authors/krishnakumar.jpg" class="bio">
+
+<em>
+
+Krishnakumar loves to hack the Linux kernel. He works
+for Hewlett-Packard and is a BTech from Govt. Engg. College
+Thrissur.
+
+</em>
+<br clear="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2005, R. Krishnakumar. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 112 of Linux Gazette, March 2005
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="engel.html" >&lt;-- prev</A> | <A HREF="odonovan.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">March 2005 (#112)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/2003/sit3-shine.7-2.gif" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

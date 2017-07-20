@@ -1,0 +1,277 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>Process Tracing Using Ptrace - Part III LG #85</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="qubism.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../lg_faq.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="sipos.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+
+<!--endcut ============================================================-->
+
+<TABLE BORDER><TR><TD WIDTH="200">
+<A HREF="http://www.linuxgazette.net/">
+<IMG ALT="LINUX GAZETTE" SRC="../gx/2002/lglogo_200x41.png" 
+	WIDTH="200" HEIGHT="41" border="0"></A> 
+<BR CLEAR="all">
+<SMALL>...<I>making Linux just a little more fun!</I></SMALL>
+</TD><TD WIDTH="380">
+
+
+<CENTER>
+<BIG><BIG><STRONG><FONT COLOR="maroon">Process Tracing Using Ptrace - Part III</FONT></STRONG></BIG></BIG>
+<BR>
+<STRONG>By <A HREF="../authors/sandeep.html">Sandeep S</A></STRONG>
+</CENTER>
+
+</TD></TR>
+</TABLE>
+<P>
+
+<!-- END header -->
+
+
+
+<EM>The basic features of ptrace were explained in
+<A HREF="../issue81/sandeep.html">Part I</A>. In 
+<A HREF="../issue83/sandeep.html">Part II</A>
+we saw a small program which accessed the registers of a process and modified them so as to change the output of that process, by injecting some extra code. This time we are going to access the memory of a process.
+The purpose of this article is to introduce a methods for infecting binaries on runtime. There are many possible areas of use for this technique. </EM>
+<HR>
+<H2><A NAME="s1">1. Introduction.</A></H2>
+
+<P>We are familiar with ptrace and know the techniques of attaching a process, 
+how to trace it and finally to free it. We also have an idea about the 
+structure of the Linux binary format - ELF.
+<P>
+<P>Our plan is to fetch/modify a running binary. So we have to locate the 
+symbols inside the binary. There we need <CODE>link_map</CODE>. link_map is 
+the dynamic 
+linker's internal structure with which it keeps track of loaded libraries 
+and symbols within libraries. 
+<P>
+<P>The foramt of link_map is (from /usr/include/link.h)
+<P>
+<BLOCKQUOTE><CODE>
+<PRE>
+struct link_map
+  {
+    ElfW(Addr) l_addr;      /* Base address shared object is loaded at.  */
+    char *l_name;           /* Absolute file name object was found in.  */
+    ElfW(Dyn) *l_ld;        /* Dynamic section of the shared object.  */
+    struct link_map *l_next, *l_prev; /* Chain of loaded objects.  */
+  };
+</PRE>
+</CODE></BLOCKQUOTE>
+<P>
+<P>A small explanation for the fields.
+<UL>
+<LI>l_addr: Base address where shared object is loaded. 
+This value can also be found from /proc/&lt;pid&gt;/maps</LI>
+<LI>l_name: pointer to library name in string table</LI>
+<LI>l_ld  : pointer to dynamic (DT_*) sections of shared lib</LI>
+<LI>l_next: pointer to next link_map node</LI>
+<LI>l_prev: pointer to previous link_map node</LI>
+</UL>
+<P>
+<P>Link-map is a linked list, each item on list having a pointer to loaded 
+library. What we have to do is, to follow this chain, go through every 
+library and find our symbol. Now we have a question. Where we can find this
+link_map?
+<P>
+<P>For every object file, there is a global offset table (GOT) which contains 
+many details of the binary. In GOT, the second entry is dedicated for the 
+link_map. So we get the address of link_map from <B>GOT[1]</B> and we go on 
+searching our symbol.
+<P>
+<H2><A NAME="s2">2. Straight to code.</A></H2>
+
+<P>Now we have collected the basic information needed to access the memory. Let's 
+start now. First of all we attach the process 'pid' for tracing. Now we go for 
+finding out the link_map we require. You will find functions <CODE>read_data</CODE>, 
+<CODE>read_str</CODE> etc. These are helper functions to make working with ptrace easier.
+Helper functions are self explaining.
+<P>
+<P>The function for locating the link_map is:
+<BLOCKQUOTE><CODE>
+<PRE>
+struct link_map *locate_linkmap(int pid)
+{
+    Elf32_Ehdr *ehdr = malloc(sizeof(Elf32_Ehdr));
+    Elf32_Phdr *phdr = malloc(sizeof(Elf32_Phdr));
+    Elf32_Dyn *dyn = malloc(sizeof(Elf32_Dyn));
+    Elf32_Word got;
+    struct link_map *l = malloc(sizeof(struct link_map));
+    unsigned long phdr_addr, dyn_addr, map_addr;
+    
+     read_data(pid, 0x08048000, ehdr, sizeof(Elf32_Ehdr));
+    phdr_addr = 0x08048000 + ehdr-&gt;e_phoff;
+    printf("program header at %p\n", phdr_addr);
+    read_data(pid, phdr_addr, phdr, sizeof(Elf32_Phdr));
+
+    while (phdr-&gt;p_type != PT_DYNAMIC) {
+        read_data(pid, phdr_addr += sizeof(Elf32_Phdr), phdr,
+                             sizeof(Elf32_Phdr));
+    }
+    
+    read_data(pid, phdr-&gt;p_vaddr, dyn, sizeof(Elf32_Dyn));
+    dyn_addr = phdr-&gt;p_vaddr;
+
+    while (dyn-&gt;d_tag != DT_PLTGOT) {
+        read_data(pid, dyn_addr += sizeof(Elf32_Dyn), dyn, sizeof(Elf32_Dyn));
+    }
+
+    got = (Elf32_Word) dyn-&gt;d_un.d_ptr;
+    got += 4;           /* second GOT entry, remember? */
+
+    read_data(pid, (unsigned long) got, &amp;map_addr, 4);
+    read_data(pid, map_addr, l, sizeof(struct link_map));
+    free(phdr);
+    free(ehdr);
+    free(dyn);
+    return l;
+}
+</PRE>
+</CODE></BLOCKQUOTE>
+<P>
+<P>We start from the location 0x08048000 to get elf header of the process we are 
+tracing. We get the elf header and from its fields we can get the program header.
+(The fields of headers were discussed in 
+<A HREF="../issue83/sandeep.html">Part II</A>.)     
+Once we get the program header, we go on checking for the header with dynamic 
+linking information. From the header/struct with dynamic linking information, we 
+fetch the location of the information. Go on searching until we get the base 
+address of global offset table.
+<P>
+<P>Now we have the address of GOT with us and take the second entry of GOT 
+(there we have link_map). From there get the address of the link_map which 
+we require and return.
+<P>
+<P>We have the struct link_map and we have to get symtab and strtab. For this,
+we move to <CODE>l_ld</CODE> field of link_map and traverse through dynamic sections until 
+DT_SYMTAB and DT_STRTAB have been found, and finally we can seek our symbol 
+from DT_SYMTAB. DT_SYMTAB and DT_STRTAB are the addresses of symbol table and 
+string table respectively.
+<P>
+<P>The function resolv_tables is:
+<BLOCKQUOTE><CODE>
+<PRE>
+void resolv_tables(int pid, struct link_map *map)
+{
+    Elf32_Dyn *dyn = malloc(sizeof(Elf32_Dyn));
+    unsigned long addr;
+    addr = (unsigned long) map-&gt;l_ld;
+    read_data(pid, addr, dyn, sizeof(Elf32_Dyn));
+    while (dyn-&gt;d_tag) {
+        switch (dyn-&gt;d_tag) {
+        case DT_HASH:
+            read_data(pid, dyn-&gt;d_un.d_ptr + map-&gt;l_addr + 4, 
+                       &amp;nchains, sizeof(nchains));
+            break;
+        case DT_STRTAB:
+            strtab = dyn-&gt;d_un.d_ptr;
+            break;
+        case DT_SYMTAB:
+            symtab = dyn-&gt;d_un.d_ptr;
+            break;
+        default:
+            break;
+        }
+        addr += sizeof(Elf32_Dyn);
+        read_data(pid, addr, dyn, sizeof(Elf32_Dyn));
+    }
+    free(dyn);
+}
+</PRE>
+</CODE></BLOCKQUOTE>
+<P>
+<P>What we actually do here is just reading dynamic sections one by one and checks 
+whether the tag is DT_STRTAB or DT_SYMTAB. If yes, we can get their respective 
+pointers and assign to <CODE>strtab</CODE> and <CODE>symtab</CODE>. Once the dynamic sectoins are 
+over, we can stop.
+<P>
+<P>Our next step is getting the value of symbol from the symbol table. For this we 
+take every symbol table entry one by one and check it whether it's a function name.
+(We are interested in finding the value of a library function). If it is then 
+it's compared with the function name given by us. If here also they match now the 
+value of the symbol is returned. 
+<P>
+<P>Now we have got the value of the symbol what we actually required. What help will
+the value do for us? The answer depends upon the reader. As I have already stated
+we may use this for both good and evil purposes.
+<P>
+<P>You might be thinking that everything is over. We forgot a step that we shouldn't 
+forget - detaching the traced process. This may leave the process in a stopped 
+state for ever and the consequences are already discussed in 
+<A HREF="http://linuxgazette.net/issue81/sandeep.html">Part I</A>.
+So our last and final step is to detach the traced process.
+<P>
+<P>The program may be obtained from. 
+<A HREF="misc/sandeep/Ptrace.c.txt">Ptrace.c</A>
+Almost the whole code is self explaining.
+<P>
+<P>Compile it by typing
+<BLOCKQUOTE><CODE>
+<PRE>
+#cc Ptrace.c -o symtrace
+</PRE>
+</CODE></BLOCKQUOTE>
+<P>
+<P>Now we want to test the program. Run some process in some other console, come 
+back and type. 
+(Here my test program is <CODE>emacs</CODE> and the symbol I give is <CODE>strcpy</CODE>).
+You may trace any program that is traceable instead of emacs and any symbol
+you want to inspect.
+<P>
+<BLOCKQUOTE><CODE>
+<PRE>
+#./symtrace `ps ax | grep 'emacs' | cut -f 2 -d " "` strcpy
+</PRE>
+</CODE></BLOCKQUOTE>
+
+and watch what is going on.
+<P>
+<H2><A NAME="s3">3. Conclusion.</A></H2>
+
+<P>So, we come to the end of a series of three articles which has gone through 
+the basic programming with <CODE>ptrace</CODE>. Once you have understood the basic 
+concept it is not difficult to make steps by your own. More details on ptrace
+and elf are available at 
+<A HREF="http://www.phrack.org">www.phrack.org</A>. One more thing 
+I have to write is that, we reached here without even mentioning a major topic.
+One major feature of ptrace is its play with system calls. In User Mode Linux,
+this feature is used in a large scale. I am busy with my classes and final year
+project, and I promise, if time permits we will continue this series and then
+we will have a look at those features of ptrace.
+<P>
+<P>All Suggestions, Criticisms, Contributions etc. are welcome. You can contact 
+me at 
+<A HREF="mailto:busybox@sancharnet.in">busybox@sancharnet.in</A>
+
+
+
+
+
+<!-- *** BEGIN copyright *** -->
+<hr>
+<CENTER><SMALL><STRONG>
+Copyright &copy; 2002, Sandeep S.
+Copying license <A HREF="../copying.html">http://www.linuxgazette.net/copying.html</A><BR> 
+Published in Issue 85 of <i>Linux Gazette</i>, December 2002
+</STRONG></SMALL></CENTER>
+<!-- *** END copyright *** -->
+<HR>
+
+<!--startcut ==========================================================-->
+<CENTER>
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="qubism.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../lg_faq.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="sipos.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+</CENTER>
+</BODY></HTML>
+<!--endcut ============================================================-->

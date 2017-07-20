@@ -1,0 +1,87 @@
+/* 
+ * perfmod.c 
+ * A performance counting module for Linux
+ */
+
+#include <linux/module.h>
+#include <asm/uaccess.h>
+#include <asm/msr.h>
+#include <linux/fs.h>
+
+#define ATHLON
+#include "perf.h"
+
+
+char *name = "perfmod";
+int major, reg;
+
+int
+perf_ioctl(struct inode* inode, struct file* filp,
+		   unsigned int cmd, unsigned long val)		
+{
+	switch(cmd){
+		case EVSEL:
+			reg = EVSEL_BASE + val;
+			break;
+		case EVCNT:
+			reg = EVCNT_BASE + val;
+			break;
+		}
+		return 0;
+}
+
+ssize_t
+perf_write(struct file *filp, const char *buf,
+			size_t len, loff_t *offp)
+{
+	unsigned int *p = (unsigned int*)buf;
+	unsigned int low, high;
+	
+	if(len != 2*sizeof(int)) return -EIO;
+	get_user(low, p);
+	get_user(high, p+1);
+	//printk("write:low=%x,high=%x. reg=%x\n", low, high, reg);
+	wrmsr(reg, low, high);
+	return len;
+}
+
+ssize_t
+perf_read(struct file *filp,  char *buf,
+			size_t len, loff_t *offp)
+{
+	unsigned int *p = (unsigned int*)buf;
+	unsigned int low, high;
+	
+	if(len != 2*sizeof(int)) return -EIO;
+	rdmsr(reg, low, high);
+	//printk("read:low=%x,high=%x. reg=%x\n", low, high, reg);
+	put_user(low, p);
+	put_user(high, p+1);
+	return len;
+}
+
+struct file_operations fops = {
+ioctl:perf_ioctl,
+read:perf_read,
+write:perf_write,
+};
+
+int
+init_module(void)
+{
+	major = register_chrdev(0, name, &fops);
+	if(major < 0) {
+		printk("Error registering device...\n");
+		return major;
+	}
+	printk("Major = %d\n", major);
+	return 0;
+}
+		
+void
+cleanup_module(void)
+{
+	unregister_chrdev(major, name);
+}
+
+

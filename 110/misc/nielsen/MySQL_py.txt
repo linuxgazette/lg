@@ -1,0 +1,805 @@
+#!/bin/env python
+
+""" MySQL contains several classes. Only one currently works. "Installer()".
+Installer will download and install MySQL with maste/slave or cluster
+combinations. It is currently only made for demonstration purposes and
+is not meant to be used in a production environment. If you can get the
+Master/Slave/Cluster instances working on one computer, all you have to do
+to get it to work on multiple computers is copy over the software,
+change the config files a little, and then start it up. 
+
+Copyrighted by Mark E. Nielsen, 11/2004 under the original GPL License. 
+
+"""
+
+import string, os, stat, time, sys, types, commands, re, posix, time, getopt
+
+__version__ = '0.1'
+Date_Version = "2004/11/29"
+
+#-------------------------------------------------------------------
+# This method is global for the module. 
+def Except():
+  (type, value, traceback) = sys.exc_info()
+  print "exc_type = " + str(type)
+  print "exc_value = " + str(value)
+  print "exc_traceback = " + str(traceback)
+  print sys.excepthook(type, value, traceback)
+  return(1)
+
+#---------------------------------------------
+  ### A class we need to develop to test our instances. 
+  ### We haven't developed this class yet. 
+class Test:
+  def Test_Master_Slaves(self):
+    """ Test_Master_Slaves() is not finished. Used to test master/slaves."""
+
+  def Test_Cluster(self):
+    """ Test_Cluster() is not finished. Used to test the cluster."""
+
+#------------------------------------------------
+
+  ### The Utils class will contain methods for manipulating our instances. 
+  ### We haven't developed this class yet.
+class Utils:
+     ### The init function sets some default options for the object.
+  def __init__(self,options={}): pass
+     ### A method to make a master a slave. 
+  def Slave_To_Master(self): pass  
+     ### A method to add a slave to a master/slave setup. 
+     ### This will also make the current master a slave or disable it. 
+  def Add_Slave(self): pass
+       ### A method to add a node to a cluster.
+  def Add_Node(self): pass
+  
+#--------------------------------------------------
+
+### -- This class installs MySQL Master/Slave and Clusters. 
+# Features to add:
+# Save a configuration file in target mysql directory which will be read if
+#    this script accesses that directory again.
+# Doesn't let you install if already installed, except if override.
+
+class Installer:
+  """ This install mysql with master/slave and/or cluster installations.
+  Installer takes one option called "options" which is a hash.
+  """
+
+     ### The init function sets some default options for the object. 
+  def __init__(self,options={}):
+    self.original_options = options
+
+      ## Where we install mysql. 
+    self.prefix = "/usr/local/mysql_cluster"
+      ## The log file. 
+    self.log = "/tmp/mysql_install.log"
+      ## Will we have maste/slave combinations?
+    self.master = 1
+      ## how many slaves?
+    self.slave = 2
+      ## How many cluster computers?
+      ### WARNING: I couldn't get replicas to work when there were more than 2.
+    self.cluster = 2
+
+      ### The various ports we want to use. 
+    self.master_port = 20000
+    self.slave_port = 21000
+    self.cluster_management_port = 22000
+    self.cluster_db_port = 23000
+    self.cluster_api_port = 24000
+
+    self.notes = ""
+
+     ### options to pass to -d
+     #      http://www.signal42.com/mirrors/mysql/Downloads/MySQL-5.0/mysql-5.0.2-alpha.tar.gz
+
+      ## The default mysql file and location to get it from.
+    self.mysql_file = "mysql-4.1.7.tar.gz"
+    self.mysql_compile_dir = "mysql-4.1.7"
+    self.ftp_dir = "ftp://mirror.services.wisc.edu/mirrors/mysql/Downloads/MySQL-4.1/"
+    self.prefix = "/usr/local/mysql-cluster"
+      ## Where we will compile mysql.
+    self.compile_home = "/usr/local/src/mysql_compile"
+    
+      ## Get the line command options to overide those above. 
+    self.Define_Variables()
+
+    self.instances_no = self.master + self.slave + self.cluster
+
+    if self.log == '': self.log = sys.stout
+    print "Writing log file to: ", self.log
+    self.log_handle = open(self.log, 'a')
+
+      ## Get the templates for the config files. 
+    self.templates = self.Get_Templates()
+
+      ## Some regular expressions we will use.
+      ## We could make these global to the pakcage. 
+    self.re_mysql_file = re.compile('__MYSQL_FILE__')
+    self.re_mysql_compile_dir = re.compile('__MYSQL_COMPILE_DIR__')
+    self.re_ftp_dir = re.compile('__FTP_DIR__')
+    self.re_prefix = re.compile('__PREFIX__')
+    self.re_compile_home = re.compile('__COMPILE_HOME__')
+
+    self.re_m_port = re.compile('__M_PORT__')
+    self.re_s_port = re.compile('__S_PORT__')
+    self.re_mgm_port = re.compile('__MGM_PORT__')
+    self.re_db_port = re.compile('__DB_PORT__')
+    self.re_api_port = re.compile('__API_PORT__')
+        
+    ## Del executes when the object is destroyed. 
+  def __del__(self):
+    try: self.log_handle.close()
+    except: pass
+
+    ### These next few builtin functions are just for kicks.
+  def __str__(self):
+    str1 = "Master=" + str(self.master) + ":Slave=" + str(self.slave) + ":Cluster=" + str(self.cluster) + ":" + self.notes
+    return(str1)
+  def __lt__(self,other):  return(self.instances_no)
+  def __le__(self,other):  return(self.instances_no)
+  def __gt__(self,other):  return(self.instances_no)
+  def __eq__(self,other):  return(self.instances_no)
+  def __ne__(self,other):  return(self.instances_no)
+  
+
+    ### This writes our compile bash script. 
+  def Write_Compile_Script(self):
+    """ Write_Compile_Script() takes no arguements. It simply compiles
+    and install the binaries for mysql.
+    """
+
+    self.notes += "compile script written:"
+    self.Command(command="mkdir -p " + self.compile_home + "/scripts")
+
+    print "Creating script:", self.compile_home + "/scripts/Compile.bash"
+    self.log_handle.write("WRITE:" + self.compile_home + "/scripts/Compile.bash\n")
+    Write = open(self.compile_home + "/scripts/Compile.bash", "w")
+    Template = self.templates['compile']
+    Template = self.re_mysql_file.sub(self.mysql_file, Template)
+    Template = self.re_mysql_compile_dir.sub(self.mysql_compile_dir, Template)
+    Template = self.re_ftp_dir.sub(self.ftp_dir, Template)
+    Template = self.re_prefix.sub(self.prefix, Template)
+    Template = self.re_compile_home.sub(self.compile_home, Template)
+    Write.write(Template)
+    Write.close()
+
+    return(1)
+
+  def Execute_Compile_Script(self):
+    """ Execute_Compile_Script() takes no arguements and just executes the
+    compile script (which also installs mysql).
+    """
+    self.notes += "compiled:"
+    print "Compiling MySQL. This could take a while."
+    self.Command(command="bash " + self.compile_home + "/scripts/Compile.bash")
+    return(1)
+
+  def Setup_Instances(self):
+    """Setup_Instances() takes no arguements.
+    This installs the master/slave/cluster instances of mysql. This will create
+    separate data directories for each instance. It will also create a cnf
+    file for each instance. It will initialize the instances. 
+    """
+
+    self.notes += "master/slave configed:"
+    print "Setting up the instances."
+
+    Dirs = ['data', 'tmp']
+        ### We need to move these re's to the object level. 
+    Re_Instance = re.compile('__INSTANCE__')
+    Re_Prefix = re.compile('__PREFIX__')
+    Re_Extra = re.compile('__EXTRA__')    
+    Re_Instance_Dir = re.compile('__INSTANCE_DIR__')
+    Re_Instance_Cnf = re.compile('__INSTANCE_CNF__')
+    Re_DB_Port = re.compile('__DB_PORT__')
+
+    Re_DB_ID = re.compile('__DB_ID__')
+    Re_NO_Replicas = re.compile('__NO_REPLICAS__')
+    Re_API_Port = re.compile('__API_PORT__')
+    Re_API_ID = re.compile('__API_ID__')
+    Re_MGM_ID = re.compile('__MGM_ID__')
+    
+    Start_File_Text = "\n cd " + self.prefix + "\n"
+    Stop_File_Text = "\n cd " + self.prefix + "\n"
+    Mysql_Alias = ""
+    
+       ### Setup the master database config and directories
+    Extra_Master = ""
+    if self.master > 0: Extra = "log-bin=__PREFIX__/instance/__INSTANCE__/main_log\n"
+    Extra_Master += "port=" + str(self.master_port) + "\n"
+    Extra_Master += "server-id=1\n"
+    Instance = "master1"
+
+    Instance_Dir = self.prefix + "/instance/" + Instance
+    print "Setting up:", Instance_Dir
+    self.Command(command='mkdir -p ' + Instance_Dir)
+    self.Command(command='mkdir -p ' + Instance_Dir + "/data")
+    self.Command(command='mkdir -p ' + Instance_Dir + "/tmp")
+    self.Command(command='chown -R mysql ' + Instance_Dir)
+    self.Command(command='chown -R mysql.mysql ' + Instance_Dir)
+    self.Command(command='chmod 700 ' + Instance_Dir + "/data")
+
+    re_list = [[Re_Extra,Extra_Master], [Re_Prefix,self.prefix]]
+    re_list.append([Re_Instance_Dir,Instance_Dir])
+    re_list.append([Re_Instance, Instance])
+    re_list.append([Re_Instance_Cnf, Instance_Dir + "/my.cnf_" + Instance])
+
+    File = Instance_Dir + "/my.cnf_" + Instance
+    self.Write_Template(file=File, template='my.cnf_master',re_list=re_list)
+
+    File = self.prefix + "/Start_" + Instance
+    self.Write_Template(file=File, template='start',re_list=re_list)
+
+    File = self.prefix + "/Stop_" + Instance
+    self.Write_Template(file=File, template='stop',re_list=re_list)
+
+    self.Init_Instance(cnf=Instance_Dir + "/my.cnf_" + Instance)
+      
+    Start_File_Text += "echo Starting " + Instance + "\nbash " + self.prefix + "/Start_" + Instance + "\n\n"
+    Stop_File_Text += "echo Stopping " + Instance + "\nbash " + self.prefix + "/Stop_" + Instance + "\n\n"
+
+    MySQL_Alias = """
+export PATH=""" + '"' + self.prefix + """/bin:"""  + self.prefix + """/scripts:$PATH"
+    """
+
+    MySQL_Alias += "alias mysql_" + Instance + "='" + self.prefix + "/bin/mysql --defaults-file=" + Instance_Dir + "/my.cnf_" + Instance + " --local-infile=1'\n"
+
+    Write = open(Instance_Dir + "/first_run.bash", "w")
+    Write.write("\n" + self.prefix + "/bin/mysql --defaults-file=" + Instance_Dir + "/my.cnf_" + Instance + " -e \"GRANT REPLICATION SLAVE ON *.* TO 'root'@'127.0.0.1' IDENTIFIED BY ''\"\n")
+    Write.write(self.prefix + "/bin/mysql --defaults-file=" + Instance_Dir + "/my.cnf_" + Instance + " -e \"create database test_slave\"\n")
+    Write.write(self.prefix + "/bin/mysql --defaults-file=" + Instance_Dir + "/my.cnf_" + Instance + " -e \"create table table1 (text1 text)\" test_slave\n")
+    Write.write(self.prefix + "/bin/mysql --defaults-file=" + Instance_Dir + "/my.cnf_" +Instance + " -e \"insert into table1 values ('data')\" test_slave\n")
+    Write.close()
+                            
+      ### For each slave we have, do this.
+    for no in range(2,self.slave + 2):
+      Instance = "slave" + str(no)
+      Instance_Dir = self.prefix + "/instance/" + Instance
+      print "Setting up:", Instance_Dir
+      self.Command(command='mkdir -p ' + Instance_Dir)
+      self.Command(command='mkdir -p ' + Instance_Dir + "/data")
+      self.Command(command='mkdir -p ' + Instance_Dir + "/tmp")
+      self.Command(command='chown -R mysql ' + Instance_Dir)
+      self.Command(command='chown -R mysql.mysql ' + Instance_Dir)
+      self.Command(command='chmod 700 ' + Instance_Dir + "/data")
+
+         ### This goes into the extra space in my.cnf.
+      S_Extra = "port=" + str(self.slave_port + no) + "\n"
+      S_Extra += "log-bin=__PREFIX__/instance/__INSTANCE__/main_log\n"
+      S_Extra += "server-id=" + str(no) + "\n"
+      S_Extra += "report-port=" + str(self.slave_port + no) + "\n"
+
+        ### Setup the list of search/replace values and the re's.
+      re_list = [[Re_Extra,S_Extra], [Re_Prefix,self.prefix]]
+      re_list.append([Re_Instance_Dir,Instance_Dir])
+      re_list.append([Re_Instance, Instance])
+      re_list.append([Re_Instance_Cnf, Instance_Dir + "/my.cnf_" + Instance])
+      re_list.append([self.re_m_port, str(self.master_port)])
+
+         ## Create the text files. 
+      File = Instance_Dir + "/my.cnf_" + Instance
+      self.Write_Template(file=File, template='my.cnf_slave',re_list=re_list)
+      
+      File = self.prefix + "/Start_" + Instance
+      self.Write_Template(file=File, template='start',re_list=re_list)
+      
+      File = self.prefix + "/Stop_" + Instance
+      self.Write_Template(file=File, template='stop',re_list=re_list)
+
+        ### Intitalize the database. 
+      self.Init_Instance(cnf=Instance_Dir + "/my.cnf_" + Instance)
+
+        ### Various entries into Start, Stop, and bash_aliases.
+      Start_File_Text += "echo Starting " + Instance + "\nbash " + self.prefix + "/Start_" + Instance + "\n\n"
+      Stop_File_Text += "echo Stopping " + Instance + "\nbash " + self.prefix + "/Stop_" + Instance + "\n\n"
+      MySQL_Alias += "alias mysql_" + Instance + "='" + self.prefix + "/bin/mysql --defaults-file=" + Instance_Dir + "/my.cnf_" + Instance + "'\n"
+
+      ## If we have clustering, make a management server
+    if self.cluster > 0:
+      Instance = "cluster_management"
+      Instance_Dir = self.prefix + "/instance/" + Instance
+      print "Setting up:", Instance_Dir
+      self.Command(command='mkdir -p ' + Instance_Dir)
+         ## Technically, we don't need a data directory. 
+      self.Command(command='mkdir -p ' + Instance_Dir + "/data")
+      self.Command(command='mkdir -p ' + Instance_Dir + "/tmp")
+      self.Command(command='chown -R mysql ' + Instance_Dir)
+      self.Command(command='chown -R mysql.mysql ' + Instance_Dir)
+      self.Command(command='chmod 700 ' + Instance_Dir + "/data")
+                                                      
+      C_Extra = "port=" + str(no + self.cluster_api_port) + "\n"
+      C_Extra += "server-id=" + str(no) + "\n"
+
+      MySQL_Alias += "alias ndb_mgm='" + self.prefix + "/bin/ndb_mgm 127.0.0.1 " + str(self.cluster_management_port) + "'\n"
+
+      Re_Cluster_No = re.compile('__CLUSTER_NO__')
+
+      re_list = [[Re_Extra,C_Extra], [Re_Prefix,self.prefix]]
+      re_list.append([Re_Instance_Dir,Instance_Dir])
+      re_list.append([Re_Instance, Instance])
+      re_list.append([Re_Instance_Cnf, Instance_Dir + "/my.cnf_" + Instance])
+      re_list.append([Re_Cluster_No, str(self.cluster + 1)])
+      re_list.append([Re_NO_Replicas, '2'])
+#      re_list.append([Re_NO_Replicas, str(self.cluster)])
+      re_list.append([Re_MGM_ID, str(self.cluster + self.slave + 2)])
+
+      re_list.append([self.re_mgm_port, str(self.cluster_management_port)])
+      re_list.append([self.re_m_port, str(self.master_port)])
+
+      File = Instance_Dir + "/my.cnf_" + Instance
+      self.Write_Template(file=File, template='my.cnf_cluster_management',re_list=re_list)
+      
+      File = Instance_Dir + "/config.ini_cluster_management"
+      self.Write_Template(file=File, template='config.ini_mgm',re_list=re_list)
+
+      Start_File_Text += "echo Starting cluster ndb_mgmd.\n"
+      Start_File_Text += "su mysql -c './libexec/ndb_mgmd --config-file=./instance/cluster_management/config.ini_cluster_management'\n\n"
+
+      Max_No = self.cluster + self.slave + 2 + 1
+      Max_No2 = Max_No + self.cluster
+         ### Configure each storage node. Each storage node gets its own
+         ### mysqld server as well -- later in the script. 
+      for no in range(2 + self.slave, self.cluster + self.slave + 2):
+        Instance2 = "cluster_ndb" + str(no)
+        Instance_Dir2 = self.prefix + "/instance/" + Instance2
+
+        Init_File = Instance_Dir2 + "/initialized"
+        Start_File_Text += """
+if [ ! -e '""" + Init_File + """' ]; then
+        echo ''
+        echo Initializing cluster """ + str(Max_No + no)+ """ 
+        su mysql -c './libexec/ndbd --initial -c 127.0.0.1:""" + str(self.cluster_management_port) + """:id=""" + str(Max_No + no)+ """'
+        touch """ + Init_File + """
+else
+        echo Starting cluster db""" + str(Max_No + no) + """
+        su mysql -c './libexec/ndbd -c 127.0.0.1:""" + str(self.cluster_management_port) + """:id=""" + str(Max_No + no)+ """'
+fi
+        \n"""
+
+        print "Setting up:", Instance_Dir2
+        self.Command(command='mkdir -p ' + Instance_Dir2)
+        ### Technically, we don't need a data directory.
+        self.Command(command='mkdir -p ' + Instance_Dir2 + "/data")
+        self.Command(command='mkdir -p ' + Instance_Dir2 + "/tmp")
+        self.Command(command='chown -R mysql ' + Instance_Dir2)
+        self.Command(command='chown -R mysql.mysql ' + Instance_Dir2)
+        self.Command(command='chmod 700 ' + Instance_Dir2 + "/data")
+                
+        re_list = [[Re_Prefix,self.prefix]]
+        re_list.append([Re_Instance_Dir,Instance_Dir2])
+        re_list.append([Re_Instance, Instance2])
+        re_list.append([Re_DB_ID, str(Max_No + no)])
+        re_list.append([Re_API_ID, str(Max_No2 + no)])
+
+        re_list.append([self.re_mgm_port, str(self.cluster_management_port)])
+        re_list.append([self.re_m_port, str(self.master_port)])
+#        re_list.append([self.re_s_port, str(self.slave_port)])
+#        re_list.append([self.re_api_port, str(self.cluster_api_port)])
+        re_list.append([self.re_db_port, str(self.cluster_db_port + no)])
+                              
+
+        F2 = "/tmp/db_temp.cnf"
+        self.Write_Template(file=F2,template='config.ini_db',re_list=re_list)
+        Write = open(File, 'a')
+        Read = open(F2, 'r')
+        for Line in Read: Write.write(Line)
+        Write.close()
+        Read.close()
+      
+      ## For each mysqld server in the cluster, do this. 
+    for no in range(2 + self.slave, self.cluster + self.slave + 2):
+      Instance = "cluster_mysqld" + str(no)
+      Instance_Dir = self.prefix + "/instance/" + Instance
+      print "Setting up:", Instance_Dir
+      self.Command(command='mkdir -p ' + Instance_Dir)
+         ### Technically, we don't need a data directory ( I think). 
+      self.Command(command='mkdir -p ' + Instance_Dir + "/data")
+      self.Command(command='mkdir -p ' + Instance_Dir + "/tmp")
+      self.Command(command='chown -R mysql ' + Instance_Dir)
+      self.Command(command='chown -R mysql.mysql ' + Instance_Dir)
+      self.Command(command='chmod 700 ' + Instance_Dir + "/data")
+          
+      C_Extra = "port=" + str(no + self.cluster_api_port) + "\n"
+      C_Extra += "log-bin=__PREFIX__/instance/__INSTANCE__/main_log\n"
+      C_Extra += "server-id=" + str(no) + "\n"
+
+      re_list = [[Re_Extra,C_Extra], [Re_Prefix,self.prefix]]
+      re_list.append([Re_Instance_Dir,Instance_Dir])
+      re_list.append([Re_Instance, Instance])
+      re_list.append([Re_Instance_Cnf, Instance_Dir + "/my.cnf_" + Instance])
+      re_list.append([Re_API_ID, str(2*self.cluster+ self.slave + 2 + 1 + no)])
+
+      re_list.append([self.re_mgm_port, str(self.cluster_management_port)])
+      re_list.append([self.re_m_port, str(self.master_port)])
+      
+      File = Instance_Dir + "/my.cnf_" + Instance
+      self.Write_Template(file=File, template='my.cnf_cluster_db',re_list=re_list)
+      
+      File = self.prefix + "/Start_" + Instance
+      self.Write_Template(file=File, template='start',re_list=re_list)
+      
+      File = self.prefix + "/Stop_" + Instance
+      self.Write_Template(file=File, template='stop',re_list=re_list)
+
+      self.Init_Instance(cnf=Instance_Dir + "/my.cnf_" + Instance)
+      
+      Start_File_Text += "echo Starting " + Instance + "\nbash " + self.prefix + "/Start_" + Instance + "\n\n"
+      Stop_File_Text += "echo Stopping " + Instance + "\nbash " + self.prefix + "/Stop_" + Instance + "\n\n"
+      MySQL_Alias += "alias mysql_" + Instance + "='" + self.prefix + "/bin/mysql --defaults-file=" + Instance_Dir + "/my.cnf_" + Instance + "'\n"
+
+
+      ### After creating all the stop, start, and alias files, we want one
+      ### file to glue them altogether. We create one Start and Stop file.
+      ### We should add a /etc/rc.d/init.d/mysql file later. 
+
+    Write = open(self.prefix + "/Start", 'w')
+    Write.write("export mysql_prefix='" + self.prefix + "'\n")
+    Write.write(Start_File_Text)
+    Write.close()
+    Write = open(self.prefix + "/Stop", 'w')
+    Write.write(Stop_File_Text)
+    Write.write("echo Killing ndbd and then ndb_mgmd.\n")
+        ### This is a cludge. 
+    Write.write("killall ndbd; sleep 2\n")
+    Write.write("killall -q -9 ndbd; sleep 2\n")
+    Write.write("killall ndb_mgmd; sleep 2\n")
+    Write.write("killall -q -0 ndb_mgmd; sleep 2\n")
+        
+    Write.close()
+    Write = open(self.prefix + "/bash_aliases", 'w')
+    Write.write(MySQL_Alias)
+    Write.close()
+            
+    Command = "chmod 755 " + self.prefix + "/*"
+    print self.Command(command=Command)
+      
+    return(1)
+ 
+    ### Setup a bunch of test scripts.
+  def Create_Test_Scripts(self):
+    Command = "mkdir -p " + self.prefix + "/scripts"
+    self.Command(command=Command)
+
+    Mysql = self.prefix + "/bin/mysql -S " + self.prefix + "/instance"
+    NDB_MGM = self.prefix + "/bin/ndb_mgm --connect-string=127.0.0.1:" + str(self.cluster_management_port)
+
+        ### Cluster status
+    Write = open(self.prefix + "/scripts/Cluster_Status.bash", 'w')
+    Write.write("\n")
+    Write.write(NDB_MGM  + " -e show\n")
+    Write.close()
+
+      ## Master status
+    Write = open(self.prefix + "/scripts/Master_Status.bash", 'w')
+    Write.write("\n")
+    Write.write("echo\n")
+    Write.write("echo Status for master.\n")
+    Write.write(Mysql + "/master1/mysql.sock -e 'show status'\n")
+    Write.write(Mysql + "/master1/mysql.sock -e 'show processlist'\n")
+    Write.write(Mysql + "/master1/mysql.sock -e 'show master status'\n")
+    Write.close()
+
+      ## Slave status
+    Write = open(self.prefix + "/scripts/Slave_Status.bash", 'w')
+    Write.write("\n")
+    Write.write("echo\n")
+    Write.write("echo Status for slaves\n")
+    for no in range(2,self.slave + 2):
+      Write.write("echo\n")
+      Write.write("echo Status for slave"+str(no)+"\n")
+      Write.write(Mysql + "/slave"+str(no)+"/mysql.sock -e 'show slave status\\G'\n")
+    Write.close()
+ 
+      ## Master/Slave status
+    Write = open(self.prefix + "/scripts/Master_Slave_Status.bash", 'w')
+    Write.write("\n")
+    Write.write("echo\n")
+    Write.write("echo Status for slaves and then master.\n")
+    Write.write(self.prefix + "/scripts/Slave_Status.bash\n")
+    Write.write(self.prefix + "/scripts/Master_Status.bash\n")
+    Write.close()
+
+      ## Test master/slaves.
+    Write = open(self.prefix + "/scripts/Master_Slave_Test.bash", 'w')
+    Write.write("\n")
+    Write.write(Mysql + "/master1/mysql.sock -v -e 'create database if not exists test_slave'\n")
+    Write.write(Mysql+"/master1/mysql.sock -v -e 'CREATE TABLE if not exists ctest (i INT)' test_slave\n")
+
+    Write.write("\n")
+    for no in range(2, self.slave + 2):
+      Instance2 = "cluster_mysqld" + str(no)
+      Instance_Dir2 = self.prefix + "/instance/" + Instance2
+      Write.write(Mysql+"/master1/mysql.sock -v -e 'insert into ctest values ("+str(no)+")' test_slave\n")
+
+    Write.write("echo sleeping 2 seconds.\nsleep 2\n")
+    Write.write("echo Getting data from master.\n")
+    Write.write(Mysql+"/master1/mysql.sock -e 'select distinct(i) as slave_no, count(i) as inserts from ctest group by i order by i' test_slave\n")
+    for no in range(2, self.slave + 2):
+      Write.write("echo Getting data from slave"+str(no)+".\n")
+      Write.write(Mysql+"/slave"+str(no)+"/mysql.sock -e 'select distinct(i) as slave_no, count(i) as inserts from ctest group by i order by i' test_slave\n")
+    Write.write("echo All "+str(self.slave + 1)+" tables should be the same below.\n")
+    Write.close()
+    
+      ## Test cluster data.
+    Write = open(self.prefix + "/scripts/Cluster_Test.bash", 'w')
+    Write.write("\n")
+    for no in range(2 + self.slave, self.cluster + self.slave + 2):
+      Instance2 = "cluster_mysqld" + str(no)
+      Instance_Dir2 = self.prefix + "/instance/" + Instance2
+
+      Write.write("\n")
+      Write.write(Mysql + "/cluster_mysqld"+str(no)+"/mysql.sock -v -e 'create database if not exists test_cluster'\n")
+      Write.write(Mysql+"/cluster_mysqld"+str(no)+"/mysql.sock -v -e 'CREATE TABLE if not exists ctest (i INT) ENGINE=NDBCLUSTER' test_cluster\n")
+      Write.write(Mysql+"/cluster_mysqld"+str(no)+"/mysql.sock -v -e 'insert into ctest values ("+str(no)+")' test_cluster\n")
+
+    no = 2 + self.slave
+    Range = self.cluster
+    Write.write("\n")
+    Write.write("echo There should be "+str(Range)+" distinct entries in the table below.\n")
+    Write.write("echo Each mysqld node entered its own id.\n")
+    Write.write(Mysql+"/cluster_mysqld"+str(no)+"/mysql.sock -v -e 'select distinct(i) as mysqld_server, count(i) as inserts from ctest group by i order by i' test_cluster\n")
+
+    Write.write("echo Shutting down each storage node and testing.\n")
+
+    Max_No = self.cluster + self.slave + 2 + 1
+    for no in range(2 + self.slave, self.cluster + self.slave + 2):
+      Instance2 = "cluster_mysqld" + str(no)
+      Instance_Dir2 = self.prefix + "/instance/" + Instance2
+      Write.write("\n")
+      Write.write(self.prefix + "/bin/ndb_mgm  127.0.0.1 " + str(self.cluster_management_port) + " -e '" + str(Max_No + no) + " stop' \n")
+      Write.write("echo There should be "+str(Range)+" distinct entries in the table below.\n")
+      Write.write("echo Each mysqld node entered its own id.\n")
+      Write.write("echo Getting data from cluster_mysqld"+str(no)+" when storage node " + str(Max_No + no) + " is down.\n")
+      Write.write(Mysql+"/cluster_mysqld"+str(no)+"/mysql.sock -v -e 'select distinct(i) as mysqld_server, count(i) as inserts from ctest group by i order by i' test_cluster\n")
+      Write.write(self.prefix + "/libexec/ndbd --nostart -c 127.0.0.1:" + str(self.cluster_management_port) + ":id="+str(Max_No + no)+"\n")
+      Write.write("echo Sleeping 3 seconds.\nsleep 3\n")
+      Write.write(self.prefix + "/bin/ndb_mgm  127.0.0.1 " + str(self.cluster_management_port) + " -e '" + str(Max_No + no) + " start' \n")
+      Write.write("echo Sleeping 5 seconds.\nsleep 5\n")
+    Write.close()
+
+    Command = "chmod 755 " + self.prefix + "/scripts/*"
+    print self.Command(command=Command)
+            
+    ### To start all the mysql instances, we use one file. 
+  def Start_Instances(self):
+    print "Starting the mysql services. This could take a minute."
+    return(self.Command(command="bash " + self.prefix + "/Start"))
+
+    ### To stop all he mysql instances, we use one file. 
+  def Stop_Instances(self):
+    print "Stopping mysql services. This could take a minute."
+    return(self.Command(command="bash " + self.prefix + "/Stop"))
+
+    ### initialize non-cluster mysql instances. Doesn't hurt to init the
+    ### cluster instances since they use separate data directories. 
+  def Init_Instance(self, cnf=""):
+    print "Initializing: " + cnf
+    Command = self.prefix + "/bin/mysql_install_db --defaults-file=" + cnf
+    Result = self.Command(command=Command)
+    if Result[0] > 0: print Result
+    self.log_handle.write(Result[1])
+
+    Command = "chown -R mysql " + self.prefix + "/instance"
+    Result = self.Command(command=Command)
+
+    return(Result)
+
+  def Define_Variables(self):
+    Menu ="""Defined_Variables takes no arguements. It grabs what it needs from
+    self.original_options. The available options (which should be line
+    command options) are:
+    -p or --prefix         The directory mysql gets install to.
+    -m or --master         0 or 1. 1 means we have a master, 0 means none.
+    -s or --slave          No of slaves.
+    -l or --log            Location where we dump the install log. 
+    -c or --cluster        No of instances in our cluster.
+    -h or --help           This menu.
+    -d or --download       Location of the file to download with wget.
+                           This will automatically change direcrory names
+                           where it compiles and install mysql. It assumes
+                           the url ends in ".tar.gz" or it will abort. 
+    --mport=NO             Master port.
+    --sport=NO             Slave port (base).
+    --dbport=NO            Cluster db (ndbd) port (base).
+    --apiport=NO           Cluster api (mysqld) port (base). 
+    --mgmport=NO           Cluster management (ndb_mgmd) port. 
+    """
+
+    self.notes += "opts loaded:"
+    
+    re_prefix = re.compile('^/usr/local/mysql')
+    options = self.original_options
+
+    if len(options.keys()) < 1:
+      Args = []
+      optlist = {}
+      Opts = "m:s:p:l:c:h:d:"
+      Long = ['master', 'slave=', 'prefix=', 'log=', 'cluster=', 'help', 'download=', 'mport=', 'sport=', 'apiport=', 'dbport=', 'mgmport=']
+      try: Args = sys.argv[1:]
+      except: pass
+      try: opts, args = getopt.getopt(Args, Opts, Long)
+      except: print Menu; sys.exit()
+      for o, a in opts: optlist[o] = a
+      options = optlist
+
+    if options.has_key('--help'): print Menu; sys.exit()
+    elif options.has_key('-h'): print Menu; sys.exit()
+
+        ### Get the ports we want. 
+    if options.has_key('--mport'):
+      try: self.master_port = int(options['--mport'])
+      except: pass
+    if options.has_key('--sport'):
+      try: self.slave_port = int(options['--sport'])
+      except: pass
+    if options.has_key('--apiport'):
+      try: self.cluster_api_port = int(options['--apiport'])
+      except: pass
+    if options.has_key('--dbport'):
+      try: self.cluster_db_port = int(options['--dbport'])
+      except: pass
+    if options.has_key('--mgmport'):
+      try: self.cluster_mgm_port = int(options['--mgmport'])
+      except: pass
+
+    if options.has_key('--prefix'): self.prefix = options['--prefix']
+    elif options.has_key('-p'): self.prefix = options['-p']
+    if not re_prefix.search(self.prefix):
+     print "ERROR: bad prefix. Must be a directory under /usr/local/mysqlXXXX."
+     sys.exit()
+
+    if options.has_key('-l'): self.log = options['-l']
+    elif options.has_key('--log'): self.log = options['--log']
+
+    try:
+      Log = open(self.log, 'w')
+      Log.write("# Testing to see if we can write to the log.\n")
+      Log.close()
+    except:
+      print "ERROR: couldn't write to log:", LogFile
+
+    try:
+      if options.has_key('-m'): self.master = int(options['-m'])
+      elif options.has_key('--master'): self.master = int(options['--master'])
+    except:
+      print "ERROR: master no didn't make sense, options:", options
+      sys.exit()
+
+    try:
+      if options.has_key('-s'): self.slave = int(options['-s'])
+      elif options.has_key('--slave'): self.slave = int(options['--slave'])
+    except:
+      print "ERROR: slave no didn't make sense, options:", options
+      sys.exit()
+
+    try:
+      if options.has_key('-c'):
+        no = int(options['-c'])
+        self.cluster = (no/2)*2 + 2
+        print "WARNING: only cluster of 2 seems to work well. Setting to 2."
+        self.cluster = 2
+      elif options.has_key('--cluster'):
+        no = int(options['--cluster'])
+        self.cluster = (no/2)*2 + 2
+        print "WARNING: only cluster of 2 seems to work well. Setting to 2."
+        self.cluster = 2 
+    except:
+      print "ERROR: cluster no didn't make sense, options:", options
+      sys.exit()
+    
+
+    Download_Bad = ''
+    Download = ''
+    try:
+      if options.has_key('-d') or options.has_key('--download'):
+        if options.has_key('-d'): Download = str(options['-d'])
+        else: Download = str(options['--download'])
+
+        Re_TGZ = re.compile('.tar.gz$')
+        if not Re_TGZ.search(Download):
+          Download = "No tar.gz:" + Download
+          print Download 
+          sys.exit()
+
+        ### Get the filename. 
+        Temp = string.split(Download, '/')
+        self.mysql_file = Temp[-1]
+        if len(self.mysql_file) < 1:
+          print "ERROR: download file has bad name.", self.mysql_file
+          sys.exit()
+        self.mysql_compile_dir = Re_TGZ.sub('', self.mysql_file)
+
+        ### Get the directories.
+        Temp = string.split(Download[::-1], '/', 1)
+        self.ftp_dir = Temp[1][::-1]
+        self.prefix = "/usr/local/" + self.mysql_compile_dir
+          ### I disabled this so that we would have a consistent place
+          ### to compile mysql.
+#        self.compile_home = "/usr/local/src/" + self.mysql_compile_dir
+        
+#        print self.mysql_file
+#        print self.mysql_compile_dir
+#        print self.ftp_dir
+#        print self.prefix
+#        print self.compile_home
+            
+    except:
+      print "ERROR: download option not valid.", Download
+      Except()
+      sys.exit()
+
+       #--------------------------------------------------------------
+    ### This point and below is only for template files. 
+  def Get_Templates(self):
+    """ Get_Templates() takes no arguements. It returns the predefined
+    templates or if you have the directory "Config" within the directory
+    that you are executing, it will attempt to grab templates from files
+    called compile, my.cnf_master, my.cnf_slave, my.cnf_cluster, start, and
+    stop.
+    """
+
+    self.notes += "templates loaded:"
+    
+    templates = {}
+    templates['compile'] = ""
+    templates['my.cnf_master'] = ""
+    templates['my.cnf_slave'] = ""
+    templates['my.cnf_cluster_db'] = ""
+    templates['my.cnf_cluster_management'] = ""
+    templates['start'] = ""
+    templates['stop'] = ""
+    templates['config.ini_db'] = ""
+    templates['config.ini_mgm'] = ""
+        
+    Config_Home = posix.getcwd() + "/Config"
+
+    for Key in templates.keys():
+      if os.path.isfile(Config_Home + "/" + Key):
+        self.log_handle.write("READ:" + Config_Home + "/" + Key + "\n")
+        Read = open(Config_Home + "/" + Key, 'r')
+        templates[Key] = ""
+        for Line in Read: templates[Key] += Line
+        Read.close()
+
+        ### Remove this else clause once we embed the config files. 
+      else:
+        print "Error, file not found.", Config_Home + "/" + Key  
+        sys.exit()
+        
+    return(templates)
+
+    ### I made a general subroutine to escape to shell to execute commands
+    ### because I was doing it repeatedly and I wanted to log it. I could have
+    ### used built-in Python commands instead of escaping to shell, but I like
+    ### the unix commands better becaue they are more flexible. 
+  def Command(self, command=""):
+    """ Command takes a single arguement "command". It will escape to shell
+    and execute that arguement, return the result, and record how long it took
+    in minutes to perform the action.
+    """
+
+    start_time = time.time()
+    self.log_handle.write("COMMAND:" + command + "\n")
+    Result = commands.getstatusoutput(command)
+    stop_time = time.time()
+    time_diff = int((stop_time - start_time)/60)
+
+    str1 = "TIME:" + str(time_diff) + " minutes.\n"
+    self.log_handle.write("TIME:" + str1)
+    self.log_handle.write("RESULT NO:" + str(Result[0]) + "\n")
+    self.log_handle.write("RESULT:" + str(Result[1]) + "\n")
+
+    return(Result)
+
+    ### This just writes our templates. No big deal. 
+  def Write_Template(self, re_list=[], file="", template=""):
+    Write = open(file, "w")
+    Line = self.templates[template]
+    for Item in re_list:
+      Re = Item[0]
+      Value = Item[1]
+      Line = Re.sub(Value, Line)
+    Write.write(Line)
+    Write.close()
+

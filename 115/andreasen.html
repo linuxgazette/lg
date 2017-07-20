@@ -1,0 +1,683 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Python for scientific use, Part II: Data analysis LG #115</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="lg_bytes.html" >&lt;-- prev</A> | <A HREF="chirico.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Python for scientific use, Part II: Data analysis</h1>
+<p id="by"><b>By <A HREF="../authors/andreasen.html">Anders Andreasen</A></b></p>
+
+<p>
+<h3>Introduction</h3>
+
+<p>
+In <a href="../114/andreasen.html">Linux Gazette issue #114</a>, we took
+the first steps towards understanding and interpretation of scientific data
+by using <a href="http://www.python.org">Python</a> for the visualization.
+The next step is to reach a quantitative understanding by performing some
+sensible data analysis, such as fitting a model to the data and thereby
+extracting useful parameters. This defines the main topic of this part II
+of Python for scientific use. As with part I, this article will also be
+centered around a few illustrative examples. I assume that the reader is
+familiar with either part I of this article or basic Python.
+</p>
+
+<h3>Part I: <em>post scriptum</em></h3>
+<p>
+As a pleasant surprise, I actually got some nice reader feedback related to
+Part I of this article. Some readers proposed additional tips &amp; tricks;
+I have included them here, to the service of other readers who might find
+it useful (at least I did :-).
+</p>
+
+<p>
+If you want to try out all the examples on a Wind0ws machine (for some
+wicked reason), John Bollinger suggested to use <code>os.popen</code> the
+following way:
+</p>
+
+<pre class="code">
+f=os.popen('pgnuplot.exe','w')
+</pre>
+
+<p>
+Even more intelligently, the following code ensures that the Python script
+can be run on both Linux and Wind0ws:
+</p>
+
+<pre class="code">
+import os
+import sys
+
+if os.name == 'posix':
+    f=os.popen('gnuplot', 'w')
+    print 'posix'
+elif os.name == 'nt':
+    f=os.popen('pgnuplot.exe', 'w')
+    print 'windows'
+else:
+    print 'unknown os'
+    sys.exit(1)
+</pre>
+
+<p>
+JB also pointed my attention to Michael Haggerty's neat
+project, <code>gnuplot.py</code>, 
+at <a href="http://gnuplot-py.sourceforge.net/">sourceforge</a>.
+</p>
+
+<p>
+Cyril Buttay brought to my attention that the default encoding in gnuplot
+is insufficient if you want to print special characters, e.g. Danish
+ones like &aelig;, &oslash;, and &aring; on the plots. In order to do
+so, you need to specify another encoding as described in the <a
+href="http://gnuplot.info/docs/gnuplot.html#encoding">gnuplot manual</a>:
+</p>
+
+<pre class="code">
+set encoding {&lt;value&gt;}
+show encoding
+</pre>
+
+<p>
+where the valid values are
+</p>
+
+<pre class="code">
+default     - tells a terminal to use its default encoding
+iso_8859_1  - the most common Western European font used by many
+              Unix workstations and by MS-Windows. This encoding is
+              known in the PostScript world as 'ISO-Latin1'.
+iso_8859_2  - used in Central and Eastern Europe
+iso_8859_15 - a variant of iso_8859_1 that includes the Euro symbol
+cp850       - codepage for OS/2
+cp852       - codepage for OS/2
+cp437       - codepage for MS-DOS
+koi8r       - popular Unix Cyrillic encoding
+</pre>
+
+<p>
+If the encoding is not changed from the default, the special character might
+show up on the screen but not in the hardcopy (actually, I think the
+special characters only work with <code>terminal postscript</code>, but I'm
+not sure). If the desired special character is not available on your
+keyboard, it can be accessed though its octal value; e.g., to print a special
+character such as the Danish &aring; in the title of a plot, set the encoding to
+<code>iso_8859_1</code>:
+
+<pre class="code">
+set title "This is a Danish character \345"
+</pre>
+
+<p>
+which will display <strong>This is a Danish character &aring;</strong> in
+the title of the plot. To also use Greek characters, e.g. &alpha; (lowercase
+alpha), one should use <code>{/Symbol a}</code> (this requires
+<code>terminal postscript enhanced</code>). Similar, &Gamma; (uppercase
+gamma), is generated with <code>{/Symbol G}</code>. To find special
+characters and their corresponding octal values for, e.g.,
+<code>iso8859-1</code> encoding in Linux, just type:
+
+<pre>
+man iso_8859-1
+</pre>
+
+<p>
+or have a look at <a href="misc/andreasen/iso8859_1.ps">this postscript file</a>.
+</p>
+
+<p class="editorial">
+[ If you're not sure of the exact name of the relevant manpage, just type
+<code>man -k <b>string</b></code>, where 'string' is the name, or part of
+the name of the encoding you're looking for. This will get you a list of
+all the manpages the names of which contain that string. -- Ben ]
+</p>
+
+
+<h3>Example 1: Fitting 2-D data</h3>
+
+<p>
+The first example illustrates how to fit a model to 2-D data. The data to
+be fitted is included in the file <a
+href="misc/andreasen/tgdata.dat">tgdata.dat</a> and represents weight
+loss (in wt. %) as a function of time. The weight loss is due to hydrogen
+desorption from <a
+href="http://en.wikipedia.org/wiki/Lithium_aluminium_hydride">LiAlH<sub>4</sub></a>,
+a potential material for on-board hydrogen storage in future fuel cell
+powered vehicles (thank you Ben for mentioning <em>hydrogen power</em> in the
+<a
+href="../114/lg_laundrette.html#nottag.30"><em>Laundrette</em></a>
+in issue #114). The data is actually the same as in example 1 of <a
+href="../114/andreasen.html">LG#114</a>. For some
+reason, I suspect that the data may be explained by the following function:
+</p>
+
+<pre>
+f(t) = A1*(1-exp(-(k1*t)^n1)) + A2*(1-exp(-(k2*t)^n2)) 
+</pre>
+
+<p> 
+There are different mathematical methods available for finding the
+parameters that give an optimal fit to real data, but the most widely used
+is probably the <a
+href="http://en.wikipedia.org/wiki/Levenberg-Marquardt_algorithm">Levenberg-Marquandt
+algorithm</a> for non-linear <a
+href="http://en.wikipedia.org/wiki/Least_squares">least-squares</a>
+optimization. The algorithm works by minimizing the sum of squares (squared
+residuals) defined for each data point as
+</p>
+
+<pre>
+(y-f(t))^2
+</pre>
+
+<p>
+where <code>y</code> is the measured dependent variable and
+<code>f(t)</code> is the calculated. The <a
+href="http://www.scipy.org">Scipy</a> package has the Levenberg-Marquandt
+algorithm included as the function <code>leastsq</code>.
+</p>
+
+
+
+
+<p>
+The fitting routine is in the file <a
+href="misc/andreasen/kinfit.py.txt">kinfit.py</a> and the python code is
+listed below. Line numbers have been added for readability.
+</p>
+
+<pre class="code">
+     1  from scipy import *
+     2  from scipy.optimize import leastsq
+     3  import scipy.io.array_import
+     4  from scipy import gplt
+     5
+     6  def residuals(p, y, x):
+     7          err = y-peval(x,p)
+     8          return err
+     9
+    10  def peval(x, p):
+    11          return p[0]*(1-exp(-(p[2]*x)**p[4])) + p[1]*(1-exp(-(p[3]*(x))**p[5] ))
+    12
+    13  filename=('tgdata.dat')
+    14  data = scipy.io.array_import.read_array(filename)
+    15
+    16  y = data[:,1]
+    17  x = data[:,0]
+    18
+    19  A1_0=4
+    20  A2_0=3
+    21  k1_0=0.5
+    22  k2_0=0.04
+    23  n1_0=2
+    24  n2_0=1
+    25  pname = (['A1','A2','k1','k2','n1','n2'])
+    26  p0 = array([A1_0 , A2_0, k1_0, k2_0,n1_0,n2_0])
+    27  plsq = leastsq(residuals, p0, args=(y, x), maxfev=2000)
+    28  gplt.plot(x,y,'title "Meas" with points',x,peval(x,plsq[0]),'title "Fit" with lines lt -1')
+    29  gplt.yaxis((0, 7))
+    30  gplt.legend('right bottom Left')
+    31  gplt.xtitle('Time [h]')
+    32  gplt.ytitle('Hydrogen release [wt. %]')
+    33  gplt.grid("off")
+    34  gplt.output('kinfit.png','png medium transparent size 600,400')
+    35
+    36  print "Final parameters"
+    37  for i in range(len(pname)):
+    38          print "%s = %.4f " % (pname[i], p0[i])
+</pre>
+
+<p>
+In order to run the code download the <a
+href="misc/andreasen/kinfit.py.txt">kinfit.py.txt</a> file as kinfit.py (or
+use another name of your preference), also download the datafile <a
+href="misc/andreasen/tgdata.dat">tgdata.dat</a> and run the script with
+<code>python kinfit.py</code>. Besides Python, you need to have SciPy and
+gnuplot installed (vers. 4.0 was used throughout this article). The output
+of the program is plotted to the screen as shown below. A hard copy is also
+made. The gnuplot png option <code>size</code> is a little tricky. The
+example shown above works with gnuplot compiled against <code>libgd</code>.
+If you have <code>libpng + zlib</code> installed, instead of
+<code>size</code> write <code>picsize</code> and the specified width and
+height should not be comma separated. As shown in the figure below, the
+proposed model fit the data very well (sometimes you get lucky :-).
+</p>
+
+<img src="misc/andreasen/kinfit.png" alt="Fit of 2-D data" width="600" height="400">
+
+<p> 
+Now, let us go through the code of the example. 
+
+<dl>
+<dt>Line 1-4</dt> 
+<dd>all the needed packages are imported. The first is basic SciPy
+functionality, the second is the Levenberg-Marquandt algorithm, the third
+is ASCII data file import, and finally the fourth is the gnuplot interface. 
+<dt>Line 6-11</dt>
+<dd>First, the function used to calculate the residuals (not the squared
+ones, squaring will be handled by <code>leastsq</code>) is defined; second,
+the fitting function is defined.
+<dt>Line 13-17</dt>
+<dd>The data file name is stored, and the data file is read using
+<code>scipy.io.array_import.read_array</code>. For convenience x (time) and
+y (weight loss) values are stores in separate variables.
+<dt>Line 19-26</dt>
+<dd>All parameters are given some initial guesses. An array with the names
+of the parameters is created for printing the results and all initial
+guesses are also stored in an array. I have chosen initial guesses that are
+quite close to the optimal parameters. However, chosing reasonable starting
+parameters is not always easy. In the worst case, poor initial parameters
+might result in the fitting procedure not being able to find a converged
+solution. In this case, a starting point can be to try and plot the data
+along with the model predictions and then "tune" the initial parameters to
+give just a crude description (but better than the initial parameters that
+did not lead to convergence), so that the model just captures the essential
+features of the data before starting the fitting procedure.
+<dt>Line 27</dt>
+<dd>Here the Levenberg-Marquandt algorithm (<code>lestsq</code>) is called.
+The input parameters are the name of the function defining the residuals,
+the array of initial guesses, the x- and y-values of the data, and the
+maximum number of function evaluation are also specified. The values of the
+optimized parameters are stored in <code>plsq[0]</code> (actually the
+initial guesses in <code>p0</code> are also overwritten with the optimized
+ones). In order to learn more about the usage of <code>lestsq</code> type
+<code>info(optimize.leastsq)</code> in an interactive python session
+- remember that the SciPy package should be imported first - or read the
+tutorial (see references in the end of this article). 
+<dt>Line 28-34</dt>
+<dd>This is the plotting of the data and the model calculations (by
+evaluating the function defining the fitting model with the final
+parameters as input). 
+<dt>Line 36-38</dt>
+<dd>The final parameters are printed to the console as:
+<dd><code>Final parameters</code>
+<dd><code>A1 = 4.1141</code>
+<dd><code>A2 = 2.4435</code>
+<dd><code>k1 = 0.6240</code>
+<dd><code>k2 = 0.1227</code>
+<dd><code>n1 = 1.7987</code>
+<dd><code>n2 = 1.5120</code>
+</dl>
+
+<p>
+<a href="http://www.gnuplot.info">Gnuplot</a> also uses the
+Levenberg-Marquandt algorithm for its built-in curve fitting procedure.
+Actually, for many cases where the fitting function is somewhat simple and
+the data does not need heavy pre-processing, I prefer gnuplot over Python -
+simply due to the fact that Gnuplot also prints standard error estimates of
+the individual parameters. The advantage of Python over Gnuplot is the
+availability of many different optimization algorithms in addition to the
+Levenberg-Marquandt procedure, e.g. the Simplex algorithm, the Powell's
+method, the Quasi-Newton method, Conjugated-gradient method, etc. One only
+has to supply a function calculating the sum of squares (with
+<code>lestsq</code> squaring and summing of the residuals were performed
+<em>on-the-fly</em>).
+</p>
+
+<h3>Example 2: Sunspots</h3>
+<p>
+In the next example we will use the <a
+href="http://en.wikipedia.org/wiki/Fast_Fourier_transform">Fast Fourier
+Transform</a> (FFT) in order to transform time-dependent data into the
+<em>frequency</em> domain. By doing so, it is possible to analyse if any
+predominant frequencies exists - i.e. if there is any periodicity in the
+data. We will not go into too much detail of the underlying mathematics of
+the FFT method; if you're interested, have a look at some of the many
+informative pages on the internet, e.g. <a
+href="http://astronomy.swin.edu.au/~pbourke/analysis/dft/">http://astronomy.swin.edu.au/~pbourke/analysis/dft/</a>,
+<a
+href="http://www.cmlab.csie.ntu.edu.tw/cml/dsp/training/coding/transform/fft.html">http://www.cmlab.csie.ntu.edu.tw/cml/dsp/training/coding/transform/fft.html</a>,
+<a href="http://www.library.cornell.edu/nr/bookcpdf/c12-0.pdf">Numerical
+recipes</a>, etc.
+</p>
+
+<p>
+Let's take a simple example to get started. Consider temperature
+measurement at a given location as a function of time. By intuition, we
+expect such data to have a dominant frequency component of 1/24h = 0.042
+h<sup>-1</sup> simply reflecting the fact that it is usually warmer during
+the day (with a maximum around noon) and cooler during the night (with a
+minimum sometime during the night). Thus, assuming a period with stable
+weather for, say, one week, we may approximate the the temperature
+variations as a function of time with a sine wave with a period of 24 h. If
+we take the Fourier Transform of this sine wave we find that only one
+single frequency is present (shown as a &delta;-function) and that it is
+0.042 h<sup>-1</sup>. OK, enough with the simple case, if everything was
+this simple we wouldn't need the Fourier Transform. Instead we will move to
+a more complex case where intuition is not enough.   
+</p>
+
+<p>
+The example data we will use is the sunspot activity measurements from year
+1700 to year 2004 provided by <a
+href="http://www.ngdc.noaa.gov/stp/SOLAR/ftpsunspotnumber.html">National
+Geophysical Data Center - NOAA Sattelite and Information Service</a>. The
+data set is the yearly sunspot observations available via <a
+href="ftp://ftp.ngdc.noaa.gov/STP/SOLAR_DATA/SUNSPOT_NUMBERS/YEARLY.PLT">FTP</a>.
+The datafile is also included as <a
+href="misc/andreasen/sunspots.dat">sunspots.dat</a>. The sunspot data have
+been used for illustrating the power of FFT with respect to finding a
+periodicity in sunspot activity in various computer languages, e.g. <a
+href="http://www.mathworks.com/access/helpdesk/help/techdoc/math/datafun22.html">Matlab</a>
+and <a
+href="http://www.physics.odu.edu/~gec100f/cai-lib/simulations.htm#astro">BASIC</a>.
+The observations that there is (or might be) a correlation between sunspot
+activity and the global temperature have led to controversy when discussing
+the greenhouse effect and global warming.
+</p>
+
+<p>
+The graph below illustrates the sunspot data to be used in this example.
+</p>
+
+<img src="misc/andreasen/sunspot_time.png" alt="Sunspots" width="600" height="400">
+
+<p>
+The code below shows the python script for analysing the sunspot data. The
+shown script is a shortened version with some plots removed. The full
+script is in <a href="misc/andreasen/sunspots.py.txt">sunspots.py.txt</a>.
+</p>
+
+<pre class="code">
+     1  from scipy import *
+     2  import scipy.io.array_import
+     3  from scipy import gplt
+     4  from scipy import fftpack
+     5
+     6  sunspot = scipy.io.array_import.read_array('sunspots.dat')
+     7
+     8  year=sunspot[:,0]
+     9  wolfer=sunspot[:,1]
+    10  Y=fft(wolfer)
+    11  n=len(Y)
+    12  power = abs(Y[1:(n/2)])**2
+    13  nyquist=1./2
+    14  freq=array(range(n/2))/(n/2.0)*nyquist
+    15  period=1./freq
+    16  gplt.plot(period[1:len(period)], power,'title "Meas" with linespoints')
+    17  gplt.xaxis((0,40))
+    18  gplt.xtitle('Period [year]')
+    19  gplt.ytitle('|FFT|**2')
+    20  gplt.grid("off")
+    21  gplt.output('sunspot_period.png','png medium transparent picsize 600 400')
+</pre>
+
+<p> 
+In the first few lines we import all the necessary packages. In line 6 the
+sunspot data is imported and stored in the variable <code>sunspot</code>;
+for convenience the x-values (year) and y-values (Wolfer number) are stored
+in separate variables. In line 10 we take the fast Fourier transform (FFT)
+of the sunspot data. As shown in the figure below, the output is a
+collection of complex numbers (defining both amplitude and phase of the
+wave components), and there is noticeable symmetry around Im=0.
+</p>
+
+<img src="misc/andreasen/sunspot_FFT.png" alt="FFT(sunspots)" width="600" height="400">
+
+<p>
+In order to construct a periodogram, i.e. a graph of power vs. frequency,
+we first compute the <em>power</em> of the FFT signal which is simply the
+FFT signal squared. We only need the part of the signal ranging from zero
+to a frequency equal to the Nyquist frequency, which is equal to half the
+maximum frequency, since frequencies above the Nyquist frequency correspond
+to negative frequencies. The frequency range is calculated from
+<strong>0-N/2</strong> as <strong>N/(2T)</strong> where <strong>N</strong>
+is the number of samples and <strong>T</strong> is the sampling time. The
+figure below shows the resulting periodogram.
+</p>
+
+<img src="misc/andreasen/sunspot_freq.png" alt="sunspots(freq.)" width="600" height="400">
+
+<p>
+Thus, we can see that there is indeed periodicity in the sunspot data,
+with frequencies around 0.9 standing out. Note that it is easier to
+see if we use the period (inverse of frequency) instead of frequency on the
+x-axis.
+</p>
+
+<img src="misc/andreasen/sunspot_period.png" alt="sunspots(period)" width="600" height="400">
+
+<p>
+As seen in the figure we have found out (like many others have) that the
+sunspot activity data from 1700-2004 is periodic, and that the sunspots
+occur with a maximum in activity approx. every 11 years.
+</p>
+
+<h3>Example 3: Fitting multiple 2-D data files</h3>
+<p>
+The next and final example is a little more complex than the previous ones.
+The task it should accomplish is to cycle through a number of data files
+(similar to the ones used in Example 3 of <a
+href="../114/andreasen.html">Part I</a>) and take a slice of each data
+file, corresponding to an <a
+href="http://en.wikipedia.org/wiki/X-ray_diffraction">X-ray diffraction</a>
+peak as shown in example 2 in <a href="../114/andreasen.html">Part I</a>.
+To this peak a <a
+href="http://en.wikipedia.org/wiki/Normal_distribution">Gaussian</a> (bell)
+curve should be fitted and the fitting parameters should be stored in a
+datafile. The extracted parameters: peak position, peak height, peak width,
+all contain valuable information about the sample under investigation
+(MgH<sub>2</sub>, another material for solid state hydrogen storage). The
+peak position is related to the crystal lattice of the material (actually
+the interatomic spacing, if we're to be precise), the peak height
+corresponds to the abundance of the material, and the peak width
+corresponds to the domain size of the MgH<sub>2</sub> crystallites.
+Furthermore, the script should take two command line arguments,
+<code>plot</code> and <code>data</code>, enabling plotting of the peak fit
+as the script cycles through the data files as well as printing out the
+fitting parameters to the screen. This option is mainly of diagnostic
+nature. Furthermore, there should be some sort of mechanism evaluating the
+quality of the fit and in case the fit is poor it should be disregarded.
+Finally, the scripts should generate a plot of the fitting parameters as a
+function of time (cycle #).  The length of the script approaches 100 lines
+and will not be shown, but it is stored in the file <a
+href="misc/andreasen/lgtixrpd.py.txt">lgtixrpd.py.txt</a>. In the
+following section, I will go though the main parts of the script. To run
+the example yourself you'll have to <a
+href="http://andr.dk/wiki/index.php/Supplementary_material#Linux_gazette_115">download</a>
+and unpack the data files.
+<p>
+
+<dl>
+<dt>Line 1-3</dt>
+	<dd>The usual import of modules and packages
+<dt>Line 5-10</dt>
+	<dd>Setting file names for data files including a data file
+	containing information about temperature vs. cycle number. Setting
+	file names for storing the fitting parameters and the hard copy of
+	the plot.
+<dt>Line 12-19</dt>
+	<dd>Setting initial parameters for the fitting routine including
+	lower and upper bounds for the peak position, peak amplitude/height
+	(<code>A</code>), peak position (<code>B</code>), peak half width
+	(<code>C</code>), and the background (<code>D</code>). 
+<dt>Line 21-24</dt>
+	<dd>Read in the temperature data, making a list of data files to be
+	cycled through, and creating data arrays for storing the output.
+<dt>Line 26-61</dt>
+	<dd>The main procedure. For each filename in the file list, gnuplot
+	is used to fit the data (since I prefer to have std. dev. included
+	in the output as well). If the script is passed a command line
+	argument called <code>plot</code> as the first argument, each fit is
+	plotted along the way though the files. In lines 42-53, the state
+	of the fit is evaluated. If, e.g., the amplitude is negative or the
+	peak position is out of bounds, the fit is disregarded and the
+	corresponding fitting parameters are not stored (only zeros are
+	stored). If the script is passed a command line argument called
+	<code>data</code>, the fitting parameters are printed to screen as
+	the data files are cycled through.
+<dt>Line 63-68</dt>
+	<dd>All lines in the data array containing only zeros are removed.
+<dt>Line 70-80</dt>
+	<dd>The fitting parameters are stored in ASCII-format in a data file. 
+<dt>Line 82</dt>
+	<dd>A hard copy of a plot showing temperature, peak amplitude,
+	position and width as a function of time is prepared.
+<dt>Line 95-98</dt>
+	<dd>The plot is shown using <code>ggv</code> and a <code>pnm</code>
+	version of the hard copy is created.
+</dl>
+
+<p>
+The figure below shows the created plot. From the plot, we notice that
+during heating (linear) of our sample, the peak position shifts towards
+lower values. According to <a
+href="http://en.wikipedia.org/wiki/Bragg%27s_law">Bragg's law of
+diffraction</a>, there is an inverse relationship between the peak position
+and the lattice spacing. Thus, our sample expands during heating (as
+expected). We also observe that when the sample has been heated to
+400&deg;C for some time, the amplitude starts decreasing, signaling a
+disappearance of MgH<sub>2</sub> due to decomposition accompanied
+by the release of hydrogen.
+</p>
+
+<img src="misc/andreasen/tixrpd_plot.png" alt="Fit of 2-D data" width="600" height="840">
+
+<h3>Summary</h3>
+<p>
+In this article, a few examples have been given in order to illustrate that
+Python is indeed a powerful tool for visualization and analysis of
+scientific data. It combines the plotting power of gnuplot with the power
+of a real programming language. The SciPy package includes many scientific
+tools suitable for data analysis.
+</p>
+
+<h3>Suggestions for further reading</h3>
+<p> Manuals, Tutorials, Books etc:</p>
+<ol>
+<li>Guido van Rossum, <em>Python tutorial</em>, <a href="http://docs.python.org/tut/tut.html">http://docs.python.org/tut/tut.html</a></li>
+<li>Guido van Rossum, <em>Python library reference</em>, <a href="http://docs.python.org/lib/lib.html">http://docs.python.org/lib/lib.html</a></li>
+<li>Mark Pilgrim, <em>Dive into Python</em>, <a href="http://diveintopython.org/toc/index.html">http://diveintopython.org/toc/index.html</a></li>
+<li>Thomas Williams &amp; Colin Kelley, <em>Gnuplot - An Interactive Plotting Program</em>, <a href="http://www.gnuplot.info/docs/gnuplot.html">http://www.gnuplot.info/docs/gnuplot.html</a></li>
+<li>Travis E. Oliphant, <em>SciPy tutorial</em>, <a href="http://www.scipy.org/documentation/tutorial.pdf">http://www.scipy.org/documentation/tutorial.pdf</a></li>
+<li>David Ascher, Paul F. Dubois, Konrad Hinsen, Jim Hugunin and Travis Oliphant, <em>Numerical Python</em>, <a href="http://numeric.scipy.org/numpydoc/numdoc.htm">http://numeric.scipy.org/numpydoc/numdoc.htm</a></li>
+</ol>
+<p>See also <a href="http://www.google.com/search?q=Python+&btnG=Google+Search&domains=linuxgazette.net&sitesearch=linuxgazette.net">previous articles</a> about Python published in <em><a href="http://www.linuxgazette.net">LG</a></em>.</p>
+
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<p>
+
+<img align="left" alt="[BIO]" src="../gx/authors/andreasen.jpg" class="bio">
+
+<em>
+
+<p> Anders has been using Linux for about 6 years. He started out with RH
+6.2, moved on to RH 7.0, 7.1, 8.0, Knoppix, has been experimenting a little
+with Mandrake, Slackware, and FreeBSD, and is now running Gentoo on his
+workstation (no dual boot :-) at work and Debian Sarge on his laptop at
+home. Anders has (a little) programming experience in C, Pascal, Bash,
+HTML, LaTeX, Python, and Matlab/Octave.  
+
+<p> Anders has a Masters degree in Chemical Engineering and is currently
+employed as a Ph.D. student at the Materials Research Department, Ris&ouml;
+National Laborary in Denmark. Anders is also the webmaster of <a
+href="http://www.risoe.dk/afm/hydrogen">Hydrogen storage at Ris&ouml;</a>.
+
+
+</em>
+<br clear="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2005, Anders Andreasen. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 115 of Linux Gazette, June 2005
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="lg_bytes.html" >&lt;-- prev</A> | <A HREF="chirico.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">June 2005 (#115)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/2003/sit3-shine.7-2.gif" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

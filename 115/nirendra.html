@@ -1,0 +1,389 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Exploring procfs LG #115</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="moen.html" >&lt;-- prev</A> | <A HREF="okopnik.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Exploring procfs</h1>
+<p id="by"><b>By <A HREF="../authors/nirendra.html">Awasthi Nirendra</A></b></p>
+
+<p>
+<h3>Why this article</h3>
+<p>
+I am trying to collect some tips for getting userland information from procfs.
+Warning: Information may be specific to kernel version 2.6.
+</p>
+
+<h3>What is procfs all about?</h3>
+<p>
+Procfs is a virtual file system in linux mounted in /proc, and serves
+multiple purposes including access to kernel information in userland or for
+debugging. One of the features which makes Linux special to me is access to
+process information as a text stream. A lot of linux commands (ps, top,
+pstree, etc.) rely on this filesystem for information.
+</p>
+
+<h3>The virtual file system</h3>
+<p>
+The files and directories of the /proc filesystem are virtual because the
+data is not actually stored on any sort of permanent storage like a hard
+disk; instead, the directories, files, and data within them are created
+dynamically in memory from raw kernel data whenever you attempt to read
+them.
+</p>
+
+<h3>Mounting proc</h3>
+<p>
+Check if you already have procfs mounted on your system (<code>grep proc
+/etc/mtab</code>), otherwise mount it using the following command:
+</p>
+
+<pre>
+mount -t proc proc /proc
+</pre>
+
+<h3>Process information</h3>
+<p>
+Each process has an entry in the <code>/proc</code> filesystem identified by its PID.
+The following are the important files in <code>/proc</code> directory:
+
+<ul>
+<li><code>pid/cmdline</code> contains the command that was used to start the process (using
+null characters to separate the arguments).
+<li><code>/proc/pid/cwd</code> contains a link to the current working directory of the process.
+<li><code>/proc/pid/environ</code> contains a list of the environment variables that the process has available.
+<li><code>/proc/pid/exe</code> contains a link to the program that is running in the process.
+<li><code>/proc/pid/fd/</code> is a directory containing a link to each of the files that the process has open.
+<li><code>/proc/pid/mem</code> contains the memory contents of the process.
+<li><code>/proc/pid/stat</code> contains process status information.
+<li><code>/proc/pid/statm</code> contains process memory usage information.
+</ul>
+
+<p>
+Some examples of getting the process information are:
+</p>
+
+<p>
+i) Some time back I got stuck in a tricky problem of determining whether
+any particular process is doing a core dump. After some research, I noticed
+that the per-process flag in <code>/proc/pid/stat</code> file (the 8th
+attribute) gives quite a lot of "personal" information about process. This
+information can be parsed by doing a logical AND of the per-process flag with
+the following values:
+</p>
+
+<pre class="code">
+0x00000002 Process being created
+0x00000004 Exiting
+0x00000008 Dead
+0x00000040 Process using superuser privilage
+0x00000200 Process dumping core
+0x00000400 Process received some signal
+0x00000800 Process allocating memory
+0x00001000 Killed due to out-of-memory condition
+</pre>
+
+<p>
+I picked up these flags from
+<code>/usr/src/linux/include/linux/sched.h</code> .
+</p>
+
+<p>
+ii) <code>/proc/[pid]/fd/</code> folder gives information about open files.
+To find the input files used by a process:
+</p>
+
+<pre>
+ls -l /proc/[pid]/fd/0
+</pre>
+
+<p>
+iii) To find the sockets being used by a process:
+</p>
+
+<pre>
+ls -l /proc/[pid]/fd|sed -n '/socket/{s/.*\[//;s/\]//p}'
+</pre>
+
+<p>
+Information about these sockets can be obtained from
+</p>
+
+<pre>
+netstat -ae
+</pre>
+
+<p>
+iv) To get command line arguments passed to any process:
+</p>
+
+<pre>
+cat /proc/[pid]/cmdline
+</pre>
+
+<p>
+v) Getting parent process ID of a process:
+</p>
+
+<pre>
+grep PPid /proc/[pid]/status
+</pre>
+
+<p>
+<h3>General system information</h3>
+<p>
+Procfs contains a lot of system information; this includes the CPU
+load, the file system, and the networking configuration. Following are
+some examples of viewing or changing the system information using procfs:
+</p>
+
+<p>
+i) To find out the amount of free system memory:
+</p>
+
+<pre>
+grep Free /proc/meminfo
+</pre>
+
+<p>
+ii) System statistics since it was last started can be collected from
+/proc/stat file. To find out number of processes system had since last
+reboot:
+</p>
+
+<pre>
+grep processes /proc/stat
+</pre>
+
+<p>
+iii) To find out the one, five, and fifteen minute system load averages:
+</p>
+
+<pre>
+awk '{print "1 min:\t" $1 "\n5 min:\t" $2 "\n15 min:\t" $3 }' /proc/loadavg
+</pre>
+
+<p>
+iv) <code>/proc/partitions</code> can also be used for getting system partition information.
+</p>
+
+<p>
+v) <code>/proc/net</code> and <code>/proc/sys/net</code> can be used to
+view or modify important network information. To disable ping, do the
+following as root:
+</p>
+
+<pre>
+echo 1 &gt; /proc/sys/net/ipv4/icmp_echo_ignore_all
+</pre>
+
+<p>
+or to enable IP forwarding / IP Masquerading:
+</p>
+
+<pre>
+echo 1 &gt; /proc/sys/net/ipv4/ip_forward
+</pre>
+
+<p>
+vi) Mounted filesystem information can be retrieved
+from<code>/proc/mounts</code> 
+</p>
+
+<p>
+vii) To change hostname on the fly, do
+</p>
+
+<pre>
+echo www.abc.com &gt; /proc/sys/kernel/hostname
+</pre>
+
+<p>
+viii) To get CPU information:
+</p>
+
+<pre>
+cat /proc/cpuinfo
+</pre>
+
+<p>
+ix) To get swap space utilization:
+</p>
+
+<pre>
+cat /proc/swaps
+</pre>
+
+<p>
+x) To get the system uptime:
+</p>
+
+<pre>
+cat /proc/uptime
+</pre>
+
+<p>
+xi) To list the file systems being shared by NFS:
+</p>
+
+<pre>
+cat /proc/fs/nfsd/exports
+</pre>
+
+<h3>A bit of kernel information</h3>
+
+<p>
+Though I intend to cover it in another article, here are some kernel tidbits:
+</p>
+
+<p>
+i) To get the version information for the currently-running kernel:
+</p>
+
+<pre>
+cat /proc/version
+</pre>
+
+<p>
+ii) The <code>/proc/kmsg</code> file is used by klogd as a source of kernel
+log information, as an alternative to the syslog system call interface.
+</p>
+
+<p>
+iii) The <code>/proc/kcore</code> file provides access to the physical
+memory of the system in core file format, and can be used by gdb to examine
+the current state of any kernel data structures. 
+</p>
+
+<p>
+To get more information, have a look
+at<code>/usr/src/linux/Documentation/filesystems/proc.txt</code> if you
+have the kernel source installed.
+</p>
+
+<p>
+I will try to look into this filesystem from the kernel perspective in a
+future article.
+
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/authors/nirendra.jpg" class="bio">
+
+<em>
+<p>
+I am currently working for Induslogic, India. I have a Bachelor's degree in
+Computer Science.
+</p>
+
+<p> I am a strong supporter of Free Software. In my free time, I write
+programs or read books. My areas of interest includes Device drivers, P2P
+and operating systems. I maintain my blog at <a
+href="http://www.nirendra.net">http://www.nirendra.net</a>.
+</p>
+
+</em>
+<br clear="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2005, Awasthi Nirendra. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 115 of Linux Gazette, June 2005
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="moen.html" >&lt;-- prev</A> | <A HREF="okopnik.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">June 2005 (#115)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/2003/sit3-shine.7-2.gif" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

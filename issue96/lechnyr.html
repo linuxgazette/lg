@@ -1,0 +1,428 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Sendmail AUTH/STARTTLS LG #96</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="adam.html" >&lt;-- prev</A> | <A HREF="moen.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Sendmail AUTH/STARTTLS</h1>
+<p id="by"><b>By <A HREF="../authors/lechnyr.html">David Lechnyr</A></b></p>
+
+<p>
+<p>Sendmail has two little-used options that are great for security and access control. This is commonly referred to as
+AUTH/STARTTLS. With AUTH support, you can require that all SMTP traffic must log in first with a valid username and password;
+those that do can also be allowed to relay (great for laptops with random/mobile IP-addresses). With STARTTLS support, all SMTP
+traffic can be SSL-encrypted. To access these features, you&#39;ll need to download and install OpenSSL, Cyrus SASL, and
+Sendmail.</p>
+<h2>OpenSSL</h2>
+<p>Download OpenSSL from <a href="http://www.openssl.org/source/">http://www.openssl.org/source/</a> and run:</p>
+<blockquote>
+<p><code>$ ./config --prefix=/usr --openssldir=/etc/ssl shared
+<br>
+$ make
+<br>
+$ make test
+<br>
+# make install
+<br>
+# strip /usr/bin/openssl /usr/lib/libcrypto.a /usr/lib/libssl.a<br>
+# cp -fa /etc/ssl/man /usr &amp;&amp; rm -rf /etc/ssl/man<br>
+# ldconfig -v</code></p>
+</blockquote>
+<h2>Cyrus SASL</h2>
+<p>Download Cyrus SASL 1.5.28 from <a href=
+"ftp://ftp.andrew.cmu.edu/pub/cyrus-mail/">ftp://ftp.andrew.cmu.edu/pub/cyrus-mail/</a>. At present, Cyrus SASL 2.1.15 appears to have problems with Sendmail 8.12.10, however reports are mixed.</p>
+<blockquote>
+<p><code>$ tar xzf cyrus-sasl-1.5.28.tar.gz</code><code><br>
+$ cd cyrus-sasl-1.5.28
+<br>
+$ ./configure --prefix=/usr --enable-login
+<br></code> <code>$ make
+<br>
+# make install
+<br>
+# echo &quot;/usr/lib/sasl&quot; &gt;&gt; /etc/ld.so.conf
+<br>
+# ldconfig -v</code></p>
+</blockquote>
+<p>Next, create the AUTH configuration file that Sendmail will look for. It should reside in
+<code>/usr/lib/sasl/Sendmail.conf</code> (note the uppercase &quot;S&quot; in the filename):</p>
+<blockquote>
+<p><code>pwcheck_method: shadow</code></p>
+</blockquote>
+<h2>Sendmail</h2>
+<p>Download Sendmail 8.12.10 from <a href="http://www.sendmail.org">http://www.sendmail.org</a> and unpack the archive:</p>
+<blockquote>
+<p><code>$ tar xzf sendmail.8.12.10.tar.gz
+<br>
+$ cd sendmail-8.12.10/devtools/Site</code></p>
+</blockquote>
+<p>Create the file <code>devtools/Site/site.config.m4</code> with the following contents:</p>
+<blockquote>
+<p><code>APPENDDEF(`conf_sendmail_ENVDEF&#39;, `-DSASL -DSTARTTLS&#39;)
+<br>
+APPENDDEF(`conf_sendmail_LIBS&#39;, `-lsasl -lssl -lcrypto&#39;)</code></p>
+</blockquote>
+<p>Then, from the main directory of the archive, run the standard build command with the &#39;-c&#39; switch, which essentially
+tells Sendmail to re-read any configuration changes we&#39;ve made:</p>
+<blockquote>
+<p><code>$ cd ../..
+<br>
+$ sh Build -c</code><code><br>
+$ cd cf/cf</code></p>
+</blockquote>
+<p>Before we can continue, we need to create our Sendmail configuration file in <code>cf/cf/sendmail.mc</code> --
+everyone&#39;s is different; adjust it to fit your specific circumstance. The required items for AUTH are in red; those for
+STARTTLS are in blue:</p>
+<blockquote>
+<p><code>VERSIONID(`Sample Sendmail AUTH/STARTTLS configuration file&#39;)dnl
+<br>
+OSTYPE(linux)dnl
+<br>
+DOMAIN(generic)dnl
+<br>
+<span class="style5">define(`confAUTH_OPTIONS&#39;, `A&#39;)dnl
+<br>
+define(`confAUTH_MECHANISMS&#39;, `PLAIN&#39;)dnl
+<br>
+TRUST_AUTH_MECH(`PLAIN&#39;)dnl</span>
+<br>
+<span class="style6">define(`confCACERT_PATH&#39;, `/etc/ssl/certs&#39;)dnl
+<br>
+define(`confCACERT&#39;, `/etc/ssl/certs/certificate-authority.crt&#39;)dnl
+<br>
+define(`confSERVER_CERT&#39;, `/etc/ssl/certs/server.crt&#39;)dnl
+<br>
+define(`confSERVER_KEY&#39;, `/etc/ssl/certs/server.key&#39;)dnl</span>
+<br>
+define(`confPRIVACY_FLAGS&#39;, `goaway&#39;)dnl
+<br>
+MAILER(local)dnl
+<br>
+MAILER(smtp)dnl</code></p>
+</blockquote>
+<p>We can&#39;t use cram-md5 or digest-md5 as it&#39;s tricky (if not impossible) to get them to work. Which is why we also use
+STARTTLS to make sure that our plain-text password is encrypted during the AUTH transaction.</p>
+<p>Once done, you can generate the final configuration files and then install the Sendmail binary:</p>
+<blockquote>
+<p><code>$ sh Build sendmail.cf
+<br>
+# mkdir -p /etc/mail
+<br>
+# sh Build install-cf
+<br>
+# cd ../..
+<br>
+# sh Build install</code></p>
+</blockquote>
+<h2>Install Your Certificates</h2>
+<p>If you haven&#39;t yet purchased your certificates, from personal experience I can recommend <a href=
+"http://www.thawte.com">Thawte</a>. If you&#39;d like to have additional information in detail regarding certificates and keys,
+or if you&#39;d rather generate your own, please see <a href=
+"http://hr.uoregon.edu/davidrl/lamp.html#CERTIFICATES">http://hr.uoregon.edu/davidrl/lamp.html#CERTIFICATES</a> and <a href=
+"http://www.modssl.org/docs/2.8/ssl_faq.html#ToC24">http://www.modssl.org/docs/2.8/ssl_faq.html#ToC24</a>.</p>
+<p>The bottom line is that you&#39;ll need three files:</p>
+<ol>
+<li><code>/etc/ssl/certs/server.crt</code> -- This is your server&#39;s SSL certificate (chmod 400)</li>
+<li><code>/etc/ssl/certs/server.key</code> -- This is your server&#39;s SSL private key (chmod 400)</li>
+<li><code>/etc/ssl/certs/certificate-authority.crt</code> -- This is the root certificate from your issuing certificate
+authority; for example, Thawte&#39;s is available <a href=
+"https://www.thawte.com/html/SUPPORT/keygen/serverbasic.txt">here</a>.</li>
+</ol>
+<h2>Bringing it all together</h2>
+<p>Go ahead and start up your Sendmail daemon:</p>
+<blockquote>
+<p><code># /usr/sbin/sendmail -L sm-mta -bd -q30m
+<br>
+# /usr/sbin/sendmail -L sm-msp-queue -Ac -q30m</code></p>
+</blockquote>
+<h2>Testing</h2>
+<p>Nothing&#39;s ever good without a test. On your mail server, run the following commands, which are in bold:</p>
+<blockquote>
+<p><code>$ <strong>telnet localhost 25</strong>
+<br>
+Trying 127.0.0.1...
+<br>
+Connected to localhost.
+<br>
+Escape character is &#39;^]&#39;.
+<br>
+220 mail.fluffygerbils.net ESMTP Sendmail 8.12.10/8.12.10; Tue, 23 Sep 2003 12:16:07 -0700
+<br>
+<strong>ehlo localhost</strong>
+<br>
+250-mail.fluffygerbils.net Hello localhost [127.0.0.1], pleased to meet you
+<br>
+250-ENHANCEDSTATUSCODES
+<br>
+250-PIPELINING
+<br>
+250-8BITMIME
+<br>
+250-SIZE
+<br>
+250-DSN
+<br>
+250-ETRN
+<br>
+<span class="style6">250-AUTH PLAIN</span>
+<br>
+<span class="style5">250-STARTTLS</span>
+<br>
+250-DELIVERBY
+<br>
+250 HELP</code></p>
+</blockquote>
+<p>It&#39;s the presence of the AUTH PLAIN and STARTTLS statements that should make you feel that your time was well spent
+;-)</p>
+
+<p>Now, let's compare a non-AUTH/STARTTLS transaction to our new transaction:</p>
+
+<p><b>Regular SMTP Transaction</b></p>
+<blockquote><pre>
+E..<..@.@.....3...2\....e...........................xVo.....E..<..@.@.....2\..3.
+.......be.......................xVo.....E..4..@.@..'..3...2\....e......c........
+....xVo.....E..[b.@.@.p...2\..3........ce........P..........xVo.220.Sendmail.ESM
+TP.-.Is.It.Not.Nifty?..E..I..@.@.....3...2\....e...................xVo.....EHLO.
+hr.uoregon.edu..E..4b.@.@.p(..2\..3.........e..(................xVo.E...b.@.@.o\
+..2\..3.........e..(....H...........xVo.250-hr.uoregon.edu.Hello.[128.223.51.169
+],.pleased.to.meet.you..250-ENHANCEDSTATUSCODES..250-PIPELINING..250-8BITMIME..2
+50-SIZE..250-DSN..250-ETRN..250-AUTH.PLAIN..250-STARTTLS..250-DELIVERBY..250.HEL
+P..E..V..@.@.....3...2\....e..(...U.....X......xVo.....MAIL.FROM:&lt;david@hr.uoreg
+on.edu&gt;..E..cb.@.@.o...2\..3........Ue..J...../..........xVo.250.2.1.0.&lt;david@hr
+.uoregon.edu&gt;....Sender.ok..E..T..@.@.....3...2\....e..J........8@......xVo.....
+RCPT.TO:&lt;david@hr.uoregon.edu&gt;..E..fb.@.@.o...2\..3.........e..j.....W..........
+xVo.250.2.1.5.&lt;david@hr.uoregon.edu&gt;....Recipient.ok..E..4./@.@.....3...2\....e.
+.j.........a......xVo.....E..:.A@.@.....3...2\....e..j................xVo.....DA
+TA..E..fb.@.@.o...2\..3.........e..p................xVo.354.Enter.mail,.end.with
+.".".on.a.line.by.itself..E....B@.@..c..3...2\....e..p................xVo.....Da
+te:.Tue,.30.Sep.2003.09:44:07.-0700..Mime-Version:.1.0.(Apple.Message.framework.
+v552)..Content-Type:.text/plain;.charset=US-ASCII;.format=flowed..Subject:.Linus
+.Torvalds,.on.releasing.1.3.27..From:.David.Lechnyr.&lt;david@hr.uoregon.edu&gt;..To:.
+david@hr.uoregon.edu..Content-Transfer-Encoding:.7bit..Message-Id:.<4EED6E4A-F36
+5-11D7-BF81-000A95E359BA@hr.uoregon.edu&gt;..X-Mailer:.Apple.Mail.(2.552)....Eh,.th
+at's.it,.I.guess...No.300.million.dollar.unveiling.event.for.this..kernel,.I'm.a
+fraid,.but.you're.still.supposed.to.think.of.this.as.the.."happening.of.the.cent
+ury".(at.least.until.the.next.kernel.comes.along)...Oh,.and.this.is.another.kern
+el.in.that.great.and.venerable."BugFree(tm)"..series.of.kernels..So.be.not.afrai
+d.of.bugs,.but.go.out.in.the.streets..and.deliver.this.message.of.joy.to.the.mas
+ses............--.Linus.Torvalds,.on.releasing.1.3.27....E..4b.@.@.p#..2\..3....
+.....e...................xVo.E..7.C@.@.....3...2\....e...........ml......xVo....
+....E..4b.@.@.p"..2\..3.........e...................xVo.E..lb.@.@.o...2\..3.....
+....e.......D...........xVo.250.2.0.0.h8UGi6WP012112.Message.accepted.for.delive
+ry..E..4..@.@..z..3...2\....e............?......xVo.....E..:..@.@..5..3...2\....
+e............}......xVo.....QUIT..E..4b.@.@.p...2\..3.........e........u........
+..xVo.E..ab.@.@.o...2\..3.........e...................xVo.221.2.0.0.hr.uoregon.e
+du.closing.connection..E..4b.@.@.p...2\..3........Me........F..........xVo.E..4.
+.@.@..:..3...2\....e............8......xVo.....E..4b.@.@.p...2\..3........Ne....
+....E..........xVo.E..(..@.@..E..3...2\....e.......P.............E..(..@.@..D..3
+...2\....e.......P.............E..(..@.@..C..3...2\....e.......P.............
+</pre></blockquote>
+
+<p><b>AUTH/SASL SMTP Transaction</b></p>
+<blockquote><pre>
+E..<..@.@.....3...2\................\[..............xVpy....E..<..@.@.....2\..3.
+.......h........L...............xVpy....E..4..@.@.....3...2\...........i........
+....xVpy....E..[O.@.@.....2\..3........i.........o..........xVpy220.Sendmail.ESM
+TP.-.Is.It.Not.Nifty?..E..I..@.@.....3...2\................F.......xVpy....EHLO.
+hr.uoregon.edu..E..4O.@.@../..2\..3.................x8..........xVpyE...O.@.@..c
+..2\..3.............................xVpy250-hr.uoregon.edu.Hello.[128.223.51.169
+],.pleased.to.meet.you..250-ENHANCEDSTATUSCODES..250-PIPELINING..250-8BITMIME..2
+50-SIZE..250-DSN..250-ETRN..250-AUTH.PLAIN..250-STARTTLS..250-DELIVERBY..250.HEL
+P..E..>..@.@.....3...2\...........[............xVpy....STARTTLS..E..RO.@.@.....2
+\..3........[........`...........xVpy220.2.0.0.Ready.to.start.TLS..E..4..@.@....
+.3...2\...........y............xVpy....E..z..@.@.....3...2\...........y.........
+...xVpy........A...=..?y.O.`.........]....2:b..?,..t.!..........................
+.E...O.@.@.}...2\..3........y........M...........xVpy....J...F..?y.N..(......'..
+..>1..<.w.||lod...+....vo...>.^.Qby..+Z....=.Y.....................0...0..M.....
+...i.0...*.H........0..1.0...U....ZA1.0...U....Western.Cape1.0...U....Cape.Town1
+.0...U....Thawte.Consulting.cc1(0&..U....Certification.Services.Division1.0...U.
+...Thawte.Server.CA1&0$..*.H........server-certs@thawte.com0...020919201425Z..03
+1008230345Z0..1.0...U....US1.0...U....Oregon1.0...U....Eugene1.0...U....Universi
+ty.of.Oregon1.0...U....Human.Resources1.0...U....hr.uoregon.edu0..0...*.H.......
+.....0.........y.......e..PG3.!\j.Z.lP...b.dE|.S....&:.....!.Z..&.o..[.h.#E....$
+.l.[............M.....u..*s.....2.~.<...t.._..S.LN.|...T.Bm.......%0#0...U.%..0.
+..+.......0...U.......0.0...*.H............q.`'.r.x|..+5F...6o....hk.....bpq{f..
+....+.?K.s{.[%-..\....C....|....5...iE....3.......u._....B..."`.U!.g^....#UQ....
+-t..s.........0...0..|........0...*.H........0..1.0...U....ZA1.0...U....Western.
+Cape1.0...U....Cape.Town1.0...U....Thawte.Consulting.cc1(0&..U....Certification.
+Services.Division1.0...U....Thawte.Server.CA1&0$..*.H........server-certs@thawte
+.com0...960801000000Z..201231235959Z0..1.0...U....ZA1.0...U....Western.Cape1.0..
+.U....Cape.Town1.0...U....Thawte.Consulting.cc1(0&..U....Certification.Services.
+Division1.0...U....Thawte.Server.CA1&0$..*.H........server-certs@thawte.com0..0.
+..*.H............0........Pn..Vk..]...huG.....%...GQ....t....u...a..m0n....R.b.M
+...j.D8....d.p...k)./I.;.'.%../..m.(B..LC...!mT.].X....[....{E...O.@.@.....2\..3
+........!........;w..........xVpy.6:..f"...........0.0...U.......0....0...*.H...
+...........Li\...F...M!0....oI...Q.`pl.a....H>YC}O.=....b.zu...NN.@...2t.o....D.
+..o.)...(;..@(.Z<...........Q..L,Y....u..B...........#.pG................0..1.0.
+..U....ZA1.0...U....Western.Cape1.0...U....Cape.Town1.0...U....Thawte.Consulting
+.cc1(0&..U....Certification.Services.Division1.0...U....Thawte.Server.CA1&0$..*.
+H........server-certs@thawte.com....E..@.`@.@.....3...2\.................'......
+xVpy................E..4O.@.@..*..2\..3.................o...........xVpyE....c@.
+@.....3...2\.................I......xVpy................._b...H.qf..[..}H(J....U
+HDO.IZ..]..q.K...S...$..D.tv.....*{^..4..e....B....6$HRq........<.S......o.1....
+1.s.6[.ZM....r.L..k.J.]..........(..+...........m6.*...C}>.......s.\R.....E..4O.
+@.@..)..2\..3.................n...........xVpyE..gO.@.@.....2\..3...............
+..iV..........xVpy..........(..k.X./:...T!...{~.!.wD.......=..*..;..qE..i.d@.@..
+g..3...2\........................xVpy........0.....e..v._...5&K..=.;.`08....:.uI
+=b..p...Y...G.E...O.@.@..J..2\..3.............................xVpy........@.RI..
+..`vX.P.....6W.H.A.....h......P....Z..5..G..}....S.-=.....#e...}..<.Ym.h..N..\.4
+\LV..........P|......i1p6./".......d.....@V..z.^.>.....k.>....-.N*....l...4.(...
+.xa..tg...?x..=...?......D.fN@;..O.D/...J*....}E..y.e@.@..V..3...2\.............
+...........xVpy........@>z,%+m.;k.B..y..M.0;...X$.....9..nP.!.y.fE9..T.<~..W."..
+...Q.&.mE..qO.@.@.....2\..3............-................xVpy....8.F......h....1.
+U.gU..MA}G....].J.N+7.x......G..o........E..q.f@.@..]..3...2\.......-...........
+.....xVpy........8....7fk...}...o@$...h4."...Z.O.9-.L..D...A.*........._)cE...O.
+@.@.....2\..3............j................xVpy....H.....2...\Z....V..Y.i.az'.]@.
+j..K....v.........[...Z9.R.3.....e.0....i..E..q.g@.@..\..3...2\.......j...N....f
+p......xVpy........8.vh..&W..XO......3...2.?.OF..............g....pzy.m*...QE...
+O.@.@.....2\..3........N....................xVpy....H<........B`7./)..I/.dR...Uq
+....Q..&.....W=o...{..]...a.5......].PL.}....E..Y.h@.@..s..3...2\...............
+.........xVpy.........x..C..%.Xmo.p.n.T...(.i..[......E...O.@.@.....2\..3.......
+......................xVpy....H.;X..0..>C....#.3.....N...+%..V......5IHl$5*UG.8x
+=.........:9.^k..0oW.%mE.....@.@.....3...2\........................xVpz........p
+yB).......D.:9..\g7@...y.$].........g.=.D1..5......I......O.H..iM.J.$..O...9..S.
+......>%.~...Z.Ir....[.R........v./...A..v.h..J.......,....).....T.....l.......:
+.T^..!y..Y_.|.1u..O..m....L..f...d.J....i.MoZ..T.l.Igy....$.3.......:@E.I,C#....
+X..9....).(..bt.T#.<...!..\..;),.....u,.......1IQkVw..,..WU?".....#..)..10..\m..
+h.S.0.........sh.._=..:.......B.......=.VK..A\...P..(]+.)?7...E....x.#.....;.L..
+\.O...>q<..N.V..G...M....9.p(....d6..F.....9x.5+:..Syr.Y....afg.a.[...]I<8.^...E
+.g...*...z..4.~..OO..._......j..6V...0.`....A./b..{q'.I........7......)O:j.8...J
+..O.\.....oP.."......N&..t.*.v.e....+Z+-.<..p^.0nX.......9..nh..&x.{U...'......!
+......:..U.D.1...KB.X!.E..vF.......zi>.<6.<....y..S.....?..0.n.m}.:7m..Qi......m
+Bra..T....QM...U...)...)..y...._]0f...O.G.9..u..f*_f..e.W..V-....Q.i3b?:(.../n!.
+...T....8..*;..X.\=....h.5.P._.N.wd........m..OX.|....3..(...W.......t/}.;bfm?w.
+E..4O.@.@.."..2\..3............A....c...........xVpzE..(..@.@.....2\..3........=
+....P...."..
+</pre></blockquote>
+
+<h2>Client Configuration Examples</h2>
+<p>Apple Mail (MacOS X):</p>
+<blockquote><img src="misc/lechnyr/authssl.jpg" width="362" height="307"></blockquote>
+
+<p>Microsoft Outlook XP:</p>
+<blockquote><img src="misc/lechnyr/outlookxp1.jpg">&nbsp;
+<img src="misc/lechnyr/outlookxp2.jpg"></blockquote>
+
+<h2>Additional Resources</h2>
+<ul>
+<li>It would be well worth your while to test your configuration against a packet sniffer like <a href="http://www.tcpdump.org">tcpdump</a>(1).</li>
+<li>If you want to investigate securing your POP3/IMAP traffic as well, see <a href="http://hr.uoregon.edu/davidrl/lamp.html#IMAPD">http://hr.uoregon.edu/davidrl/lamp.html#IMAPD</a>.</li>
+<li><a href="http://www.jonfullmer.com/smtpauth/">http://www.jonfullmer.com/smtpauth/</a></li>
+<li><a href="http://www.sendmail.org/%7Eca/email/auth.html">http://www.sendmail.org/~ca/email/auth.html</a></li>
+<li><a href="http://www.sendmail.org/%7Eca/email/starttls.html">http://www.sendmail.org/~ca/email/starttls.html</a></li>
+</ul>
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<P>
+<img ALIGN="LEFT" ALT="[BIO]" SRC="../gx/2002/note.png" class="bio">
+<em>
+David is a Network Manager at the Human Resources department of the
+University of Oregon. He holds a Master's Degree in Social Work along with his
+MCSE+I, CNE, and CCNA certifications. He has been working with Linux for the
+past six years, with an emphasis on systems security, network troubleshooting,
+and PHP/MySQL integration.
+</em>
+<br CLEAR="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2003, David Lechnyr. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 96 of Linux Gazette, November 2003
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="adam.html" >&lt;-- prev</A> | <A HREF="moen.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">November 2003 (#96)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/2003/sit3-shine.7-2.gif" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

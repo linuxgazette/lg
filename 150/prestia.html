@@ -1,0 +1,499 @@
+<!DOCTYPE html
+	PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+	 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="utf-8" xml:lang="utf-8">
+<head>
+<title>Joey's Notes: Guide to adding a new partition or drive to an existing system LG #150</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link rel="stylesheet" href="../lg.css" type="text/css" media="screen, projection"  />
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<!-- link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" / -->
+<link rel="shortcut icon" href="../favicon.ico" />
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+</head>
+<body>
+
+<a href="../">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+<div id="navigation">
+<table summary="masthead" width="100%">
+<tr>
+<td align="center" colspan="3" style="font-size: 10px; font-weight: bold">
+<a href="../index.html">Home</a>
+<a href="http://linuxgazette.net">Main Site</a>
+<a href="../faq/index.html">FAQ</a>
+
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/mailman/listinfo/">Mailing Lists</a>
+<a href="../jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+<hr width="99%" style="border: 1px inset #000033">
+</td>
+</tr>
+<tr>
+<td width="40%" align="left" style="font-size: 10px; font-weight: bold">
+The Free International Online Linux Monthly
+</td>
+<td width="20%" align="center" style="font-size: 10px; font-weight: bold">
+ISSN: 1934-371X
+</td>
+<td width="40%" align="right" style="font-size: 10px; font-weight: bold">
+Main site: <a href="http://linuxgazette.net">http://linuxgazette.net</a> 
+</td>
+</table>
+</div>
+
+
+<div id="breadcrumbs1">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">May 2008 (#150)</a> &gt; 
+Article
+
+</div>
+
+<div class="articlecontent1">
+<div class="content">
+
+<div id="previousnexttop">
+<A HREF="pfeiffer.html" >&lt;-- prev</A> | <A HREF="saha.html" >next --&gt;</A>
+</div>
+
+<h1>Joey's Notes: Guide to adding a new partition or drive to an existing system</h1>
+<p id="by"><b>By <a href="../authors/prestia.html">Joey Prestia</a></b></p>
+
+<img src="../../gx/minilogos/joeys_notes.png" alt="Joey's Notes image" align="left" />
+
+<p>
+The basic steps involved in this process are:
+</p>
+
+<ol style="margin-left: 185px">
+	<li>Determine what partitions need to be created and where.</li>
+	<li>Create the partitions (I use fdisk here but any Linux disk 
+	    partitioning tool should work)</li>
+	<li>Re-read the partition table either with partprobe or by a reboot
+	</li>
+	<li>Make a filesystem on the partition, label it, and create the 
+	    necessary mount points</li>
+	<li>Add the appropriate entries to /etc/fstab so the
+	    partitions are mounted upon reboot</li> 
+</ol>
+
+<h3>Scenario</h3>
+
+<p>
+Imagine that we have a server running RHEL 4 and our supervisor comes over and
+wants a 10 GB partition created for the data processing department. This is
+in addition to what the server currently has allocated, so we can either
+create a partition out of unpartitioned space on the existing disk
+(experienced Linux system administrators will leave unpartitioned disk
+space for future expansion) if available, or we can add another drive. This
+scenario actually happens quite frequently in the production world, so this
+is a valuable skill to have even if you administer nothing more than your
+home machines.
+</p>
+
+<p>
+We'll assume that your supervisor has given you the latitude of deciding
+which of the above options you'll use, so your first task is to check to
+see if space is available on your existing media. We'll run "fdisk -l" to
+see the size of the disk; the data we need is on the first line of output.
+</p>
+
+<pre class="code">
+[root@station17 ~]# fdisk -l
+
+Disk /dev/sda: 80.0 GB, 80000000000 bytes
+255 heads, 63 sectors/track, 9726 cylinders
+Units = cylinders of 16065 * 512 = 8225280 bytes
+
+   Device Boot      Start         End      Blocks   Id  System
+/dev/sda1   *           1          38      305203+  83  Linux
+/dev/sda2              39        7687    61440592+  83  Linux
+/dev/sda3            7688        7942     2048287+  82  Linux swap
+</pre>
+
+<p>
+From this we can see the size of our drive is 80.0 GB. Now, we'll use "df
+-h" to calculate the size of the partitions that are on our system. We only
+need to be concerned with the rows that have a device label, the others
+(labeled with "none") don't concern us. The column labeled "Size" has the
+numbers we'll need to add up to get a overall size.
+</p>
+
+<pre class="code">
+[root@station17 ~]# df -h
+Filesystem            Size  Used Avail Use% Mounted on
+/dev/sda2              58G  6.5G   49G  12%   /
+/dev/sda1             289M   17M  258M   6%   /boot
+none                 1013M     0 1013M   0%   /dev/shm
+
+[root@station17 ~]# 
+</pre>
+
+<p>
+From this, we can see that /dev/sda2 is 58G and /dev/sda1 is 289M - a total
+of 58.3GB.  Now we need to add in our swap size; "cat /proc/swaps" will
+tell us what size our swap partition is.
+</p>
+
+<p class="editorial">
+[ If you feel like using an actual system utility for this, "swapon -s"
+will do the same thing. -- Ben ]
+</p>
+
+<pre class="code">
+[root@station17 ~]# cat /proc/swaps 
+Filename                              Type            Size    Used    Priority
+/dev/sda3                             partition       2048276    0       -1
+[root@station17 ~]# 
+</pre>
+
+<p>
+Adding in the 2GB from this means that we have 19.7 GB to work with - well
+over what we need. Now, let's move on to creating our partition: "fdisk
+/dev/sda" will open our drive's partition table for modification.  Since
+we're already using 3 partitions on the drive, we'll have to make our 4th
+one an <em>extended</em> one - a container to house any additional
+partitions, including the one we are creating now. We'll want to accept the
+defaults on this extended partition, which will make the whole rest of the
+drive available for our new partitions. We'll be using an ext3 filesystem,
+so we also need to keep this in mind: the "mkfs" command reserves 5% of the
+blocks for root. Given all that, we'll make our new partition 11.5GB to
+compensate for the blocks reserved for root plus a little extra.
+</p>
+
+<pre class="code">
+[root@station17 ~]# fdisk /dev/sda
+
+The number of cylinders for this disk is set to 9726.
+There is nothing wrong with that, but this is larger than 1024,
+and could in certain setups cause problems with:
+1) software that runs at boot time (e.g., old versions of LILO)
+2) booting and partitioning software from other OSs
+   (e.g., DOS FDISK, OS/2 FDISK)
+
+Command (m for help): <b>n</b>
+Command action
+   e   extended
+   p   primary partition (1-4)
+<b>e</b>
+Selected partition 4
+First cylinder (7943-9726, default 7943): 
+Using default value 7943
+Last cylinder or +size or +sizeM or +sizeK (7943-9726, default 9726): 
+Using default value 9726
+</pre>
+
+<p>
+Here you can see where I selected "n" for a new partition and 
+"e" to make a extended partition. I then accepted the defaults 
+for both the starting cylinder and again for the ending cylinder.
+</p>
+
+<pre class="code">
+Command (m for help): <b>n</b>
+First cylinder (7943-9726, default 7943): 
+Using default value 7943
+Last cylinder or +size or +sizeM or +sizeK (7943-9726, default 9726):.<b>+11500M</b>
+</pre>
+
+<p>
+Next, I hit "n" to create a new partition; then, when prompted to use a
+starting cylinder, I hit 'enter' to accept the default.  For the ending
+cylinder I entered "+11500M" to specify the size. The plus is important -
+without it, you will get an error.  Its a good idea to hit "p" to at this
+point to get "fdisk" to print the partition table. This will show what we
+have done before saving our changes. 
+</p>
+
+<pre class="code">
+Command (m for help):.<b>p</b>
+
+Disk /dev/sda: 80.0 GB, 80000000000 bytes
+255 heads, 63 sectors/track, 9726 cylinders
+Units = cylinders of 16065 * 512 = 8225280 bytes
+
+   Device Boot      Start         End      Blocks   Id  System
+/dev/sda1   *           1          38      305203+  83  Linux
+/dev/sda2              39        7687    61440592+  83  Linux
+/dev/sda3            7688        7942     2048287+  82  Linux swap
+/dev/sda4            7943        9726    14329980    5  Extended
+/dev/sda5            7943        9341    11237436   83  Linux
+</pre>
+
+<p>
+If there are any mistakes just quit "fdisk" with a "q" and no changes will be
+saved. This looks right - so lets write our changes with a "w".
+</p>
+
+<pre class="code">
+Command (m for help): <b>w</b>
+The partition table has been altered!
+
+Calling ioctl() to re-read partition table.
+
+WARNING: Re-reading the partition table failed with error 16: Device or resource busy.
+The kernel still uses the old table.
+The new table will be used at the next reboot.
+Syncing disks.
+[root@station17 ~]# 
+</pre>
+
+<p>
+This warning can be remedied by using the 'partprobe' command to force the 
+kernel to reread the partition table. Remember - if this were a production 
+machine, we wouldn't want to have to reboot it.   
+</p>
+
+<pre class="code">
+[root@station17 ~]# partprobe
+</pre>
+
+<p>
+At this point our 11.5G partition is /dev/sda5 and raw - it has neither a
+file system nor a label descriptor - so let's format it and give it a
+label. Giving the partition a label can be done at the same time that the
+file system is being created with the -L option, but I prefer to do it in a
+separate step.
+</p>
+
+<pre class="code">
+[root@station17 ~]# mkfs.ext3 /dev/sda5
+mke2fs 1.35 (28-Feb-2004)
+Filesystem label=
+OS type: Linux
+Block size=4096 (log=2)
+Fragment size=4096 (log=2)
+1406272 inodes, 2809359 blocks
+140467 blocks (5.00%) reserved for the super user
+First data block=0
+Maximum filesystem blocks=2877292544
+86 block groups
+32768 blocks per group, 32768 fragments per group
+16352 inodes per group
+Superblock backups stored on blocks: 
+        32768, 98304, 163840, 229376, 294912, 819200, 884736, 1605632, 2654208
+
+Writing inode tables: done                            
+Creating journal (8192 blocks): done
+Writing superblocks and filesystem accounting information: done
+
+This filesystem will be automatically checked every 34 mounts or
+180 days, whichever comes first.  Use tune2fs -c or -i to override.
+[root@station17 ~]# 
+</pre>
+
+<p>
+Now we'll give it label ("/data"):
+</p>
+
+<pre class="code">
+[root@station17 ~]# e2label /dev/sda5 /data
+[root@station17 ~]# 
+</pre>
+
+<p>
+Next, we need to create a mount point in our filesystem and make sure that
+it's mounted at boot time. Let's create a directory on our system called
+/data.
+</p>
+
+<p class="editorial">
+[ The usual method of allocating new space is often much more complex than
+that - at least in the planning stages. In fact, creating a non-standard
+directory name in the root of the filesystem as suggested here is incorrect
+and violates the Filesystem Hierarchy Standard (FHS). As an example of a
+more typical situation, if an administrator finds that a shared machine's
+drive is running out of room, he may first examine the machine to see where
+the most activity/space consumption is occuring. Assuming that it's in the
+space assigned to users (i.e., "/home"), he would most likely back up the
+data in that subdirectory, restore it to the newly-created partition, delete
+"/home", and mount the new partition as "/home". This would recover all the
+space used by the original "/home" and leave it available for the rest of
+the system to use - and most users would not even realize that any change
+had been made. This approach doesn't require rebooting the machine either.
+-- Ben ]
+</p>
+
+<hr>
+
+<p class="editorial">
+[ I do understand that the partitioning is inconsistent with the FHS, but
+our RedHat course materials do instruct us to create directories in / for
+simplicity and ease in the aid backups. We are also led by instruction to
+do things such as specialized partitioning schemes for different things
+this way here at the RedHat academy. -- Joey ]
+</p>
+
+<pre class="code">
+[root@station17 ~]# mkdir /data
+[root@station17 ~]# 
+</pre>
+
+<p>
+Now we put it in the file system table, '/etc/fstab', so it gets mounted on
+every boot. 
+</p>
+
+<pre class="code">
+[root@station17 ~]# vi /etc/fstab
+
+# This file is edited by fstab-sync - see 'man fstab-sync' for details
+LABEL=/                /                       ext3    defaults        1 1
+LABEL=/data            /data                   ext3    defaults        1 1
+LABEL=/boot            /boot                   ext3    defaults        1 2
+none                   /dev/pts                devpts  gid=5,mode=620  0 0
+none                   /dev/shm                tmpfs   defaults        0 0
+none                   /proc                   proc    defaults        0 0
+none                   /sys                    sysfs   defaults        0 0
+LABEL=SWAP-sda3         swap                   swap    defaults        0 0
+/dev/scd0   /media/cdrecorder   auto    pamconsole,exec,noauto,managed 0 0
+</pre>
+
+<p>
+I used the root partition as a guide in this sample. The label is in the
+first column, the mount point is in the second, then we have the file system type
+and the mount options. The last two numbers are the dump indicator and the
+fsck indicator; they determine when the system gets backed up if you're using
+'dump', and when the system gets checked for errors. Basically, you can
+copy these numbers and options just as I have. Write your changes and exit the
+editor. Then, to make sure that there were no errors, run "mount -a" to
+mount all the partitions listed in /etc/fstab. Any errors would be reported
+at this point.
+</p>
+
+<pre class="code">
+[root@station17 ~]# mount -a
+</pre>
+
+<p>
+Since we didn't get any errors, let's do a "df -h" and see how everything
+looks.
+</p>
+
+<pre class="code">
+[root@station17 ~]# df -h
+Filesystem            Size  Used Avail Use% Mounted on
+/dev/sda2              58G  6.6G   49G  12% /
+/dev/sda1             289M   17M  258M   6% /boot
+none                 1013M     0 1013M   0% /dev/shm
+/dev/sda5              11G   59M   10G   1% /data
+
+[root@station17 ~]# 
+</pre>
+
+<p>
+That's it - we are now ready to start using this new partition, keeping in
+mind we may have to modify permissions as needed for our users and groups.
+This is a very common task, one that all Linux users should become familiar
+with because you will almost certainly be faced with needing more room.
+This process is very similar to adding another disk - you would simply
+substitute your device labels as required.
+</p>
+
+
+
+<script type='text/javascript'>
+digg_url = 'http://linuxgazette.net/150/prestia.html';
+digg_title = 'Joey\'s Notes: Guide to adding a new partition or drive to an existing system';
+digg_bodytext = '<p> Imagine that we have a server running RHEL 4 and our supervisor comes over and wants a 10 GB partition created for the data processing department. This is in addition to what the server currently has allocated, so we can either create a partition out of unpartitioned space on the existing disk (experienced Linux system administrators will leave unpartitioned disk space for future expansion) if available, or we can add another drive. This scenario actually happens quite frequently in the production world, so this is a valuable skill to have even if you administer nothing more than your home machines. </p> ';
+digg_topic = 'linux_unix';
+</script>
+<script src="http://digg.com/tools/diggthis.js" type="text/javascript"></script>
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:150/prestia.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/authors/prestia.jpg" class="bio">
+</p>
+
+<em>
+<p>
+Joey was born in Phoenix and started programming at the age fourteen on
+ a Timex Sinclair 1000. He was driven by hopes he might be able to do
+ something with this early model computer. He soon became proficient in
+ the BASIC and Assembly programming languages. Joey became a programmer
+ in 1990 and added COBOL, Fortran, and Pascal to his repertoire of
+ programming languages. Since then has become obsessed with just about
+ every aspect of computer science. He became enlightened and discovered
+ RedHat Linux in 2002 when someone gave him RedHat version six. This 
+ started off a new passion centered around Linux. Currently Joey is 
+ completing his degree in Linux Networking and working on campus
+ for the college's RedHat Academy in Arizona. He is also on the staff of
+ the Linux Gazette as the Mirror Coordinator.
+</p>
+
+
+
+</em>
+
+<br clear="all">
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2008, Joey Prestia. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication License</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 150 of Linux Gazette, May 2008
+</p>
+
+</div>
+
+<div id="previousnextbottom">
+<A HREF="pfeiffer.html" >&lt;-- prev</A> | <A HREF="saha.html" >next --&gt;</A>
+</div>
+
+</div>
+</div>
+
+<script src="http://www.google-analytics.com/urchin.js"
+type="text/javascript">
+</script>
+<script type="text/javascript">
+_uacct = "UA-1204316-1";
+urchinTracker();
+</script>
+
+
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+</body>
+</html>
+

@@ -1,0 +1,454 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Automatic creation of an Impress presentation from a series of images LG #116</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="lg_answer.html" >&lt;-- prev</A> | <A HREF="okopnik1.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Automatic creation of an Impress presentation from a series of images</h1>
+<p id="by"><b>By <A HREF="../authors/herrmann.html">Karl-Heinz Herrmann</A></b></p>
+
+<p>
+
+<h3>Why would I want to use a command line tool to generate a WYSIWYG/GUI Document?</h3>
+<p> Well, I don't know about you, but I am not very keen on
+extremely boring and repetitive clicking through some GUI if the
+task at hand doesn't need individual care for every page
+done. Specifically, I had a presentation created with <a
+href="http://latex-beamer.sourceforge.net/">LaTeX/beamer</a> in
+PDF format and "boss" wanted to have a PowerPoint file. Or you
+have your paper accepted at this great/important conference and you
+find out they will <b>only</b> accept PPT files for a talk: no
+PDF, no Impress, no own laptop.
+
+<p> So, I found myself importing a series of identically-sized images into
+a PowerPoint presentation once too often (i.e. once) and got
+<b>extremely</b> bored. So bored that I started investigating if I could do
+it any other way, even if it took me a week to write the program. For me,
+the "perfect" solution would be to have a list of image files (e.g.,
+created by '<code>ls *png &gt; file</code>'), run a script and
+--<em>voila</em> -- get a PPT file, each slide containing exactly one of
+the images filling the whole slide.
+
+
+<h3>Finding the tools</h3>
+<p>A Google (re)search showed nothing on automatic generation of PPT
+files, since their internal structure is too obscure to reverse-engineer.
+However, I <b>did</b> find information on the inner structure of OpenOffice
+files. These are simply compressed XML files and the DTD of the XML
+structure <a href="http://xml.openoffice.org/xml_specification.pdf">is
+published</a>. After fast-forwarding through the 571 pages I was seriously
+hoping somebody else might have done some work on this already. Indeed,
+adding my favorite programming language Perl to the Google search words
+produced some interesting links:
+
+<ul>
+  <li>The <a href="http://ooolib.sourceforge.net/doc/ooolib-0.1.5-doc.html">ooolib</a></li>
+  <li>The <a href="http://search.cpan.org/~jmgdoc/OpenOffice-OODoc/OODoc/Intro.pod">OpenOffice::OODoc perl Module</a></li>
+</ul>
+
+<p>I decided to give the OpenOffice::OODoc module a try.
+
+
+To get the modules installed on my system I went to CPAN
+(the Comprehensive Perl Archive Network) by typing as root ([...] 
+signifies unimportant left-out parts):
+
+<pre class="code">
+# <strong>perl -MCPAN -e shell</strong> 
+
+cpan shell -- CPAN exploration and modules installation (v1.7601)
+cpan&gt; install OpenOffice::OODoc
+CPAN: Storable loaded ok
+[...]
+Running install for module OpenOffice::OODoc
+Running make for J/JM/JMGDOC/OpenOffice-OODoc-1.309.tar.gz
+Fetching with LWP:
+  ftp://ftp.perl.org/pub/CPAN/authors/id/J/JM/JMGDOC/OpenOffice-OODoc-1.309.tar.gz
+[...]
+OpenOffice-OODoc-1.309/
+OpenOffice-OODoc-1.309/OODoc/
+[...]
+Checking if your kit is complete...
+Looks good
+Warning: prerequisite XML::Twig 3.15 not found.
+---- Unsatisfied dependencies detected during [J/JM/JMGDOC/OpenOffice-OODoc-1.309.tar.gz] -----
+    XML::Twig
+Shall I follow them and prepend them to the queue
+of modules we are processing right now? [yes] <strong>&lt;Enter&gt;</strong> 
+[...]
+Writing /usr/lib/perl5/site_perl/5.8.3/x86_64-linux-thread-multi/auto/OpenOffice/OODoc/.packlist
+Appending installation info to /usr/lib/perl5/5.8.3/x86_64-linux-thread-multi/perllocal.pod
+  /usr/bin/make install  -- OK
+cpan&gt; <strong>quit</strong> 
+</pre>
+
+<p>The cpan shell realized that a prerequisite, the module XML::Twig, was
+missing for OpenOffice::OODoc. It offered to fetch it automatically, which
+I asked it to do. Both Twig and OODoc asked some questions during the
+install, and I selected the defaults every time. After that, I had
+OpenOffice::OODoc and all the prerequisites on my system and could start
+reading the documentation.
+
+<h3>The code</h3>
+
+<p>After glancing at the <a
+href="http://search.cpan.org/~jmgdoc/OpenOffice-OODoc/OODoc/Intro.pod">Introduction</a>
+and some man pages, I started checking out the examples that came with the
+module. I found it interesting to find a solution for the reverse of my
+problem -- extracting all images from an OpenOffice Document -- since there
+is another simple method to get the images out: Just run
+'<code>unzip</code>' on the *.swi, *.sxw or any other OpenOffice document.
+They are nothing but a zip-file containing the content, meta files and (in
+the <em>Pictures</em> subdirectory) all images of the document.
+
+<pre class="code">
+<strong>unzip -t img2ooImpressExport.swi</strong>
+Archive:  img2ooImpressExport.swi
+    testing: mimetype                 OK
+    testing: content.xml              OK
+    testing: meta.xml                 OK
+    testing: styles.xml               OK
+    testing: settings.xml             OK
+    testing: META-INF/manifest.xml    OK
+    testing: Pictures/Seite_1.jpg     OK
+    testing: Pictures/Seite_2.jpg     OK
+No errors detected in compressed data of img2ooImpressExport.swi.
+</pre>
+
+
+<p>After some digging around in the documentation I came up with the
+following <a href="misc/herrmann/img2ooImpress.pl.txt">Perl code</a>:
+
+<pre class="code">
+use OpenOffice::OODoc;
+
+# start a new document
+my $document = ooDocument
+  (
+   file            =&gt; 'outputfile.swi',
+   create          =&gt; 'presentation'
+  );
+
+$document-&gt;createImageStyle("slide");
+
+# loop over image file names (open is outside of this snippet)
+my $i=1;
+while (my $imgfile=&lt;IN&gt;){
+  chomp($imgfile);
+
+
+# start a new page/slide
+  my $page = $document-&gt;appendElement
+    ('//office:body',0,'draw:page');
+
+# include the image at full size
+my $image=  $document-&gt;createImageElement
+    (
+     "Slide".$i,
+     description     =&gt; "image ".$i." filename:".$imgfile,
+     page            =&gt; $page,
+     position        =&gt; "0,0",
+     import          =&gt; $imgfile,
+     size            =&gt; "28cm, 21cm",
+     style           =&gt; "slide"
+    );
+
+$i++;
+
+}
+
+$document-&gt;save;
+</pre>
+
+<p>The <a href="misc/herrmann/img2ooImpress.pl.txt">complete script</a>
+includes some file-handling and reads the image list. The hardest part was
+figuring out how to add a new page in an Impress presentation, since I
+could only find examples which modified a document (inserting an image
+after some text, etc.) but none that created new pages. Some digging in the
+other man-pages and the doc-folder (if you have '<code>locate</code>'
+installed and ran '<code>updatedb</code>' after the OODoc installation,
+'<code>locate OODoc</code>' will find all of them) started me in the
+right direction.
+
+<p>In the created *swi file, the very first slide is left blank (named
+"First Page") and every other page contains one image, named
+consecutively "Slide N". I didn't bother figuring out how to drop that
+first page. Also OpenOffice seems to have changed the file extensions
+between versions: Impress files could be *.swi or *.sxi. The script
+takes either one or two arguments: The necessary file with the list of
+images (one filename each line) and an optional output filename
+(default img2ooImpressExport.swi).  The images are automatically
+aligned, so animations in the PDF (each animation step is a new page)
+will play out smoothly in Impress/PowerPoint. That was one of the most
+annoying things with manually importing single images into PPT --
+realigning and rescaling so the images won't jump from slide to slide.
+
+
+<p> If you would like to add a title or other text to the slides you
+could just modify the position and size specification in the
+createImageElement block. The page specification adds the image
+anchored to the page. The <a
+href="http://search.cpan.org/~jmgdoc/OpenOffice-OODoc/OODoc/Intro.pod#Manipulating_graphics">
+Info page</a> gives an example where an image is anchored to a new
+paragraph. The Intro page is also accessible by:
+
+<pre>
+man OpenOffice::OODoc::Intro
+</pre>
+
+<p>Other examples that came with the Perl module create spreadsheets from
+*.csv files ('<code>oobuild</code>') or create swriter files from text
+source ('<code>text2ooo</code>').
+
+<h3>So what about PPT?</h3>
+
+<p>Impress is quite capable of opening and then exporting the created
+file to PPT-format, and PowerPoint will not even be able to turn Vector
+arrows into letters, much less mess about with text colors and other
+annoyances I see regularly at conferences.
+
+
+<h3>How to convert from LaTeX/PDF files</h3>
+
+<p>A cheap way of converting a LaTeX-created PDF presentation (e.g., <a
+href="http://latex-beamer.sourceforge.net/">beamer</a>, <a
+href="http://prosper.sourceforge.net/">prosper</a> or (limited in
+animation capabilities) <a
+href="http://texpower.sourceforge.net/">TeXPower</a>) is to convert
+every PDF page into an image and run the images through img2ooImpress.pl.
+The PDF-to-image conversion can be handled by ghostscript (gs). '<code>gs -h</code>'
+will show some useful options and a list of formats it can export
+to. Look for pngalpha, png16m, and jpeg as useful image formats. If
+pngalpha (PNG with antialias rendering) is available, you can run
+something similar to:
+
+<pre>
+gs -dNOPAUSE -g1024x768 -r205 -sDEVICE=pngalpha \
+ -sOutputFile=Talkimg_%d.png  -dBATCH Talk.pdf
+</pre>
+
+which creates 1024x768-sized, antialiased PNG images, consecutively
+numbered Talkimg_1.png to however many pages were in the PDF. The -r205
+specifies the resolution which fits PDF files produced with
+'<code>pdflatex</code>' and the beamer class. For other PDF files you will
+want to change the resolution so you fill the 1024x768 pixels as close as
+possible. '<code>gs</code>' either pads with white or just clips your pages
+if the '-r' does not match the '-g' option. With pages rendered exactly at
+destination resolution no additional scaling will occur and the images
+should look good on the screen. Alternatively, you can generate the images
+too large and let Impress do the scaling (image size is set to full page in
+the script) so they will fit on the slide, e.g.:
+
+<pre>
+gs -dNOPAUSE -r300 -sDEVICE=pngalpha \
+ -sOutputFile=Talkimg_%d.png  -dBATCH Talk.pdf
+</pre>
+
+which again is OK for a beamer-class PDF file as the slides are rather
+small. For a PDF document in A4 landscape, 300 dpi is way too high (-r
+specifies the dpi resolution for which '<code>gs</code>' should render the
+image). Switching from page to page will get really slow if the images are
+much larger then the actual resolution.
+
+<pre>
+ls -rt *_1024.jpg &gt; imglist
+img2ooImpress.pl imglist MyTalk.swi
+</pre>
+
+then converts the images into an Impress file.  Since the '<code>gs</code>'
+image is generated without padding zeros, i.e. 1, 2, ..., 10, 11, ..., the
+"ls -rt *png" reverse sorts by file modification time and gets the page
+sequence right. For some reason, this doesn't work right on all systems and
+the file list is still not sorted properly.
+
+There are several methods to create the filenames with enough left hand
+zeros so they can be used in "alphabetic" order. If you have "mmv"
+installed, and you used a file name structure like File_[num].png, you could
+use:
+
+<pre>
+mmv "*_?.png" "#1_0#2.png"
+</pre>
+
+Here "mmv" will replace #1 with whatever the first wildcard matches and
+will add one zero left of every single digit number. #2 will become the
+number before the change. It's straightforward to extend this to more
+padding zeros.
+
+Another option is a Perl-based renaming script as in the <a
+href="http://www.unix.org.ua/orelly/perl/cookbook/ch09_10.htm">perl
+cookbook</a> or a slightly <a
+href="misc/herrmann/rename.pl.txt">modified version</a> which lets you
+test a regular expression until you tell it to actually do the rename
+by adding as first option "-x", i.e.:
+
+<pre>
+rename.pl -x 's/(\d+)/sprintf "%03d", $1/e' Talkimg*png
+</pre>
+
+which pads left-hand zeros so all images have three digits. A simple
+'<code>ls "Talkimg*png" &gt; list</code>' will now create the properly
+sorted list for '<code>img2ooImpress.pl</code>'.
+
+
+<h3>Drawbacks</h3>
+
+<p> The one major drawback is that any navigational link in the PDF
+('<code>beamer</code>' can add a full clickable table of contents in a
+sidebar) is lost. Text changes can only be added in the Impress/PPT file by
+overlaying boxes to hide the original text and adding new text on top of
+that. However, with the suggested small modification in the size and
+position specification, you could still create preformatted pages which
+only need the additional title and/or text; then, you could easily choose
+Insert-NewSlide, insert-Graphics-fromFile, align and resize to fit, etc. 
+
+
+<h3>Other uses?</h3> 
+
+<p> With the rise of digital cameras and the disappearance of color
+slides (do you still have some?), why not create an Impress or
+PowerPoint presentation from your latest holiday photos? (assuming Bash
+usage):
+
+<pre class="code">
+cd your/image/dir
+for i in *jpg; do
+convert -geometry 1024x768 $i `basename $i .jpg`_1024.jpg
+done
+ls *_1024.jpg &gt; list
+img2ooImpress.pl list img2ooImpressExport.swi
+</pre>
+
+You could then run '<code>soffice img2ooImpressExport.swi</code>' to see
+the resulting presentation.
+
+<p> The 'for' loop and 'convert' (from ImageMagick) scale the images down
+to 1024x768 (most beamers won't use anything larger) and you could throw in
+a gamma correction (-gamma x), watermark, added text, rotation, sharpening
+or whatever (see "<code>man convert</code>" for details).
+
+
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<P> Karl-Heinz is a member of The Answer Gang.
+
+<!-- *** BEGIN bio *** -->
+<hr>
+<P>
+<IMG ALT="picture" SRC="../gx/2002/tagbio/karl-heinz-herrmann.jpg" WIDTH="142" HEIGHT="200" ALIGN="left"  HSPACE="10" VSPACE="10" class="bio">
+<em>
+
+I'm a physicist working on magnetic resonance at the university hospital in
+Jena, Germany. I started out with Linux as it made the leap to 2.0.0 and
+have been running my home PC under Linux since then. The Laptop and an
+AMD64 box also run under Linux. With computers, I started out in school
+when they got Commodore PET 4040 boxes and later the very first PCs. Around
+that time I picked up a Ti99/4a and did some assembler progamming (nice
+16bit command set and relocateable registers) on that one since it was so
+damn slow in BASIC. At the university I finally got my fingers on a SUN ELC
+worksation and have tried to stay with Unix systems afterwards.
+
+
+</em>
+<br CLEAR="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2005, Karl-Heinz Herrmann. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 116 of Linux Gazette, July 2005
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="lg_answer.html" >&lt;-- prev</A> | <A HREF="okopnik1.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">July 2005 (#116)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

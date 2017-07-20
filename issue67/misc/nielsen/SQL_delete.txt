@@ -1,0 +1,37 @@
+
+drop function delete_job (int4);
+CREATE FUNCTION delete_job (int4) RETURNS int2 AS '
+DECLARE
+    job_id1 ALIAS FOR $1;
+    job_exists int4 := 0;
+    job_backup_exists int4 := 0;
+    record1 RECORD; 
+    return_int4 int4 :=0;
+BEGIN
+     -- If the job_id1 is not greater than 0, return error.
+   IF job_id1 < 1 THEN return -1; END IF;
+
+     -- If we find the job, delete it, record we found it, and back it up. 
+     -- I do not like using LOOP for one row, but I use it for a reason.
+   FOR record1 IN SELECT * FROM jobs where job_id = job_id1
+      LOOP
+      delete from jobs where job_id = job_id1;  
+      GET DIAGNOSTICS return_int4 = ROW_COUNT;       
+      job_exists := 1;
+      insert into jobs_backup (contact_id, job_no, job_name, job_location, action, error_code, job_id)
+        values (record1.contact_id, record1.job_no, record1.job_name, 
+	  record1.job_location, ''delete'', return_int4, record1.job_id);
+   END LOOP;
+
+     -- If job_exists == 0, Return error.
+     -- It means it never existed. 
+   IF job_exists = 0 THEN return (-1); END IF;
+
+     -- We got this far, it must be true, return ROW_COUNT.   
+   return (return_int4);
+END;
+' LANGUAGE 'plpgsql';
+select delete_job (1);
+select * from jobs;
+  --- We already deleted it, we should get an error this time. 
+select delete_job (1);

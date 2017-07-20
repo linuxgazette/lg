@@ -1,0 +1,240 @@
+#!/usr/bin/perl
+
+use warnings;
+use strict;
+
+use HTML::Entities qw(encode_entities);
+use Encode qw(from_to decode);
+
+# Set to non-zero
+my $buggy_as_hell = 0;
+my @call_type = ("", "", "Dialled", "Received", "Missed");
+
+my $xml_header = <<HDR;
+<?xml version="1.0" encoding="windows-1252" standalone="yes"?>
+<DATAPACKET Version="2.0">
+<METADATA>
+<FIELDS>
+<FIELD FieldName="Storage" DisplayLabel="CallType" FieldType="ftString"
+FieldClass="TStringField"/>
+<FIELD FieldName="Number" DisplayLabel="Number" FieldType="ftString"
+FieldClass="TStringField"/>
+<FIELD FieldName="Name" DisplayLabel="Name" FieldType="ftString"
+FieldClass="TStringField"/>
+<FIELD FieldName="Time" DisplayLabel="Time" FieldType="ftString"
+FieldClass="TStringField"/>
+</FIELDS>
+</METADATA>
+<ROWDATA>
+HDR
+
+my $xml_footer = <<FTR;
+</ROWDATA>
+</DATAPACKET>
+FTR
+
+my $test_line = "2\t15\t002B003300350033\t1\t00420065\t38849.598275463
+38849.5955324074 38829.5784722222";
+
+sub split_date
+{
+	my $date_in = shift;
+	my $numdays = int($date_in);
+	my $time_part = $date_in - $numdays;
+	my $date;
+	
+	my $time = get_time($time_part);
+
+	# Number of days since 1900
+	if (eval "require Date::Manip")
+	{
+		import Date::Manip qw(DateCalc Date_Init);
+
+		# OPM doesn't seem to use proper leap years
+		$numdays -= 2;
+
+		if (!$ENV{TZ})
+		{
+			# You're using Wind0ws, aren't you?
+			# Just to avoid complaints...
+			Date_Init("TZ=UTC");	
+		}
+		
+		my $wdate = DateCalc ("Jan 1 1900", "+ $numdays days");
+		if ($wdate =~ /(\d{4})(\d\d)(\d\d)\d\d:\d\d:\d\d/)
+		{
+			$date = "$3/$2/$1";
+		}
+		
+	}
+	# I haven't tried using this module, so if you want to use it,
+	# fix it yourself!
+#	elsif (eval "require Date::Calc")
+#	{
+#		import Date::Calc qw(Add_Delta_Days);
+#		$numdays -= 2;
+#		my ($y, $m, $d) = Add_Delta_Days (1900, 1, 1, $numdays);
+#		$date = "$d/$m/$y";
+#	}
+	else
+	{
+		# My crappy function, as a last resort
+		days_since_1900 ($numdays);
+	}
+
+	if ($buggy_as_hell) {print "$date\n";}
+	return "$date $time;";
+}
+
+# Yep, it just reads from stdin!
+print $xml_header;
+while (<>)
+{
+	s/\r\n//;
+	my ($type, $order, $number, $foo, $name, @times) = split (/\t/, $_);
+	xml_line ($type, $number, $name, @times);
+}
+print $xml_footer;
+
+if ($buggy_as_hell)
+{
+	# 38860.8914930556 should be 23/05/2006 21:23:45
+	split_date(38860.8914930556);
+	# 20/05/2006 12:52:43
+	split_date(38857.5366087963);
+
+	my ($ttype, $torder, $tnumber, $tfoo, $tname, @ttimes) = split (/\t/, 
+$test_line);
+	print "test line: $ttype, $tnumber, $tname, @ttimes\n";
+	xml_line ($ttype, $tnumber, $tname, @ttimes);	
+
+	days_since_1900 (38860);
+	my $string = decode_string("002B003300350033");
+	print "Decoded string: $string\n";
+}
+
+sub xml_line
+{
+	my ($type, $number, $name, $stimes) = @_;
+	my @times = split / /,$stimes;
+
+	if ($buggy_as_hell) {print "xml_line: $type, $number, $name\n";}
+	if ($buggy_as_hell) {print "xml_line: times: $#times @times\n";}
+
+	# Process numbers
+	my @dates;
+# ??
+#	@dates = map (split_date($_), @times);
+	foreach $_ (@times)
+	{
+		push @dates, split_date($_);
+	}
+
+	if ($buggy_as_hell) {print "xml_line: @dates\n";}
+
+	my $pnumber;
+	if ($number ne '')
+	{
+		$pnumber = encode_entities(decode_string($number));
+	}
+	else {$pnumber = $number;}
+
+	my $pname;
+	if ($name ne '')
+	{
+		$pname = encode_entities(decode_string($name));
+	}
+	else {$pname = $name;}
+
+	#print line
+	print '<ROW Storage="' . $call_type[$type] . '" ';
+	print 'Number="' . $pnumber . '" ';
+	print 'Name="' . $pname . '" ';
+	print 'Time="';
+	print join(" ", @dates);
+	print '"/>' . "\n";
+}
+
+sub days_since_1900
+{
+	my $numdays = shift;
+	my @mdays = qw(31 28 31 30 31 30 31 31 30 31 30 31);
+
+	my $years = int($numdays / 365);
+	if ($buggy_as_hell) {print "$years years\n";}
+
+	$numdays -= ($years * 365);
+	if (($years % 4) == 0)
+	{
+		$mdays[1] = 29;
+	}
+	if ($buggy_as_hell) {print "February has $mdays[1] days\n";}
+
+	my $leapyears = int ($years / 4);
+	if ($buggy_as_hell) {print "$leapyears leapyears\n";}
+	$leapyears++; # Um... 'cos this doesn't count 1900 as OPM does
+
+	$numdays -= $leapyears;	
+	if ($buggy_as_hell) {print "$numdays ...\n";}	
+
+	my $cmonth = 1;
+	my $month;
+	foreach $month (@mdays)
+	{
+		if ($numdays > $month)
+		{
+			$cmonth++;
+			$numdays -= $month;
+		}
+	}
+	if ($buggy_as_hell) {print "Month: $cmonth, days: $numdays\n";}
+
+	my $retval = sprintf("%02d/%02d/%04d", $numdays, $cmonth, $years+1900);
+	if ($buggy_as_hell) {print "$retval\n";}
+
+	return $retval;
+}
+
+sub get_time
+{
+	my $time = shift;
+
+	my $time_part = ($time * 86400);
+	my $seconds = ($time_part % 60);
+	$time_part /= 60;
+	my $minutes = ($time_part % 60);
+	$time_part /= 60;
+	my $hours = ($time_part % 24);
+
+	if ($buggy_as_hell) {print "Time: $hours:$minutes:$seconds\n";}
+	my $ret = sprintf ("%02d:%02d:%02d", $hours, $minutes, $seconds);
+	return $ret;
+}
+
+sub decode_string
+{
+	my $in = shift;
+	my $add = 0;
+	my ($char, $string);
+	my @chars = split//, $in;
+
+	foreach $_ (@chars)
+	{
+		if ($add == 0)
+		{
+			$char = "0x$_";
+			$add = 1;
+		}
+		else
+		{
+			$char .= $_;
+			$string .= chr(hex($char));
+			$add = 0;
+		}
+	}
+	if ($buggy_as_hell) {print "String: $string\n";}
+
+	from_to($string, "UTF-16BE", "utf-8");
+	if ($buggy_as_hell) {print "String: $string\n";}
+	return $string;
+}

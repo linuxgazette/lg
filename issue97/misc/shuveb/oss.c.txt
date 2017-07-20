@@ -1,0 +1,86 @@
+/*
+	oss.c plays a raw PCM 22KHz sample sound on the sound card
+	
+	Important  -  Make sure the demo.pcm file is is the current directory
+	before you attempt to run this program.
+
+	Disclaimer - I'm in no way responsible if you screw up your system
+	trying to run this example.	
+*/
+
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/soundcard.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <stdlib.h>
+
+#define SECONDS 5 //playback seconds
+
+int main() 
+{
+	int fd;
+	int handle = -1;
+	int channels = 1;         // 0=mono 1=stereo
+	int format = AFMT_U8;
+	int rate = 22000;
+	unsigned char* data;
+	
+/* Open the file corresponding to the soundcard for writing, DSP stands for Digital Signal Processor */
+	if ( (handle = open("/dev/dsp",O_WRONLY)) == -1 )
+	{
+		perror("open /dev/dsp");
+		return -1;
+	}
+/* Tell the sound card that the sound about to be played is stereo. 0=mono 1=stereo */
+
+	if ( ioctl(handle, SNDCTL_DSP_STEREO,&channels) == -1 )
+	{
+		perror("ioctl stereo");
+		return errno;
+	}
+
+	/* Inform the sound card of the audio format */
+	if ( ioctl(handle, SNDCTL_DSP_SETFMT,&format) == -1 )
+	{
+		perror("ioctl format");
+		return errno;
+	}
+	
+	/* Set the DSP playback rate, sampling rate of the raw PCM audio */
+	if (ioctl(handle, SNDCTL_DSP_SPEED,&rate) == -1 )
+	{
+		perror("ioctl sample rate");
+		return errno;
+	}
+   
+	// rate * 5 seconds * two channels
+	data = malloc(rate*SECONDS*(channels+1));
+	
+	if((fd=open("demo.pcm",O_RDONLY))==-1)
+	{
+		perror("open file");
+		exit(-1);
+	}
+
+	/* read the data contained in the demo file to the allocated memory */
+	read(fd,data,rate*SECONDS*(channels+1));
+	close(fd);
+	
+	/* just write the data to the sound card! This will play it. */
+
+	write(handle, data, rate*SECONDS*(channels+1));
+
+	if (ioctl(handle, SNDCTL_DSP_SYNC) == -1)
+	{
+		perror("ioctl sync");
+		return errno;
+    	}
+
+	free(data); //Be good, clean up.
+	close(handle);
+	printf("\nDone\n");
+	return 0;
+}

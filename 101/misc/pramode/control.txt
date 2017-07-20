@@ -1,0 +1,97 @@
+#include <linux/module.h>
+#include <rtai.h>
+#include <rtai_sched.h>
+
+#define STACK_SIZE 4096
+#define TIMERTICKS 333000 /*  333 micro second */
+
+#define LPT1_BASE 0x378
+#define JS_PORT 0x200
+#define TRIGGER() outb(0x0, JS_PORT)
+
+static RTIME on_time[3], off_time;
+static RTIME tick_period;
+
+enum {LEFT, MIDDLE, RIGHT};
+static int joystick_position = LEFT;
+
+static RT_TASK joystick_task, servo_task;
+
+static void 
+monitor_js(int t)
+{
+		static int tick = 0, pos;
+		while(1) {
+			switch(tick) {
+				case 0:
+					pos = LEFT;
+					TRIGGER(); tick++; 
+					break;
+				case 1: 
+					if(inb(JS_PORT)&1) pos = MIDDLE;
+					tick++; 
+					break;
+				case 2: 
+					tick++; 
+					break;
+				case 3: 
+					if(inb(JS_PORT)&1) pos = RIGHT;
+					rt_task_wait_period();
+					tick = 0; 
+					break;
+
+			}
+			if(tick == 0) joystick_position = pos;
+			rt_task_wait_period();
+            
+            /* Note that we wait for two more `ticks' before the next
+             * `trigger' (the rt_task_wait_period() in case 3 and the one
+             * just above). I don't know for sure - but it seems that the
+             * game port misbehaves when another trigger appears before all
+             * the high bits become low.
+             */
+		}
+}
+
+static void 
+pwm_servo(int t)
+{
+	/* Servo is controlled by
+	 * signal on pin 3 of LPT1
+	 */
+	while(1) {
+		outb(2, LPT1_BASE); /* Pin 3 high */
+		rt_sleep(on_time[joystick_position]);
+		outb(~2, LPT1_BASE);
+		rt_sleep(off_time);
+	}
+}
+
+
+int init_module(void)
+{
+	RTIME  now;
+
+	rt_set_periodic_mode();
+	rt_task_init(&joystick_task, monitor_js, 0, STACK_SIZE, 1, 0, 0);
+	rt_task_init(&servo_task, pwm_servo, 0, STACK_SIZE, 0, 0, 0);
+	tick_period = start_rt_timer(nano2count(TIMERTICKS));
+	
+	on_time[LEFT] = nano2count(TIMERTICKS*2);
+	on_time[MIDDLE] = nano2count(TIMERTICKS*4);
+	on_time[RIGHT] = nano2count(TIMERTICKS*6);
+	off_time = nano2count(TIMERTICKS * 53); /* 17.6 milli second */
+
+	now = rt_get_time();
+	rt_task_make_periodic(&servo_task, now + tick_period, tick_period);
+	rt_task_make_periodic(&joystick_task, now + tick_period, tick_period);
+	return 0;
+}
+
+void cleanup_module(void)
+{
+	stop_rt_timer();
+	rt_busy_sleep(10000000);
+	rt_task_delete(&joystick_task);
+	rt_task_delete(&servo_task);
+}

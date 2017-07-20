@@ -1,0 +1,224 @@
+/*------------------- ADC_driver -----------------------------------
+
+  PURPOSE - Gives ten sensor readings over 10 seconds.
+  
+
+  COMPILE to binary st as below-
+            gcc -o run_ADC ADC_driver.c
+
+  RUN       ./lp_tty_start ./ADC_driver
+*/
+
+#include <asm/io.h>
+#include <sys/time.h>
+                                            
+//------- Parallel port data.
+static short lp_base_addr ; // save base addr of pp port.
+#define status_offset  1
+#define control_offset 2
+#define high 1
+#define low  0
+
+
+static char save_data ;    // save of original values.
+static char save_control ;
+static char image_data ;   // use image as master record of port.
+static char image_control ;
+
+int count; // used for clock data in or out
+
+//-------Parallel port pins-------------------------
+#define CS1         0x02
+#define SCLK1       0x01
+#define SCLK1_CS1   0x03
+#define DIN1        0x04
+#define DIN1_SCLK1  0x05
+#define DIN1_SCLK1_CS1 0x07  
+#define all_low     0x00
+
+//-------Control Byte-------------------------------
+int thermo1_DIN[8] = {1,0,0,0,1,0,1,0};
+
+//-------12 bit Output------------------------------
+int DOUT = 0;
+
+//=================== pp routines ================================
+
+//-------- lp_init() --------------------------------------------
+//
+// PURPOSE - given lp number 0-2, get lp base address,
+//           save registers, disable interrupts.
+
+void lp_init(short lp_num)
+ { switch ( lp_num)
+    { case 2 : lp_base_addr = 0x3BC ; break ;
+      case 1 : lp_base_addr = 0x278 ; break ;
+      default: lp_base_addr = 0x378 ; break ;
+    }
+   image_data    = save_data    = inb( lp_base_addr) ;
+   image_control = save_control = inb( lp_base_addr+2) ;
+   outb( (image_control &= 0xEF),  lp_base_addr + control_offset) ;
+ }
+
+//--------- lp_restore() ----------------------------------------
+//
+// PURPOSE - restore lp port to previous state.
+
+void lp_restore()
+{  outb( save_data,    lp_base_addr) ;
+   outb( save_control, lp_base_addr + control_offset) ;
+}
+
+//---------check SSTRB pin------------------------------
+//PURPOSE - check the SSTRB pin (pin 10 or S6) 
+
+int check_SSTRB_pin()
+{
+  if ( inb( lp_base_addr+status_offset) & 0x40)
+    return(high);
+  else return(low);   
+}
+
+//---------check DOUT pin------------------------------
+//PURPOSE - check the SSTRB pin (pin 11 or S7)
+
+int check_DOUT_pin()
+{
+  if ( inb( lp_base_addr+status_offset) & 0x80)
+    return(low);
+  else return(high);
+}
+
+//---------two power of-----------------------------
+//PURPOSE - to output two to the power of (x) - 2^x
+
+int twopowerof(int x)
+{
+  int tempPow = 0;
+  int value = 1;
+    while(x>tempPow)
+    {
+      value = 2*value;
+      tempPow++;
+    }
+  return(value);
+}
+           
+//---------Clock in 8bits------------------------------
+//PURPOSE - clock in the 8 bit command into the ADC.*/
+ 
+void clock_in_8bits(int buffDIN[8])
+{  
+  for(count=0; count<=7; count++)
+  {
+    //---falling edge-------------------------
+    if(buffDIN[count] == 1) 
+      {outb(DIN1, lp_base_addr);         //SCLK-low, DIN-high              
+      }
+    else
+      {outb(all_low, lp_base_addr);        //SCLK-low, DIN-low            
+      }              
+
+    //---rising edge---------------------------
+    if(buffDIN[count] == 1)
+      {if(count == 8)
+        outb(DIN1_SCLK1_CS1, lp_base_addr);   
+       else
+        outb(DIN1_SCLK1, lp_base_addr);   //SCLK-high, DIN-high 
+      }
+    else
+      {if(count == 8)
+        outb(SCLK1_CS1, lp_base_addr);   
+       else
+        outb(SCLK1, lp_base_addr);        //SCLK-high, DIN-low
+      }
+  }
+
+  outb(CS1, lp_base_addr);   //last falling edge so CS goes high
+ 
+}
+
+//---------Clock out signal-----------------------------
+//PURPOSE - once tconv is finished clock out the 12 bit
+//          signal from ADC
+
+int clock_out_signal()
+{
+  int tempOut[12] = {0,0,0,0,0,0,0,0,0,0,0,0};
+
+  for(count=1; count<=14; count++)
+  {
+    //-----begin clocking out out byte----
+    outb(0, lp_base_addr);  //force pin2 SCLK to low
+
+    //----rising edge------
+    if(count == 1 && check_DOUT_pin() != 0)
+    { 
+    }
+
+    if(count>=2 && count<=13)
+    {
+      if(check_DOUT_pin() == high)
+      tempOut[count-2] = 1;
+      else
+      tempOut[count-2] = 0; 
+    }                               
+
+    outb(SCLK1, lp_base_addr); //force pin2 SCLK to high  
+  }
+
+  outb(0, lp_base_addr);   //force pin2 SCLK to low
+  int dec = 0;
+  for(count=0; count<=11; count++)
+  {
+    dec = ((tempOut[11-count])*(twopowerof(count)))+dec;  
+  }
+  
+  return(dec);
+}
+
+
+//---------get thermistor sensor reading-----------------------
+//PURPOSE - to clock in thermistor sensor config and then clock out
+//          the thermistor sensor reading as a integer.
+
+void get_thermo1_sensor_reading()
+{   //--- begin clocking in 8 bit command/
+    outb(CS1, lp_base_addr); //force CS (D2) high rest of the pins are low
+ 
+    //---starting 8-bit command---
+    outb(all_low, lp_base_addr);  //make all pins low
+    outb(DIN1, lp_base_addr);     //input DIN START(high) bit
+    clock_in_8bits(thermo1_DIN);  //clocking in the 8 bit command
+    DOUT = clock_out_signal();    //clocking out 12 bit signal from ADC
+}
+
+                        
+//========== main ===============================================
+
+int main(void)
+{ //====== inits.
+    lp_init(0);
+          
+  //--- initialize primary time interval PTI timer.
+    struct timespec sleep_time ;
+    sleep_time.tv_sec = 0 ;
+    sleep_time.tv_nsec = 0 ; // 10 ms PTI.
+    
+  //--- output the sensor reading every second x 10 times 
+    int i;
+    for(i=0; i<10; i++)
+    {
+      get_thermo1_sensor_reading();
+      if(DOUT == 4095)
+        printf("ERROR: No power or connection \n");
+      else
+      printf("Voltage Reading: %d \n",DOUT);
+      sleep(1);         
+    }
+
+    printf("********************************************\n");
+                                                      
+    lp_restore();
+    return(0);
+}

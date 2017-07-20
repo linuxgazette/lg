@@ -1,0 +1,454 @@
+#!/usr/bin/perl -w
+#
+#	pack - use a USB stick as a reliable directory synchroniser
+#
+use File::Basename;
+use File::Temp qw/ :mktemp  /;
+use File::Find ();
+use Getopt::Long;
+use POSIX qw(strftime);
+# set signal handlers
+$SIG{INT}  = \&cleanup;
+$SIG{QUIT} = \&cleanup;
+#----------------------------------------------------------------------------------------
+# CONFIGURATION
+#----------------------------------------------------------------------------------------
+$config  = "/etc/pack.list";                              # configuration: contains the file list
+
+$flashdir=  ${ENV}{'VOL'} || "/vol/flash";                # set mount point
+$tarfile = "$flashdir/actual.2";                          # main archiving file
+$pret    = "$flashdir/pre.2";                             # additional file, unpacked before
+$addt    = "$flashdir/add.2";                             # additional file, unpacked afterwards
+$confdir = "$flashdir/.conf.d";                           # directory for configuration/notes etc.
+$notes   = "$confdir/notes";                              # notes file
+$cmds    = "$confdir/commands";                           # commands to execute
+
+#----------------------------------------------------------------------------------------
+our $DEBUG = ${ENV}{'debug'} || 0;                        # set to numerical value > 0
+#----------------------------------------------------------------------------------------
+$prog    = basename($0);                                  # program name
+$tmpconf = "/tmp/${prog}-conf.tmp";                       # temporary $config
+$tmpfile = "/tmp/${prog}-pack.tmp";                       # temporary file
+$list    = "/tmp/${prog}-list.tmp";                       # temporary list
+$log     = "/tmp/${prog}-$$.log";                         # logfile
+$less    = ${ENV}{'PAGER'} || "less";                     # less is more
+
+
+-e $config || warn "Config file $config missing!";        # sanity test
+#----------------------------------------------------------------------------------------
+# GLOBAL
+use vars qw/*name/;
+*name   = *File::Find::name;
+
+our %KNOWN;                                               # links traversed before
+our $days;                                                # number of days to consider for archive
+our ($see,$unpack, $yes);                                 # global option names
+our $hostlabel;                                           # hostname, used as archive label
+our $timestamp;                                           # timestamp file to record last backup
+#----------------------------------------------------------------------------------------
+# ESSENTIAL FILES
+sub essential {
+  open(ESSENTIAL, ">$tmpconf") || die "can't store essential files in $tmpconf: $!\n";
+  # now add the essentials
+  File::Find::find(sub {lstat($_); (-f _ || -l _) && (-M _ <= 0) && print ESSENTIAL "$name\n"; },
+                      '/usr/lib/cgi-bin/',
+                      '/home/gerrit/bin/');
+  print ESSENTIAL <<eof;
+  /home/gerrit/.{abfile,pwd.html,aspell*,indent.pro,gitconfig}
+  /home/gerrit/.{bash?[place]*,alias,functions,dircolors}
+  /home/gerrit/.{exrc,*vimrc,vim/*pl,vim/{syntax,*plugin,macros,doc}/*}
+  ${config}
+eof
+  close ESSENTIAL;
+}
+# determine if gdialog is available and whether X is up
+our $dialog = ($ENV{'DISPLAY'} && (qx#which gdialog 2>/dev/null#))? "gdialog" : "dialog";
+chomp($hostlabel = qx/hostname --fqdn/);                         # determine hostname
+$timestamp="${confdir}/timestamp-${hostlabel}";           # determine name of timestamp file
+#----------------------------------------------------------------------------------------
+# FUNCTIONS
+#----------------------------------------------------------------------------------------
+# USUAL ERROR ROUTINES
+sub log {                                                 # for printing messages
+ printf STDERR "\033[1;34;7m@_\033[m\n";
+}
+sub usage() {                                             # the help screen
+     print "Usage: $prog  [options]
+       where options are one or more of
+         --help               display this help text
+         --unpack             unpack rather than pack
+         --list               check the packing list and exit
+         --config             edit the configuration file $config
+         --read               read the notes file and exit
+         --edit               edit the notes file and exit
+         --show               view the contents of the commands file
+         --info               print last recorded timestamps
+         --exec               execute the commands file independently [DISABLED]
+         --days    n          restrict backup to the last n days
+                              (default n=1 if no timestamp file)
+         --yes                assume YES for overwriting old archive
+
+This program honours the PAGER environment variable. With the VOL=xxx environment
+variable, a different volatile medium relative to /vol/ can be used (e.g. VOL=floppy).
+Use debug=n to see debugging output (n>0).\n";
+  exit 0;
+}
+##########################################################################
+# present error log if there
+sub checklog {
+  my $title = "" . ((@_)? "@_" : "Error Log");
+  if ( -s $log ) {
+  system("fmt -w 72 $log > $tmpfile;" .
+         "$dialog --backtitle \"ERRORS as below, please redo.\"".
+         "        --title \"$title\"  --textbox ${tmpfile} 10 72");
+  return 0;                                               # return error
+  }
+  return 1;                                               # return ok
+}
+##########################################################################
+# remove temporary files
+sub cleanup {
+  unlink  ($log, $list, $tmpfile, $tmpconf) unless $DEBUG > 1;
+  exit ((@_)? 1 : 0);
+}
+##########################################################################
+# simple error routine, checks for error log
+# if no error log is present, only a simple error message box is displayed
+sub error {
+  checklog("Error: @_") && system("$dialog --title \"Error\" --msgbox \"@_\" 7 35");
+  cleanup 1;
+}
+##########################################################################
+# routine to save a fresh copy of the MBR each time
+sub save_mbr {
+  my $rdev = qx{/usr/sbin/rdev 2>&1};
+  $rdev =~ s#[0-9].*\s+$##;                               # remove numbers and chomp
+  $rdev || die "Cant determine root device";
+  my $mbr="$confdir/.mbr-";
+  chomp($mbr .= qx/hostname -s/);                         # add hostname
+  system("dd if=$rdev of=$mbr bs=512 count=1  2>/dev/null") == 0 || warn "Cannot save MBR";
+}
+##########################################################################
+# unpack(): unpack the tarfile given as argument
+##########################################################################
+sub unpack {
+  if ( @_ && -e $_[0] ) {                                 # if file present ...
+    ::log "Unpacking $_[0] ...";
+    if (system("tar -jxpPvf $_[0] 2>$log") == 0) {        # extract files
+      ::log "Storing old archive file in /tmp ...";
+      system "mv  $_[0] /tmp 2>>$log";
+    }
+  }                                                       # else: return quietly
+}
+##########################################################################
+# execute_cmds(): run/show stored commands
+##########################################################################
+sub execute_cmds {
+  local $log="/tmp/commands-error-log";                   # logfile for errors
+  (-s $cmds) || return;                                   # ignore empty files
+  if ( @_ ) {                                             # let's see the commands
+     if ($ENV{DISPLAY} ) {                                # X version
+      system("cp  $cmds $cmds.bak;"  .                    #  backup first
+             "zenity --title \"STORED COMMANDS\" --width=700 --height=200 " .
+             "--text-info --editable --filename $cmds >$tmpfile  &&  mv $tmpfile $cmds");
+     } elsif ( -t STDOUT ) {                              # test for terminal
+       system "$less $cmds";                              # cmdline version
+     }
+   } else {
+     ::log "Running commands ...";
+     system "bash $cmds";                                 # execute commands
+     system "mv  $cmds /tmp/commands";                    # remove command file
+  }
+}
+##########################################################################
+# read the notes file if there and if on terminal
+sub read_notes  {
+  -s $notes || return;                                    # ignore empty notes
+  if ( -t STDOUT ) {                                      # test for terminal
+    system "$less $notes";                                # cmdline version
+  }
+}
+##########################################################################
+# readLink(): return arguments if these are not links
+# otherwise return the list of links in order of their use
+# ended by a non-link file
+##########################################################################
+sub readLink {
+  my $link;
+  foreach $file (@_) {                                    # repeat for all arguments
+    $file =~ s#/$##;                                      # strip trailing slashes
+    printf "$file\n";                                     # output filename
+    until (! -l ($link=$file)) {                          # handle symlinks iteratively
+       $file = readlink($link);
+       (-e $file)  or  warn "!stuff $file";
+       $file =~ m#^/#  or $file = sprintf("%s/$file", dirname($link)); # symlink to same directory
+       printf "$file\n";                                  # output filename
+    }
+  }
+}
+##########################################################################
+# readlink_recurse(): return argument if not a link, otherwise return the
+#            list of links in order of their use ended by a non-link file
+##########################################################################
+sub readlink_recurse {
+ my $file = shift;
+ my $link;
+ LINK: while( -l ($link=$file) ) {              # handle symlinks iteratively
+    $file = readlink($link);
+    $file =~ m#^/#  or $file = sprintf("%s/$file", dirname($link)); # symlink to same directory
+
+    # CIRCLE PREVENTION UNIT: if there is a circularity in the symlinks
+    # we would like to prevent calling getLinkedFiles again. Therefore, the
+    # list KNOWN is maintained. If a symlinked directory is encountered and
+    # at the same time found to be in $KNOWN, the control resumes at the
+    # label `LINK',  and the reursive call to getLinkedFiles is skipped.
+    if ( -d $file ) {
+      for my $i (keys %KNOWN) {
+        next LINK if $i eq $file                # seen before
+                  || ( -l $file                 # pointer to existing subtree
+                      && ($i =~ m#${file}.*#  || $file =~ m#${i}.*#));
+      }
+      getLinkedFiles($file);                    # otherwise: recurse
+    } else {
+      error "FATAL: $file is a broken link.\n" unless -e $file;
+      printf "$file\n";                         # output filename
+    }
+  }
+}
+##########################################################################
+# getLinkedFiles(): get both the symlink and the file it points to
+##########################################################################
+sub getLinkedFiles {
+  foreach $i (@_) {                                       # repeat for all arguments
+
+   $i =~ s#/$##;                                          # strip trailing slashes
+   next  if ${KNOWN}{$i}++;                               #  skip known entries
+
+   if ( -d $i && -l $i) {                                 # 1) DIRECTORIES THAT APPEAR AS SYMLINKS
+      print "$i\n";                                       # record as visited
+      ::log "Symlinked dir: $i"     if $DEBUG >4;
+      readlink_recurse($i);
+
+   } elsif (-d $i) {                                      # 2) PURE DIRECTORIES
+       opendir(DIR, $i) || die "can't read directory $i: $!";
+       my @files = grep(!/(\.\.?|\Q${i}\E)$/, readdir(DIR));
+       closedir(DIR);
+
+       # this alternative adds more directories, small changes are sufficient to qualify for adding
+       #my $dir_is_new = ((-C "$i") <= 0 && (-M "$i") <= 0 && (-A "$i") <= 0 ); # a|m|ctime < timestamp
+       # This alternative has the criterion:  all files in the directory are new
+       my $dir_is_new = (($#files + 1) == grep(-e "$i/$_" && ((-M "$i/$_") <= 0), @files));
+
+       if ($dir_is_new) {                                 # 2a) NEW DIRECTORY
+        ::log "New dir: $i"     if $DEBUG >4;
+
+        if ( (-M "$i" ) < 0 ) {                           # this prints to LIST, so wants a check
+           ::log "ADDING DIRECTORY: $i"     if $DEBUG;    # the *entire* directory is added
+           print  LIST "$i\n";                            # only add if this directory is newer
+        } else {                                          # old directory: add directory contents
+         @files = map { $_ = "$i/$_" } @files;            # prepend directory name
+         getLinkedFiles( @files );                        #
+        }
+       } else {                                           # 2b) OLD DIRECTORY
+         ::log "Old dir: $i"     if $DEBUG >4;
+         foreach (@files) {
+           if (-f "$i/$_" ) {                             # plain file: just print
+              print "$i/$_\n";
+           } else {
+              getLinkedFiles("$i/$_");                    # recurse per each dir entry
+           }
+         }
+       }
+   } elsif ( -l $i) {                                     # 3) LINKS
+      print "$i\n";                                       # record as visited
+      readlink_recurse($i);                               # and recurse again
+
+   } else  {                                              # 4) OTHER (PLAIN) FILES
+      print "$i\n";
+   }
+  }
+}
+##########################################################################
+# parse the configuration file and build the list via recursive subfunction calls
+sub build_list  {
+  # get timestamp: consult file only if (i) no $days option and (ii) file there
+  if (-f $timestamp ) {
+    open(STAMP, $timestamp) || error("Could not open timestamp file $timestamp: $!");
+    my $stamp = <STAMP>     || error "Uninitialized timestamp in $timestamp!";
+    close STAMP;
+    ::log  "Last backup on this host was on " .
+            strftime("%A %e %B at %l:%M %P",localtime($stamp));
+    # set script start time to timestamp
+    unless ($days) {                                      # unless cmdline option present
+      error "Timestamp file $timestamp points into the future!" if $stamp > time;
+      $^T = $stamp;                                       # rewind script start time
+      undef $days;                                        # undefine this option
+    }
+  } else {                                                # no timestamp yet
+    ::log "WARN: No timestamp yet for this host.";
+    $days = 1 unless $days;                               # set default value
+  }
+  # rewind script start time: if `days' option was set.
+  $^T -= $days * 24 * 3600  if $days;
+
+  ::log "Building list from configuration file ...";
+  essential();                                            # pre-load essential files
+  local @ARGV = ($config, $tmpconf);                      # args for <>: override global ones
+  # create temporary files
+  open(TMPLIST,  ">$tmpfile") || error "Can't open temp list $tmpfile: $!";
+  open(LIST,     ">$list")    || error "Can't open temp list $list: $!";
+  select TMPLIST;                                         # redirect all output to this file
+
+  # Main Processing Loop: read configuration file, decide how to parse, call subroutines
+  while(<>) {
+   s/#.*//g; s/^\s+//g;                                   # strip comments, leading white space
+   s/>/> /;                                               # deal with missing white space
+   next if m/^\s*$/;                                      # skip blank lines
+   my @arr=split;
+
+   if ($arr[0] =~ m/<\s*rec\s*>/i) {                      # (i)    RECURSIVE DESCENT
+     shift @arr;                                          # remove first entry (command)
+     getLinkedFiles(@arr);
+
+   } elsif ($arr[0] =~ m/<\s*link\s*>/i) {                # (ii)   LINK ONLY
+     shift @arr;                                          # remove first entry (command)
+     readLink(@arr);
+
+   } else {                                               # (iii)  FILE ONLY
+     foreach (@arr) {
+       if (m#[{\*]#) {
+         $_ = qx/bash -c "echo $_"/;                      # let bash do the eval
+         print STDERR "BASH: $_" if $DEBUG > 2;
+         foreach (split) { print "$_\n"; }                # add each file
+       } elsif ( -d ) {
+          getLinkedFiles($_);                             # a single directory
+       } else {
+         printf "$_\n";                                   # a file or a link
+       }
+     }                                                    # end (foreach)
+   }                                                      # end (if)
+  }                                                       # end (while)
+  close TMPLIST;
+  select STDOUT;
+  %KNOWN = ();                                            # truncate list
+
+  # PROCESS TEMPORARY FILE, LINE BY LINE
+  ::log "Selecting files modified " .  ( ($days)? "during the last $days day(s) ..."
+                                                : "since the last backup ..."       );
+  open(TMPLIST,  "$tmpfile") || error "Can't open temp list $tmpfile: $!";
+
+  while(<TMPLIST>) {                                      # build the list
+    chomp;
+    s#/[^/]+/(\.\.)+/(\S+)#/$2#g;                         # normalize file names that contain ".."
+    error "FATAL:\n \"$_\"\n--$!\n" unless -e $_;         # check if file exists
+
+    next if ( (-M ) >= 0 );                               # skip old files
+    print LIST "$_\n" unless $KNOWN{$_}++;                # remove duplicates
+  }
+  close TMPLIST; close LIST;
+  error "Your backup seems up-to date:\nSearch resulted in an empty list." unless %KNOWN;
+}
+#----------------------------------------------------------------------------------------
+# SCRIPT PROPER
+#----------------------------------------------------------------------------------------
+# GET OPTIONS
+Getopt::Long::Configure ("bundling");                     # enable bundling of single-character options
+GetOptions (
+    'show'   => sub { execute_cmds("show"); exit; },      # read commands file
+    #'exec'   => sub { execute_cmds();       exit; },     # execute commands file
+    'config' => sub { exec "$ENV{EDITOR} $config"; },     # normal edit
+    'days=i' => \$days,                                   # set the period of backup
+    'edit'   => sub { exec "$ENV{EDITOR} $notes"; },      # edit the notes file
+    'help'   => \&usage,                                  # help
+    'list'   => \$see,                                    # only check the list
+    'info'   => sub { for (<$confdir/timestamp-*>) {      # read out timestamps
+                        open(S,"$_") || error "Cannot read timestamp file $_: $!";
+                        my $t = localtime(<S>); close S;
+                        s#.*timestamp-##; s#$hostlabel#this host#;
+                        printf "Last transfer onto %-29s:  $t\n", $_
+                      }
+                      exit;
+                },
+    'read'   => sub { read_notes(); exit; },              # read the notes
+    'unpack' => \$unpack,                                 # unpack
+    'yes'    => \$yes,                                    # overwrite ok
+) || usage();                                             # display help message in case of error
+
+# TEST FOR DEVICE
+if ( defined $yes || defined $unpack || not defined $see ) {
+  for $trial (1..3) {                                     # check: is USB device mounted
+     if (qx#ls -l $flashdir 2>/dev/null# ) {
+       $mounted="yes";
+       last;
+     }
+     ::log "Trying to mount device $flashdir ... (attempt $trial)";
+     sleep $trial;                                        # wait a second or two
+  }
+  $mounted || die "Your device does not seem to be mounted on $flashdir -- try again.\n";
+
+  # Create configuration directory if not there
+  if ( not -d $confdir ) {
+    ::log "Creating yet non-existent configuration directory: $confdir";
+    system "mkdir -p $confdir";                             # the -p option is important
+    die "Configuration directory can not be created - Aborting.\n"  if $?;
+  }
+}
+#----------------------------------------------------------------------------------------
+# PROCEED BY CASES
+#----------------------------------------------------------------------------------------
+if ( $see ) {                                             # VIEW FILE LIST
+  build_list();
+  system "$less $list";                                   # launch viewer
+#----------------------------------------------------------------------------
+ } elsif ( $unpack ) {                                    # UNPACK ARCHIVE
+    if ( -e $tarfile ) {                                  # check if archive present
+      # test first whether the archive was created on this host
+      open(TAR, "tar jtf  $tarfile|") || die "Cannot read volume header of $tarfile: $!\n";
+      chomp($label = <TAR>);                              # only read the first line: vol. header
+      die "Refusing to unpack, archive was created on this host. Try the --yes option.\n"
+              if ($label eq $hostlabel && ! defined $yes);
+      ::unpack $pret;                                     # pre-file
+      execute_cmds();                                     # run commands beforehand
+      ::log "Unpacking ...";
+      ::unpack $tarfile;                                  # main archive
+      ::unpack $addt;                                     # additional file
+
+      # update time stamp if the archive wasn't made on this host
+      if ($label ne $hostlabel) {
+        if ( open(STAMP, ">$timestamp") ) {
+            print STAMP time;                             # update timestamp
+            close STAMP;
+        } else {
+            ::log "WARNING: cannot update timestamp $timestamp.";
+        }
+      }
+      checklog()  &&  read_notes();                       # do your reading
+    } else {
+      error "$tarfile not present";                       # complain about missing file
+    }
+#----------------------------------------------------------------------------
+ } else {                                                 # BUILD THE ARCHIVE
+  save_mbr();                                             # save a copy of the MBR
+  if ( ! $yes && -e $tarfile ) {                          # warn before overwriting
+   system("$dialog --title \"WARNING:\" --yesno \"Archive $tarfile already exists. Overwrite?\" 8 30");
+   $? == 0 || exit;
+  }
+  build_list();                                           # construct the list
+
+  # TAR OPERATION
+  ::log "Creating backup archive file ...";
+  system "tar -jcpPvf $tarfile --label $hostlabel --files-from=$list 2>$log";
+  if ($? != 0) {                                          # something went wrong
+    unlink $tarfile;
+    error "Tar Problem!\nDeleting archive $tarfile";
+  }
+  printf "Transferred %.0f KB.\n", (-s $tarfile)/1024;    # display the total size
+
+  ::log "Syncing ...";
+  system "sync;sync;";                                    # try syncing flash disk
+
+  ::log "Testing file integrity:";                        # verify the bzip2 file
+  system "bzip2 -tvv $tarfile";
+}
+#----------------------------------------------------------------------------
+cleanup();

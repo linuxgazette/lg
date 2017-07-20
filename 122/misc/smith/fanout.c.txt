@@ -1,0 +1,313 @@
+/*
+ *  fanout.c:  A one-to-many multiplexer
+ *
+ */
+
+#include <linux/kernel.h>
+#include <linux/module.h>
+#include <linux/fs.h>
+#include <linux/poll.h>
+#include <linux/cdev.h>
+#include <linux/slab.h>
+#include <asm/uaccess.h>
+#include <linux/devfs_fs_kernel.h>
+
+
+
+/* Limits and other defines */
+	/* The # fanout devices.  Max minor # is one less than this */
+#define NUM_FO_DEVS 10
+#define DEVNAME "fanout"
+
+
+
+/* Data structure definitions */
+	/* This data structure describes one fanout device.  There
+	 * is one of these for each instance (minor #) of fanout */
+struct fo {
+	int	minor;		/* minor number of this fanout instance */
+	char   *buf;		/* points to circular buffer */
+	int	indx;		/* where to put next char recv'd */
+	loff_t	count;		/* number chars received */
+	wait_queue_head_t waitq; /* readers wait on this queue */
+	struct semaphore wlock;	/* write lock to keep buf/indx sane */
+};
+
+
+
+/*  Function prototypes.  */
+int fanout_init(void);
+void fanout_exit(void);
+static int fanout_open(struct inode *, struct file *);
+static int fanout_release(struct inode *, struct file *);
+static ssize_t fanout_read(struct file *, char *, size_t, loff_t *);
+static ssize_t fanout_write(struct file *, const char *, size_t, loff_t *);
+static unsigned int fanout_poll(struct file *, poll_table *);
+
+
+
+
+/* Global variables */
+static int buf_sz = 16384;		/* Size of the circular buffer */
+	/* Debuglvl controls whether a printk is executed
+	 * 	0 = no printk at all
+	 *	1 = printk on error only
+	 *	2 = printk on errors and on init/remove
+	 *	3 = debug prink to trace calls into fanout
+	 *	4 = debug trace inside of fanout calls */
+static int debuglvl = 2;		/* printk verbosity */
+struct fo fodevs[NUM_FO_DEVS];		/* fanout devices */
+struct cdev fo_cdev;
+dev_t fo_devt;
+
+static struct file_operations fanout_fops = {
+	.owner = THIS_MODULE,
+	.read = fanout_read,
+	.open = fanout_open,
+	.write = fanout_write,
+	.poll = fanout_poll,
+	.release = fanout_release
+};
+
+
+
+/* Module description and macros */
+MODULE_DESCRIPTION("A device to replicate input on all outputs");
+MODULE_AUTHOR("Bob Smith");
+MODULE_LICENSE("GPL");
+module_param(buf_sz, int, S_IRUSR);
+MODULE_PARM_DESC(buf_sz, "Size of each circular buffer.  Def=16k");
+module_param(debuglvl, int, S_IRUSR);
+MODULE_PARM_DESC(debuglvl, "Debug level. Higher=verbose. Def=2");
+module_init(fanout_init);
+module_exit(fanout_exit);
+
+
+
+int fanout_init(void)
+{
+	int i, err;
+
+
+	for (i = 0; i < NUM_FO_DEVS; i++) {
+		fodevs[i].minor = i;
+		fodevs[i].buf = (char *) 0;
+		fodevs[i].indx = 0;
+		fodevs[i].count = 0;
+		init_waitqueue_head(&fodevs[i].waitq);
+		init_MUTEX(&fodevs[i].wlock);
+	}
+
+	err = alloc_chrdev_region(&fo_devt, 0, NUM_FO_DEVS, DEVNAME);
+	if (err < 0) {
+		if (debuglvl >= 1) {
+			printk(KERN_ALERT "fanout: init fails. err=%d\n", err);
+		}
+		return err;
+	}
+	cdev_init(&fo_cdev, &fanout_fops);
+	kobject_set_name(&(fo_cdev.kobj), "fanout%d", fo_devt);
+
+	err = cdev_add(&fo_cdev, fo_devt, NUM_FO_DEVS);
+	if (err < 0) {
+		if (debuglvl >= 1) {
+			printk(KERN_ALERT "fanout: init fails. err=%d\n", err);
+		}
+		return err;
+	}
+
+	if (debuglvl >= 2) {
+		printk(KERN_INFO "fanout: Installed\n");
+	}
+
+	return 0;  /* success */
+}
+
+
+void fanout_exit(void)
+{
+	int i;
+
+	for (i = 0; i < NUM_FO_DEVS; i++) {
+		if (fodevs[i].buf) {
+			kfree(fodevs[i].buf);
+		}
+	}
+
+	cdev_del(&fo_cdev);
+	unregister_chrdev_region(fo_devt, NUM_FO_DEVS);
+
+	if (debuglvl >= 2) {
+		printk(KERN_INFO "fanout: Uninstalled\n");
+	}
+}
+
+
+static int fanout_open(struct inode *inode, struct file *filp)
+{
+	int mnr = iminor(inode);
+	struct fo *fodp = &fodevs[mnr];
+
+	if (debuglvl >= 3) {
+		printk(KERN_DEBUG "fanout open. Minor#=%d\n", mnr);
+	}
+
+	if (!fodp->buf) {
+		fodp->buf = kmalloc(buf_sz, GFP_KERNEL);
+		if (debuglvl >= 3) {
+			printk(KERN_DEBUG "fanout: Got memory for minor=%d\n",
+					mnr);
+		}
+		if (!fodp->buf) {
+			if (debuglvl >= 1) {
+				printk(KERN_ALERT "fanout: No memory dev=%d\n",
+						mnr);
+			}
+			return -ENOMEM;
+		}
+	}
+
+	/* store which fanout device in the file's private data */
+	filp->private_data = (void *) fodp;
+
+	/* define the file to be immediately caught up with the fanout dev */
+	filp->f_pos = fodp->count;
+
+	return 0;	/* success */
+}
+
+static int fanout_release(struct inode *inode, struct file *filp)
+{
+	if (debuglvl >= 3) {
+		printk(KERN_DEBUG "fanout close. Minor#=%d\n", 
+			((struct fo *)filp->private_data)->minor);
+	}
+
+	return 0;	/* success */
+}
+
+
+
+static ssize_t fanout_read( struct file *filp, char *buff, size_t len,
+	loff_t * offset)
+{
+	int ret, xfer;			/* num bytes read from fanout buf */
+	int cpcnt, cpstrt;		/* cp count and start location */
+
+	struct fo *fodp = (struct fo *)filp->private_data;
+
+	if (debuglvl >= 3) {
+		printk(KERN_DEBUG "fanout: read %d char from dev%d, off=%d\n",
+			len, fodp->minor, (int)*offset);
+	}
+
+	/* Verify that data requested is in the buffer or is next byte */
+	xfer = fodp->count - *offset;
+	if ((xfer > buf_sz) || (xfer < 0)) {
+		return -EPIPE;
+	}
+
+	/* Wait here until new data is available */
+	if (*offset == fodp->count) {
+		wait_event_interruptible(fodp->waitq, *offset != fodp->count);
+	}
+
+	/* Copy the new data out to the user */
+	xfer = fodp->count - *offset;
+	ret = xfer = (len < xfer) ? len : xfer;
+	while (xfer) {
+		cpstrt = fodp->indx - xfer;
+		if (cpstrt < 0) {
+			cpcnt = -cpstrt;
+			cpstrt += buf_sz;
+		} else {
+			cpcnt = xfer;
+		}
+
+		if (copy_to_user(buff, fodp->buf + cpstrt, cpcnt) ) {
+			return -EFAULT;
+		}
+		buff += cpcnt;
+		xfer -= cpcnt;
+	};
+
+	/* We may have slept during the above copy_to_user() and more
+	 * data may have been added while we slept.  Do a sanity check
+	 * to make sure the buffer did not wrap while we slept. */
+	if (fodp->count - *offset > buf_sz) {
+		return -EPIPE;
+	}
+
+	*offset += ret;
+
+	return ret;
+}
+
+
+static ssize_t
+fanout_write(struct file *filp, const char *buff, size_t len, loff_t * off)
+{
+	int ret, xfer;		/* num bytes to read from user */
+	int cpcnt;		/* num bytes in a copy */
+
+	struct fo *fodp = (struct fo *)filp->private_data;
+
+	if (debuglvl >= 3) {
+		printk(KERN_DEBUG "fanout: write %d char to dev%d, off=%d\n", 
+			len, fodp->minor, (int)*off);
+	}
+
+	/* Copy at most one-quarter of the circular buffer size.  This
+	 * gives readers more of a chance to wake up and get some data */
+	ret = xfer = (len > (buf_sz / 4)) ? (buf_sz / 4) : len;
+
+	if (down_interruptible(&fodp->wlock)) {
+		return -ERESTARTSYS;
+	}
+
+	while (xfer) {
+		cpcnt = buf_sz - fodp->indx;
+		cpcnt = (cpcnt < xfer) ? cpcnt : xfer;
+
+		/* Don't we need a lock of some kind here ? */
+		if (copy_from_user(fodp->buf + fodp->indx, buff, cpcnt) ) {
+			up(&fodp->wlock);
+			return -EFAULT;
+		}
+		fodp->indx += cpcnt;
+		fodp->indx = (fodp->indx == buf_sz) ? 0 : fodp->indx;
+		xfer -= cpcnt;
+		buff += cpcnt;
+	}
+	fodp->count += ret;
+	up(&fodp->wlock);
+
+	/* This is what the readers have been waiting for */
+	wake_up_interruptible(&(fodp->waitq));
+
+	return ret;
+}
+
+
+static unsigned int fanout_poll(struct file *filp, poll_table *ppt)
+{
+	/* The circular buffer is always available for writing */
+	int ready_mask = POLLOUT | POLLWRNORM;
+
+	struct fo *fodp = (struct fo *)filp->private_data;
+
+	poll_wait(filp, &fodp->waitq, ppt);
+
+	if (filp->f_pos != fodp->count) {
+		ready_mask = (POLLIN | POLLRDNORM);
+	}
+
+	if (debuglvl >= 3) {
+		printk(KERN_DEBUG "fanout: poll returns 0x%x\n", ready_mask);
+	}
+
+	return ready_mask;
+}
+
+
+

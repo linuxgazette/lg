@@ -1,0 +1,571 @@
+<!DOCTYPE html
+	PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+	 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en-US" xml:lang="en-US">
+<head>
+<title>Debugging WiFi LG #135</title>
+<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1" />
+<link rel="stylesheet" href="../lg.css" type="text/css" media="screen, projection"  />
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+<link rel="shortcut icon" href="../favicon.ico" />
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+</head>
+<body>
+
+<a href="../">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+<div class="content articlecontent1">
+
+<div id="previousnexttop">
+<A HREF="pfeiffer.html" >&lt;-- prev</A> | <A HREF="collinge.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Debugging WiFi</h1>
+<p id="by"><b>By <a href="../authors/root.html">Jeff Root</a></b></p>
+
+<h3>It Works For Me</h3>
+
+<p>Don't you hate it when you have a problem, only to be told, "On my
+machine, it just works"? I know I do. So when Ben Okopnik wrote in
+Linux Gazette #127:</p>
+
+<pre>
+ [ I do a lot of travelling, and connect to a wide variety of
+   strange WLANs. In my experience, at least, connecting to a
+   wireless LAN with Linux is usually just as simple as Edgar
+   describes. -- Ben ]
+</pre>
+
+<p>This motivated me to solve a long-standing problem: I could not
+connect to "open" wifi access points.  I had no trouble at all with
+closed access points; someone gives me the ESSID and the WEP key, and
+I'm on.  But plop me down at a hotel, airport, or coffee shop, and no
+amount of fiddling would get me connected.</p>
+
+<p>So, being determined, I wrote to Ben and offered to write this
+article, if The Answer Gang would help me troubleshoot my problem.  Ben
+and the Gang held up their end of the bargain, so here is my tale.</p>
+
+<h3>The Approach</h3>
+
+<p>First, a word about my specific configuration, so you'll have a shot at
+changing things to suit your particular setup.  I am running on a Dell
+C600 laptop, with an unsupported wifi card built in.  I therefore use
+a PCMCIA card, a Microsoft MN-520.  The machine boots into Debian
+Sarge, with all current updates.</p>
+
+<p>Since I could easily connect to any closed access point (AP), I knew
+that the hardware, driver, and networking layers were all working.  My
+problem was almost certainly a configuration issue.</p>
+
+<p>The main config file for Debian is the /etc/network/interfaces file.
+My work configuration included the ESSID and WEP key, which should not
+be needed for an open AP.  So I stripped the config file down to a
+minimum:</p>
+
+<pre>
+    iface wlan0 inet dhcp
+	wireless-mode managed
+</pre>	
+
+<p>Now, a trip to the coffee shop, and see what we get in /var/log/messages:</p>
+
+<pre class="code">
+localhost dhclient: DHCPDISCOVER on wlan0 to 255.255.255.255 port 67 interval 6
+localhost dhclient: DHCPDISCOVER on wlan0 to 255.255.255.255 port 67 interval 12
+localhost dhclient: DHCPDISCOVER on wlan0 to 255.255.255.255 port 67 interval 11
+localhost dhclient: DHCPDISCOVER on wlan0 to 255.255.255.255 port 67 interval 21
+localhost dhclient: DHCPDISCOVER on wlan0 to 255.255.255.255 port 67 interval 7
+localhost dhclient: DHCPDISCOVER on wlan0 to 255.255.255.255 port 67 interval 4
+localhost dhclient: No DHCPOFFERS received.
+localhost dhclient: No working leases in persistent database - sleeping.
+</pre>
+
+<p>Not much of use to me here.  A bit of googling shows that my machine
+is broadcasting a request for an address, but is not getting any
+answers.</p>
+
+<p>In Ben's first email to me, he included a sample of successful IP
+address negotiation:</p>
+
+<pre class="code">
+Fenrir pumpd[4711]: starting at (uptime 0 days, 2:43:09)
+Fenrir pumpd[4711]: PUMP: sending discover
+Fenrir pumpd[4711]: got dhcp offer
+Fenrir pumpd[4711]: PUMP: sending second discover
+Fenrir pumpd[4711]: PUMP: got an offer
+Fenrir pumpd[4711]: PUMP: got lease
+Fenrir pumpd[4711]: intf: device: wlan0
+Fenrir pumpd[4711]: intf: set: 416
+Fenrir pumpd[4711]: intf: bootServer: 10.0.0.1
+Fenrir pumpd[4711]: intf: reqLease: 43200
+Fenrir pumpd[4711]: intf: ip: 10.0.0.219
+Fenrir pumpd[4711]: intf: next server: 10.0.0.1
+Fenrir pumpd[4711]: intf: netmask: 255.255.255.0
+Fenrir pumpd[4711]: intf: gateways[0]: 10.0.0.1
+Fenrir pumpd[4711]: intf: numGateways: 1
+Fenrir pumpd[4711]: intf: dnsServers[0]: 10.0.0.1
+Fenrir pumpd[4711]: intf: numDns: 1
+Fenrir pumpd[4711]: intf: broadcast: 10.0.0.255
+Fenrir pumpd[4711]: intf: network: 10.0.0.0
+Fenrir pumpd[4711]: configured interface wlan0
+</pre>
+
+<p>Ben uses "pump" rather than "dhcpd", but you can clearly see his
+machine sending a "discover" request, which is answered by the AP with
+a "dhcp offer".  This is simply a suggested address, which your
+machine is free to reject. (I don't know why you would, though.)</p>
+
+<p class="editorial">[ It might taste a little strange, or smell 
+sorta funky. Or perhaps you might already have an interface mapped to
+that IP. One never knows. <img src="../gx/smile.png" alt=":)"> -- Ben ]</p>
+
+<h3>When In Doubt, Use Brute Force</h3>
+
+<p>Ken Thompson's aphorism is handy here.  I couldn't get a connection
+via the automated tools, so I switched to a manual configuration.  I
+knew I needed the ESSID for the AP network, so I started looking for
+tools that could discover this without a connection.</p>
+
+<p>First, I tried the <code>iwlist</code> command.  This tool uses the radio in the
+WiFi card, and listens for what are known as "beacon" frames.  These
+are simply broadcast messages that advertise the presence of an AP.
+One problem with <code>iwlist</code> is that it's a one-shot tool; you get a list
+of whatever happens to be broadcasting at the moment it listens.
+While you can simply repeat the <code>iwlist</code> command, I felt more
+comfortable with a tool that listens continuously.</p>
+
+<p>That tool was Kismet.  I used APT to install it, but still had to
+edit the config file (/etc/kismet/kismet.conf) to tell it to use my
+HostAP-driven card.  Once configured, Kismet showed me a continuously
+updated list of APs in my vicinity, and told me which ones were open
+and which were masked (usually done simply by not broadcasting the
+network ID, known as the SSID or ESSID).  Sure enough, one of the open
+APs used the name of the coffee shop as its ESSID.</p>
+
+<p>So, this means my machine can see the shop's AP.  Even the signal
+strength looked good.  Why, then, couldn't I get any response to the
+DHCPDISCOVER?</p>
+
+<p>This meditation brings enlightenment: wifi is a radio system, and just
+because I can hear the AP just fine does not mean that the AP can hear
+me.  After all, an AP usually has a strong transmitter, but there's
+only so much power a PCMCIA transmitter (like the one in my wifi card)
+can send.</p>
+
+<h3>Running Blind</h3>
+
+<p>Since I can't change the power transmitted by my card, I moved closer
+to the AP.  Now, I get:</p>
+
+<pre class="code">
+localhost pumpd[1275]: PUMP: sending discover 
+localhost pumpd[1275]: got dhcp offer 
+localhost pumpd[1275]: PUMP: sending second discover
+localhost cardmgr[1068]: + Operation failed.
+localhost cardmgr[1068]: + Failed to bring up wlan0.
+</pre>
+
+<p>(As you can see, I switched from dhcpd3 to pump, based on the Gang's
+suggestions.)  This looks promising, since I now get an offer, but
+now there's a "second discover" that fails.  What's that all about?</p>
+
+<p>My guess is that the first discover is used to gather the AP
+information (ESSID, etc.), which is then used to do the actual IP
+address negotiation.</p>
+
+<p>At this point, I was somewhat frustrated by the lack of information
+contained in the logs.  But one reason I run Linux is because the
+system keeps no secrets; you can always get more information, even if
+you have to recompile the kernel.  It was time to stop running blind.</p>
+
+<h3>TCPDUMP To The Rescue</h3>
+
+<p>At this point, The Answer Gang was as starved for information as I
+was.  They wanted to see <code>tcpdump</code> traces.  Tcpdump is a very low-level
+network tool.  It monitors the underlying physical medium (ethernet,
+radio, carrier pigeon, whatever is carrying the actual bits).</p>
+
+<p>Tcpdump is normally run against an existing network interface, but
+in my case I not only didn't have one yet, but also couldn't get one.
+This was the whole object of my quest.  So the Gang shared the
+incantation necessary: <code>tcpdump -vvv -i any</code>.  (You can use
+more or fewer 'v' flags, for more or less detail.)</p>
+
+<div class="pullquotes">
+<a name="pullquote_135_root_1"></a>
+<table border="2">
+<tr>
+<td align="left" bgcolor="#6EB2F1">
+<sup>Category: Free software</sup>
+<br />
+<strong>
+The most obvious benefit is the existence of such groups as The Answer Gang. While there's no guarantee that anyone will help you with your specific problem, it is much more likely to happen than with any proprietary product, even if you pay for a support contract.
+</strong>
+</td>
+</tr>
+</table>
+</div>
+
+<p>So now my sequence was: bring up the machine, start capturing the log
+files, start tcpdump and save the output to a file, then insert the
+card.</p>
+
+<p>Having captured the failed traffic, I passed it along to the Gang.
+(Ben wanted me to be sure and mention that copy and paste is the
+preferred method for this; too often they get hand-transcribed data
+that was corrupted by a fat finger.)  Since they did such a good job
+of walking through the tcpdump data, I'm just going to copy and paste
+it right here.</p>
+
+<h3>The Gang Speaks</h3>
+
+<p>The TCPDUMP output is indented by a '&gt;'; Ben Okopnik's explanation follows.</p>
+
+<table summary="quote" border="1" style="background-color: lightgray">
+<tr>
+<td>
+<pre>
+&gt; 15:08:58.385577 IP 0.0.0.0.bootpc &gt; 255.255.255.255.bootps: BOOTP/DHCP, Request from 00:02:2d:74:4a:fa, length: 300
+</pre>
+
+<p>OK, there goes your "all stations" broadcast for DHCP.</p>
+
+<pre>
+&gt; 15:08:58.395954 arp who-has 169.254.1.51 tell 169.254.1.1
+&gt; 15:08:58.397085 arp who-has 169.254.1.51 tell 169.254.1.1
+&gt; 15:08:58.398200 arp who-has 169.254.1.51 tell 169.254.1.1
+</pre>
+
+<p>Wait a minute - I've just smelled a rat. 169.254.X.X? That's an IP
+that's auto-assigned to an interface that requested a DHCP assignment
+but failed; note that it's not assigned by the server but by your kernel
+(google for 'APIPA' for more info; this is ridiculously common Windows
+behavior, and I should have spotted it earlier.) The ARP request is the
+standard "Before I assign this IP to this interface, is anyone else
+using it?" check.</p>
+
+<p>In other words, it looks like your system <em>never</em> acknowledges any
+communication with the DHCP server other than the ESSID assignment. Even
+that's probably being assigned by your own system, based on nothing more
+than beacon detection.</p>
+
+<p>Or... OK, this is silly - but could it be that the coffee shop server's
+IP is actually set to be 169.254.1.1? In that case, your machine could
+just be rejecting that assignment, and properly so: that /16 is a
+reserved address range. Not 'reserved' as in '10.x.x.x' or
+'192.168.x.x', but as in 'do not use for anything but failed DHCP
+requests.'</p>
+
+<p>It's a weird but possible explanation. Let's see if it holds up:</p>
+
+<pre>
+&gt; 15:09:02.080455 IP 169.254.1.1.bootps &gt; 255.255.255.255.bootpc: BOOTP/DHCP, Reply, length: 293
+</pre>
+
+<p>Well, <strong>something</strong> with an address of 169.254.1.1 actually does reply to you. <em>Tres</em> weird...</p>
+
+<pre>
+&gt; 15:09:02.083702 IP 0.0.0.0.bootpc &gt; 255.255.255.255.bootps: BOOTP/DHCP, Request from 00:02:2d:74:4a:fa, length: 548
+&gt; 15:09:06.083860 IP 0.0.0.0.bootpc &gt; 255.255.255.255.bootps: BOOTP/DHCP, Request from 00:02:2d:74:4a:fa, length: 548
+&gt; 15:09:13.082798 IP 0.0.0.0.bootpc &gt; 255.255.255.255.bootps: BOOTP/DHCP, Request from 00:02:2d:74:4a:fa, length: 548
+&gt; 15:09:19.895539 IP 169.254.1.31.53127 &gt; 255.255.255.255.2222: UDP, length: 106
+</pre>
+
+<p>...and something with <strong>another</strong> IP in the reserved
+range (169.254.1.31) answers. Yeah, it's beginning to look like a
+seriously misconfigured network.</p>
+
+<pre>
+&gt; 15:09:21.896457 IP 0.0.0.0.bootpc &gt; 255.255.255.255.bootps: BOOTP/DHCP, Request from 00:02:2d:74:4a:fa, length: 548
+</pre>
+
+<p>These are all replies from your machine - possibly saying "nope, can't
+use that IP. How about something else?" - and that request never gets
+honored. I'm not certain of this, but it seems likely.</p>
+</td>
+</tr>
+</table>
+
+<p>I want to thank The Answer Gang for this analysis; I'd have spent
+weeks looking up all these packets in the RFCs and other specs.</p>
+
+<h3>Zeroconf</h3>
+
+<p>At this point, it appears that the AP I'm trying to use is
+misconfigured.  It is using an IP address range that is not supposed
+to be used by anyone.  But stop and think; if this configuration is
+invalid, how come other people can use the AP without error.  (I even
+had a friend try it with his SUSE laptop and: "On that machine, it
+just works".)</p>
+
+<p>We need to dig some more.  At this point, I somehow dropped off the
+email list for this issue, so I'll pick up the Gang's deliberations in
+progress.  Kapil Hari Paranjape thought my tcpdump was capturing a
+"zeroconf" session.  Here's his explanation:</p>
+
+<pre> 
+   Under "zeroconf" (RFC 3927) two machines can network if they use
+   addresses in the range 169.254.0.0/16. So what may be happening here:
+
+   1. The access point tries to communicate with you, using zeroconf.
+   2. Provided you establish a zeroconf link, it then requires
+   authentication information.
+   3. Upon authentication, it provides a "real" DHCP address.
+
+   So, you should allow DHCP to fail and then establish a zeroconf
+   address picked "at random". (The zeroconf package in Debian does
+   this.)
+</pre>
+
+<p>The bit about "authentication" seems to apply to systems that are not
+truly open; airports, for example, often require that you pay for
+connectivity via a Web page.  So you'd get a temp IP via zeroconf,
+then go anywhere with your browser.  This request is redirected to the
+"pay first" page.  Once you've paid, you get a "real" IP address and
+are on the Net.</p>
+
+<p>At this point, I started looking at Debian support for Zeroconf.  It
+turns out that full zeroconf is only in "unstable", and I prefer not
+to use that.  Debian stable includes a "zcip" tool which is supposed
+to handle exactly this problem, so I installed that.</p>
+
+<p>But to no avail.  I was able to get a bit further, and had a "real" IP
+address, but I was not able to get to the outside world.  So close...</p>
+
+<h3>Worldcon</h3>
+
+<p>At this point, the opinion of the Gang was that this was a seriously
+broken coffee shop, and that I should take my trade elsewhere.  Also
+at this point, I took a vacation to the World Science Fiction
+Convention in Anaheim, California.  My first stop was the Salt Lake
+City airport, which has an open wifi network.  You are required to pay
+for it, but I thought I could at least test the connectivity portion.</p>
+
+<p>And guess what?  "On my machine, it just worked right out of the box."
+I hate that answer.</p>
+
+<p>I tried this experiment again with the hotel wifi network, and it just
+worked again.</p>
+
+<p>At this point, I realized that my goal was achieved: I could
+connect to open wifi AP's.  True, I could not connect to that lone
+coffee shop, but that appeared to be their problem.  Or, perhaps just
+incomplete zeroconf support in Debian.</p>
+
+<p>I was also able to enlist the help of a local network engineer, who
+took his Linux laptop down to the coffee shop.  When he, too, failed
+to connect, I felt confident that this was just a problem with the AP.
+While it might be educational to keep after that AP until I figure out
+what's going on, that was not my original goal.</p>
+
+<h3>The Proof of the Pudding ...</h3>
+
+<p>... is in the tasting.  My friend the network guy recommended another
+coffee shop that he used regularly.  And guess what?  It just worked.</p>
+
+<p>So here are the log file captures showing my final result:</p>
+
+<p>From /var/log/daemon.log:</pre>
+
+<pre class="code">
+localhost cardmgr[1239]: + Internet Systems Consortium DHCP Client V3.0.1
+localhost cardmgr[1239]: + Copyright 2004 Internet Systems Consortium.
+localhost cardmgr[1239]: + All rights reserved.
+localhost cardmgr[1239]: + For info, please visit http://www.isc.org/products/DHCP
+localhost cardmgr[1239]: + 
+localhost cardmgr[1239]: + wifi0: unknown hardware address type 801
+localhost cardmgr[1239]: + wifi0: unknown hardware address type 801
+localhost cardmgr[1239]: + Listening on LPF/wlan0/00:50:f2:c3:aa:07
+localhost cardmgr[1239]: + Sending on   LPF/wlan0/00:50:f2:c3:aa:07
+localhost cardmgr[1239]: + Sending on   Socket/fallback
+localhost cardmgr[1239]: + DHCPDISCOVER on wlan0 to 255.255.255.255 port 67 interval 3
+localhost cardmgr[1239]: + DHCPOFFER from 192.168.0.1
+localhost cardmgr[1239]: + DHCPREQUEST on wlan0 to 255.255.255.255 port 67
+localhost cardmgr[1239]: + DHCPACK from 192.168.0.1
+localhost cardmgr[1239]: + bound to 192.168.0.4 -- renewal in 982546229 seconds.
+</pre>
+
+<p>And the Tcpdump log:</p>
+
+<pre class="code">
+tcpdump: WARNING: Promiscuous mode not supported on the "any" device
+tcpdump: listening on any, link-type LINUX_SLL (Linux cooked), capture size 96 bytes
+18:43:38.008431 IP (tos 0x0, ttl  32, id 33709, offset 0, flags [DF], length: 576) 192.168.0.1.bootps &gt; 192.168.0.4.bootpc: BOOTP/DHCP, Reply, length: 548, xid:0xfbfc2356, flags: [none]
+	  Your IP: 192.168.0.4
+	  Client Ethernet Address: 00:50:f2:c3:aa:07
+	  sname "M-^?" [|bootp]
+18:43:38.017371 IP (tos 0x0, ttl  32, id 32941, offset 0, flags [DF], length: 576) 192.168.0.1.bootps &gt; 192.168.0.4.bootpc: BOOTP/DHCP, Reply, length: 548, xid:0xfbfc2356, flags: [none]
+	  Your IP: 192.168.0.4
+	  Client Ethernet Address: 00:50:f2:c3:aa:07
+	  sname "M-^?" [|bootp]
+
+2 packets captured
+2 packets received by filter
+0 packets dropped by kernel
+</pre>
+
+<h3>Final Thoughts</h3>
+
+<p>Initially, I had been unable to connect to any of several APs that
+I had tried.  Then, the one I picked for a concentrated debug session
+turned out to be misconfigured.  But I finally got it all working, and
+the next time an open AP fails me, I'll know it's not my fault.  More
+important, I'll know how to see what's going on, and have a good
+chance of fixing it.</p>
+
+<p>But this does illustrate some things that are unique to the Linux
+community and Free Software in general.  The most obvious benefit is
+the existence of such groups as The Answer Gang.  While there's no
+guarantee that anyone will help you with your specific problem, it is
+much more likely to happen than with any proprietary product, even if
+you pay for a support contract.</p>
+
+<p>The next important difference is how transparent Linux is.  I could
+easily trace the kernel activity from the moment I inserted the PCMCIA
+card until I had my real IP address.  I also have confidence that this
+level of transparency is always available, since I have the source
+code to every bit of software involved.  Access to source might not
+help a non-programmer, but simply adding some "kprintf" statements to
+a driver is really not that hard a task.  That freedom allows me to
+add transparency where none may have existed before.</p>
+
+<p>And last, I think you have to recognize how powerful choice is when
+debugging.  At each step, I had several choices of tools to use.  When
+<code>iwlist</code> wasn't working for me, I could easily swap in Kismet.</p>
+
+<p>I can't thank The Answer Gang enough for their help.  Robert Heinlein
+told people to "pay it forward".  So, I hope the next person with this
+sort of trouble will find my article and get the help they need.</p>
+
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:135/root.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/2002/note.png" class="bio">
+</p>
+
+<em>
+<p>
+Jeff Root's first computer was an IBM System 3, programmed in FORTRAN IV
+ using 64-column punch cards. His first love was his Apple ][e, which
+ still sees occasional use today. Jeff never learned BASIC, preferring
+ the "no excuses" nature of assembly language instead.
+</p>
+
+<p>
+Jeff started using Linux with Yggdrasil, which was a "run from CD"
+ distribution back in the days of kernel 1.1.13. This was necessary,
+ since Jeff's computer had no hard drive. He's now a dedicated Debian
+ GNU/Linux user, but keeps a Damn Small Linux pendrive handy.
+</p>
+
+<p>
+He currently works as a programmer for a semiconductor maker in
+ Pocatello, Idaho. In a previous life, he tested bombers for the USAF.
+</p>
+
+
+
+</em>
+
+<br clear="all">
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2007, Jeff Root. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication License</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 135 of Linux Gazette, February 2007
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="pfeiffer.html" >&lt;-- prev</A> | <A HREF="collinge.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+<div id="navigation">
+<table summary="masthead" width="100%">
+<tr>
+<td align="center" colspan="3" style="font-size: 10px; font-weight: bold">
+<a href="../index.html">Home</a>
+<a href="http://linuxgazette.net">Main Site</a>
+<a href="../faq/index.html">FAQ</a>
+
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/mailman/listinfo/">Mailing Lists</a>
+<a href="../jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+<hr width="99%" style="border: 1px inset #000033">
+</td>
+</tr>
+<tr>
+<td width="33%" align="left" style="font-size: 10px; font-weight: bold">
+The Free Monthly Linux Publication
+</td>
+<td width="33%" align="center" style="font-size: 10px; font-weight: bold">
+ISSN: 1934-371X
+</td>
+<td width="33%" align="right" style="font-size: 10px; font-weight: bold">
+Main site: <a href="http://linuxgazette.net">http://linuxgazette.net</a> 
+</td>
+</table>
+</div>
+
+
+
+
+<div id="breadcrumbs1">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">February 2007 (#135)</a> &gt; 
+Article
+
+</div>
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+</body>
+</html>
+

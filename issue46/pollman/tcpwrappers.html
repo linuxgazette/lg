@@ -1,0 +1,110 @@
+<!doctype html public "-//w3c//dtd html 4.0 transitional//en">
+<html>
+<head>
+   <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+   <meta name="Author" content="JC Pollman">
+   <meta name="GENERATOR" content="Mozilla/4.61 [en] (X11; I; Linux 2.2.11 i686) [Netscape]">
+</head>
+<body bgcolor=#ffffff>
+
+<center><b><font size=+1>TCP Wrappers</font></b></center>
+
+<p>We are indebted to <a href="mailto:unixhelp@home.com">Rob Sellars</a>
+for his excellent article: TCP Wrappers, Locked doors and a security camera for
+computer!</a>
+
+<p><b>How does <font color="#330000">"</font>tcp wrappers<font color="#330000">"
+</font>work?</b>&nbsp; Many programs do not run all the time as they are
+infrequently used and would create unnecessary overhead.&nbsp; The inetd
+program is run takes care of this nicely.&nbsp; When a user tries to connect
+to your computer, the connection is made up of a pair of data: an ip address
+and a port. Inetd reacts to this connection by looking up the port number
+in /etc/services, and then looking in the file /etc/inetd.conf for a corresponding
+service, (program) and then runs the service. With tcp wrappers, inetd
+is tricked into running tcpd instead of the service that would normally
+be called. Tcpd checks it's rules in the /etc/hosts.allow and /etc/hosts.deny
+files. It either accepts the connection and runs the service or denies
+the connection based on it's rules.
+<p><b>NOTE:</b> tcp wrappers only works for services that inetd starts!
+Sendmail, apache, and named do not use inetd, and so they are not protected
+via tcp wrappers.
+<p><b>Check to see if tcp wrappers is installed.</b> Most distributions
+install tcp wrappers by default. The easiest way to see if tcp wrappers
+is installed is to view the /etc/inetd.conf file. If it is not installed,
+a typical line looks like this:
+<p>Do this:
+<p><tt>ftp&nbsp;&nbsp;&nbsp; stream&nbsp; tcp&nbsp;&nbsp;&nbsp;&nbsp; nowait&nbsp;
+root&nbsp;&nbsp;&nbsp; <b>/usr/sbin/ftpd&nbsp;</b>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+ftpd -l -a</tt>
+<p>and if it is installed, it looks like this:
+<p><tt>ftp&nbsp;&nbsp;&nbsp; stream&nbsp; tcp&nbsp;&nbsp;&nbsp;&nbsp; nowait&nbsp;
+root&nbsp;&nbsp;&nbsp; <b>/usr/sbin/tcpd</b>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+ftpd -l -a</tt>
+<p>The bolded part shows the difference. Assuming it is installed, you
+must edit your /etc/host.allow and /etc/host.deny files to give tcpd the
+rules it needs.
+<p><b>Edit your /etc/hosts.allow&nbsp; and /etc/hosts.deny to limit access
+to your computer's network services.&nbsp;</b> One of the nice features
+of tcp wrappers is the ability to control access to your computers network
+services and log failed or successful attempts. You can also perform certain
+actions based on the users hostname.&nbsp; When someone tries to connect
+to a network service on your computer, the tcp wrapper (tcpd) reads the
+file /etc/hosts.allow&nbsp; for a rule that matches the the hostname of
+the person trying to connect, if /etc/hosts.allow doesn't contain a rule
+allowing access, tcpd reads /etc/hosts.deny for a rule that would deny
+access to the hostname. If neither file contains an accept or deny rule,
+access is granted by default.&nbsp; <font color="#330000">It's important
+to note the sequence of events here.&nbsp; "hosts.allow" is read first
+and overrides anything in "hosts.deny".&nbsp; As you'll see, we tell the
+server to accept connections from specific machines in hosts.allow, but
+via hosts.deny we tell our server to refuse access to anyone for any reason.</font>
+<p>In the following examples we are going to&nbsp; deny all finger request,
+and deny telnet access to all users from lamers.edu.&nbsp; The format of
+the rules in the hosts.allow/hosts.deny files is as follows:
+<blockquote>service: hostname : options</blockquote>
+An example&nbsp;&nbsp; /etc/hosts.allow&nbsp; could look like the following:
+<br>*****************************************************************************
+<br><tt>ipop3d: ALL: ALLOW</tt><tt></tt>
+<p><tt>in.telnetd: .myschool.edu : ALLOW</tt><tt></tt>
+<p>*****************************************************************************
+<br>Note: in the two rules above, each rule must be on ONE line, it may
+appear as more than one line here due to article formatting.
+<p>In the first line "ipop3d" is the service, the hostname is "ALL" which
+means the rule applies to all hosts, and finally we tell tcpd to "ALLOW"
+the connection.
+<p>The second rule follows the same format as the first, it allows access
+to telnet only for users from "myschool.edu".
+<p>Again: Each rule goes on it's own unbroken line.
+<p>The above example was given to explain rules tcp wrappers uses. Here
+is what I have on my server for /etc/hosts.allow:
+<p>*****************************************************************************
+<br><tt># allow connections from my local network</tt>
+<br><tt>ALL: A<font color="#330000">LL</font>@127.0.0.1 : ALLOW</tt>
+<br><tt># allow all connections from computers on my network</tt>
+<br><tt>ALL: A<font color="#330000">LL</font>@192.168.124.1 : ALLOW</tt>
+<br><tt>ALL: ALL@192.168.124.10 : ALLOW</tt>
+<br><tt>ALL: ALL@192.168.124.11 : ALLOW</tt>
+<br><tt>ALL: ALL@192.168.124.20 : ALLOW</tt>
+<br>*****************************************************************************
+<p>This file allows permissions based on ip addresses instead of services.
+Since it is a home network, all computers are trusted and listed. Obviously
+ip spoofing needs to be fixed or this method is not secure. I want all
+connects from outside my network denied and a message sent to me telling
+me what happened. My /etc/hosts.deny looks like this:
+<p>*****************************************************************************
+<br><tt>ALL:ALL : spawn (echo Attempt from %h %a to %d at `date` | tee
+-a /var/log/tcp.deny.log |mail jpollman@kulai.org )</tt>
+<br>*****************************************************************************
+<br>This needs to be on ONE line. And yes, I do get email from here - about
+two a week. They look like this:<font color="#330000"></font>
+<p><tt><font color="#330000">Attempt from gw.webec.com 209.98.44.94 to
+in.ftpd at Mon Jul 5 21:44:54 EDT 1999</font></tt>
+<br><font color="#330000"></font>&nbsp;
+<br><font color="#330000"></font>&nbsp;
+<br><font color="#330000"></font>&nbsp;
+<br><font color="#330000"></font>&nbsp;
+<br><font color="#330000"></font>&nbsp;
+<br>&nbsp;
+<br>&nbsp;
+</body>
+</html>

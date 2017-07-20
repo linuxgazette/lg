@@ -1,0 +1,197 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>Handling Power Status Using snmptrapd LG #83</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="padala.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../lg_faq.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="qubism.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+
+<!--endcut ============================================================-->
+
+<TABLE BORDER><TR><TD WIDTH="200">
+<A HREF="http://www.linuxgazette.net/">
+<IMG ALT="LINUX GAZETTE" SRC="../gx/2002/lglogo_200x41.png" 
+	WIDTH="200" HEIGHT="41" border="0"></A> 
+<BR CLEAR="all">
+<SMALL>...<I>making Linux just a little more fun!</I></SMALL>
+</TD><TD WIDTH="380">
+
+
+<center>
+<BIG><BIG><STRONG><FONT COLOR="maroon">Handling Power Status Using snmptrapd</FONT></STRONG></BIG></BIG><BR>
+<STRONG>By <A HREF="../authors/prasad.html">A B Prasad</A></STRONG></BIG>
+
+</TD></TR>
+</TABLE>
+<P>
+
+<!-- END header -->
+
+
+
+
+<H3>If you are new to this topic</H3>
+<P>Refer the following if you are new to SNMP</P>
+<UL>
+  <LI>net-snmp documentation
+  <LI>rfc1678
+  <LI>UPSHowto
+  <LI>man pages of snmptrapd(8), snmptrapd.conf(8), and snmptrap(8) </LI></UL>
+<H3>Net-snmp</H3>
+<P>Various tools relating to the Simple Network Management Protocol
+including:</P>
+<UL>
+  <LI>An extensible agent
+  <LI>An SNMP library
+  <LI>Tools to request or set information from SNMP agents
+  <LI>Tools to generate and handle SNMP traps
+  <LI>A version of the unix 'netstat' command using SNMP
+  <LI>A graphical Perl/Tk/SNMP based mib browser.... </LI></UL>
+<P>See the <A href="http://www.net-snmp.org/">NET-SNMP site</A>.</P>
+<H3>snmptrapd</H3>
+<P>Snmptrapd is an SNMP application that receives and logs snmp trap messages
+sent to the SNMP-TRAP port (162) on the local machine. It can be configured to
+run a specific program on receiving a snmp trap.</P>
+<H3>snmptrapd.conf</H3>
+<P>snmptrapd.conf is the configuration file(s) which define how the ucd-snmp
+SNMP trap receiving demon operates when it receives a trap.</P>
+<H3>ups-MIB</H3>
+<P>RFC1628 document defines the managed objects for Uninterruptible Power
+Supplies which are to be manageable via the Simple Network Management Protocol
+(SNMP).</P>
+<H3>How to use snmptrapd with powerh</H3>
+<P>Please Note: I renamed 'powerd' as 'powerh' as here it is not a daemon but
+only a trap handling routine</P>
+<P>We had the powerh to handle the Power Status of the system. powerh
+communicates with the UPS through the serial port. However, in a networked
+system where a number of machines are using the same UPS it is not possible for
+each system to directly communicate with the UPS. Most modern high capacity UPS
+support the SNMP Protocol either directly or through a proxy. To handle various
+power status follow these steps</P>
+<P>1. To your snmptrapd.conf add the following lines</P><PRE>traphandle 33.2.3 powerh b
+traphandle 33.2.4 powerh p
+</PRE>
+<P>2. Compile the following C <a href="misc/prasad/code.c.txt">code</a> by entering <I>cc powerh.c -o powerh</I>and
+copy <I>powerh</I> to a directory in path like /usr/local/sbin/.
+<BR><A HREF="misc/prasad/code.c.txt">[Text version of this listing.]</A> 
+</P>
+
+
+<PRE>
+#include &lt;string.h&gt;
+#include &lt;unistd.h&gt;
+#include &lt;stdio.h&gt;
+#include &lt;fcntl.h&gt;
+#include &lt;signal.h&gt;
+
+
+#define PWRSTAT "/etc/powerstatus"
+
+void powerfail(int);
+
+main(int argc, char* argv[]) {
+    char s[1000];
+    int i=0;
+    while(i&lt;7) {
+        scanf("%s",s);
+        i++;
+    }
+    scanf("%s",s);
+    if (!strcmp("b",argv[1]))
+        if ((!strcmp(s,"33.1.6.3.3"))||(!strcmp(s,"upsMIB.upsObjects.upsAlarm.upsWellKnownAlarms.upsAlarmLowBattery")))
+            powerfail(1);
+    if (!strcmp("p",argv[1]))
+        if ((!strcmp(s,"33.1.6.3.3"))||(!strcmp(s,"upsMIB.upsObjects.upsAlarm.upsWellKnownAlarms.upsAlarmLowBattery")))
+            powerfail(0);
+}
+/* As the program may be activated in the event of other alarms as well, the inner 'if' are necessary */
+void powerfail(int event) {
+    int fd;
+    unlink(PWRSTAT);
+    if ((fd = open(PWRSTAT, O_CREAT|O_WRONLY, 0644)) &gt;= 0) {
+          switch (event)
+           {
+           case 0:
+                  write(fd, "OKWAIT\n", 7);
+                   break;
+
+             case 1:
+                    write(fd, "FAIL\n", 5);
+                     break;
+             }
+          close(fd);
+       }
+       kill(1, SIGPWR);
+}
+
+
+
+</PRE>
+<P>3. Run snmptrapd on your system (you can configure it in the init
+scripts)</P>
+<P>The system will shutdown 2 minutes after receiving a 'battery low alarm' from
+the UPS.  Then if power is OK before the shutdown it will cancel shutdown or as
+configured in the powerfail and powerokwait lines in /etc/inittab</P> <h3>Code
+Explanation
+<H3></H3>
+<P>When received a trap 33.2.3 (upsMIB.upsTraps.upsTrapAlarmEntryAdded) the
+program is executed with a 'b' option. Program checks for the 'upsAlarmId' send
+by the trap and if it is 33.1.6.3.3
+(upsMIB.upsObjects.upsAlarm.upsWellKnownAlarms.upsAlarmLowBattery) it notfies
+init that a power failure occurred. This alarm is added to the alarm table by
+the UPS agent if the remaining battery run-time is less than or equal to
+upsConfigLowBattTime. It is removed when the power is back and is acknowledged
+by trap 33.2.4. The program then sends init a powerokwait message.</P>
+<H3>Drawbacks</H3>
+<UL>
+  <LI>The program handles only two traps and look for only one type of alarm.
+  The upsMIB has a number of alarms and the program is to be extended to handle
+  all conditions.
+  <LI>The obsolete method of informing init is used. This has to be changed.
+  <LI>As I had no UPS that sends a snmp traps, I used the snmp trap
+  generator
+<PRE>
+snmptrap -v 2c localhost public '' 33.2.3 33.2.3.0 s "33.1.6.3.3"
+snmptrap -v 2c localhost public '' 33.2.4 33.2.4.0 s "33.1.6.3.3" 
+</PRE>
+I am not sure whether this is correct.
+  <LI>The snmptrapd is to be run without -f option.
+  <LI>Tested only on RedHat Linux 6.2.</LI></UL>
+<H3>TODO</H3>
+<P>I would like to see this few lines of code grow into a complete general
+purpose UPS managing software capable of:</P>
+<UL>
+  <LI>Monitoring and changing all possible MIB of the upsMIB node
+  <LI>Handle signals from multiple UPS
+  <LI>Use data from a configuration file
+  <LI>Handle authentication </LI></UL>
+<P>All Suggestions, Criticisms,Contibutions (code and idea only - no cash please
+;) ) etc. are welcome. You can contact me at <A
+href="mailto://prasad_ab@yahoo.com">prasad_ab@yahoo.com</A>. See also my <a
+href="www.geocities.com/prasad_ab">home page </a>.</P>
+
+<!-- *** BEGIN copyright *** -->
+<hr>
+<CENTER><SMALL><STRONG>
+
+Copyright &copy; 2002, A B Prasad.
+Copying license <A HREF="../copying.html">http://www.linuxgazette.net/copying.html</A><BR> 
+Published in Issue 83 of <i>Linux Gazette</i>, October 2002</H5>
+</STRONG></SMALL></CENTER>
+<!-- *** END copyright *** -->
+<HR>
+
+<!--startcut ==========================================================-->
+<CENTER>
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="padala.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../lg_faq.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="qubism.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+</CENTER>
+</BODY></HTML>
+<!--endcut ============================================================-->

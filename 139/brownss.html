@@ -1,0 +1,352 @@
+<!DOCTYPE html
+	PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+	 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en-US" xml:lang="en-US">
+<head>
+<title>Creating an Unkillable Process LG #139</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link rel="stylesheet" href="../lg.css" type="text/css" media="screen, projection"  />
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+<link rel="shortcut icon" href="../favicon.ico" />
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+</head>
+<body>
+
+<a href="../">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+<div id="navigation">
+<table summary="masthead" width="100%">
+<tr>
+<td align="center" colspan="3" style="font-size: 10px; font-weight: bold">
+<a href="../index.html">Home</a>
+<a href="http://linuxgazette.net">Main Site</a>
+<a href="../faq/index.html">FAQ</a>
+
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/mailman/listinfo/">Mailing Lists</a>
+<a href="../jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+<hr width="99%" style="border: 1px inset #000033">
+</td>
+</tr>
+<tr>
+<td width="40%" align="left" style="font-size: 10px; font-weight: bold">
+The Free International Online Linux Monthly
+</td>
+<td width="20%" align="center" style="font-size: 10px; font-weight: bold">
+ISSN: 1934-371X
+</td>
+<td width="40%" align="right" style="font-size: 10px; font-weight: bold">
+Main site: <a href="http://linuxgazette.net">http://linuxgazette.net</a> 
+</td>
+</table>
+</div>
+
+
+<div id="breadcrumbs1">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">June 2007 (#139)</a> &gt; 
+Article
+
+</div>
+
+<div class="articlecontent1">
+<div class="content">
+
+<div id="previousnexttop">
+<A HREF="lg_tips.html" >&lt;-- prev</A> | <A HREF="jordan.html" >next --&gt;</A>
+</div>
+
+<h1>Creating an Unkillable Process</h1>
+<p id="by"><b>By <a href="../authors/brownss.html">Silas Brown</a></b></p>
+
+
+<p>Annoying as unkillable processes can be,
+there are some circumstances where you might
+legitimately want to create one. For example, if
+I run an audit tool, or if I want to write a
+program that makes sure I go to bed on time even
+when I'm really stuck into something, then I
+might not want even the root user to be able to
+stop it from running.</p>
+
+<p>One approach would be to simply disallow any
+root access to the system, or at least disallow
+it at critical times, but that can get very
+complex if you still need to be able to
+administrate the system and/or cannot tell with
+certainty which times will not be critical.  So
+I wanted an approach that did not rely on
+disallowing root access altogether.</p>
+
+<p>As root can do anything (including writing
+batches of commands which when run will likely
+out-pace any periodic integrity checks), and
+even modifying all of root's tools does not
+preclude the installation of new ones, the only
+way to really make a process unkillable is to
+modify the kernel.  But if possible I wanted a
+solution that didn't involve delving into the
+kernel, for reasons of portability and keeping
+it simple.</p>
+
+<p>So I had to settle for the lesser goal of
+"create a process that, if killed, will start
+again immediately".  That's not too difficult:
+edit /etc/inittab and get init(8) to restart the
+process whenever it dies.  But the root user can
+change /etc/inittab, and can also change the
+executable file on disk, which could forestall
+the process from properly starting again after
+it's killed.</p>
+
+<h3>Read-only filesystem</h3>
+
+<p>To prevent such changes, both the executable
+and /etc/inittab will have to go on a read-only
+filesystem.  But it's not sufficient to take
+just any filesystem and mount it read-only,
+because root can simply remount it read/write.
+You can however make an ISO image and mount that
+as a loop device; this mount can't possibly be
+remounted read/write, and changing the
+underlying ISO file shouldn't affect the mounted
+filesystem.  But you'd still have to stop root
+from unmounting it and mounting something else
+in its place (or unmounting/remounting it after
+changing the ISO file).</p>
+
+<p>You can stop a filesystem from being
+unmounted by making sure that it's always busy,
+i.e. there are processes whose current directory
+is inside it.  But that doesn't stop the use of
+"umount -l" (lazy unmount) which detaches the
+filesystem from the hierarchy and postpones the
+actual unmounting until it's no longer busy;
+root can do a lazy unmount and mount something
+else, and all new processes will see the new
+version.</p>
+
+<p>Actually that's not quite true: If root does
+use "umount -l", then any currently-running
+processes whose current working directory is in
+the old mount can continue to see the files from
+the old mount, and so can their child processes,
+provided that they always refer to them from the
+current working directory and not via an
+absolute path.  If they use an absolute path
+then they'll see the new mount.</p>
+
+<p>So if we can get init(8) to run with the
+mounted ISO as its current working directory,
+and to execute our program from the current
+directory instead of from an absolute path, then
+it should not be possible to change the contents
+of that ISO as far as init(8) is concerned, at
+least not without rebooting or cracking the
+kernel.</p>
+
+<p>This can be done by moving /sbin/init to
+/sbin/init.orig, and creating a new /sbin/init,
+a shell script:</p>
+
+<pre class="code">
+#!/bin/bash
+mount /sbin/init.iso /init-mnt -o loop
+cd /init-mnt
+exec /sbin/init.orig $@
+</pre>
+
+<p>You will also need to ensure that future
+package upgrades do not overwrite your
+/sbin/init script with the original binary.</p>
+
+<p>Then chmod +x that script, make the /init-mnt
+directory, and use mkisofs to make the
+/sbin/init.iso file containing any binaries you
+want to run.  You can run scripts, but make sure
+the interpreter binaries are in the ISO and that
+/etc/inittab calls them from the current
+directory, for example:</p>
+
+<pre>AA:23:respawn:./python myscript.py</pre>
+
+<p>(In the case of python you might also want to
+ensure that it's reading its standard libraries
+from the ISO rather than from anywhere else,
+otherwise there could be a back door that
+way.)</p>
+
+<h3>Patching init</h3>
+
+<p>Although it should now be impossible for root
+to change your script without rebooting, it is
+still possible for root to change /etc/inittab
+and tell init to re-read it.  On most systems,
+init is hard-coded to load /etc/inittab by
+absolute path, which means you can't get around
+this without patching init, either to make it
+load inittab from the current working directory
+or to prevent it from ever re-reading inittab
+during its run.</p>
+
+<p>You could hex-edit the init binary and change
+the string, but the resulting system probably
+won't boot.  It's better to download your
+distribution's source package for "sysvinit" (or
+whatever your distribution calls it), change
+into its "src" directory, edit paths.h and
+change "/etc/inittab" to "inittab", then type
+"make" and move the resulting init binary to
+where you want it.  Remember to put an inittab
+file inside the ISO image: this is the inittab
+file that will be used (not /etc/inittab), and
+the only way to change it is to change the
+underlying ISO file and reboot.</p>
+
+<p>There is still another problem, however.  If
+your process is killed too often, init will
+refuse to restart it for a while.  You could
+make it more aggressive whenever it restarts
+(e.g. terminate all root shells and disable the
+root account for a time to stop it from being
+killed again too soon), but if root launches a
+script that repeatedly scans the current
+processes and kills yours, and that script's
+loop is small and fast, then your process is not
+likely to be able to get as far as stopping
+it.</p>
+
+<p>Perhaps the easiest way around this is to
+treat the "respawning too fast" condition more
+seriously.  For example, search the init source
+for the part that prints the "respawning too
+fast" message (in version 2.86 it's in init.c)
+and add "exit(1);" after the statement's closing
+semicolon.  This means, if any process respawns
+too fast (for example because root is running an
+aggressive script to stop your process from
+running), init will exit, which will result in a
+kernel panic and an unusable system.  Note
+however that this also means the system will
+crash if any inittab task respawns too fast due
+to a typo, so be careful.</p>
+
+<h3>Closing remarks</h3>
+
+<p>In this article we have put together a way of
+preventing even the root user from getting rid
+of a certain process without rebooting.
+However, there is still the issue of rebooting
+itself.  You can't really stop root from
+changing /sbin/init or /sbin/init.iso and
+rebooting the system, especially if it's done
+quickly without a proper shutdown, so reboots
+had better be very noticeable.  If you want to
+make things more difficult, though, you could
+get your program to frequently check the stat()
+of /sbin/init* for changes, taking care to do so
+from the main thread (remember that if your
+program goes multi-threaded then it may be
+possible to kill some of the threads while
+preserving others).  It would still be possible
+to do things by booting from a rescue disk
+however, and perhaps even without booting from a
+rescue disk in some circumstances, so this is
+not completely flawless.</p>
+
+<p class="editorial">
+[ Pruning root privileges is a tricky business. As the article shows, this
+endeavor is tied to the filesystem layer. Projects such as <a
+href="http://lwn.net/Articles/199004/">Linux capabilities</a> or <a
+href="http://www.nsa.gov/selinux/">Security-Enhanced Linux</a> also touch
+upon filesystems and are worth a look. -- Ren&eacute; ]
+</p>
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:139/brownss.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/authors/brownss.jpg" class="bio">
+</p>
+
+<em>
+<p>
+Silas Brown is a legally blind computer scientist based in Cambridge UK.
+ He has been using heavily-customised versions of Debian Linux since
+ 1999.
+</p>
+
+
+
+</em>
+
+<br clear="all">
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2007, Silas Brown. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication License</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 139 of Linux Gazette, June 2007
+</p>
+
+</div>
+
+<div id="previousnextbottom">
+<A HREF="lg_tips.html" >&lt;-- prev</A> | <A HREF="jordan.html" >next --&gt;</A>
+</div>
+
+</div>
+</div>
+
+<script src="http://www.google-analytics.com/urchin.js"
+type="text/javascript">
+</script>
+<script type="text/javascript">
+_uacct = "UA-1204316-1";
+urchinTracker();
+</script>
+
+
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+</body>
+</html>
+

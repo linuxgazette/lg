@@ -1,0 +1,136 @@
+#!/bin/sh
+# Commands used:
+# modprobe grep cat
+# This script defines an alternative
+# mount_root() function for 
+# /sbin/init to run
+# method of checking for root
+TEST_for_ROOT(){
+	if [ -d /mnt/ram -a -f /mnt/ram.cpio.gz -a \
+	     -x /mnt/etc/init.d/ramload.sh ]
+	then
+		return 0
+	else
+		return 1
+	fi
+}
+
+# default values
+rootfstype=auto
+root=ask
+found=no
+ROOT=
+
+# Generate the list of block devices/partitions available
+try_block_list(){
+	for i 
+	do
+		case $i in
+			# No ram devices or floppy
+			*fd* | *ram* )
+				continue
+				;;
+		esac
+		[ -f $i ] || continue
+		name=${i%/dev}
+		name=${name##*/}
+		dev=$(cat $i)
+		major=${dev%:*}
+		minor=${dev#*:}
+		if [ "$root" = "ask" ] 
+		then
+			echo -n "Try /dev/$name?[Yn]"
+			read ans
+			case $ans in
+				n | N )
+				continue
+				;;
+			esac
+		fi
+		mount_dev_and_check $name $major $minor && return 0
+	done
+	return 1
+}
+
+# Mount device and look for some 
+# "signature" files
+mount_dev_and_check(){
+	name=$1
+	major=$2
+	minor=$3
+
+	mknod /dev2/$name b $major $minor
+	if mount -nrt $rootfstype /dev2/$name /mnt 2>/dev/null
+	then
+		if TEST_for_ROOT 
+		then
+			ROOT=/dev/$name
+			rootdev=$(($major*256+$minor))
+			echo $rootdev > /proc/sys/kernel/real-root-dev
+			found=yes
+			return 0
+		fi
+		umount -n /mnt
+	fi
+	return 1
+}	
+
+# This mounts the root device using the routines above
+mount_root() {
+	mount -nt proc proc /proc
+	mount -nt sysfs sysfs /sys
+	mount -nt tmpfs tmpfs /dev2
+
+	#Get the values of the various important parameters
+
+	for i in $(cat /proc/cmdline); do
+		case $i in
+		root=*)
+			root=${i#root=}
+			;;
+		rootfstype=*)
+			rootfstype=${i#rootfstype=}
+			;;
+		esac
+	done
+
+	# There is no harm in loading all the FSTYPES
+	# as they will be useful later on too!
+	sIFS="$IFS"
+	IFS=','
+	set $FSTYPES
+	IFS="$sIFS"
+	for fs 
+	do
+		/sbin/modprobe -k $fs 2> /dev/null
+		case "$fs" in
+		*dos* | *fat* )
+			# This is required for the mount command
+			/sbin/modprobe -k nls_cp437 2> /dev/null
+			/sbin/modprobe -k nls-iso8859-1 2> /dev/null
+			;;
+		esac
+	done
+
+	case $root in
+	/dev/*)
+		name=${root##/dev/}
+		try_block_list /sys/block/$name/dev /sys/block/*/$name/dev
+		
+		;;
+	ask | auto )
+		try_block_list /sys/block/*/dev /sys/block/*/*/dev
+		;;
+	esac
+
+	umount -n /dev2
+	umount -n /sys
+	umount -n /proc
+
+	if [ "$found" != "yes" ]
+	then
+		echo "Could not mount the root file system"
+		echo "Giving you a shell"
+		exec sh
+	fi
+}

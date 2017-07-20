@@ -1,0 +1,159 @@
+//
+//
+// Copyright 2002 Rob Tougher <robt@robtougher.com>
+//
+// This file is part of xmlrpc.
+//
+// xmlrpc is free software; you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation; either version 2 of the License, or
+// (at your option) any later version.
+//
+// xmlrpc is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with xmlrpc; if not, write to the Free Software
+// Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+//
+//
+
+
+// Implementation of the request class
+
+#include "request.hpp"
+#include "xmlrpc_exceptions.hpp"
+
+namespace xmlrpc
+{
+  request::request ( const std::string name ) : m_name ( name ) {}
+
+  request::~request() {}
+
+  //
+  // <request>
+  //   <name></name>
+  //   <params>
+  //      <param>
+  //         <name></name><value></value>
+  //      </param>
+  //   </params>
+  // </request>
+  //
+  std::string request::get_xml() const
+  {
+    xml::node root ("request" );
+    xml::node * request_name = root.add_child ( "name", m_name );
+    xml::node * params = root.add_child ( "params" );
+
+    for ( std::vector<param>::const_iterator it = m_params.begin();
+	  it != m_params.end();
+	  it++ )
+      {
+	param p = (*it);
+	xml::node * param_node = params->add_child ( "param" );
+
+	xml::node * param_name = param_node->add_child ( "name",
+							 p.get_name() );
+
+	xml::node * param_value = param_node->add_child ( "value",
+							  p.get_value() );
+      }
+
+    return root.get_xml();
+  }
+
+
+  //
+  // <request>
+  //   <name></name>
+  //   <params>
+  //      <param>
+  //         <name></name><value></value>
+  //      </param>
+  //   </params>
+  // </request>
+  //
+  void request::load_xml ( const std::string s )
+  {
+    m_params.clear();
+    m_name = "";
+
+    xml::node n;
+
+    try
+      {
+	n.load_xml ( s );
+      }
+    catch ( xml::parse_exception& e )
+      {
+	throw request_exception ( "Could not parse the request." );
+      }
+
+    if ( n.get_child_count() > 0 )
+      {
+	xml::node * request = n.get_child ( 0 );
+
+	if ( request && request->get_name().compare ( "name" ) == 0 )
+	  {
+	    m_name = request->get_text();
+	  }
+	else
+	  {
+	    throw request_exception
+	      ( "<name> is not the first child node of the request." );
+	  }
+
+	xml::node * params = n.get_child ( 1 );
+
+	if ( params )
+	  {
+	    int param_count = params->get_child_count();
+
+	    for ( int param_index = 0; param_index < param_count; param_index++ )
+	      {
+		xml::node * p = params->get_child ( param_index );
+
+		if ( p && p->get_name().compare ( "param" ) == 0 &&
+		     p->get_child_count() == 2 )
+		  {
+		    xml::node *name = p->get_child ( 0 );
+		    xml::node *value = p->get_child ( 1 );
+
+		    if ( name && name->get_name() == "name" &&
+			 value && value->get_name() == "value" )
+		      {
+			m_params.push_back ( param ( name->get_text(), 
+						     value->get_text() ) );
+		      }
+		    else
+		      {
+			throw request_exception ( "Param not properly formed." );
+		      }
+		  }
+	      }
+	  }
+	else
+	  {
+	    throw request_exception ( "Request does not contain a params collection." );
+	  }
+      }
+  }
+
+
+
+  param request::get_param ( const std::string name ) const
+  {
+    for ( std::vector<param>::const_iterator it = m_params.begin();
+	  it != m_params.end();
+	  it++ )
+      {
+	param p = *(it);
+	if ( p.get_name() == name ) return p;
+      }
+
+    throw request_exception ( "Param with specified name not found." );
+  }
+};

@@ -1,0 +1,237 @@
+<!--startcut ==========================================================-->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML>
+<HEAD>
+<title>Backing Up Your Data LG #32</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#A000A0"
+ALINK="#FF0000">
+<!--endcut ============================================================-->
+
+<H4>
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H1><font color="maroon">A Convenient and Practical Approach to Backing Up Your Data</font></H1>
+<H4>By <a href="mailto:bu@hightek.org">Vincent Stemen</a></H4>
+</center>
+<P> <HR> <P>  
+
+    July 19,1998<br><br>
+      <p>
+      Every tool I have found for Linux and other UNIX environments seems to
+      be designed primarily to backup files to tape or any device that can
+      be used for streaming backups.  Often this method of backing up is
+      infeasible, especially on small budgets.  This led to the development
+      of bu, a tool for backing up by mirroring the files on another file
+      system.  bu is not necessarily meant as a replacement for the other
+      tools (although I have set up our entire disaster recovery system
+      based on it for our development servers), but more commonly as a
+      supplement to a tape backup system.  The approach I discuss below is a
+      way to manage your backups much more efficiently and stay better
+      backed up without spending so much money.
+      </p>
+
+      <dl>
+        <h4>* Some problems I have found with streaming backups</h4>
+        <dd>
+          <dl>
+            1. The prices and storage capacities often make it infeasible.
+            <dd><br>
+              The sizes of hard drives and the amount of data stored on an
+              average server or even workstation is growing faster than the
+              capacity of the lower end tape drives that are affordable to
+              the individual or small business.  5 and 8 gig hard drives are
+              cheap and common place now and the latest drives go up to at
+              least 11 gig.  However, the most common tape drives are only a
+              few gig.  Higher capacity/performance tape drives are
+              available but the costs are out of the range of all but the
+              larger companies.
+              <br><br>
+              For example:<br>
+              Staying properly backing up with 30GB of data (which can be
+              just 3 or 4 hard drives) to a midrange tape drive, can cost
+              $15,000 to $25,000 or more inside of just 2 to 4 years. There
+              is a typical cost scenario on
+              <a href="http://www.exabyte.com/home/press.html">
+              http://www.exabyte.com/home/press.html</a>.
+              <br><br>
+              This is just the cost for the drive and tapes.  It does not
+              include the cost of time and labor to manage the backup system.
+              I discuss that more below.  With that in mind, the comments I
+              make on reliability, etc, in the rest of this article are based
+              on my experience with lower end drives.  I haven't had thousands
+              of extra dollars to throw around to try the higher end drives.
+              <br><br>
+          </dl>
+          
+          <dl>
+            2. The cost of squandered sys admin time and the lost productivity
+            of users or developers waiting for lost files to be restored, can
+            get much more expensive than buying extra hard drives.
+            <dd><br>
+              To backup or restore several gig of data to/from a tape can take
+              up to several hours.  The same goes for trying to restore a
+              single file that is near the end of the tape.  I can't tell you
+              how frustrating it is to wait a couple of hours to restore a
+              lost file only to discover you made some minor typo in the
+              filename or the path to the file so it didn't find it and you
+              have to start all over.  Also, if you are backing up many gig of
+              data, and you want to be fully backed up every day, you either
+              have to keep a close eye on it and change tapes several times
+              throughout the day, every day, or do that periodically and do
+              incremental backups onto a single tape the rest of the days.
+              With tapes, the incremental approach has other problems, which
+              leads me to number 3.
+              <br><br>
+          </dl>
+        
+          <dl>
+            3. Incremental backups to tape can be expensive, undependable
+            and time consuming to restore.
+            <dd><br>
+              First, this kind of backup system can consume a lot of time
+              labeling, and tracking tapes to keep track of the dates and
+              which ones are incremental and which ones are full backups, etc.
+              Also, if you do incremental backups throughout a week, for
+              example, and then have to restore a crashed machine, you can
+              easily consume up to an entire day restoring from all the tapes
+              in sequence in order to restore all the data back the way it
+              was.  Then you have Murphy to deal with.  I'm sure everybody is
+              familiar with Murphy's laws.  When you need it most, it will
+              fail.  My experience with tapes has revealed a very high failure
+              rate.  Probably 20 or 30% of the tapes I have tried to restore
+              on various types of tape drives have failed because of one
+              problem or another.  This includes our current 2GB DAT drive.
+              Bad tape, dirty heads when it was recored, who knows.  To
+              restore from a sequence of tapes of an incremental backup, you
+              are dependent on all the tapes in the sequence being good.  Your
+              chances of a failure are very high.  You can decrease your
+              chance of failure, of course, by verifying the tape after each
+              backup but then you double your backup time which is already to
+              long in many cases.
+              <br><br>
+          </dl>
+      </dl>
+
+      <dl>
+        <h4>* A solution (The history of the bu utility)</h4>
+        <dd>
+          With all the problems I described above, I found that, like most
+          other people I know, it was so inconvenient to back up that I
+          never stayed adequately backed up, and have payed the price a time
+          or two.  So I set up file system space on one of our servers and
+          periodically backed up my file systems over nfs just using cp.
+          This way I would always be backed up to another machine if mine
+          went down and I could quickly backup just one or a few files
+          without having to mess with the time and cost of tapes.  This
+          still wasn't enough.  There were still times I was in a hurry and
+          didn't want to spend the time making sure my backup file system
+          was NFS mounted, verifying the pathname to it, etc, before doing
+          the copy.  Manually dealing with symbolic links also was
+          cumbersome.  If I specified a file to copy that was a symbolic
+          link, I didn't want it to follow the link and copy it to the same
+          location on the backup file system as the link.  I wanted it to
+          copy the real file it points to with it's path so that the backup
+          file system was just like the original.  I also wanted other
+          sophisticated features of an incremental backup system without
+          having to use tapes.  So, I wrote bu.  bu intelligently handles
+          symbolic links, can do incremental backups on a per directory
+          basis with the ability to configure what files or directories
+          should be included and excluded, has a verbose mode, and keeps log
+          files.  Pretty much everything you would expect from a fairly
+          sophisticated tape backup tool (except a GUI interface :-) but is
+          a fairly small and straight forward shell script.
+          <br><br>
+      </dl>
+
+      <dl>
+        <h4>* Backup strategy</h4>
+        <dd>
+          Using bu to backup to another machine may or may not be a good
+          replacement for a tape backup system for others as it has for us,
+          but it is an excellent supplement.  When you have done a lot of
+          work and have to wait hours or even days until the next scheduled
+          tape backup, you are at the mercy of Murphy until that time, then
+          you cross your fingers and hope the tape is good.  To me, it is a
+          great convenience and a big relief to just say "bu src" to do an
+          incremental backup of my whole src directory and know I
+          immediately have an extra copy of my work if something goes wrong.
+          <br><br>
+          It is much easier and faster to restore a whole file system over
+          NFS than it is from a tape.  This includes root (at least with
+          Linux).  And, it is vastly faster and easier to restore just one
+          file or directory just using the cp command.
+          <br><br>
+          So far as cost: You can get extra 6GB hard drives now for less
+          than $200 dollars.  In fact I can buy a whole new computer with
+          extra hard drives to use as a backup server for $1000 or less now.
+          Much less than the cost of buying just a mid to high end tape
+          drive, not counting the cost of all the tapes and extra time spent
+          managing them.  In fact, one of the beauties of Linux is, even
+          your old 386 or 486 boat anchors make nice file servers for such
+          things as backups.
+          <br><br> For those individuals and small businesses who use zip
+          drives and jaz drives for backing up so they can have multiple
+          copies or take them off site, bu is also perfect, since
+          incremental backups can be done to any file system.  I often use
+          it to back up to floppies to take my most critical data and recent
+          work off site.
+          <br><br>
+          Here is an interesting strategy we have come up with using bu that
+          is the least expensive way to stay backed up we could come up with
+          for our environment.  It is the backup strategy we are setting up
+          for our development machines which house several GB of data.  Use
+          bu to backup daily and right after doing work, to file systems
+          that are no more than 650 mb.  Then, once or twice a month, cut
+          worm CD's from those file systems to take off site.  WORM CD's are
+          only about a dollar each in quantities of 100, and CD WORM writers
+          have gotten cheap.  This way your backups are on media that
+          doesn't decay like tapes and floppies tend to do.  Re-writable
+          CD's are also an option if you don't mind spending a bit more
+          money.  If you have just too much data for that to be practical,
+          hard drives are cheap enough now that it is feasible to have extra
+          hard drives and rotate them off site.  It is nice to have one of
+          those drive bays that allow you to un-plug the drive from the
+          front of the machine if you take this approach.  Where bu will
+          really shine with large amounts of data, is when we finally can
+          get re-writable DVD drives with cheap media.  I think, in the
+          future, with re-writable DVD or other similar media on the
+          horizon, doing backups to non-random access devices such as tape
+          will become obsolete and other backup tools will likely follow the
+          bu approach anyway.
+          <br><br>
+      </dl>
+
+      <dl>
+        <h4>* Getting bu</h4>
+        <dd>
+          bu is freely re-distributable under the GNU copyright.<br>
+          <a href="http://www.hightek.org/bu/"><i>http://www.hightek.org/bu/</i><br></a>
+          <a href="ftp://www.hightek.org/pub/vstemen/bu/bu.tar.gz">
+            <i>ftp://www.hightek.org/pub/vstemen/bu/bu.tar.gz</i><br></a>
+      </dl>
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<center><H5>Copyright &copy; 1998, Vincent Stemen<BR> 
+Published in Issue 32 of <i>Linux Gazette</i>, September 1998</H5></center>
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<A HREF="./index.html"><IMG ALIGN=BOTTOM SRC="../gx/indexnew.gif" 
+ALT="[ TABLE OF CONTENTS ]"></A>
+<A HREF="../index.html"><IMG ALIGN=BOTTOM SRC="../gx/homenew.gif"
+ALT="[ FRONT PAGE ]"></A>
+<A HREF="./lg_answer32.html"><IMG SRC="../gx/back2.gif"
+ALT=" Back "></A>
+<A HREF="./gm.html"><IMG SRC="../gx/fwd.gif" ALT=" Next "></A>
+<P> <hr> <P> 
+<!--startcut ==========================================================-->
+</BODY>
+</HTML>
+<!--endcut ============================================================-->

@@ -1,0 +1,208 @@
+#!/usr/bin/perl
+#
+# cyrus_syncboxes.pl - syncs Cyrus IMAP server mailboxwise with an OpenLDAP
+# server
+# 
+# Copyright (C) 2005, I. Averintsev <pg at cccp at>
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+#
+
+use Carp;
+use Digest::SHA1 qw(sha1 sha1_hex sha1_base64);
+use Getopt::Long;
+use Net::LDAP;
+use Net::LDAP::Entry;
+use Net::LDAP::Filter;
+use Pod::Usage;
+use strict;
+use Term::ANSIColor qw(:constants);
+use Cyrus::IMAP::Admin;
+
+
+# Getopt::Long
+my $binddn = 'cn=ldapadmin,dc=example,dc=net';
+my $debug  = 100;
+my $help;
+my $passwd = 'XXXXXXXXXXXXXXXXX';
+my $source = 'localhost';
+my $tree   = 'ou=users,ou=accounts,dc=example,dc=net';
+my $verbose= 1;
+my $cyrhost= 'localhost';
+my $cyradm = 'imapadmin';
+my $cyrpass= 'YYYYYYYYYYYYYYYYYY';
+my @objects;
+
+my $user;
+my $quota;
+
+# LDAP
+my $ldap;
+my $mesg;
+my $lres;
+my $entry;
+my $maxentries;
+
+# Cyrus
+my $cyrus;
+my @mailboxes;
+my @mblist;
+
+GetOptions( 'binddn=s' => \$binddn,
+            'debug=i' => \$debug,
+            'help' => \$help,
+            'ldaphost=s' => \$source,
+            'passwd=s' => \$passwd,
+            'tree=s' => \$tree,
+            'cyrhost=s' => \$cyrhost,
+	    'cyradm=s' => \$cyradm,
+	    'cyrpass=s' => \$cyrpass,
+            'verbose=i' => \$verbose );
+
+pod2usage(-exitval => 2, -verbose => 2) if $help;
+
+# create ldap connection
+
+$ldap = Net::LDAP->new( $source, port => 389, version => 3, async => 1 ) or die "$@";
+
+if ( $debug > 0 ) {
+        print WHITE "Connected to $source.",RESET,"\n";
+}
+else {
+        print WHITE "Connected to LDAP server : ",YELLOW,$source,RESET,"\n";
+}
+
+# bind to ldap
+
+$mesg = $ldap->bind( $binddn, password => $passwd );
+# TODO add error handling
+
+# read tree
+
+$lres = $ldap->search(  base => $tree,
+			scope => 'sub',
+			timelimit => 900,
+			attrs => ['uid','mailQuotaSize','accountStatus'],
+			filter => "(objectclass=greenUser)");
+
+
+$maxentries = $lres->count;
+if ( $debug > 0 ) {
+        print YELLOW "Got $maxentries results.",RESET,"\n";
+}
+
+# read cyrus user mailbox list
+$cyrus = Cyrus::IMAP::Admin->new($cyrhost);
+$cyrus->authenticate(   -user => $cyradm,
+			-password => $cyrpass,
+			-mechanism => "LOGIN") or die "Could not login to cyrus\n";
+
+@mailboxes = $cyrus->list('user/*');
+foreach $entry (@mailboxes) {
+  push @mblist, @$entry[0];
+}
+
+# iterate through LDAP tree
+
+if ( $maxentries > 0 ) {
+	@objects = $lres->entries;
+	foreach $entry (@objects) {
+		$user = $entry->get_value('uid');
+		$quota = $entry->get_value('mailQuotaSize');
+		my $mbox = "user/$user";
+		if ($debug>0) {
+			print WHITE "would have created mailbox: ",$mbox," with quota ",$quota,RESET,"\n";
+		} else {
+			if (not grep(/^$mbox/, @mblist)) {
+				$cyrus->createmailbox($mbox);
+			}
+			$cyrus->setquota($mbox, 'STORAGE', $quota + 5120);
+		}
+	}
+}
+
+
+exit;
+
+__END__
+
+=head1 NAME
+
+cyrus_syncboxes.pl - reads LDAP tree and creates INBOXes, setting quotas
+
+=head1 SYNOPSIS
+
+cyrus_syncboxes.pl [OPTIONS]
+
+=head1 DESCRIPTION
+
+This script reads greenAccounts from LDAP server, creates INBOXes for every account if needed, and sets storage quotas.
+
+=head1 OPTIONS
+
+=over 8
+
+=item B<--binddn dn>
+
+The DN to use bining to LDAP server
+
+=item B<--debug n>
+
+Set the debug level. 0 is for production use.
+
+=item B<--help>
+
+Prints this text.
+
+=item B<--ldaphost hostname>
+
+LDAP server hostname.
+
+=item B<--passwd password>
+
+Password to use when binding to LDAP server.
+
+=item B<--tree dntree>
+
+The DN of the subtree on the LDAP server where the data should be read from.
+
+=item B<--verbose n>
+
+A verbose level greater than 0 makes the program print more status messages. Defaults to 0. Unused for now.
+
+=item B<--cyrhost hostname>
+
+IMAP server hostname.
+
+=item B<--cyradm username>
+
+IMAP server administrator username.
+
+=item B<--cyrpass password>
+
+IMAP server administrator password.
+
+=head1 BUGS
+
+Lacks error handling. Does explicitly set quota on mailboxes, even if it has been set already to the same value. Does not handle user deletion on LDAP server. Passwords for LDAP and Cyrus servers should be entered at an interactive prompt.
+
+=head1 AUTHOR
+
+P. Kolobok <ivan at gruene at>, 
+R. Pfeiffer <lynx at luchs at> (POD)
+
+=head1 VERSION
+
+version 0.03

@@ -1,0 +1,198 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML>
+<HEAD>
+   <TITLE> Setting up dynamic IP web server via PPP connection </TITLE>
+   <META NAME="GENERATOR" CONTENT="Mozilla/3.0Gold (X11; I; Linux 2.0.0 i486) [Netscape]">
+</HEAD>
+<BODY>
+
+<H4>&quot;Linux Gazette...<I>making Linux just a little more fun!</I>
+&quot;</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center><H1>Setting up dynamic IP web server via PPP connection</H1></center>
+<center><H4>By Henry H. Lu, <A HREF="mailto:honglu@rt66.com">honglu@rt66.com</A>,
+<A HREF="http://www.tc.umn.edu/nlhome/m508/luxxx012/">http://www.tc.umn.edu/nlhome/m508/luxxx012/</A> 
+</H4> </center> 
+<center><H5>Copyright (c) 1996</H5></center>
+<center> <H5>Published in Issue 10 of the Linux Gazette</H5></center>
+
+<P>Have you been thinking of seting up a reachable web server at your home
+PC in addition to your permenent page at ISP? There are obvious reasons
+to do this: You can show off your home linux box to the world; you do not
+need to use other messy method (email) to know your current IP in order
+to login remotely; finally, it is fun! </P>
+
+<P>First, You need to have ppp connection and httpd working and a PERMANENT
+web page before trying the following dynamic IP solution. </P>
+
+<H3>Description of files: </H3>
+
+<P><B>web_up: </B>shell script I run to update webpage at permenet site
+with new IP whenever connection is up. </P>
+
+<P><B>web_down:</B> shell script I run before shutting down the link, to
+inform others of the shutdown </P>
+
+<P><B>update_uppage:</B> perl scripts to creat up.html page with updated
+IP address on the fly, called by web_up. </P>
+
+<P><B>up.html_source:</B> fixed part of up.html </P>
+
+<P><B>down.html:</B> web page used when link is down. </P>
+
+<P><B>/etc/add, /etc/last_add:</B> files where I put IP address. </P>
+
+<P><B>ip-down, ip-up:</B> files executed when ppp link is disconnected
+or connected. they are used to update the /etc/add files here. </P>
+
+<H3>Now lets look at scripts web_up: </H3>
+
+<PRE>------------------------------------------------------------------
+
+    #!/bin/sh
+    #check new IP
+    new_ip()
+    {
+    if [ -f /etc/add ]; then
+       if [ -f /etc/last_add ]; then
+          if /usr/bin/diff /etc/add /etc/last_add &gt;/dev/null ; then
+              exit 1 
+          else
+              return 0 
+          fi
+       else
+          return 0
+       fi
+    else
+       exit 1
+    fi
+    }
+
+    #check whether maroon is connected
+    try_connect()
+    {
+    if ping -c4 -l3 128.101.118.21  2&gt;&amp;1 | grep &quot;0 packets&quot; &gt; /dev/null
+    then 
+       return 1
+    else
+       return 0
+    fi
+    }
+                    
+    if try_connect
+    then
+         touch  /var/run/maroon_connected  
+    else
+         rm -f /var/run/maroon_connected
+    fi
+
+    # ftp to update page
+    if [ -f /var/run/maroon_connected ] &amp;&amp; new_ip
+    then
+       # update_uppage is perl scripts, exit status is opposite of shell
+       if ( ! /home/honglu/public_html/update_uppage )
+       then 
+          cd /home/honglu/public_html
+          if echo &quot;put up.html /nlhome/m508/luxxx012/dynamic.html&quot; \
+              | /usr/bin/ftp maroon  
+          then 
+             rm -f /etc/last_add
+             cp /etc/add  /etc/last_add
+             exit 0
+          else
+             exit 1
+          fi
+       fi
+    else
+        exit 1
+    fi
+
+-----------------------------------------------------------------
+</PRE>
+
+<P>Now let's look at web_up in detail. </P>
+
+<P>Function <B>new_ip()</B> is used to check whether we have new IP and
+whether the new IP is different from the last one. /etc/ppp/ip-up and /etc/ppp/ip-down
+update IP adress in files /etc/add and /etc/last_add so that we can compare
+files &quot;add&quot; with &quot;last_add&quot; to tell whether we need
+to update page. </P>
+
+<P>Function <B>try_connect()</B> is used to test whether the perment web
+site is reachable. </P>
+
+<P>Next is fun part, I used automatic feature of <B>ftp</B> to update webpage.
+In order to make it work, you have to set file ~/.netrc correctly, type
+&quot;man ftp&quot; for more information. </P>
+
+<P><B>update_uppage</B> is straitforward perl scripts to parse and creat
+up.html by using new IP from /etc/add file. </P>
+
+<P>Final part is to update /etc/add /etc/last_add to reflect correct status
+IP address. </P>
+
+<P>You can put &quot;web_up&quot; in your crontab entry ( or ip-up, or
+keapalive.sh) to let it execute automatically whenever your PC is connected.</P>
+
+<H3>Web_down is a similar page, main difference is in ftp part: </H3>
+
+<PRE>-----------------------------------------------------
+......
+......
+# ftp to send down.html page 
+if [ -f /var/run/maroon_connected ] 
+then
+      cd /home/honglu/public_html
+      if  echo &quot;put down.html /nlhome/m508/luxxx012/dynamic.html&quot; \
+        | /usr/bin/ftp maroon  
+      then
+          rm -f /etc/last_add
+      else
+          exit 1
+      fi
+else
+      exit 1
+fi
+
+----------------------------------------------------
+</PRE>
+
+<P>Instead of ftp up.html as web_up did, web_down put down.html to permenent
+web site to inform the delink of page. </P>
+
+<P>web_down should be run before you shut down the machine. I created a
+scripts called &quot;shut&quot; to shutdown machine: </P>
+
+<PRE>-----------------------------------------
+#!/bin/sh
+if web_down
+then
+   shutdown -h now
+else
+   echo &quot;can not web_down&quot;
+   exit 1
+fi
+-----------------------------------------
+</PRE>
+
+<P>For more detail check out my home page for source code: </P>
+
+<P><A HREF="http://www.tc.umn.edu/nlhome/g625/luxxx024/">http://www.tc.umn.edu/nlhome/g625/luxxx024/</A></P>
+
+<P>Henry H Lu 
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<A HREF="./index.html"><IMG ALIGN=BOTTOM SRC="../gx/indexnew.gif" 
+ALT="[ TABLE OF CONTENTS ]"></A>
+<A HREF="../index.html"><IMG ALIGN=BOTTOM SRC="../gx/homenew.gif"
+ALT="[ FRONT PAGE ]"></A>
+<A HREF="plugin.gimp.html"><IMG SRC="../gx/back2.gif"
+ALT=" Back "></A>
+<A HREF="xaos.html"><IMG SRC="../gx/fwd.gif" ALT=" Next "></A>
+<P> <hr> <P> 
+</BODY>
+</HTML>

@@ -1,0 +1,310 @@
+<!--startcut ======================================================= -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<html><head>
+<META NAME="generator" CONTENT="lgazmail v1.1preC">
+<TITLE>The Answer Guy 33: Shuffling Lines in a File</TITLE> 
+<!-- ORIGINAL SUBJECT:
+[linuxprog] more shuffling experiments 
+JTD SUBTITLE:
+
+-->
+</head>
+
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#A000A0"
+ALINK="#FF0000">
+<H4>"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+<P> <hr> <P>
+<!-- ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::: -->
+<H1 align="center"><A NAME="answer">
+	<img src="../../gx/dennis/qbubble.gif" alt="" border="0" align="middle">
+	<a href="../index.html">The Answer Guy</a>
+	<img src="../../gx/dennis/bbubble.gif" alt="" border="0" align="middle">
+</A></H1> 
+<BR>
+<H4 align="center">By James T. Dennis,
+	<a href="mailto:tag@lists.linuxgazette.net">tag@lists.linuxgazette.net</a>
+	<BR>Starshine Technical Services, <A HREF="http://www.starshine.org/">http://www.starshine.org/</A> 
+</H4>
+<p><hr><p>
+<!--endcut ========================================================= -->
+<H3><img src="../../gx/dennis/qbub.gif" alt="(?)"
+width="50" height="28" align="left" border="0"
+>Shuffling Lines in a File</H3>
+<p><strong>From David Stanaway on the 
+	Linux Programmers Support Team mailing list 
+	on 20 Sep 1998 </strong></p>
+<!-- begin body -->
+
+<strong><p><font color="navy"><em>
+Now I'm trying to shuffle the order of the lines in a text file
+without reading in the whole file...  Does anyone have any advice, code,
+etc on this?  If I can read in the whole file, this is simple, but I might
+want to shuffle a file several megs long.
+</em></font></p></strong>
+
+<strong><p>
+What do you mean by shuffle?
+</p></strong>
+
+
+<blockquote><img src="../../gx/dennis/bbub.gif" height="28" width="50" 
+	alt="(!)" border="0"
+>I think he means something like: randomly or arbtrarily
+reorder the lines of the file without reading the whole
+thing into RAM/core.
+</blockquote>
+
+
+<blockquote>
+I think the approach I'd take is to lock the file from
+access by whatever programs and/or processes are intended to
+read the data out of it. 
+</blockquote>
+
+
+<blockquote>
+Then I'd "index" the file --- search through it finding all
+of the line boundary offsets and their lengths.  I'd then
+use an standard shuffling techniques on that index file.
+The problem with "shuffling" a normal text file on line
+boundaries is the variable record lengths.  So we create a
+table of offsets and lengths to those --- and all of the
+offset/length pairs are of a fixed size.
+</blockquote>
+
+
+<blockquote>
+So I could use the index file and "shuffle" it with the 
+following psuedo code:
+</blockquote>
+
+
+<blockquote>
+<dl>
+<dt>open index file
+<dt>while read index file entry (readbuf)
+<dd>pick a random place to put it
+<br>load the "place to put it" entry (writebuf)
+<br>swap these entries in read and write buf.
+<br>write both buffers
+</dl></blockquote>
+
+
+<blockquote>
+If the intent is to shuffle the files by some other criteria
+(arbitrary vs. random) when you'd modify the above algorithm
+accordingly.  If the criteria for resequencing has to do
+with the data in the files (i.e. your "sorting" the file)
+you'd have a bit more work ahead of you.
+</blockquote>
+
+
+<blockquote>
+... actually I'd optimize this a bit by read x entries into
+a buffer, for looping through that, and maintain a few write
+bufs into random locations into the file.  For example I
+might load 100 entries in the read buffer and up to ten
+unique randomly selected write buffers.  For each of the 100
+read buffer entries I'd randomly select among the open write
+buffers (1 to 10) and randomly select a place in that buffer
+to put it).  At the end of the for loop I'd write everything
+back out, read the next read buff, select more write buffs,
+and so on until the end of the file.
+</blockquote>
+
+
+<blockquote>
+Every entry in the index file will have been exchanged with
+some random entry at least once --- and the average will be
+two.  There is a small chance that a given entry would be
+swapped out of and back into the same location (which is
+usually a good feature of a shuffling algorithm).
+</blockquote>
+
+
+<blockquote>
+Then I'd open the original text file and the shuffled index
+file and I'd walk through the shuffle file sequentially
+reading offset/length pairs and using them to seek into the
+text file and copy to a new file.  After each seek I'd do
+one sanity check --- it there should be a newline there, and
+as I was copying I'd do another, there should be no newlines
+between my offset and the end of my length.  I'd abend with
+an error message if either sanity check failed, or if any
+seek failed (the original file was shortened while I was
+shuffling).
+</blockquote>
+
+
+<blockquote>
+Finally I'd mv the new file back into place.
+</blockquote>
+
+
+<blockquote>
+This algorithm assumes that you have files with variable
+length records delimited by newlines.  It also assumes that
+you are not disk space constrained (that you have at least
+enough room to make one full copy of the file to be shuffled
++ enough for an index file.  Oddly enough the index file
+could, in some degenerate circumstances be several times the
+size of the original file.  (that happens if all of the
+lines in the old file were only zero or one characters long
+and that your offsets and lengths are 32 bits each.
+</blockquote>
+
+
+<blockquote>
+Note that I chose to use a <EM>file</EM> for the index rather than
+RAM.  If I'm guaranteed that the file will have a
+"reasonable" number of lines I can build that in memory ---
+thus simplifying the code somewhat.  I chose the method that
+I describe so that you could as easily shuffle
+multi-gigabyte files as multi-megabyte.
+</blockquote>
+
+
+<blockquote>
+The whole program could probably run in less than a 100K and
+work on <EM>any</EM> size file that was supported by your OS.
+</blockquote>
+
+
+<blockquote>
+You could also look at the sources for the GNU 'sort'
+utility.  I handles arbitrarily large inputs (using
+sequences of temp files which then merged together).
+</blockquote>
+
+
+<p><strong><img src="../../gx/dennis/qbub.gif" height="28" width="50" 
+	alt="(?)" border="0"
+>If you open a file for reading, the only space it takes up is the read
+buffer, so if you read a line at a time, the memory usage depends on how
+you are shuffling.
+</strong></p>
+
+
+<p><strong>
+If you wanted to reverse the file, you could jsut be writing the lines
+you read to another file.
+</strong></p>
+
+
+
+<P><strong>
+[deletia]
+</strong></p>
+
+
+<p><strong>
+Then you may like to read the source file from the tail first. I don't
+know how to do this in C, or C++, but it is possible in Java.
+</strong></p>
+
+
+<blockquote><img src="../../gx/dennis/bbub.gif" height="28" width="50" 
+	alt="(!)" border="0"
+>There is a program called <tt>tac</tt> ("cat" backwards) which does
+exactly this.  I'm sure it's written in C and the sources
+can be found at any good GNU or BSD software archive.
+</blockquote>
+
+
+<p><strong><img src="../../gx/dennis/qbub.gif" height="28" width="50" 
+	alt="(?)" border="0"
+>You really need to say more about what you mean by &lt;Shuffle&gt;
+<br>David Stanaway
+</strong></p>
+
+
+
+<blockquote><img src="../../gx/dennis/bbub.gif" height="28" width="50" 
+	alt="(!)" border="0"
+>I think the term is sufficiently unambiguous.  
+</blockquote>
+
+
+<blockquote>
+Shuffle: to resequence.  to place a group of objects into
+some arbitrary or random order.
+</blockquote>
+
+
+<blockquote>
+The problem at hand is a classic CS homework assignment.  It
+has quite a bit to do with the variable length nature of the
+objects to be sorted.  We can't do this with "in place"
+editing (arbitrary seeks and writes into the orginal file)
+because the record we're trying to move might overwrite two
+or more record fragments at its destination.
+</blockquote>
+
+
+<blockquote>
+When you are editing a file (the whole thing being in 
+memory) there are ways that the editor's buffer handling
+handles the issue --- look at the sources to 'vi' or 
+some other smaller, simpler editor and find out how they
+"delete a line" in terms of their internal data structures.
+These don't work well for files since you might end up 
+re-writing from the current offset to the end of the file
+for each replacement.
+</blockquote>
+
+
+<blockquote>
+If the lines are of a fixed length it is much easier, we can
+skip the indexing step and we can, if we wish, shuffle the
+file "in place" --- without the copying.  Naturally we'll
+still want to lock the file (or move it to someplace where
+other processes and programs won't be giving us concurrency
+fits).
+</blockquote>
+<!-- end body -->
+<!--startcut ======================================================= -->
+<P> <hr> <P>
+<H5 align="center"><a href="http://www.linuxgazette.net/copying.html"
+	>Copyright &copy;</a> 1998, James T. Dennis <BR>
+Published in <I>Linux Gazette</I> Issue 33 October 1998</H5>
+<P> <hr> <P>
+<!--::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::-->
+<table width="98%"><tr valign="center" align="center">
+<td rowspan="3"><A HREF="../lg_answer33.html"><IMG
+        SRC="../../gx/dennis/answernew.gif"
+        ALT="[ Answer Guy Index ]"></A></td>
+  <td><A HREF="floppy.html">floppy</a>
+  <td><A HREF="autocad.html">autocad</a>
+  <td><A HREF="scsi.html">scsi</a>
+  <td><A HREF="samba_pdc.html">samba_pdc</a>
+  <td><A HREF="virthost.html">virthost</a>
+</tr><tr valign="center" align="center">
+  <td><A HREF="emacs_cc.html">emacs_cc</a>
+  <td><A HREF="ipmasq.html">ipmasq</a>
+  <td><A HREF="tty.html">tty</a>
+  <td><A HREF="shuffle.html">shuffle</a>
+  <td><A HREF="connect.html">connect</a>
+</tr><tr valign="center" align="center">
+  <td><A HREF="hostavail.html">hostavail</a>
+  <td><A HREF="desqview.html">desqview</a>
+  <td><A HREF="catch22.html">catch22</a>
+  <td><A HREF="thanks2.html">thanks2</a>
+  <td><A HREF="typo.html">typo</a>
+</tr></table>
+<P> <hr> <P>
+<!--::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::-->
+<A HREF="../index.html"><IMG SRC="../../gx/indexnew.gif"
+        ALT="[ Table Of Contents ]"></A>
+<A HREF="../../index.html"><IMG SRC="../../gx/homenew.gif"
+        ALT="[ Front Page ]"></A>
+<A HREF="../lg_bytes33.html"><IMG SRC="../../gx/back2.gif"
+        ALT="[ Previous Section ]"></A>
+<A HREF="../vrenios.html"><IMG SRC="../../gx/fwd.gif"
+        ALT="[ Next Section ]"></A>
+<!--::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::-->
+</body>
+</html>
+<!--endcut ========================================================= -->
+
+

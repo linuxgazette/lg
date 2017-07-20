@@ -1,0 +1,317 @@
+<!--startcut ==========================================================-->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML>
+<HEAD>
+<title>Setting up mail for a home network using exim LG #42</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!--endcut ============================================================-->
+
+<H4>
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H1><font color="maroon">Setting up mail for a home network using exim</font></H1>
+<H4>By <a href="mailto:">Jan W. Stumpel, Oegstgeest, The Netherlands</a></H4>
+</center>
+<P> <HR> <P>  
+
+<h4><a NAME="exim1"></a>1 Introduction</h4>
+
+Setting up a home network with Linux and Win95, using Samba, IP
+Masquerading, and diald has been described many times, also in the Linux
+Gazette, but so far I have not found a recipe for setting up <i>mail</i> on
+a small network with only one dial-up e-mail account. In this article I want
+to explain how I did it. With this system:
+
+<p><ul><li> users on the network can send local mail to each other, and
+reply to it, also locally.</li>
+
+<li> outgoing mail has a proper From: address, so the outside world can
+reply to it.</li>
+
+<li> the e-mail account is shared by the users, but each only receives
+his/her personal mail.</li></ul> 
+
+<p>This is realized on my system (running Debian Linux 2.1) using the
+following programs: 
+
+<p><ul><li> exim as the mail transfer agent (it is
+<i>much</i> easier to configure than sendmail).</li>
+
+<li> fetchmail for collecting the mail from the ISP.</li>
+
+<li> pine as the mail client on the Linux side (but other clients can be
+used as well, including <tt>mail</tt>).</li>
+
+<li> Microsoft Internet Mail on the Windows side (but other clients can be
+used as well).</li>
+
+<li> qpopper as the POP3 server, for moving mail from the Linux system to
+the Win95 machine.</li></ul> 
+
+<p>I have this set up for two machines (1 Linux + 1 Win95) but it will
+probably also work for a somewhat larger network, and may be sufficient for
+a small office. Note: this article is Debian-oriented. If you use another
+distribution, change where appropriate!
+
+<h4> <a NAME="exim2"></a>2 The network and the names</h4>
+
+For this article I assume the following <i>names</i> (change these to
+correspond with your own situation):
+
+<p><ul><li> the owner / system administrator is called Joe Bloggs.</li>
+
+<li> the Linux machine is called <b>heaven</b>.</li>
+
+<li> the Win95 machine is called <b>earth</b>. It is mostly used by Emily
+Bloggs.</li>
+
+<li> Joe's user name on heaven is <tt>joe</tt>.</li>
+
+<li> Emily's user name on heaven is <tt>emi</tt>.</li>
+
+<li> Emily's user name on earth is also <tt>emi</tt>; her Linux password on
+heaven and her 'password for Microsoft networking' on earth are the
+same.</li>
+
+<li> Joe has a dialup account (dynamic IP address) with an ISP called
+<tt>isp.com</tt>. Mail from the ISP can be collected using POP3.</li>
+
+<li> Joe's account name at the ISP is <tt>jbloggs</tt>.</li>
+
+<li> Joe's e-mail address (also used by Emily) is
+<tt>joe.bloggs@isp.com</tt>.</li>
+
+<li> Joe's password for collecting POP3 mail is <tt>zaphod</tt>.</li>
+
+<li> The ISP's mail server (for sending mail) is <tt>smtp.isp.com</tt>.</li>
+
+<li> The ISP's POP3 server (for collecting mail) is <tt>pop3.isp.com</tt>.
+</li>
+
+<li> heaven and earth belong to a domain called <tt>home</tt>. This domain
+name is meant for use only inside the home network; Joe has not registered
+his domain name and it cannot be recognized by the outside world.</li> </ul>
+I also assume that the local networking works, and that there is on-demand
+dialup access using diald. There is no name server on heaven.
+/etc/resolv.conf contains the addresses of two name servers supplied by the
+ISP. These same addresses are entered into the TCP/IP configuration on
+earth.
+
+<p><tt>/etc/hostname</tt> on heaven is
+
+<p><tt>heaven</tt>
+
+<p><tt>/etc/hosts</tt> on heaven is
+
+<p><tt>127.0.0.1 localhost</tt>
+<br><tt>192.168.1.1 heaven.home heaven</tt>
+<br><tt>192.168.1.2 earth.home earth</tt>
+
+<p>On earth there is a file <tt>c:\windows\hosts</tt> with the same contents
+as <tt>/etc/hosts</tt>.
+
+<h4><a NAME="exim3"></a>3 Mail addresses</h4>
+
+Mail messages can have more than just the address in the 'To:' and 'From:'
+lines, for instance :
+
+<p><tt>To: Emily Bloggs &lt;joe.bloggs@isp.com></tt>
+
+<p>'Emily Bloggs' in the above example is the 'real-name part'. It is set in
+the e-mail program which composes the message. This 'real-name part' can be
+used for delivering Emily's mail to her. Note: if the 'real-name part' has
+dots in it, it must be quoted using " characters ("Joe C. Bloggs"). See also
+<tt>man mailaddr</tt>.
+
+<h4> <a NAME="exim4"></a>4 Configuring exim</h4>
+
+On a Debian system this is done by running <tt>eximconfig. </tt>It asks a
+number of questions which you can answer as follows:
+
+<p><ul><li>your system is an Internet site using smarthost.</li>
+
+<li>the 'visible mail domain' is <tt>home</tt></li>
+
+<li>other names apart from <tt>home</tt> and <tt>heaven.home</tt>: answer
+<tt>heaven:localhost</tt></li>
+
+<li>you don't want to relay for any non-local domains.</li>
+
+<li>you want to relay for the local network <tt>192.168.1.0/16</tt></li>
+
+<li>RBL (spam filter database): whatever you like. I said <tt>n</tt></li>
+
+<li>The smarthost, handling outgoing mail, is <tt>smtp.isp.com</tt></li>
+
+<li>System administrator mail should go to <tt>joe</tt> (not to
+<tt>root</tt>!)</li> </ul>
+
+In MS Internet Mail (or whatever mail client you use on Win95) <tt>heaven</tt>
+must be entered both as the STMP server and as the POP3 server. Under 'pop3
+account' and 'pop3 password', enter the username <tt>emi</tt> and her Linux
+password. Enter the the name, Emily Bloggs, and the e-mail address, <tt>emi@home</tt>,
+in the appropriate place. Note that the e-mail address must be in the <i>local
+domain</i>!
+
+<p>On the Linux side, nothing special has to be set. /etc/pine/conf and
+the users' ~/.pinerc can be used 'out of the box'. The mail client (pine)
+constructs local addresses using the hostname together with user information
+from /etc/passwd.
+
+<p>With the above setup, local users can happily send mail to each other
+and reply to it. For instance, in pine at heaven, user <tt>joe</tt> sends
+mail to user <tt>emi</tt>. Automatically, pine changes this to:
+
+<p><tt>To: Emily Bloggs &lt;emi@heaven.home></tt>
+
+<p>The message is delivered immediately (as you can see if you run eximon,
+the exim monitoring utility). <tt>emi</tt> (should she log in to heaven)
+would see the message as coming from
+
+<p><tt>From: Joe Bloggs &lt;joe@home></tt>
+
+<p>So <tt>home</tt> really functions like a local domain within which messages
+can be exchanged. The problem is sending messages to the outside world.
+A From: address like <tt>&lt;joe@home></tt> is no good because nobody on
+the outside could reply to an address in the non-existent domain <tt>home</tt>.
+
+<h4><a NAME="exim5"></a>5 Fixing the From: address</h4>
+
+We must change the local From: address into a valid e-mail address (the
+e-mail account at the ISP), but <i>only</i> in the case of outgoing messages.
+With exim, we can do this by means of a 'transport filter'. The outgoing
+mail passes through this filter, and the From: address is changed. Local
+mail will not be affected.
+
+<p>The following filter will do the trick, provided we are <i>sure</i> that
+the address that we want to change is always between &lt; and > signs. This
+is not guaranteed, but <i>very</i> common: <tt>pine</tt>, <tt>mutt</tt>, and
+<tt>mail</tt>, as well as MS Internet Mail all generate such addresses.
+
+<p><pre>#!/usr/bin/perl
+while (&lt;STDIN>) {
+	if (/^From: /) {
+		s/&lt;.*>/&lt;'joe.bloggs@isp.com'>/;
+		print "$_"; last;
+		}
+	print "$_";
+	}
+while (&lt;STDIN>) { print "$_"; }
+</pre>
+
+Don't forget to change the e-mail address to yours! Call this program
+<tt>outfilt</tt>, do <tt>chmod +x outfilt</tt> and put it in
+<tt>/usr/bin</tt>. Now we must add a line to <tt>/etc/exim.conf</tt>, so the
+last lines of the <tt>TRANSPORTS CONFIGURATION</tt> section read:
+
+<p><pre>remote_smtp:
+   driver = smtp
+   headers_remove = "sender"
+   transport_filter = "/usr/bin/outfilt"
+end</pre>
+
+Actually, we added <i>two</i> lines. The <tt>headers_remove</tt> line is
+also new. This prevents exim from adding a Sender: header to the message (as
+it would do with this setup, if you use pine). The Sender: line can cause
+trouble with some (badly configured) mail destinations.
+
+<p>With these changes to /etc/exim.conf, whenever anyone sends an e-mail
+message to the outside world it is now delivered properly by exim. Exim
+(through diald) opens the outside line at once. In a home situation this is
+probably what you want. In a small office, with a lot of e-mail traffic, you
+may want to defer messages and send them as a bunch at certain times, to
+save phone costs. This is possible, but I don't need it myself and have not
+looked into it. You could look at the 'Linux Mail-Queue mini-HOWTO'.
+
+<h4><a NAME="exim6"></a>6 Fetchmail configuration</h4>
+
+At the command <tt>fetchmail</tt> diald opens the line and the mail from the
+ISP is collected (and passed to exim for local delivery). Only users who
+have a <tt>.fetchmailrc</tt>, owned by themselves, in their home directory
+can run fetchmail. This file can be created using the configuration tool
+fetchmailconfig. You get something like:
+
+<p><pre># Configuration created Sun Mar 28 03:15:20 1999 by fetchmailconf
+set postmaster "postmaster"
+poll pop3.isp.com with proto POP3
+       user "jbloggs" there with password "zaphod" is joe here options fetchall warnings 3600
+</pre>
+
+The <tt>.fetchmailrc</tt> files belonging to the various users could all be
+copies of each other, but with the ownership set to the user concerned. It
+is not so nice that every user has the password in plain view. Maybe there
+is a better way, but in a home situation it does not matter.
+
+<p>The main point is that whoever runs fetchmail, the mail must always
+be delivered to the <i>same</i> user mailbox (<tt>joe</tt>'s mailbox in
+this case).
+
+<h4><a NAME="exim7"></a>7 Removing exim's delivery limit</h4>
+
+Exim by default does not deliver more than 10 messages at a time. I am sure
+there are circumstances where this makes perfect sense, but having a dialup
+account is not one of them. To get rid of this restriction, you must put
+into the <tt>MAIN CONFIGURATION</tt> section of <tt>/etc/exim.conf</tt>,
+before the <tt>end</tt> statement, a line
+
+<p><tt>smtp_accept_queue_per_connection = 0</tt>
+
+<h4><a NAME="exim8"></a>8 Delivering personal mail</h4>
+
+Through <tt>fetchmail</tt> and <tt>exim</tt>, all mail from the outside
+is by default delivered to Joe's mailbox (<tt>var/spool/mail/joe</tt>)
+at heaven. In Joe's home directory he puts a file called <tt>.forward</tt>,
+containing the following text:
+
+<p><tt># Exim filter</tt>
+<br><tt>if $header_to: contains Emily then deliver emi endif</tt>
+
+<p>If mail contains 'Emily' in (the 'real name part' of) the To: address
+(and this will almost always be the case when her friends send her mail) it
+will go into her mail account on heaven, not into Joe's. She can move the
+mail to her own machine using POP3 (see below).
+
+<h4><a NAME="exim9"></a>9 Transferring mail with qpopper</h4>
+
+To let heaven act as POP3 server for earth, qpopper can be installed. I
+installed the Debian package <tt>qpopper_2.3-4.deb</tt>. Installation is
+automatic; no configuration is necessary. If Emily presses 'get/send
+messages' in MS Internet Mail, the contents of her mailbox on heaven get
+transferred to earth (and all mail, local or outside, which she has written
+gets delivered).
+
+<h4><a NAME="exim10"></a>10 Manually checking the mail</h4>
+
+Thanks to a 'shortcut' on earth's Win95 'desktop', which does a telnet to
+heaven, Emily can log into heaven and start <tt>fetchmail</tt> by hand. That
+is, if she does not want to wait for the scheduled <tt>cron</tt> times when
+fetchmail runs. After the mail has been transferred from the ISP, she can
+press 'get/send messages' to move any mail from her heaven mailbox into the
+earth one.
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<center><H5>Copyright &copy; 1999, Jan W. Stumpel<BR> 
+Published in Issue 42 of <i>Linux Gazette</i>, June 1999</H5></center>
+
+<!--===================================================================-->
+<!--startcut ==========================================================-->
+<P> <hr> <P> 
+<A HREF="./index.html"><IMG ALIGN=BOTTOM SRC="../gx/indexnew.gif" 
+ALT="[ TABLE OF CONTENTS ]"></A>
+<A HREF="../index.html"><IMG ALIGN=BOTTOM SRC="../gx/homenew.gif"
+ALT="[ FRONT PAGE ]"></A>
+<A HREF="./richardson.html"><IMG SRC="../gx/back2.gif"
+ALT=" Back "></A>
+<A HREF="./carlson.html"><IMG SRC="../gx/fwd.gif" ALT=" Next "></A>
+<P> <hr> <P> 
+</BODY>
+</HTML>
+<!--endcut ============================================================-->

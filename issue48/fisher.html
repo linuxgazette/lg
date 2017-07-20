@@ -1,0 +1,337 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>Advanced Programming in Expect: A Bulletproof Interface LG #48</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<!-- *** BEGIN navbar *** -->
+<A HREF="index.html"><IMG ALT="[ Table of Contents ]" 
+	SRC="../gx/indexnew.gif" WIDTH=163 HEIGHT=60 ALIGN=bottom ></A>
+<A HREF="../index.html"><IMG ALT="[ Front Page ]" 
+	SRC="../gx/homenew.gif" WIDTH=163 HEIGHT=60 ALIGN=bottom></A>
+<A HREF="fischer.html"><IMG ALT="[ Prev ]" SRC="../gx/back2.gif" WIDTH=41 HEIGHT=60 ALIGN=bottom></A>
+<A HREF="../faq/index.html"><IMG ALT="[ Linux Gazette FAQ ]" 
+	SRC="./../gx/dennis/faq.gif"WIDTH=163 HEIGHT=60 ALIGN=bottom></A>
+<A HREF="lane.html"><IMG ALT="[ Next ]" SRC="../gx/fwd.gif" WIDTH=41 HEIGHT=60 ALIGN=bottom  ></A>
+<!-- *** END navbar *** -->
+
+<!--endcut ============================================================-->
+
+<H4>
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H1><font color="maroon">Advanced Programming in Expect: A Bulletproof Interface</font></H1>
+<H4>By <a href="mailto:dlf@cotse.com">David Fisher</a></H4>
+
+</center> <P> <HR> <P>  
+
+<!-- END header -->
+
+<P><EM>Links to the scripts in this article are included in the Linux Gazette.
+Off-site links to Expect manual pages are indicated by a "(*)" after the
+link.</EM> 
+
+
+
+
+<h2>
+<b><font face="Arial"><font size=+0>Introduction:</font></font></b></h2>
+This article assumes the reader has a thorough understanding of the basics
+of the Expect scripting language and is looking for advanced solutions.
+For more on Expect, see:
+<dir><a href="http://www.cotse.com/dlf/man/expect/index.html">http://www.cotse.com/dlf/man/expect/index.html</a> (*)</dir>
+In the design of automated systems using the Expect programming language,
+one of the more difficult hurdles many programmers encounter is ensuring
+communication with ill-behaved connections and remote terminals. The <a href="misc/fisher/send_expect.txt">send_expect</a>
+procedure detailed in this article provides a means of ensuring communication
+with remote systems and handles editing and rebroadcast of the command
+line. Where a programmer would usually send a command line and then expect
+the echo from the remote system, this procedure replaces those lines of
+code and provides the most reliable interface I have come across. Features
+of this interface include:
+<ul>
+<li>
+Guarantees transmission via remote system echo</li>
+
+<li>
+Tolerates remote terminal control codes and garbage characters in the echo</li>
+
+<li>
+Persistence of attempts and hierarchy of methods before declaring a failure</li>
+
+<li>
+Interactively edits and retransmits command lines that cannot be verified</li>
+
+<li>
+Maintains its own moving-window diagnostics files, so they are small and
+directly associated with the errors</li>
+</ul>
+Communication with local processes (i.e. those running on the same workstation
+as the expect process) is typically not problematic and does not require
+the solutions detailed in this article. External processes, however, can
+create a number of problems that may or may not affect communication, but
+will affect an automated system's ability to determine the success of the
+communication. In cases where it is corrupted, it is not always immediately
+obvious: a corrupted command may trigger an error message, but data which
+has been corrupted may still be considered valid and the error would not
+show up immediately, and may cause a variety of problems. This is why it
+is necessary to ensure that the entire string that is transmitted is properly
+received echoed by the remote system.
+<p>
+The basic idea of this interface is to send the command string except
+for its terminating character (usually, a carriage return) and look at
+the echo from the remote system. If the two can be matched using the regular
+expressions in the expect clauses, then the terminating character is sent
+and transmission is considered successful. If success cannot be determined,
+the command line is cleared instead of being sent, and alternative transmission
+modes are used.
+<p>
+In many cases, nothing more than expecting the exact echo of the string
+is sufficient. If you're reading this article, though, I suspect that you've
+encountered some of the problems I have when programming in Expect, and
+you're looking for the solution here. If you're just reading out of interest,
+the problems arise when automating a session on a machine off in a lab,
+or on the other side of the world. Strange characters pop up over the connection,
+and the terminal you're connected to does weird things with its echo, but
+everything is working. It becomes very difficult to determine if what was
+sent was properly received when you have noise on the connection, terminal
+control codes inserted in the echo, and even server timeouts between the
+automation program and the remote session. This interface survives all
+of that, and if it can't successfully transmit the string, it means that
+the connection to the remote system has been lost.
+<p>
+The code provided in this article is executable, but needs to be incorporated
+into any system in which it is to be used. Ordinarily, system-dependent
+commands need to be added based on the needs of the target system. Also,
+this code uses simple calls to the 
+<a href="http://www.cotse.com/dlf/man/TclCmd/puts.htm">puts</a> (*)
+command to output status messages - these should be changed to use whatever
+logging mechanism is used by the rest of the system. A final caveat, and
+I can't emphasize this enough: always wear eye protection.
+<h2>
+
+<hr WIDTH="100%"><b><font face="Arial"><font size=+0>Setting Up The Interface:</font></font></b></h2>
+The procedures provided in this article are:
+<ul>
+<li>
+<a href="misc/fisher/send_expect_init.txt">send_expect_init</a></li>
+<li>
+<a href="misc/fisher/send_only.txt">send_only</a></li>
+<li>
+<a href="misc/fisher/send_expect.txt">send_expect</a></li>
+<li>
+<a href="misc/fisher/send_expect_report.txt">send_expect_report</a></li>
+</ul>
+The interface is initialized with the send_expect_init procedure, which
+sets up all the globals required by the other procedures. See the section
+on controlling the behavior of the interface for an explanation of the
+parameters. The send_expect_init procedure is run once, at the beginning
+of execution (before the interface is to be used). It may be run a second
+time to restore settings, if necessary.
+<p>
+The send_only procedure is a wrapper for the 
+<a href="http://www.cotse.com/dlf/man/expect/exp_send.htm">exp_send</a> (*)
+command, and is used by send_expect to transmit strings. The only time
+this procedure is called directly is for strings that are not echoed, such
+as passwords, and multi-byte character constants, such as the telnet break
+character (control-]).
+<p>
+The send_expect procedure is the actual interface between the automated
+system and its remote processes, and is detailed in the next section.
+<p>Finally, the send_expect_report procedure is used at the end of execution
+to output the statistics of the interface for debugging. This procedure
+may also be run during execution, if incremental reports are needed.
+<h2>
+<b><font face="Arial"><font size=+0>Using The send_expect Procedure</font></font></b></h2>
+Once the interface has been initialized using send_expect_init, and a process
+has been spawned, it is ready to be used with the syntax:
+<blockquote>send_expect id command;</blockquote>
+where
+<blockquote>id = the spawn id of the session on which to send the command
+<br>command = the entire command string including the terminating carriage-return,
+if any.</blockquote>
+This syntax, and the implementation of the expression-action lists, support
+multiple-session applications.
+<p>
+Many people who follow the documented examples tend to write the same
+kind of error-prone code, because they follow the example as if it's the
+best example, instead of just a simple example. Examples are kept uncluttered
+by the little details that make the difference between bulletproof code
+and code that will eventually fail. The examples provided in this article
+are simple examples but with more attention to detail, and where warranted
+a complete implementation is provided as an example. The send_expect procedure
+usually replaces only two lines of code in an existing system.
+<p>
+The full syntax for properly using the interface is actually:
+<blockquote>if { [send_expect $id $command] != 0} {
+<br>&nbsp;&nbsp;&nbsp; ## handle your error here
+<br>}</blockquote>
+
+<p><br>
+<hr WIDTH="100%"><b><font face="Arial">How It Works:</font></b>
+<p>The interface uses four different transmission modes, in order:
+<ul>
+<li>
+send the entire string and hope for the best (fastest, but least reliable)</li>
+
+<li>
+send the entire string using the <a href="http://www.cotse.com/dlf/man/expect/send_slow.htm">send_slow</a> (*)
+list</li>
+
+<li>
+send the string in blocks of eight characters</li>
+
+<li>
+send the string one character at a time (slowest, but most reliable)</li>
+</ul>
+If a mode fails, the command line is cleared by sending the standard control-U,
+the expect buffer is cleared, and the next mode is tried. Each mode except
+the last one can also have a failure tolerance set, using:
+<dir>sendGlobals(ModeXFailMax), where X is either 1,2 or 3.</dir>
+If this max value is set to a positive number, once the failures for that
+mode exceeds this value, it is no longer used. If it is set to 0, then
+each mode is tried for each transmission, regardless of the number of failures.
+Each of the modes uses the send_only procedure as a wrapper for exp_send.
+If this procedure returns an error, it most likely means that the connection
+was lost, and the spawn id is checked to see if the session is still active.
+The error is returned to send_expect, which in turn returns an error to
+the calling procedure.
+<p>
+For local processes and robust remote connections, mode 1 is usually
+sufficient. If the remote system is a bit slow, mode 2 may be required.
+Mode 3 has proven invaluable when connected to routers and clusters which
+provide rudimentary terminal control. Mode 4 is rarely required, but acts
+as a backup to mode 3.
+<h2>
+
+<hr WIDTH="100%"><b><font face="Arial"><font size=+0>Moving Window Diagnostics</font></font></b></h2>
+Expect provides a means of controlling the output of its internal diagnostics
+and expression-matching attempts using the command "<a href="http://www.cotse.com/dlf/man/expect/exp_internal.htm">exp_internal</a>" (*).
+The send_expect interface makes use of this command to create a diagnostics
+output file for each transmission attempt - for each attempt, a new diagnostics
+log file is created using exp_internal -f. If transmission is successful,
+the file is deleted. If it fails, the file is renamed using the syntax
+<blockquote>send.n.i.command.diags</blockquote>
+where
+<dir>n = the number of the failure
+<br>i = the spawn id of the channel that had the failure
+<br>command = the first word of the command string that failed to get sent
+properly.</dir>
+If you've ever read a 30 Megabyte log file with all of the diagnostics
+from the beginning to the end of execution, you'll understand why this
+is necessary. The diagnostics files created using this method are usually
+less that 2 Kilobytes, and since they are directly associated with failures
+(because the window file is deleted for successful transmissions), debugging
+is far more efficient.
+<p>
+The moving window diagnostics file is the fastest and smallest way to
+implement full diagnostics output during the execution of a send command.
+If the transmission succeeds, this file is deleted. If there is a failure,
+this file is closed and renamed, and on the next invocation of the send
+command a new file is created. This results in very small files (comparatively)
+with all of the diagnostics from expect and the user-defined messages,
+from the very beginning of the attempt to send the command.
+<p>
+Ideally, if there are no failures during execution, there should be
+no more than one send diagnostics file in existence at any time, named
+send.diagnostics. If there are diagnostics files, each is associated with
+a particular failure and should be used in debugging that failure.
+<h2>
+
+<hr WIDTH="100%"><b><font face="Arial"><font size=+0>
+Controlling The Behavior Of The Interface:</font></font></b></h2>
+The sendGlobals array contains all of the parameters used by the interface,
+and may be modified at runtime to control how the interface works. This
+section will cover the meanings of these parameters and how they may be
+modified.  See 
+<a href="misc/fisher/send_expect_init.txt">send_expect_init</a> 
+for the initial values of these parameter.
+<p>
+The failure limit elements (Mode1FailMax, Mode2FailMax, and Mode3FailMax)
+determine how many failures are permitted for modes 1, 2 and 3 (respectively).
+A value of zero disables this limitation, and any positive integer sets
+the maximum number of failures for that mode before it is no longer used
+by the interface. There is no failure limit for the last mode.
+<p>
+The element useMode allows the system to determine which transmission
+mode should be used first, so that the less reliable modes (the first and
+second) can be bypassed. Allowable values for this parameter are 1, 2,
+3, or 4. Invalid values will be replaced by the default mode (1).
+<p>
+If transmission errors are not considered fatal, the sendErrorSeverity
+element may be specified to a more tolerant value. Note that this parameter
+is not used internally, so if the automated system does not access this
+value, it won't affect the interface.
+<p>
+The kill element defines the command line kill character, which is defaulted
+to the Gnu-standard control-U.
+<p>
+The diagFile parameter names the temporary internal diagnostics file
+(generated from exp_internal).
+<p>
+The logDiags allows disabling of all diagnostics output for faster execution,
+but be forewarned that disabling this feature well make debugging much
+more difficult.
+<p>
+The sleepTime parameter, when set to a positive integer, causes the
+interface to sleep for the designated amount of time before starting transmission.
+This is useful if the automated system appears to be going faster than
+the remote system can handle - the consistent loss of characters in the
+transmission phase usually indicates a speed and synchronization problem,
+and this parameter is provided as an allowance for such cases.
+<p>
+The interval and delay elements represent the two items in the send_slow
+list, which is used by the second and third modes.
+<p>
+For experimentation purposes, it is recommended that these parameters
+be modified by the automated system at runtime, rather than directly editing
+the defaults in the initialization procedure. Once valid settings are found
+the defaults may be changed to reflect them.
+<h2>
+
+<hr WIDTH="100%"><b><font face="Arial"><font size=+0>Failures:</font></font></b></h2>
+When the send_expect procedure returns a failure, it indicates an unreliable
+connection to the remote system, and manual verification will confirm this.
+Such a failure is fatal to the reliability of any automated system, and
+must be corrected before the system can run properly.
+<p>
+If the procedure itself appears to be malfunctioning, the diagnostics
+files that were created during the failure should help in debugging. This
+interface has yet to fail with a reliable connection.
+<br>&nbsp;
+<br>&nbsp;
+
+
+
+
+<!-- *** BEGIN copyright *** -->
+<P> <hr> <P> 
+<H5 ALIGN=center>
+
+Copyright &copy; 1999, David Fisher<BR> 
+Published in Issue 48 of <i>Linux Gazette</i>, December 1999</H5>
+<!-- *** END copyright *** -->
+
+<!--startcut ==========================================================-->
+<P> <HR> <P>
+<!-- *** BEGIN navbar *** -->
+<A HREF="index.html"><IMG ALT="[ Table of Contents ]" 
+	SRC="../gx/indexnew.gif" WIDTH=163 HEIGHT=60 ALIGN=bottom ></A>
+<A HREF="../index.html"><IMG ALT="[ Front Page ]" 
+	SRC="../gx/homenew.gif" WIDTH=163 HEIGHT=60 ALIGN=bottom></A>
+<A HREF="fischer.html"><IMG ALT="[ Prev ]" SRC="../gx/back2.gif" WIDTH=41 HEIGHT=60 ALIGN=bottom></A>
+<A HREF="../faq/index.html"><IMG ALT="[ Linux Gazette FAQ ]" 
+	SRC="./../gx/dennis/faq.gif"WIDTH=163 HEIGHT=60 ALIGN=bottom></A>
+<A HREF="lane.html"><IMG ALT="[ Next ]" SRC="../gx/fwd.gif" WIDTH=41 HEIGHT=60 ALIGN=bottom  ></A>
+<!-- *** END navbar *** -->
+</BODY></HTML>
+<!--endcut ============================================================-->

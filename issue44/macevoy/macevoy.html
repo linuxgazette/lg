@@ -1,0 +1,665 @@
+<!--startcut ==========================================================-->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML>
+<HEAD>
+<title>perlpp: cpp on Steroids LG #44</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!--endcut ============================================================-->
+
+<H4>
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H1><font color="maroon">perlpp: cpp on Steroids</font></H1>
+<H4>By <a href="mailto:wmacevoy@mesastate.edu">Dr. Warren MacEvoy</a></H4>
+</center>
+<P> <HR> <P>  
+
+The point of this article is to introduce a tool I call perlpp,
+the Perl preprocessor. Since I wrote it, perlpp is not available in any
+Linux distribution. See Resources for information on obtaining perlpp
+and the examples described here.
+<p>
+<b>perlpp</b> is a beefy version of <b>cpp</b>, the C preprocessor;
+it can do what cpp can do and much more. For example, introducing the
+idea of code templates in any programming language is easy with perlpp.
+<p>
+Using <b>perlpp</b>, the Perl preprocessor, requires at least a
+rudimentary knowledge of programming in Perl. Perl 5 or later must be
+installed on your system.
+<p>
+Since Perl is such a useful language, almost every programmer should
+know a little about it. I will start by covering some of the rudiments
+of Perl used in the examples. If you are already fairly comfortable with
+Perl, move on to the next section.
+<p>
+<b>Variables.</b>  Scalar variables, which can take on values of strings,
+integers, or doubles, always have a <tt>$</tt> as the first
+character. List variables, which are simple lists of scalars, always have
+a <tt>@</tt> as the first character. All variables are global,
+unless preceded by <tt>my</tt> when first used within a block.
+<p>
+<b>String quoting.</b> Strings can be quoted three ways in
+Perl. They can be quoted almost exactly using single forward quotes
+(<tt>'</tt>), quoted with interpolation using double quotes
+(<tt>&quot;</tt>), or system quotes using single back quotes
+(<tt>`</tt>). We will present more detail on this later,
+but basically:
+<p>
+<ul>
+  <li>	Single-quoted strings are subject to minimal
+translation. For example, <tt>'\n'</tt> is a
+backslash followed by the letter n.
+</ul>
+<ul>
+  <li>	Double-quoted strings have a great deal of
+translation. For example, <tt>&quot;i=$i\n&quot;</tt> is the
+characters <tt>i=</tt>, followed by the value of the variable
+<tt>$i</tt>, followed by a new-line character. In Perl parlance,
+double-quoted strings are said to be <i>interpolated</i>.
+  <li>	Back-quoted strings are interpolated like double-quoted
+strings, but the value of a back-quoted string is the output (whatever is
+sent to STDOUT) of executing the translated string as a shell command. For
+example, <tt>`ls $dir`</tt> is the output of running
+the <tt>ls</tt> command with the value of <tt>$dir</tt>
+as an argument.
+</ul>
+<b>Loops.</b> Perl supports the csh-style loop of the form
+<p>
+<pre>
+foreach $index (@LIST) { 
+   statement1;
+   statement2; 
+   .... 
+}
+</pre>
+as well as the C-style loop:
+<p>
+<pre>
+for (<i>do-once</i>; <i>check-first-each-time</i>; <i>do-last-each-time</i>) { 
+   statement1;
+   statement2; 
+   .... 
+}
+</pre>
+Both types are used in the examples.
+<p>
+In fact, the basic syntax of Perl mimics C in many respects, so C
+programmers can read Perl scripts fairly easy. No, that is too bold:
+a C programmer can write C-looking Perl, and it will mostly work as
+expected. A Perl programmer would solve the same problem in a completely
+different manner. In doing so, he may accomplish something difficult to
+imagine: a program more obscure than what can readily be written in C.
+If you don't believe me, look at the perlpp source, which is a
+Perl script.
+<p>
+Perl is a great deal more than this tiny view, but these ideas should
+be enough to understand the examples. See Resources for more information
+about Perl.
+<p>
+<h3>Introduction</h3>
+<p>
+Let's begin by talking about cpp. C programmers don't get
+far before learning that C programs, at least logically, pass through
+two stages of translation. The first stage, the preprocessing stage,
+uses commands such as
+<p>
+<pre>
+#include &lt;stdio.h&gt;
+</pre>
+and
+<p>
+<pre>
+#define FOO(<i>x</i>) bar(<i>x</i>)
+</pre>
+to translate the hybrid C/cpp input file into a pure C input file,
+which is then input to the pure C compiler. Pictorially,
+<p>
+<pre>
+<i>input_file</i> -&gt; cpp -&gt; cc1 -&gt; <i>object_file</i>
+</pre>
+While the intended job of cpp is to preprocess input files for a C
+(or C++) compiler, it can be used to preprocess other files. For example,
+<b>xrdb</b> uses cpp to preprocess X11 resource files before loading them.
+<b>cpp</b> is a very useful tool, but a programmer can quickly run into
+limitations, essentially because cpp is a macro-processor with limited
+facilities for computation and the manipulation of text.
+<p>
+The reason I wrote perlpp was to overcome these limitations for a
+scientific computation problem at Pacific Northwest National Laboratories,
+where I wrote the chemical equilibrium portion of a ground water transport
+model. For the sake of compatibility with the rest of the model, it had to
+be programmed in FORTRAN. For the sake of compatibility with Linux, Sun
+and SGI development environments, it had to be FORTRAN 77. The problem
+statement was roughly this: given the chemical equilibrium equations
+for a given set of species, automatically generate an efficient reliable
+solver for these equations.
+<p>
+This created a need to go from chemical equilibrium equations in symbolic
+form to the generation of a Maple V (a symbolic mathematics package)
+batch file from a template, followed by the inclusion of the results
+from that batch file into a template-generated FORTRAN subroutine library
+that satisfied the requirements of the project.
+<p>
+This environment required the automatic generation of several kinds of
+programs from templates and was a natural breeding ground for thoughts
+about useful preprocessors. Although it took me most of a week to come
+up with the alpha version of perlpp, it easily saved that amount of
+time just for that one project. Solving the same problem without it
+may have taken four or five weeks longer. Furthermore, without perlpp,
+the project would be much harder to maintain.
+<p>
+<h3>What Perlpp Does</h3>
+<p>
+<b>perlpp</b> takes input files and generates perl scripts which,
+when run, create similar but better output files.
+<p>
+<h3>Example 1: Hello World!</h3>
+<p>
+Create a file called hello.c.ppp containing the lines
+<p>
+<pre>
+#include &lt;stdio.h&gt;
+int main()
+{
+printf(&quot;Hello World!\n&quot;);
+return 0;
+}
+</pre>
+Now run the perlpp command by typing:
+<p>
+<pre>
+perlpp -pl hello.c.ppp
+</pre>
+The <tt>-pl</tt> option is discussed later. If you
+check, perlpp created the file hello.c.pl, which contains the following
+Perl script:
+<p>
+<pre>
+#!/usr/bin/perl
+print '#include &lt;stdio.h&gt;
+';
+print 'int main()
+';
+print '{
+';
+print '  printf(&quot;Hello World!\\n&quot;);
+';
+print '  return 0;
+';
+print '}
+';
+</pre>
+Your mileage may vary on the exact contents of the first line. See
+<A HREF="#macevoy_troubleshooting">"Troubleshooting"</A> if you have problems
+generating this script.
+<p>
+Running hello.c.pl generates the same text as the original input
+file, hello.c.ppp. In this way, perlpp can be viewed as an obscure and
+computationally expensive way to copy text files.
+<p>
+The <tt>-pl</tt> option means ``create a perl
+program''. If you leave it off, it simply runs the program and
+saves the output in hello.c. This means
+<p>
+<pre>
+perlpp hello.c.ppp
+</pre>
+is equivalent to
+<p>
+<pre>
+perlpp -pl hello.c.ppp
+  ./hello.c.pl &gt; hello.c
+  rm hello.c.pl
+</pre>
+except that the file <tt>hello.c.pl</tt> is never explicitly
+created.
+<p>
+So our first example, hello.c.ppp, when normally processed by perlpp,
+creates a copy of itself, hello.c. While this should not excite you,
+it should not surprise you either. After all, if you processed a text
+file using cpp, containing no cpp directives, you would get back exactly
+what you put in.
+<p>
+<b>cpp</b> is interesting only when the input file contains cpp directives.
+Perlpp is only slightly interesting when the input file contains no
+perlpp directives, because it generates a Perl script that regenerates
+the input file using print statements. To get any further, the perlpp
+directives must be used.
+<p>
+<h3>Directives</h3>
+<p>
+Only four directives are available for perlpp, along with a default
+directive. Each describes how a given line of input will be translated
+into the perl script.
+<p>
+<ol>
+  <li>	<b>!</b> Perl source rule: if the first character of a line is
+a ! (bang), copy the remaining part of the line to the generated perl
+script verbatim.
+  <li>	<tt>'</tt> print exact: If the first character
+of a line is a <tt>'</tt> (single quote), then generate
+a single-quoted (uninterpolated) print statement. Executing this print
+statement will produce the remaining part of the input line exactly.
+  <li>	<tt>&quot;</tt> print interpolated: if the first
+character of a line is a <tt>&quot;</tt> (double quote),
+generate a double-quoted (interpolating) print statement. For more on
+interpolating strings, see the <b>perlop</b> man page. If use locale
+is in effect, the case map used by \l, \L, \u and &lt;\U&gt;
+is taken from the current locale. See the <b>perllocale</b> man page.
+[It should be noted that \\ (two backslashes) in an
+interpolated string translates into a single backslash, so \\n
+interpolates to \n in the output. This will show up in our next
+example.]
+  <li>	<tt>`</tt> print system: if the first character
+of a line is a <tt>`</tt> (back quote), then generate a
+back-quoted (system) print statement. Executing this print statement
+will produce the output of, first, interpolating the remainder of the line
+as in rule 2 above, then running the interpolated text as a shell command.
+</ol>
+If none of the characters bang(!), single
+quote(<tt>'</tt>), double quote(<tt>&quot;</tt>) or
+back quote(<tt>`</tt>) begin a line, a default translation
+occurs:
+<p>
+<ul>
+  <li>	With no <tt>-qq</tt> option, perlpp
+treats these lines as if they began with a single quote, i.e., use the
+``print exact'' rule 2.
+</ul>
+<ul>
+  <li>	With the <tt>-qq</tt> option, perlpp
+treats these lines as if they began with a double quote, i.e., use the
+``print interpolated'' rule 3.
+</ul>
+<h3>Example 2: Salutations</h3>
+<p>
+Create a file called salutations.c.ppp containing the lines:
+<p>
+<pre>
+  #include &lt;stdio.h&gt;
+  int main()
+  {
+  !foreach $s ('Hello World!','Hola Mundo!', 'Ciao!') {
+  &quot;  printf(&quot;$s\\n&quot;);
+  !}
+    return 0;
+  }
+</pre>
+Let's first look at the generated Perl script by typing:
+<p>
+<pre>
+perlpp -pl salutations.c.ppp
+</pre>
+In salutations.c.pl, you will find
+<p>
+<pre>
+  print '#include &lt;stdio.h&gt;
+  ';
+  print 'int main()
+  ';
+  print '{
+  ';
+  foreach $s ('Hello World!','Hola Mundo!', 'Ciao!') { 
+  print &quot;  printf(\&quot;$s\\n\&quot;);
+  &quot;;
+  }
+  print '  return 0;
+  ';
+  print '}
+  ';
+</pre>
+Look carefully at the print statement generated by the printf statement
+in salutations.c.ppp:
+<p>
+<pre>
+print &quot;  printf(\&quot;$s\\n\&quot;);
+  &quot;;
+</pre>
+Perlpp goes to the trouble of adding backslashes where appropriate so
+that double quotes do not prematurely terminate the string. The same idea
+applies to the other forms of quoted print statements perlpp generates.
+<p>
+Let perlpp run this script for us with
+<p>
+<pre>
+perlpp salutations.c.ppp
+</pre>
+This generates the file salutations.c,
+<p>
+<pre>
+#include &lt;stdio.h&gt;
+int main()
+{
+printf(&quot;Hello World!\n&quot;);
+printf(&quot;Hola Mundo!\n&quot;);
+printf(&quot;Ciao!\n&quot;);
+return 0;
+}
+</pre>
+<h3>Example 3: Fast Point Template</h3>
+<p>
+This last example uses perlpp to generate a template for fixed-length
+vector classes in C++, where loops are unwound. Unwinding a loop means,
+for example, replacing the code
+<p>
+<pre>
+for (int i=0; i&lt;3; ++i) a[i]=i;
+</pre>
+with
+<p>
+<pre>
+a[0]=0; a[1]=1; a[2]=2;
+</pre>
+Unwinding the loop does not change the effect of the code, but it
+does make it faster. This is because the index variable does not have
+to be incremented and compared between each assignment.
+<p>
+Such a fixed-length template class would be useful, for example, in
+a graphics library where two-dimensional and three-dimensional vectors
+of fixed types (float, int, double) would be used by the package.
+All of these would be essentially the same--and thus a candidate
+for a template class--except that the performance overhead for the
+looping may not be acceptable in such a high-end application.
+<p>
+<b>perlpp</b> can help here. <b>perlpp</b> is first used to generate a Perl
+program (using the <tt>-pl</tt> option) from a template
+file, Point.Template.ppp. The Point.Template.pl script is designed
+to create different fixed-length vector classes, depending on what
+arguments are passed to it. Using the back-quote print system directive,
+this script is then used in the primary source file, testPoint.cpp.ppp,
+to generate the specific desired class.
+<p>
+The file Point.Template.ppp is fairly long, and available by anonymous
+FTP as noted in Resources. Consequently, I will consider only
+the portions of this file which illustrate something interesting about
+how to use perlpp.
+<p>
+The first interesting line of <tt>Point.Template.ppp</tt> is
+<p>
+<pre>
+! eval join(&quot;;&quot;,@ARGV);
+</pre>
+This, of course, will translate into the Perl statement
+<p>
+<pre>
+eval join(&quot;;&quot;,@ARGV);
+</pre>
+Only the leading bang is deleted. Executing this line joins all
+the command-line arguments of the script, separated by semicolons, and
+evaluates that as a sequence of Perl statements. This is an extremely
+crude form of command-line argument processing, but it serves our
+purposes.
+<p>
+The next few lines check that the previous command-line evaluation
+actually defined three crucial variables:
+<p>
+<ul>
+  <li>	<tt>$name</tt>: the desired name of the class
+</ul>
+<ul>
+  <li>	<tt>$dim</tt>: the dimension of the vector
+</ul>
+<ul>
+  <li>	<tt>$type</tt>: type of the vector
+</ul>
+If they were not defined, the script writes to STDERR about it and
+exits with an exit code of 1.
+<p>
+After this, the template goes about the business of generating the
+desired class. This begins with
+<p>
+<pre>
+&quot;class $name {
+&quot;public:
+!#
+!# Declare internal array of desired type and size
+!#
+&quot;  $type a[$dim];
+&quot;  static const int dim=$dim;
+</pre>
+Here <tt>$name</tt>, <tt>$type</tt> and
+<tt>$dim</tt> are used to create specific text in the
+class definition. In Perl, <tt>#</tt> denotes a comment, so
+<tt>!#</tt> is effectively a comment in perlpp.
+<p>
+The first instance of loop unwinding is seen in the default
+constructor for the class. The lines
+<p>
+<pre>
+!  for ($i=0; $i&lt;$dim; ++$i) {
+&quot;    a[$i]=0;
+!  }
+</pre>
+translate into the Perl segment
+<p>
+<pre>
+for ($i=0; $i&lt;$dim; ++$i) {
+     print(&quot;    a[$i]=0;
+&quot;);
+}
+</pre>
+This loop is executed in the Perl script as the preprocessor, where
+the assignment will be expanded to a sequence of assignments in the C++
+class source. Loops are unwound in a similar fashion in other parts of
+the class definition.
+<p>
+Efficiency aside, the next block of the perlpp source provides a class
+constructor that would be impossible to declare using standard template
+facilities: one with as many arguments as the dimension of the vector
+class to be constructed.
+<p>
+<pre>
+  !  @arg=(); for ($i=0; $i&lt;$dim; ++$i) { $arg[$i]=&quot;$type a$i&quot;; } 
+  !  $args=join(',',@arg);
+  !
+  &quot;  $name($args)
+</pre>
+If you are new to Perl, the first line may be difficult to
+understand. It begins by setting the <tt>@arg</tt> list
+to an empty list, then loops to build <tt>$dim</tt> entries
+in <tt>@arg</tt>: <tt>&quot;$type a0&quot;</tt>,
+<tt>&quot;$type a1&quot;</tt>, etc. The reason elements of
+<tt>@arg</tt> are denoted by <tt>$arg[$i]</tt>
+in the for loop is that <tt>@arg</tt>, once subscripted,
+refers to the scalar variable available as the <i>i</i>th entry of
+<tt>@arg</tt>. Remember, scalar variables always begin with
+a <tt>$</tt> character--even those tucked inside a list.
+<p>
+Following this declaration, the constructor is defined to initialize
+the vector with its arguments:
+<p>
+<pre>
+&quot;  {
+!    for ($i=0; $i&lt;$dim; ++$i) {
+&quot;      a[$i]=a$i;
+!    }
+&quot;  }
+</pre>
+This is followed by the definition of subscript operators, which are
+perfectly standard. After this, another feature of perlpp is illustrated:
+the code for defining all the assignment operators is generated using
+a loop structure:
+<p>
+<pre>
+!  foreach $op (&quot;=&quot;,&quot;+=&quot;,&quot;-=&quot;,&quot;*=&quot;,&quot;/=&quot;) {
+    .
+    . # define the $op assignment operator
+    .
+!  }
+</pre>
+Since all the assignment operators are defined in essentially the
+same way, this loop allows the template to be written more compactly
+than with the standard template facilities. This makes the template
+faster to write, maintain and debug.
+<p>
+A similar loop follows this to define the various binary operators for
+the class: addition, subtraction, etc. These loops reduce the redundancy
+of effort in defining the template, which, amusingly, is itself a tool
+to reduce redundancy of effort. Okay, I admit I am easily amused.
+<p>
+The rest of the template declares and defines three operators, I/O
+functions and a scalar multiply. They do what they are supposed to do,
+and nothing new about perlpp is learned by going over them.
+<p>
+Let's move on to using Point.Template.ppp. First, convert it to
+a Perl script with the command:
+<p>
+<pre>
+perlpp -pl Point.Template.ppp
+</pre>
+Now look in the test program source file, testPoint.cpp.ppp.
+The only interesting line is
+<p>
+<pre>
+` ./Point.Template.pl '\$name=&quot;FixVect&quot;' '\$dim=2' '\$type=&quot;float&quot;'
+</pre>
+This runs the Point.Template.pl script just generated with
+the arguments:
+<p>
+<pre>
+$name=&quot;FixVect&quot;  $dim=2 $type=&quot;float&quot;
+</pre>
+With these arguments, the template script prints out a
+<tt>FixVect</tt> class, which represents two-dimensional arrays of
+floats. The back-quote perlpp directive includes this in the
+testPoint.cpp source file.
+<p>
+Generating template classes in this way is not completely
+satisfying, because the idea of declaring and defining the class
+must usually be separated. However, this can be corrected by
+modifications of the template file. Essentially, a fourth variable
+could be set on calling the script, <tt>$use</tt>, which
+has a value of either <tt>&quot;declare&quot;</tt> or
+<tt>&quot;define&quot;</tt>. Using if clauses, the script
+would then provide either the definition or declaration portion of the
+class. This is yet another way in which the redundancy of a template
+can be reduced using perlpp.
+<p>
+<h3>Conclusions</h3>
+<p>
+I don't want to leave you thinking of perlpp as sort of a
+``compression algorithm.''  Keeping ideas together in a
+project simplifies maintaining them. The goal of perlpp is to prevent
+``concept leakage,'' where several parts of source files
+redundantly represent an idea, and those source files have to be
+maintained separately.
+<p>
+Essentially, perlpp replaces the rather rigid (but simple!)
+text-processing language available as cpp with the expressive (but
+complex) text-processing language available as Perl. Many programmers
+use Perl in any case, so knowing the syntax of Perl pays twice: once
+as a language in itself, and once as a powerful macro language for any
+programming language.
+<p>
+If you don't know Perl, then perlpp is just another good reason
+to learn it.
+
+<p>
+<h3>Resources</h3>
+<p>
+<b>perlpp</b> is available as a tar file by anonymous FTP at
+<A HREF=ftp://zot.mesastate.edu/pub/wmacevoy/perlpp/perlpp-0.5.tar.gz>
+ftp://zot.mesastate.edu/pub/wmacevoy/perlpp/perlpp-0.5.tar.gz</A>
+(local copy <A HREF=macevoy_perlpp.tgz>here</A>.)
+The distribution includes installation instructions for perlpp.
+
+<P> The examples from this article are at
+<A HREF=ftp://zot.mesastate.edu/pub/wmacevoy/perlpp/lj-article.tar.gz>
+ftp://zot.mesastate.edu/pub/wmacevoy/perlpp/lj-article.tar.gz</A>
+(local copy <A HREF=macevoy_examples.tgz>here</A>).
+
+<P> You must have Perl 5, or later, installed to use perlpp. All Linux
+distributions have Perl available as a package in some form. The web page <A
+HREF=http://www.perl.org/>http://www.perl.org/</A> is a great place to begin if
+you want to learn more about Perl.
+
+<p><A NAME="macevoy_troubleshooting">
+<h3>Troubleshooting</h3>
+<p>
+<b>perlpp</b> is a Perl script that generates Perl scripts. To use it, you
+must have Perl installed, and perlpp must be able to find it. If
+perlpp does not work, check that the first two lines of perlpp
+reflect the actual location of your Perl executable.
+<p>
+If these are correct, make sure that execute permissions are set for
+the script (<tt>chmod 755 perlpp</tt>), and that perlpp is visible from
+your <tt>PATH</tt>.
+<p>
+If you just installed perlpp, you may have to refresh your shell PATH
+directory cache with <tt>hash -r</tt> (if you use bash) or
+<tt>rehash</tt>
+(if you use csh).
+<p>
+
+<p>
+<h3>Acknowledgements</h3>
+<p>
+Thanks to the Linux community for providing such a wonderful
+environment for reliable scientific computations. I try very hard not
+to taunt every time a colleague of mine tries to accomplish something
+useful on a machine which crashes so often they have come to expect it.
+<p>
+I also want to thank Mike Littlejohn for test-driving perlpp and this
+article, as well as Karl Castleton, Steve Yabusaki and Ashok Chilakapati
+for getting me on the groundwater modeling project.
+<p>
+Finally, thanks to Pacific Northwest National Laboratories, the
+Associated Western Universities fellowship program, and Mesa State
+College for allowing me the time, resources and opportunity to develop
+perlpp.
+<p>
+
+<p>
+<h3>A Story</h3>
+<p>
+Over the summer, I left my Red Hat 5.0 machine running in my Mesa
+State College, Grand Junction, Colorado office. I then went to
+Pacific Northwest National Laboratories in Richland, Washington,
+where I dreamed up perlpp.
+<p>
+I used my Linux box remotely for the whole summer: web-browsing,
+e-mail, obtaining old source files, using Emacs, Maple, TeX, Perl
+or the FORTRAN compiler. It's true that I used these tools on the
+PNNL machines as well, but sometimes a license was not available, or
+the Linux tool was better for my purposes than what I could obtain at
+the lab.
+<p>
+For six weeks I used that machine remotely at least once each day.
+Only once did I have a problem with connecting to it.
+After the summer, I learned that my Colorado office, which is in a
+building that is being remodeled, had experienced several power
+failures. Apparently, my machine had restarted each time without a
+hitch, and I had only noticed the single time I requested something
+during an outage.
+<p>
+That is far more reliability--and accessibility--than many of
+my colleagues experience with other operating systems.
+<p>
+
+<p>
+<!--===================================================================-->
+<P> <hr> <P> 
+<center><H5>Copyright &copy; 1999, Dr. Warren MacEvoy<BR> 
+Published in Issue 44 of <i>Linux Gazette</i>, August 1999</H5></center>
+
+<!--===================================================================-->
+<!--startcut ==========================================================-->
+<P> <hr> <P> 
+<A HREF="../index.html"><IMG ALIGN=BOTTOM SRC="../../gx/indexnew.gif" 
+ALT="[ TABLE OF CONTENTS ]"></A>
+<A HREF="../../index.html"><IMG ALIGN=BOTTOM SRC="../../gx/homenew.gif"
+ALT="[ FRONT PAGE ]"></A>
+<A HREF="../jacobowitz.html"><IMG SRC="../../gx/back2.gif"
+ALT=" Back "></A>
+<A HREF="../nielsen.html"><IMG SRC="../../gx/fwd.gif" ALT=" Next "></A>
+<P> <hr> <P> 
+</BODY>
+</HTML>
+<!--endcut ============================================================-->

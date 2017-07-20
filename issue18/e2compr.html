@@ -1,0 +1,177 @@
+<!--startcut ==========================================================-->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML>
+<HEAD>
+<title>On-The-Fly Disk Compression Issue 18</title>
+</HEAD>
+<BODY BGCOLOR="#ffffff" TEXT="#000000" LINK="#0000FF" VLINK="#0020F0"
+ALINK="#FF0000">
+<!--endcut ============================================================-->
+
+<H4>
+&quot;Linux Gazette...<I>making Linux just a little more fun!</I>&quot;
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center><img alt="E2compr" src="./gx/ayers/e2compr.gif"></center>
+<center><img alt="Disk Compression" src="./gx/ayers/e2compr2.gif"></center>
+<center><img alt="For Linux" src="./gx/ayers/e2compr3.gif"></center>
+
+<center>
+<h4><a href="mailto: layers@vax2.rainis.net">by Larry Ayers</a></h4>
+</center>
+
+<hr>
+
+<p>OS/2 used to be my main operating system, and there are still a few OS/2
+applications which I miss.  One of them is Zipstream, a commercial product
+from the Australian firm Carbon Based Software.  Zipstream enables a
+partition to be mirrored to another drive letter;  all files on the mirrored
+virtual partition are transparently decompressed when accessed
+and recompressed when they are closed.  The compression and decompression
+are background processes, executed in a separate thread during idle processor
+time.  Zipstream increased the system load somewhat, but the benefits
+more than adequately compensated for this.  I had a complete OS/2 Emacs
+installation which only occupied about four and one-half megabytes!
+
+<p>A few weeks ago I was wandering down an aleatory path of WWW links and came
+across <a href="http://netspace.net.au/~reiter/e2compr.html">
+the e2compr home page </a>.  This looked interesting: a new method of
+transparent, on-the-fly disk compression implemented as a kernel-level
+modification of the ext2 filesystem.  Available from that page are kernel
+patches both for Linux 2.0.xx and 2.1.xx kernels.  I thought it might be worth 
+investigating so I downloaded a set of patches, while I thought about how I
+may be just a little too trusting of software from unknown sources halfway
+across the world.
+
+<p>The set of patches turned out to be quite complete, even going so far as to
+add a choice to the  kernel configuration dialog.  As well as patches for source files
+in <i>/usr/src/linux/fs/ext2</i>, three new subdirectories are added, one for
+each of the three compression algorithms supported.  The patched kernel source
+compiled  here without any problems.  Also available from the above web-page is a
+patched version of <strong>e2fsprogs-1.06</strong> which is needed to take full
+advantage of <em>e2compr</em>.  If you have already upgraded to
+<strong>e2fsprogs-1.07</strong> (as I had) the patched executables (<i>e2fsck,
+chattr</i>, and <i>lsattr</i> seem to coexist well with the remainder of the
+<strong>e2fsprogs-1.07</strong> files.
+
+<hr>
+
+<center><h3>Origins</h3></center>
+
+<p>Not surprisingly, a small hard-drive was what led Antoine Dumesnil de
+Maricourt to think about finding a method of automatically compressing and
+decompressing files.  He was having trouble fitting all of the Linux tools he
+needed on the 240 mb. disk of a laptop machine, which led to a search for
+Linux software which could mitigate his plight.
+
+<p>He found several methods implemented for Linux, but they all had
+limitations.  Either they would only work on data-files (such as zlibc), or
+only on executables (such as tcx).  He did find one package, DouBle, which
+would do what he needed, but it had one unacceptable (to Antoine at least)
+characteristic.  DouBle transparently compresses and decompresses files, but
+it also compresses ext2 filesystem administrative data, which could lead to
+loss of files if a damaged filesystem ever had to be repaired or
+reconstructed.
+
+<p>Monsieur de Maricourt, after some study of the extended-2 filesystem code,
+ended up by writing the first versions of the <em>e2compr</em> patches.  The
+package is currently maintained by <a href="mailto: reiter@netspace.net.au">
+Peter Moulder</a>,
+for both the 2.0.x and the 2.1.x kernels.
+
+<center><h3>Usage and Performance</h3></center>
+
+<p><em>E2compr</em> is almost too transparent.  After rebooting the patched
+kernel of course the first thing I wanted to do was to compress some
+nonessential files and see what  would happen.  Using the modified <kbd>chattr</kbd>
+command, <kbd>chattr +c  *</kbd> will set the new compression flag on every file in
+the current directory.  Oddly enough, though, running <kbd>ls -l</kbd> on the
+directory afterwards shows the same file sizes!  I found that the only way to
+tell how much disk space has been saved is to run <kbd>du</kbd> on the
+directory both before and after the compression attribute has been toggled.
+Evidently <kbd>du</kbd> and <kbd>ls</kbd> use different methods of determining 
+sizes of files.  If you just want to see if a file or directory has been
+compressed, running the patched <kbd>lsattr</kbd> on it will result in
+something like this:<br><pre>
+
+<kbd>%-&gt; lsattr libso312.so
+--c---- 32 gzip9     libso312.so
+</kbd></pre>
+
+<p>The "c" in the third field shows that the file is compressed, "gzip9" is
+the compression algorithm used, and "32" is the blocksize.  If a file hasn't
+been compressed the output will just be a row of dashes.
+
+<p>E2compr will work recursively as well, which is nice for deeply nested
+directory hierarchies.  Running the command:<br><pre>
+
+<kb>%-&gt;chattr -R +c  /directory/*</kb></pre>
+
+<p>will compress everything beneath the specified directory.
+
+<p>If an empty directory is compressed with <i>chattr</i>, all files
+subsequently written in the directory will be automatically compressed.
+
+<p>Though the default compression algorithm is chosen during kernel
+configuration, the other two can still be specified on the command line. I
+chose gzip, only because I was familiar with it and had never had problems.
+The other two algorithms, lzrw3a and lzv1, are faster but don't compress quite 
+as well.  A table in the package's <em>README</em> file shows results of a
+series of tests comparing performance of the three algorithms.
+
+<p>The delay caused by decompression of accessed files I haven't found
+to be too noticeable or onerous. One disadvantage in using e2compr is that
+file fragmentation will increase somewhat;  Peter Moulder (the current
+maintainer) recommends against using any sort of disk defragmenting utility in 
+conjunction with e2compr.
+
+<p>I have to admit that, although e2compr has caused no problems whatsoever
+for me and has freed up quite a bit of disk space, I've avoided compressing
+the most important and hard-to-replace files.  The documentation specifically
+mentions the kernel image (vmlinuz) and swap files as files <em>not</em> to
+compress.
+
+<p>It's ideal for those software packages which might not be used very often
+but are nice to have available.  An example is the StarOffice suite, which I
+every now and then attempt to figure out; handicapped by lack of
+documentation, I'm usually frustrated.  I'd like to keep it around, as it was
+a long download and maybe docs will sometime be available.  E2compr halved its
+size, which makes it easier to decide to keep.  
+
+<p>Another use of e2compr is compression of those bulky but handy directories
+full of HTML documentation which are more and more common these days.  They
+don't lend themselves to file-by-file compression with gzip; even though
+Netscape will load and display gzipped HTML files, links to other files will
+no longer work with the <i>.gz</i> suffix on all of the files. 
+
+<center><h3><font color=firebrick>Warning!</font></h3></center>
+
+<p>E2compr is still dubbed an alpha version by its maintainer, though few
+problems have been reported.  I wouldn't recommend attempting to install it if 
+you aren't comfortable compiling kernels and, most important, reading
+documentation!  
+
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<center><H5>Copyright &copy; 1997, Larry Ayers<BR> 
+Published in Issue 18 of the Linux Gazette, June 1997</H5></center>
+
+<!--===================================================================-->
+<P> <hr> <P> 
+<A HREF="./index.html"><IMG ALIGN=BOTTOM SRC="../gx/indexnew.gif" 
+ALT="[ TABLE OF CONTENTS ]"></A>
+<A HREF="../index.html"><IMG ALIGN=BOTTOM SRC="../gx/homenew.gif"
+ALT="[ FRONT PAGE ]"></A>
+<A HREF="./bomb.html"><IMG SRC="../gx/back2.gif"
+ALT=" Back "></A>
+<A HREF="./xlock.html"><IMG SRC="../gx/fwd.gif" ALT=" Next "></A>
+<P> <hr> <P> 
+<!--startcut ==========================================================-->
+</BODY>
+</HTML>
+<!--endcut ============================================================-->
+

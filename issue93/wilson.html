@@ -1,0 +1,166 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>Auditing the Three Finger Salute LG #93</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<!-- *** BEGIN navbar *** -->
+<A HREF="yuan.html">&lt;&lt;&nbsp;Prev</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="index.html">TOC</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../index.html">Front Page</A>&nbsp;&nbsp;|&nbsp;&nbsp;Talkback&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../faq/index.html">FAQ</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="pesin.html">Next&nbsp;&gt;&gt;</A>
+<!-- *** END navbar *** -->
+
+<!--endcut ============================================================-->
+
+<TABLE BORDER><TR><TD WIDTH="200">
+<A HREF="http://www.linuxgazette.net/">
+<IMG ALT="LINUX GAZETTE" SRC="../gx/2002/lglogo_200x41.png" 
+	WIDTH="200" HEIGHT="41" border="0"></A> 
+<BR CLEAR="all">
+<SMALL>...<I>making Linux just a little more fun!</I></SMALL>
+</TD><TD WIDTH="380">
+
+
+<CENTER>
+<BIG><BIG><STRONG><FONT COLOR="maroon">Auditing the Three Finger Salute</FONT></STRONG></BIG></BIG>
+<BR>
+<STRONG>By <A HREF="../authors/wilson.html">Dean Wilson</A></STRONG>
+</CENTER>
+
+</TD></TR>
+</TABLE>
+<P>
+
+<!-- END header -->
+
+
+
+
+
+
+
+
+
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+  <body>
+      <cite>"Its only running a single service, we're fully patched and it has a local firewall that denies by default."</cite><br>
+      <cite>"What happens if i do Ctrl-Alt-Delete?"</cite>
+    </p>
+
+    <h3>Introduction</h3>
+    <p>One of the basic premises of computer security is that it's almost impossible to fully secure any machine to which an attacker has physical access. While we cannot cover all eventualities, we can make some simple changes to catch any use of the more blatant avenues of abuse. In this document we will cover how to stop unauthorised people from casually rebooting your machines.</p>
+
+    <h3>The Problem</h3>
+    <p>Anyone who walks up to a keyboard connected to a Linux machine can press Control-Alt-Delete to reboot it without entering a username or a password. Even Windows machines require a valid login (either the current user or one with Administrator privileges) before you can reboot a running machine like this if it has a locked screen. This does not even have to be an issue of malice, it is not uncommon for people familiar with Windows NT or Windows 2000 to use Control-Alt-Delete in an X-Windows session expecting to be shown a screen to lock the workstation, or open the task manager and instead seeing the dreaded "The system is going down for reboot NOW!" message as their work vanishes along with the systems uptime.</p>
+
+    <h3>A Solution</h3>
+    <p>In many Linux distributions the key combination of Control-Alt-Delete (Which is often referred to as ctrl-alt-del or "the 3 finger salute") is pre-configured to reboot the machine. While this may be acceptable for a single user desktop at home it is an unnecessary risk for office workstations or even servers because of one important fact, it requires no authentication to perform.</p>
+
+    <p>To prevent this destructive behavour we are going catch Control-Alt-Delete's and disable this "feature" by replacing the default action with a script of our own. We will also add auditing in order to catch and log any attempts to reboot. To do this we will add a single shell script to the system, make a change to the <code>'/etc/inittab'</code> configuration file so our own handler gets called and then add a little log rotation (If you run <code>'logrotate'</code>) to keep everything shipshape.</p>
+
+    <p>The bash shell script that does most of the actual work is called <code>'audit_cad.sh'</code> and can be found <a href="misc/wilson/audit_cad.sh.txt">here</a>. It can be invoked in two ways. The first way is to call it is with the <code>'-c'</code> argument. In this mode the script will check that all of its external dependencies are both present and executable. This is the best way to ensure that your system satisfies all the prerequisites.</p>
+    
+    <p>If any of the tests fail then an error will be printed containing the name of the suspect binary and the script will carry on until it has finished checking them all. If any of the checks fail, when the script finishes executing a exit code of '1' will be returned. The external binaries we depend on are:</p>
+    
+    <ul>
+      <li>/usr/bin/logger</li>
+      <li>/usr/bin/tr</li>
+      <li>/bin/date</li>
+      <li>/usr/bin/basename</li>
+    </ul>
+
+    <p>Of these the only one that may need manual editing is <code>basename</code> which often varies between the <code>'/usr/bin'</code> and <code>'/bin'</code> directories. Typically you will run the script in check mode when you first install it to ensure that it will run correctly and nothing is missing. As this script is run as root it is a good idea to ensure that the permissions are as tight as possible with only the super user having any access to the file. Ideally they should be set to <code>-rwx------</code>, you can do this with the following command; <code>'chmod 0700 audit_cad.sh'</code>.</p>
+
+    <p>The second way to call it is without arguments, when run in this fashion it logs an entry to both <code>'syslog'</code> (with a user specified facility and level) and an external file, which defaults to <code>'/var/log/shutattempt'</code>. This is how it will be executed to audit Control-Alt-Delete's.</p>
+
+    <p>For the purposes of this document we call the script <code>'audit_cad.sh'</code> and it is located in <code>'/usr/local/sbin/'</code>. To change either of these settings or any of the other ones just open the script in your editor of choice and scroll along. All the configuration options are commented.</p>
+
+    <p>Now we have the script in place we are going to edit the default handler for Ctrl-Alt-Delete in the <code>'/etc/inittab'</code> file. The line we want instructs <code>'init'</code> to listen for Control-Alt-Delete events and tells it to execute a specific command when it receives one. In most distributions the id will be 'ca' and the actual entry will look similar to <code>"ca:12345:ctrlaltdel:/sbin/shutdown -t1 -a -r now"</code> The important section of this line is the last field which begins <code>'/sbin/shutdown'</code>, to change the systems behaviour you can edit the current command and point it to our <code>'audit_cad.sh'</code> script. If you have been following along with the examples the full path will be <code>'/usr/local/sbin/audit_cad.sh'</code></p>
+
+    <p>Once you have made this change you need to tell the <code>'init'</code> process that <code>'inittab'</code> has changed. The easiest way of doing this is to run <code>'telinit q'</code> which causes <code>'init'</code> to reread its configuration file without restarting</p>
+
+    <p>Now we are in a position to test our changes, before you do this i recommend closing down anything that is not essential to the system such as GUI's and editing sessions, if we have made a mistake while following the examples the system is about to reboot and its better to be safe than annoyed at the author! When you are ready press Ctrl-Alt-Delete and nothing at all should happen.</p>
+
+    <p>If your system is still up at this point then check both the syslog file (typically this is <code>'/var/log/messages'</code> or <code>'/var/log/syslog'</code>) and the external log file we specified in the <code>'audit_cad.sh'</code> file to ensure that the logging was successful. If your system has rebooted then check each step and try again.</p>
+
+    <p>Once you have this working it's worth going the final mile and adding some automated log processing. This can vary from setting up <code>'SWATCH'</code> or <code>'logwatch'</code> to send you automated alerts to adding log rotation to keep the file sizes down. A simple example if you have <code>'logrotate'</code> running on your machine (Both recent Redhat and Debian distributions do) is given below and can also be found <a href="misc/wilson/shutattempt_logrotate.txt">here</a>.</p>
+
+<pre>
+<code>
+daily
+rotate 7
+compress
+delaycompress
+
+/var/log/shutattempt {
+  nomail
+  notifempty
+  missingok
+  create 0600 root root
+}
+</code>
+</pre>
+
+    <p>To add this to <code>'logrotate'</code>'s processing list just add a file called <code>audit_cad</code> to your <code>'logrotate'</code> directory, which is often located at <code>'/etc/logrotate.d'</code> with the above snippet or another similar one as contents and you no longer have to worry about it eating up disk space.</p>
+
+    <h3>Closing Notes</h3>
+    <p>While this technique will successfully log any attempts to reboot the machine there are a couple of points worth noting. The first is accountability, it is not possible using this script alone to determine who actually tried to take the machine over. This is because no authentication information is available for logging, <code>'init'</code>, the program that actually handles the Ctrl-Alt-Delete, runs as root so any attempts to capture the invoking username will return 'root'. 
+    
+    <p>By making some minor changes to 'audit_cad.sh' it would be possible to capture the output of <code>w</code> or <code>who</code> to the logs but this information isn't as useful as you may think in this situation, these commands only track the valid users that have supplied credentials to logon, something that someone who just walks upto your keyboard and presses Control-Alt-Delete does not need to supply and so the person who actually tried is the only one not logged!</p>
+
+    <p>The second point to consider is how obvious to make this script. If you want to be sneaky and obscure its presence you can call it <code>'shutdown'</code> and save it in a non-standard location.</p>
+
+    <h3>Further Reading</h3>
+    <p>For further information on the format and purpose of <code>'inittab'</code> please see <code>'man 5 inittab'</code> and for a full list of the options <code>'telinit'</code> supports please read <code>'man 8 telnint'</code>. If you are unfamiliar with <code>'logrotate'</code> then its manpage is a good starting point <code>'man 8 logrotate'</code>.</p>
+
+  </body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<P>
+<img ALIGN="LEFT" ALT="[BIO]" SRC="../gx/2002/note.png">
+<em>
+Dean Wilson is (this week) a systems administrator and occasional
+updater to his pages at www.unixdaemon.net
+</em>
+<br CLEAR="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+
+<!-- *** BEGIN copyright *** -->
+<hr>
+<CENTER><SMALL><STRONG>
+Copyright &copy; 2003, Dean Wilson.
+Copying license <A HREF="../copying.html">http://www.linuxgazette.net/copying.html</A><BR> 
+Published in Issue 93 of <i>Linux Gazette</i>, August 2003
+</STRONG></SMALL></CENTER>
+<!-- *** END copyright *** -->
+<HR>
+
+<!--startcut ==========================================================-->
+<CENTER>
+<!-- *** BEGIN navbar *** -->
+<A HREF="yuan.html">&lt;&lt;&nbsp;Prev</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="index.html">TOC</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../index.html">Front Page</A>&nbsp;&nbsp;|&nbsp;&nbsp;Talkback&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../faq/index.html">FAQ</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="pesin.html">Next&nbsp;&gt;&gt;</A>
+<!-- *** END navbar *** -->
+</CENTER>
+</BODY></HTML>
+<!--endcut ============================================================-->

@@ -1,0 +1,945 @@
+<!--startcut BEGIN header ==============================================-->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>T/TCP: TCP for Transactions LG #47</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!--endcut ============================================================-->
+
+<H4>
+"Linux Gazette...<I>making Linux just a little more fun!</I>"
+</H4>
+
+<P> <HR> <P> 
+<!--===================================================================-->
+
+<center>
+<H1><font color="maroon">T/TCP: TCP for Transactions</font></H1>
+<H4>By <a href="mailto:Mark.Stacey@icl.ie">Mark Stacey</a>, John Nelson and Ivan Griffin</H4>
+</center>
+<P> <HR> <P>  
+
+<!-- END header -->
+
+
+
+
+T/TCP is an experimental extension for the TCP protocol. It was designed to
+address the need for a transaction-based transport protocol in the TCP/IP
+stack. TCP and UDP are the current choices available for transaction-based
+applications. Both of these protocols have their advantages and disadvantages.
+TCP is reliable but inefficient for transactions whereas UDP is unreliable but
+highly efficient. T/TCP sits between these two protocols making it an
+alternative for certain applications.
+<p>
+Currently, a number of flavours of UNIX support T/TCP. SunOS 4.1.3 (a
+Berkeley-derived kernel) was the very first implementation of T/TCP and
+made available in September 1994. The next implementation was for FreeBSD
+2.0 and released in March 1995. For my final year project, I implemented
+T/TCP for Linux for the University of Limerick in April 1998. The source
+code is available at <A HREF=" http://www.csn.ul.ie/~heathclf/fyp/"> http://www.csn.ul.ie/~heathclf/fyp/</A>.
+<p>
+In this article, I discuss the operation, advantages and flaws of
+T/TCP. This will allow application developers to decide when T/TCP is
+appropriate for networking applications. I present my results of a comparative
+analysis between T/TCP and TCP based on the number of packets per session for
+each transaction, as well as my conclusions on a case study into the possible
+impact of T/TCP on the World Wide Web.
+
+<H3>1 Introduction</H3>
+
+The TCP/IP reference model is a specification for a networking
+stack on a computer. It exists to provide a common ground for network
+developers. This allows easier interconnection of the different vendor
+supplied networks, reducing the cost of installing completely new networks
+in order for one to work with another.
+<p>
+The most popular implementation of the transport layer in the
+reference model is the Transmission Control Protocol (TCP). This is a
+connection-oriented protocol. Another popular implementation is the User
+Datagram Protocol (UDP), which is a connectionless protocol.
+<p>
+Both of these protocols have advantages and disadvantages. The two main
+aspects of the protocols make them useful in different areas. UDP is a
+connectionless protocol. UDP always assumes that the destination host
+received the data correctly. The application layer above it looks after
+error detection and recovery. Even though UDP is unreliable, it is quite
+fast and useful for applications, such as DNS (Domain Name System)
+where speed is preferred over reliability. TCP, on the other hand, is a
+reliable, connection-oriented protocol. It looks after error detection and
+recovery. Data is retransmitted automatically if a problem is detected. As
+a result of being more reliable, TCP is a slower protocol than UDP.
+<p>
+In recent years, with the explosion of the Internet, a need for a new
+specification arose. The current transport protocols were either too
+verbose or not reliable enough. A protocol was needed that was faster than
+TCP but more reliable than UDP. These protocols lie at either end of the
+scale in taking into account speed and reliability. TCP has reliability
+at the cost of speed, whereas UDP has speed at the cost of reliability. A
+standard was needed, that would allow the reliable transmission of data
+at a faster rate than the current TCP standard. This new protocol could
+reduce bandwidth and increase the transmission speed of data.
+<p>
+TCP for Transactions (T/TCP) is envisioned as the successor to both
+TCP and UDP in certain applications. T/TCP is a transaction-oriented
+protocol based on a minimum transfer of segments, so it does
+not have the speed problems associated with TCP. By building on TCP,
+it does not have the unreliability problems associated with UDP. With
+this in mind, RFC1379 was published in November 1992. It discussed
+the concepts involved in extending the TCP protocol to allow for a
+transaction-oriented service, as opposed to a connection-oriented service
+for TCP and a connectionless service for UDP. Some of the main points
+that the RFC discussed were the bypassing of the 3-way handshake and the
+shortening of the TIME-WAIT state from 240 seconds to 12 seconds. T/TCP
+cuts out much of the unnecessary handshaking and error detection of the
+current TCP protocol and as a result increases the speed of connection
+and reduces the necessary bandwidth. Eighteen months later, RFC1644 was
+published, with the specification for Transaction TCP.
+
+<H3>2 Transaction Transmission Control Protocol</H3>
+
+T/TCP can be considered a superset of the TCP protocol. The reason
+for this is that T/TCP is designed to work with current TCP machines
+seamlessly. If a TCP host tries to connect to a T/TCP host, the T/TCP
+host will respond with the original TCP 3-way handshake. What follows
+is a brief description of T/TCP and how it differs to the current TCP
+standard in operation. 
+
+<H3>2.1 What is a Transaction?</H3>
+
+The term transaction refers to the request sent by a client to a server
+along with the server's reply. RFC955 lists some of the common characteristics of transaction processing
+applications:
+<p>
+<ul>
+  <li>	Unsymmetrical model: the two end points take different roles, this is
+a typical client-server role where the client requests the data and the
+server responds.
+  <li>	Short duration: normally a transaction runs for a short time span.
+  <li>	Few data packets: each transaction is a request for a small piece of
+information rather than a large transfer of information both ways.
+</ul>
+
+<H3>2.2 Background to T/TCP</H3>
+<p>
+The growth of the Internet has put a strain on the bandwidth and speed
+of networks. With more users than ever, the need for a more
+efficient form of data transfer is needed.
+<p>
+The absolute minimum number of packets required for a transaction
+is two: one request followed by one response. UDP is the one protocol in
+the TCP/IP protocol stack that allows this, the problem here being the
+unreliability of the transmission.
+<p>
+T/TCP solves these problems to a large degree. It has the
+reliability of TCP and comes very close to realizing the two-packet
+exchange (three in fact). T/TCP uses the TCP state model for its timing
+and retransmission of data, but introduces a new concept to allow the
+reduction in packets.
+<p>
+Even though three packets are sent using T/TCP, the data is carried
+on the first two; thus, the applications can see the data with
+the same speed as UDP. The third packet is the acknowledgment to the
+server by the client that it has received the data, which incorporates the TCP
+reliability.
+
+<H3>2.3 Basic Operation</H3>
+<p>
+<center>
+<img alt="figure" src="gx/stacey/3075f1.gif">
+<h4>Figure 1. Time Line of T/TCP/Client-Server Transaction</h4></center>
+<p>
+Consider a DNS system, one where a client sends a request to a
+server and expects a small amount of data in return. A diagram of the
+transaction can be seen in Figure 1. This diagram is very similar
+to a UDP request. In comparison to the TCP 3-way handshake in Figure
+2 it can be seen that an equal number of packets are
+required for this transaction and the 3-way handshake. Whereas with TCP
+three packet transmissions are associated with the establishment
+of a connection alone (with nine altogether), a total of three
+packet transmissions are associated with the whole process--a savings of
+66% in packets transferred compared to TCP. Obviously, in cases where a
+large amount of data is being transferred, more packets will be
+transmitted, resulting in a decrease in the percentage saving. Timing
+experiments have shown a slightly longer time is required for
+T/TCP than for UDP, but this is a result of the speed of the computer
+and not the network. As computers get more powerful, the performance of
+T/TCP will approach that of UDP.
+<p>
+<center>
+<img alt="figure" src="gx/stacey/3075f2.gif">
+<h4>Figure 2. TCP 3-way handshake</h4></center>
+<p>
+<H3>2.4 TCP Accelerated Open</H3>
+<p>
+The TCP Accelerated Open (TAO) is a mechanism introduced by T/TCP
+designed to cut down the number of packets needed to establish
+connection with a host.
+<p>
+T/TCP introduces a number of new options. These
+options allow the establishment of a connection with a host using the
+TAO. T/TCP uses a 32-bit incarnation number, called a connection count
+(CC). This option is carried in the options part of a T/TCP segment,
+Figure 3. A distinct CC value is assigned to each direction of an
+open connection. Incremental CC values are assigned to each connection
+that a host establishes, either actively or passively.
+<p>
+<center>
+<img alt="figure" src="gx/stacey/3075f3.gif">
+<h4>Figure 3. TCP Header</h4></center>
+<p>
+The 3-way handshake is bypassed using the CC value. Each server host
+caches in memory (or in a file) the last valid CC value it received from
+each different client host. This CC value is sent with the initial SYN
+segment to the server. If the initial CC value for a particular client
+host is larger than the corresponding cached value, the property of the
+CC options (the increasing numbers) ensures the SYN segment is new
+and can be accepted immediately.
+<p>
+The TAO test fails if the CC option that arrives in the SYN segment is
+smaller than the last CC value received and cached by the host or if
+a CCnew option is sent. The server then initiates a 3-way handshake in
+the normal TCP/IP fashion. Thus, the TAO test is an
+enhancement to TCP, with the normal 3-way handshake to fall back on for
+reliability and backward compatibility.
+<p>
+<H3>2.5 Truncation of TIME-WAIT</H3>
+<p>
+The TIME-WAIT state is a state entered by all TCP connections
+when the connection has been closed. The length of time for this state
+is 240 seconds to allow any duplicate segments still in
+the network from the previous connection to expire. The introduction
+of the CC option in T/TCP allows for the truncation of the TIME-WAIT
+state. The CC option provides protection against old duplicates being
+delivered to the wrong incarnation of a given connection.
+<p>
+Time constraints are placed on this truncation, however. Because the CC value from
+the host is monotonically increasing, the
+numbers may wrap around from the client host. A CC value that is the
+same as some duplicate segments from the previous incarnation can be
+encountered. As a rule, the truncation can only be performed whenever
+the duration of the connection is less than the maximum segment lifetime
+(MSL). The recommended value for the MSL is 120 seconds. As with the
+original TCP, the host that sends the first FIN is required to remain in
+the TIME-WAIT state for twice the MSL once the connection is completely
+closed at both ends. This implies that the TIME-WAIT state with the
+original TCP is 240 seconds, even though some implementations of TCP
+have the TIME-WAIT set to 60 seconds. Stevens shows how the TIME-WAIT
+state for T/TCP may be shortened to 12 seconds.
+<p>
+CC options do have problems when used on networks with high-speed
+connections. This is rarely a problem on older networks, but with
+FDDI and gigabit Ethernets becoming more frequent, the wrapping of
+the CC value will become more frequent. In this situation,
+the CC value may wrap around fast enough for problems
+to occur. Whereas CC options are not sufficient in certain conditions,
+the PAWS (protection against wrapped sequences) option adds another
+layer of security against this problem.
+<p>
+<H3>2.6 Examples</H3>
+<p>
+T/TCP can be beneficial to some of the applications which currently
+use TCP or UDP. At the moment, many applications are
+transaction-based rather than connection-based, but still must rely
+on TCP along with the overhead. UDP is the other alternative, but not
+having time-outs and retransmissions built into the protocol means the
+application programmers must supply the time outs and reliability
+checking. Since T/TCP is transaction-based, there is no
+set-up and shutdown time, so the data can be passed to the process
+with minimal delay.
+<p>
+<H3>2.6.1 HTTP and RPC</H3>
+<p>
+Hypertext Transfer Protocol is the protocol used by the World Wide
+Web to access web pages. The number of round trips used by this protocol
+is more than necessary. T/TCP can be used to reduce the number of
+packets required.
+<p>
+HTTP is the classic transaction style application. The client sends
+a short request to the server requesting a document or an image and
+then closes connection. The server then sends on the information to the
+client. T/TCP can be used to improve this process and reduce the number
+of packets on the network.
+<p>
+With TCP, the transaction is accomplished by connecting to the server
+(3-way handshake), requesting the file (<tt>GET <I>file</I></tt>), then closing the
+connection (sending a FIN segment). T/TCP operates by connecting
+to the server, requesting the document and closing the connection all
+in one segment (TAO). It is obvious that bandwidth has been saved.
+<p>
+Remote Procedure Calls also adhere to the transaction style paradigm. A
+client sends a request to a server for the server to run a function. The
+results of the function are then returned in the reply to the
+client. Only a tiny amount of data is transferred with RPCs.
+<p>
+<H3>2.6.2 DNS</H3>
+<p>
+The Domain Name System is used to resolve host names into the IP addresses
+that are used to locate the host.
+To resolve a domain name, the client sends a request with the IP address
+or a host name to the server. The server responds with the host name or
+IP address where appropriate. This protocol uses UDP as its underlying
+process.
+<p>
+As a result of using UDP, the process is fast but not
+reliable. Furthermore, if the response by the server exceeds 512 bytes
+of data, it sends the data back to the client with the first 512 bytes
+and a truncated flag. The client has to resubmit the request using TCP,
+since there is no guarantee that the receiving
+host will be able to reassemble an IP datagram exceeding 576 bytes. For
+safety, many protocols limit the user data to 512 bytes.
+<p>
+T/TCP is the perfect candidate for the DNS protocol, because of its
+speed and reliability.
+<p>
+<H3>2.7 Summary</H3>
+<p>
+T/TCP provides a simple mechanism that allows the number of segments
+involved in a data transmission to be reduced--the TAO. This test allows
+a client to open a connection, send data and close a connection all in
+one segment. With TCP, opening a connection, transmission of data
+and the closing of the connection are all completely separate processes.
+<p>
+The highest savings result with small data transfers. This leads to the
+conclusion that T/TCP favors situations with small amounts of data to
+be transferred. HTTP, RPCs and DNS are protocols that require
+the exchange of small amounts of data.
+<p>
+<H3>3. Testing and Analysis</H3>
+<p>
+In order to investigate the benefits or drawbacks of this
+implementation of T/TCP, it is important to both test its operation and
+compare it to the original TCP/IP operation. I performed
+these tests using the Linux 2.0.32 kernel with T/TCP modifications and
+FreeBSD version 2.2.5 that already implements T/TCP.
+<p>
+<H3>3.1 Operation Examples</H3>
+<p>
+This section demonstrates the operation of the protocol under various
+conditions.
+<p>
+<H3>3.1.1 Client Reboot</H3>
+<p>
+In this scenario, I rebooted the client and the TAO cache has been
+reinitialized.
+<p>
+When the client attempts a connection with a server, it finds that the
+latest CC value received from the server is undefined. Hence it sends
+a CCnew option to indicate that a 3-way handshake is needed.
+<p>
+The sequence of segments below conforms to the protocol implementation.
+<p>
+<pre>
+elendil.ul.ie.2177 &gt; devilwood.ece.ul.ie.8888: SFP 3066875000:3066875019(19) win 15928 &lt;mss 1460,nop,nop,ccnew 10&gt; (DF)
+
+devilwood.ece.ul.ie.8888 &gt; elendil.ul.ie.2177: S 139872882:139872882(0) ack 3066875001 win 17424 &lt;mss 1460,nop,nop,cc 3, nop,nop,ccecho 10&gt; (DF)
+
+elendil.ul.ie.2177 &gt; devilwood.ece.ul.ie.8888: F 20:20(0) ack 1 win 15928 &lt;nop,nop,cc 10&gt; (DF)
+
+devilwood.ece.ul.ie.8888 &gt; elendil.ul.ie.2177: . ack 21 win 17405 &lt;nop,nop,cc 3&gt; (DF)
+
+devilwood.ece.ul.ie.8888 &gt; elendil.ul.ie.2177: FP 1:31(30) ack 21 win 17424 &lt;nop,nop,cc 3&gt; (DF)
+
+elendil.ul.ie.2177 &gt; devilwood.ece.ul.ie.8888: . ack 32 win 15928 &lt;nop,nop,cc 10&gt; (DF) 3.1.2 Normal T/TCP Transaction
+</pre>
+Once the client has completed its first transaction with the server,
+the CC value in the TAO cache will contain a number. This allows the
+client to send a normal CC option, indicating to the server that it may
+bypass the 3-way handshake if possible.
+<p>
+The client and the server hold state information about the other host,
+so the TAO test succeeds and the minimal 3-segment exchange is possible.
+<p>
+<pre>
+elendil.ul.ie.2178 &gt; devilwood.ece.ul.ie.8888: SFP 2021229800:2021229819(19) win 15928 &lt;mss 1460,nop,nop,cc 11&gt; (DF)
+
+devilwood.ece.ul.ie.8888 &gt; elendil.ul.ie.2178: SFP 164103774:164103804(30) ack 2021229821 win 17424 &lt;mss 1460,nop,nop,cc 4, nop,nop,ccecho 11&gt;
+(DF)
+
+elendil.ul.ie.2178 &gt; devilwood.ece.ul.ie.8888: . ack 32 win 15928 &lt;nop,nop,cc 11&gt; (DF)
+</pre>
+<H3>3.1.3 Server Reboot</H3>
+<p>
+If the server is rebooted after the previous two tests, all the state
+information about the host will be lost.
+<p>
+When the client request arrives with a normal CC option, the server
+forces a 3-way handshake since the CC value received from the client
+is undefined. The SYNACK segment forces the 3-way handshake when
+only the client SYN and not the data are acknowledged.
+<p>
+<pre>
+elendil.ul.ie.2141 &gt; devilwood.ece.ul.ie.8888: SFP 2623134527:2623134546(19) win 15928 &lt;mss 1460,nop,nop,cc 9&gt; (DF)
+
+arp who-has elendil.ul.ie tell devilwood.ece.ul.ie
+
+arp reply elendil.ul.ie is-at 0:20:af:e1:41:4e
+
+devilwood.ece.ul.ie.8888 &gt; elendil.ul.ie.2141: S 25337815:25337815(0) ack 2623134528 win 17424 &lt;mss 1460,nop,nop,cc 2, nop,nop,ccecho 9&gt; (DF)
+
+elendil.ul.ie.2141 &gt; devilwood.ece.ul.ie.8888: F 20:20(0) ack 1 win 15928 &lt;nop,nop,cc 9&gt; (DF)
+
+devilwood.ece.ul.ie.8888 &gt; elendil.ul.ie.2141: . ack 21 win 17405 &lt;nop,nop,cc 2&gt; (DF)
+
+devilwood.ece.ul.ie.8888 &gt; elendil.ul.ie.2141: FP 1:31(30) ack 21 win 17424 &lt;nop,nop,cc 2&gt; (DF)
+
+elendil.ul.ie.2141 &gt; devilwood.ece.ul.ie.8888: . ack 32 win 15928 &lt;nop,nop,cc 9&gt; (DF)
+</pre>
+<H3>3.1.4 Request or Reply Exceeds MSS</H3>
+<p>
+If the initial request exceeds the maximum segment size allowed,
+the request will have to be fragmented.
+<p>
+When the server receives the initial SYN with just the data and no FIN,
+depending on the time outs, it either responds with a SYNACK immediately
+or waits for the FIN bit to arrive before responding with the SYNACK
+that acknowledges all of the data. The server then proceeds to send the
+multi-packet response if required.
+<p>
+<pre>
+localhost.2123 &gt; localhost.8888: S 2184275328:2184278860(3532) win 14128 &lt;mss 3544,nop,nop,cc 5&gt; (DF)
+
+localhost.2123 &gt; localhost.8888: FP 2184278861:2184279329(468) win 14128 &lt;nop,nop,cc 5&gt: (DF)
+
+localhost.8888 &gt; localhost.2123: S 1279030185:1279030185(0) ack 2184278861 win 14096 &lt;mss 3544,nop,nop,cc 6,nop,nop,ccecho 5&gt;
+
+localhost.2123 &gt; localhost.8888: F 469:469(0) ack 1 win 14128 &lt;nop,nop,cc 5&gt; (DF)
+
+localhost.8888 &gt; localhost.2123: . ack 470 win 13627 &lt;nop,nop,cc 6&gt; (DF)
+
+localhost.8888 &gt; localhost.2123: FP 1:31(30) ack 470 win 13627 &lt;nop,nop,cc 6&gt; (DF)
+
+localhost.2123 &gt; localhost.8888: . ack 32 win 14128 &lt;nop,nop,cc 5&gt; (DF)
+</pre>
+<H3>3.1.5 Backward Compatibility</H3>
+<p>
+Because T/TCP is a superset of TCP, it must be able to communicate
+seamlessly with other hosts not running T/TCP.
+<p>
+There are a couple of different scenarios in this situation. Some
+implementations hold the data in the SYN until the 3-way handshake
+has passed. In this situation the client only needs to resend the FIN
+segment to let the server know that all the data has been sent. The
+server then responds with normal TCP semantics.
+<p>
+In other implementations, the SYN segment is dumped once it has been
+processed, including the data sent in the initial SYN. The server sends
+a SYNACK acknowledging only the SYN sent. The client times out after a
+period and resends the data and FIN. The server then proceeds as normal.
+<p>
+When testing the implementation for backward compatibility, I found an
+unusual feature (bug?) of Linux. When a SYN is sent with the FIN bit set,
+the Linux host responds with the SYNACK segment but also with the FIN
+bit turned on. This causes the client to mistakenly believe the
+server has sent the reply back to the client.
+<p>
+This problem was traced to the way Linux constructs its SYNACK segment. It
+copies the header of the original SYN (and so all the flags), then sets
+all the flags except the FIN flag. This results in the Linux host sending
+a FIN without knowing it. I pointed this out to the developers of the
+Linux kernel. Their reasoning was that T/TCP leaves hosts open to a SYN
+flood attack and as such should not be allowed into main stream protocols.
+As it turned out, it was only a small check that was needed to solve
+this problem.
+<p>
+<pre>
+elendil.ul.ie.2127 &gt; skynet.csn.ul.ie.http: SFP 520369398:520369417(19) win 15928 &lt;mss 1460,nop,nop,ccnew 7&gt; (DF)
+
+skynet.csn.ul.ie.http &gt; elendil.ul.ie.2127: SF 2735307581:2735307581(0) ack 520369399 win 32736 &lt;mss 1460&gt;
+
+elendil.ul.ie.2127 &gt; skynet.csn.ul.ie.http:  F 20:20(0) ack 1 win 15928 (DF)<\n>
+
+skynet.csn.ul.ie.http &gt; elendil.ul.ie.2127: . ack 1 win 32736 (DF)
+
+elendil.ul.ie.2127 &gt; skynet.csn.ul.ie.http: FP 520369399:520369418(19) win 15928 &lt;mss 1460,nop,nop,ccnew 7&gt; (DF)<\n>
+
+skynet.csn.ul.ie.http &gt; elendil.ul.ie.2127: . ack 21 win 32716 (DF)
+
+skynet.csn.ul.ie.http &gt; elendil.ul.ie.2127: P 1:242(241) ack 21 win 32736 (DF)
+
+skynet.csn.ul.ie.http &gt; elendil.ul.ie.2127: F 242:242(0) ack 21 win 32736
+
+elendil.ul.ie.2127 &gt; skynet.csn.ul.ie.http: . ack 243 win 15928 (DF)
+</pre>
+<H3>3.2 Performance Analysis</H3>
+<p>
+To investigate the performance of T/TCP in comparison to the original
+TCP/IP, I compiled a number of executables that returned different sized
+data to the client. The two hosts involved were elendil.ul.ie (running
+Linux) and devilwood.ece.ul.ie (running FreeBSD 2.2.5). The tests were
+performed for 10 different response sizes to vary the number of segments
+required to return the full response. Each request was sent 50 times and
+the results averaged. The maximum segment size in each case is 1460 bytes.
+<p>
+The metric measured used for performance evaluation was the average
+number of segments per transaction. I used <B>Tcpdump</B> to examine the packets
+exchanged. Note that Tcpdump is not entirely accurate.
+During fast packet exchanges, it tends to drop some packets to keep
+up. This accounts for some discrepancies in the results.
+<p>
+<H3>3.2.1 Number of Packets per Transaction</H3>
+<p>
+<center>
+<img alt="figure" src="gx/stacey/3075f4.gif">
+<h4>Figure 4. Number of Segments versus Size of Data Transfer</h4></center>
+<p>
+Figure 4 shows the testing results for the number of segments
+for T/TCP versus number of segments for normal TCP/IP. It is immediately
+obvious that there is a saving of an average five packets. These five
+packets are accounted for in the 3-way handshake and the packets
+sent to close a connection. Lost packets and retransmissions cause
+discrepancies in the path of the graph.
+<p>
+When using a
+TCP client and a T/TCP server, there is still a saving of one segment. A
+normal TCP transaction requires nine segments, but because the server was
+using T/TCP, the FIN segment was piggybacked on the final data segment,
+reducing the number of segments by one. Thus,
+a reduction in segments results even if just one side is T/TCP aware.
+<p>
+<center>
+<img alt="figure" src="gx/stacey/3075f5.gif">
+<h4>Figure 5. Percentage Savings per Size of Data Transfer</h4></center>
+<p>
+Figure 5 shows the percentage savings for the different packet
+sizes. The number of packets saved remains fairly constant, but because
+the number of packets being exchanged increases,
+the overall savings decreases. This indicates T/TCP is
+more beneficial to small data exchanges. These test results were
+obtained from two hosts on the same intranet. For comparison purposes,
+the tests were repeated for a host on the Internet; www.elite.net was
+chosen as the host. Requests were sent to the web server for similar
+sized data. Figure 6 shows these results. This graph is not as smooth as
+the graph seen in Figure 4 due to a higher percentage of packets being
+lost and retransmitted.
+<p>
+<center>
+<img alt="figure" src="gx/stacey/3075f6.gif">
+<h4>Figure 6. Number of Segments versus Size of Data Transfer for Internet Host</h4></center>
+<p>
+<H3>3.3 Memory Issues</H3>
+<p>
+The main memory drain in the implementation is in the routing table. In
+Linux, for every computer that the host comes into contact with, an
+entry for the foreign host is made in the routing table. This applies
+to a direct connection or along a multi-hop route. This routing table
+is accessed through the <B>rtable</B> structure. The implementation of T/TCP
+adds in two new fields to this structure, <B>CCrecv</B> and <B>CCsent</B>.
+<p>
+The entire size of this structure is 56 bytes. This isn't a major
+memory hog on a small stand-alone host. On a busy server though, where
+the host communicates with perhaps thousands of other hosts an hour, it can
+be a major strain on memory. Linux has a mechanism where a route that is
+no longer in use can be removed from memory. A check is run periodically
+to clean out unused routes and those that have been idle for a time.
+<p>
+The problem here is the routing table holds the TAO cache. Thus, any time
+a route containing the last CC value from a host is deleted, the
+local host has to re-initiate the 3-way handshake with a CCnew segment.
+<p>
+A separate cache can be created to hold
+the TAO values, but the route table is the handiest solution.
+Also, a check can be added when cleaning out the routing entries
+for a CC value other than zero (undefined). In
+this case, the route could either be left for a longer time span
+or permanently.
+<p>
+The benefits of leaving the routing entries up permanently are clear. The
+most likely use of this option would be a situation where a host only talks
+to a certain set of foreign hosts and denies access to unknown hosts. In
+this case, it is advantageous to keep a permanent record in memory so
+that the 3-way handshake can be bypassed more often.
+<p>
+<H3>3.4 Protocol Analysis</H3>
+<p>
+The original protocol specification (RFC1644) labeled T/TCP as an
+experimental protocol. Since the RFC was published no
+updates have been made to the protocol to fix some of the problems.
+The benefits are obvious compared to the original TCP
+protocol, but is it a case of the disadvantages out-weighing the advantages?
+<p>
+One of the more serious problems with T/TCP is that it opens
+the host to certain denial-of-service attacks. SYN flooding (see
+<A HREF="http://www.sun.ch/SunService/technology/bulletin/bulletin963.html">http://www.sun.ch/SunService/technology/bulletin/bulletin963.html</A> for
+more information) is the term given to a form of denial of service
+attack where the attacker continually sends SYN packets to a host. The
+host creates a sock structure for each of the SYNs, thus reducing
+the number of sock structures that can be made available to legitimate
+users. This can eventually result in the host crashing if enough memory
+is used up. SYN cookies were implemented in the Linux kernel to combat
+this attack. It involves sending a cookie to the sender to verify
+the connection is valid. SYN cookies cause problems with T/TCP as
+no TCP options are sent in the cookie and any data arriving in the
+initial SYN can't be used immediately. The CC option in T/TCP does
+provide some protection on its own, but it is not secure enough.
+<p>
+Another serious problem was discovered during research was that
+attackers can by-pass <B>rlogin</B> authentication. An attacker creates
+a packet with a false IP address in it, one that is known to the
+destination host. When the packet is sent, the CC options allow
+the packet to be accepted immediately, and the data passed on. The
+destination host then sends a SYNACK to the original IP address. When
+this SYNACK arrives, the original host sends a reset, as it is not in
+a SYN-SENT state. This happens too late, as the command will already
+have been executed on the destination host. Any protocol that uses
+an IP address as authentication is open to this sort of attack. (See
+<A HREF="http://geek-girl.com/bugtraq/1998_2/0020.html">http://geek-girl.com/bugtraq/1998_2/0020.html</A>.) There are methods of
+avoiding this security hole.
+<p>
+Kerberos is a third-party authentication
+protocol but requires the presence of a certification authority and
+an increase in the number of packets transferred. The IP layer has
+security and authentication built into it. With the new IP version being
+standardized, IPv6, the authentication of IP packets will be possible
+without third-party intervention. This is accomplished through the use
+of an authentication header that provides integrity and authentication
+without confidentiality.
+<p>
+RFC1644 also has a duplicate transaction problem. This can be serious
+for non-idempotent applications (repeat transactions are
+very undesirable). Requesting time from a timeserver can be considered
+idempotent because there is no adverse effect results on either the client or the
+server if the transaction is repeated. In the case of a banking system
+however, if an account transaction were repeated accidentally, the owner
+would either gain or lose twice as much as anticipated. This error can
+occur in T/TCP if a request is sent to a server and the server processes
+the transaction, but before it sends back an acknowledgment the process
+crashes. The client side times out and retransmits the request, if the
+server process recovers in time, it can repeat the same transaction. This
+problem occurs because the data in a SYN can be immediately passed
+onto the process, rather then in TCP where the 3-way handshake has to
+be completed before data can be used. The use of two-phase commits and
+transaction logging can keep this problem from occurring.
+<p>
+<H3>3.5 Summary</H3>
+<p>
+This chapter illustrates the required functionality of T/TCP for
+Linux. It also displays the advantages in speed and efficiency T/TCP
+has over normal TCP.
+<p>
+T/TCP admittedly has some serious problems, but these problems are not
+relevant to all situations. Where hosts have some form of protection
+(other than pure T/TCP semantics) and basic security precautions are taken,
+T/TCP can be used without any worries.
+<p>
+<H3>4. Case Study: T/TCP Performance over Suggested HTTP Improvements</H3>
+<p>
+With the World Wide Web being the prime example of a client-server transaction
+processing nowadays, this section will focus on the benefits of T/TCP
+to the performance of the Web.
+<p>
+Currently, the HTTP protocol sits in the application layer of the
+TCP/IP reference model. It uses the TCP protocol to carry out all its
+operations, UDP being too unreliable. There is a lot of latency involved
+in the transfer of information, the 3-way handshake and the explicit
+shutdown exchanges being the examples. Using the criteria specified in
+section 2.1 it is apparent that the World Wide Web's operation is
+one of transactions.
+<p>
+<H3>4.1 Web Document Characteristics</H3>
+<p>
+In a survey of 2.6 million web documents searched by the Inktomi web
+crawler search engine (see: <A HREF="http://inktomi.berkeley.edu">
+http://inktomi.berkeley.edu)</A> it was found
+that the mean document size on the world wide web was 4.4KB, the median
+size was 2.0KB and the maximum size that was encountered was 1.6MB.
+<p>
+Referring to figure 3.2 it can be seen that the lower the segment size,
+the better the performance of T/TCP over normal TCP/IP. With a mean
+document size of 4.4KB, this results in an average saving of just over
+55% in the number of packets. When taking the median size into account,
+there is a saving of approximately 60%.
+<p>
+Time-wise there will be an improvement in speed, depending of course on
+the reliability of the network.
+<p>
+<H3>4.2 Suggested Performance Improvements for HTTP</H3>
+<p>
+There have been a number of suggestions put forward to improve the
+operation of HTTP and reduce the time and bandwidth required downloading
+information. Most of these suggestions have as their basis compression
+and/or delta encoding.
+<p>
+<H3>4.2.1 Compression</H3>
+<p>
+At the moment, all web pages are transferred in plaintext form, requiring
+little work from either the server side or the client side to display
+the pages.
+<p>
+In order to introduce compression into the HTTP protocol, a number of
+issues would have to be resolved.
+<p>
+First and foremost would be the issue of backward compatibility, with the
+web having reached so far across the world, switching to compression would
+take a long time. Browsers need to be programmed to handle compressed
+web pages and web servers also need to be configured to compress the
+information requested before sending it onto the user. It would be a
+straightforward task for the IETF (Internet Engineering Task Force) to
+introduce a compression standard. It would then be up to the vendors
+and application writers to modify the browsers and servers for the
+new standard.
+<p>
+Another issue would be the load placed on the server when it is requested
+to compress the information. Many busy servers would not have the power
+to handle the extra workload. This holds to a lesser extent on the client
+side, with a minimal overhead involved in decompressing a few pages at
+a time.
+<p>
+In their paper ôNetwork Performance Effects of HTTP/1.1, CSSI and
+PNGö, the authors investigated the effect of introducing compression
+to the HTTP protocol. They found that the compression resulted in a 64%
+saving in the speed of downloading with a 68% decrease in the number of
+packets required. Over normal TCP/IP, this brings the packet exchanges
+and size of data down to the level where T/TCP becomes beneficial. Thus
+a strategy involving both compression and T/TCP can result in enormous
+savings in time and bandwidth.
+<p>
+<H3>4.2.2 Delta Encoding</H3>
+<p>
+In this situation, a delta refers to the difference between two
+files. On UNIX systems, the <CODE>diff</CODE> command can be used to generate
+the delta between two files. Using the changed file, and the delta,
+the original file can be regenerated again, and vice-versa.
+<p>
+For delta encoding on the web, the client initially requests a document
+and the complete document is downloaded. This will result in about a
+55% benefit if using T/TCP and taking into account the mean size of
+a document. Once the client has the page, it can be cached and stored
+indeterminately. When the client requests the document the next time,
+the browser will already have the original document cached. Using delta
+encoding, the browser would present the web server with the last date
+the cached document was modified. The server determines if the document
+has been updated since the cached copy was stored, and if so, a delta of
+the server side document is created. The delta, rather than the original
+document are transferred.
+<p>
+Of course, there are quite a few difficulties that need to be considered.
+<p>
+<ol>
+  <li>	The client needs to retain a cached copy of the document. This is not
+so much a hassle with more modern browsers, as this is already done. In
+fact the HTTP protocol defines a command that can be used to request the
+last modified date from a document on a server. This is then compared to
+the cached document and a decision made whether to download the new file,
+or display the original.
+  <li>	From the server side, multiple versions of the document have to be
+cached to allow the server to create deltas. A decision has to be made
+of how many changed versions are allowed. Should the older versions be
+kept in the user side, or should a separate database of old versions be
+kept? A more detailed study of the impact of caching documents can be
+found in Braun &amp; Claffy's book (see Resources).
+  <li>	In the case where there have been a number of updates to the server
+side document since the client side was cached, it should be decided how
+many updates are allowed before the new document is sent, as opposed to
+sending a delta. The more changes applied to a document, the larger a
+delta is, hence, a loss in the savings by using delta encoding.
+  <li>	Again there is the question of the load placed on the server
+by generating a delta for each document requested, similar to the
+compression method.
+</ol>
+Mogul, et al. (see Resources) investigated the effect that delta encoding has on
+the web. In their testing, they not only used delta encoding; they
+also compressed the delta generated to further reduce the amount of
+information transferred. They discovered that using the ôvdeltaö delta
+generator and compression they could achieve up to 83% savings in the
+transmission of data.
+<p>
+If this method was used with T/TCP, there could be as much as a further
+66% saving in packets transferred. This is a total of 94% reduction in
+packet transfer.
+<p>
+It should be noted however that this is a best case scenario. In this
+situation, the document will already have been cached on both the server
+and the client side, and the client and server will previously have
+completed the 3-way handshake in order to facilitate the TAO tests.
+<p>
+<H3>4.2.3 Persistent HTTP</H3>
+<p>
+RFC2068 describes a modification to HTTP that maintains a continuous
+connection to an HTTP server for multiple requests, P-HTTP. This
+removes the inefficiency of continually reconnecting to a web server
+to download multiple images from the same page. The constant connection
+and reconnection results in a lot of unnecessary overhead.
+<p>
+Some advantages over the original HTTP protocol are:
+<p>
+<ol>
+  <li>	Opening and closing fewer TCP connections save CPU time and memory.
+  <li>	Multiple HTTP requests and responses can be sent without waiting for
+a response that would otherwise be necessary when opening and closing
+multiple connections.
+  <li>	Network congestion is reduced since there are fewer packets.
+</ol>
+This technique is one step away from T/TCP. Instead of using transactions,
+it uses persistent connections much like the TELNET protocol. In this
+situation T/TCP would not be of much benefit, the connection will remain
+open for a length of time, with multiple requests being exchanged. This
+violates the transaction characteristics discussed in section 2.1.
+<p>
+<H3>4.3 Summary</H3>
+<p>
+Using the results obtained in section 3 and the characteristics of
+documents available on the World Wide Web, a study is presented on how
+T/TCP can benefit, or otherwise, some of the suggestions for improving
+the HTTP protocol.
+<p>
+The main case for the introduction of compression and delta encoding is
+the reduction in the size of the data that needs to be transferred. The
+results obtained from the performance analysis of T/TCP suggest that
+a greater benefit be obtained on small data transfers. The compression
+and delta encoding ideas result in data small enough that can be sent
+in one packet. Under these conditions, T/TCP operates best.
+<p>
+P-HTTP puts forward the idea that a connection should be semi-permanent,
+unlike the current open-close operation HTTP currently employs. In this
+scenario, T/TCP will not work at all because of its transaction-oriented
+style.
+<p>
+<H3>5. Socket Programming Under T/TCP</H3>
+<p>
+Programming for T/TCP is slightly different using socket programming.
+<p>
+As an example, the chain of system calls to implement a TCP client would
+be as follows:
+<p>
+<ul>
+  <li>	socket(): create a socket
+  <li>	connect(): connect to the remote host
+  <li>	write(): write data to the remote host
+  <li>	shutdown(): close one side of the connection
+</ul>
+Whereas with T/TCP the chain of commands would be:
+<p>
+<ul>
+  <li>	socket(): create a socket
+  <li>	sendto(): connect, send data, and close connection
+</ul>
+The <B>sendto</B> function has to be able to use a new flag
+<tt>MSG_EOF</tt>,
+to indicate to the kernel that it has no more data to send on this
+connection. This is the transaction-processing coming into effect.
+<p>
+Programming under T/TCP is much like programming under UDP.
+<p>
+<H3>6. Conclusion</H3>
+<p>
+T/TCP was originally designed to address the need for a more efficient
+protocol for transaction style applications. The original protocols
+defined in the TCP/IP reference model were either too verbose or not
+reliable enough.
+<p>
+T/TCP works by building on the TCP protocol and introducing a number of
+new options that allow the 3-way handshake to be bypassed in certain
+situations. When this occurs, the transaction can almost realize the
+minimum number of segments that are required for a data transfer. T/TCP
+can reduce the average number of segments involved in a transaction from 9
+(TCP) to 3 using the TAO test. This has potential benefits to overloaded
+networks where there is a need to introduce a more efficient protocol.
+<p>
+Analysis of T/TCP shows that it benefits small transaction-oriented
+transfers more than large-scale information transfer. Aspects of
+transactions can be seen in such cases as the World Wide Web, Remote
+Procedure Calls and DNS. These applications can benefit from the use of
+T/TCP in efficiency and speed. T/TCP reduces on average both the numbers
+of segments involved in a transaction and the time taken.
+<p>
+As T/TCP is still an experimental protocol, there are problems
+that need to be addressed. Security problems encountered include
+the vulnerability to SYN flood attacks and rlogin authentication
+bypassing. Operational problems include the possibility of duplicate
+transactions occurring. Problems that occur less frequently would be the
+wrapping of the CC values on high-speed connections and thus opening up
+a destination host to accepting segments on the wrong connection.
+<p>
+Many people recognize the need for a protocol that favors transaction
+style processing and are willing to accept T/TCP as the answer. The
+security considerations lead to the conclusion that T/TCP would be
+more useful in a controlled environment, one where there is little
+danger from a would-be attacker who can exploit the weaknesses of the
+standard. Examples of enclosed environments would be company Intranets
+and networks protected by firewalls. With a lot of companies seeing
+the web as the future of doing business, internal and external, a
+system employing T/TCP and some of the improvements to HTTP, such as
+compression and delta encoding, would result in a dramatic improvement
+in speed within a company Intranet.
+<p>
+Where programmers are willing to accept T/TCP as a solution to
+their applications, there are only minor modifications needed for
+the application to become T/TCP aware. For client side programming,
+it involves the elimination of the connect() and shutdown() function
+calls, which can be replaced by adding the MSG_EOF flag to the sendto()
+command. Server side modifications involve simply adding the MSG_EOF
+flag to the send() function.
+<p>
+In conclusion, researches into T/TCP suggest that it is a protocol that
+is nearly, but not quite, ready to take over transaction processing for
+general usage. For T/TCP alone, more work needs to be done to develop it
+further and solve the security and operational problems. Security problems
+can be solved using other authentication protocols such as Kerberos and
+the authentication facilities of IPv6. Operational problems can be dealt
+with using greater transaction reliability built into the applications
+that will use T/TCP, such as two phase commits and transaction logs.
+<p>
+Future work in this area could involve the promotion of T/TCP as an
+alternative to the TCP and UDP protocols for certain applications. T/TCP
+has been slow to take off. FreeBSD is the most widespread implementation
+of T/TCP for PC computers. Now that Linux is T/TCP aware, it can push
+the use of the protocol more. Applications can be easily modified to
+use T/TCP when available, any applications that involve an open-close
+connection can use T/TCP efficiently, and the more prominent examples
+would be web browsers, web servers and DNS client-server applications. To
+a smaller extent, applications such as time, finger and whois daemons can
+benefit from T/TCP as well. There are many networking utilities available
+that can take advantage of the efficiency of the protocol, all that is
+needed is the incentive to do it. Perhaps a more immediate task though,
+is to port the T/TCP code to the new Linux kernel series, 2.1.x.
+<p>
+<h3>Resources</h3>
+<p>
+Braun H W, Claffy K C, "Web Traffic Characterization: An Assessment of the
+Impact of Caching Documents from NCSA's Web Server", Proceedings
+of the Second World Wide Web Conference '94: Mosaic and the Web,
+October 1994
+<p>
+Mogul J C, Douglis F, Feldmann A, Krishnamurthy B, "Potential Benefits of
+Delta Encoding and Data Compression for HTTP", ACM SIGCOMM, September 1997
+<p>
+Prud'Hommeaux E, Lie H W, Lilley C, "Network Performance Effects
+of HTTP/1.1, CSSI and PNG", ACM SIGCOMM, September 1997
+<p>
+Stevens W R, <I>TCP/IP Illustrated, Volume 3, TCP for Transactions, HTTP,
+NNTP, and the UNIX Domain Protocols</I>, Addison-Wesley, 1996
+<p>
+</body>
+</html>
+
+
+
+<!-- BEGIN copyright ==================================================-->
+<P> <hr> <P> 
+<H5 ALIGN=center>
+
+Copyright &copy; 1999, Mark Stacey<BR> 
+Published in Issue 47 of <i>Linux Gazette</i>, November 1999</H5>
+<!-- END copyright ===================================================-->
+
+
+
+
+
+<!--startcut footer ===================================================-->
+<P> <hr> <P> 
+<A HREF="index.html"><IMG ALIGN=BOTTOM SRC="../gx/indexnew.gif" 
+ALT="[ TABLE OF CONTENTS ]"></A>
+<A HREF="../index.html"><IMG ALIGN=BOTTOM SRC="../gx/homenew.gif"
+ALT="[ FRONT PAGE ]"></A>
+<A HREF="slambo.html"><IMG SRC="../gx/back2.gif"
+ALT=" Back "></A>
+<A HREF="../faq/index.html"
+	><IMG SRC="./../gx/dennis/faq.gif"
+              ALT="[ Linux Gazette FAQ ]"></A>
+<A HREF="ward.html"><IMG SRC="../gx/fwd.gif" ALT=" Next "></A>
+<P> <hr> <P> 
+</BODY></HTML>
+<!--endcut ============================================================-->

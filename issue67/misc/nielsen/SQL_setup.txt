@@ -1,0 +1,86 @@
+ --- Create the jobs table. 
+ --- a good suggestion would be to have a foriegn key constraint
+ --- with the table contact.
+create sequence Job_Sequence;
+drop table jobs;
+create table jobs (
+job_id int4 unique DEFAULT nextval('Job_Sequence'),
+contact_id int4,
+job_no int4,
+job_name  text,
+job_location text 
+);
+CREATE UNIQUE INDEX job_index ON jobs (job_name, contact_id);
+
+-- This is a real backup table. 
+-- Everytime a changes occur, insert it into this table. 
+-- This isn't just for deletes, but for inserts and updates. 
+-- This becomes a history table, not just a backup.
+-- We even record the final output. 
+create sequence Backup_Job_Sequence;
+drop table jobs_backup;
+create table jobs_backup (
+backup_id int4 unique DEFAULT nextval('Backup_Job_Sequence'),
+action text CHECK (action in ('insert','update','delete','')),
+error_code int4,
+job_id int4,
+contact_id int4,
+job_no int4,
+job_name  text,
+job_location text
+);
+
+create sequence Contact_Sequence;
+drop table contact;
+create table contact (
+contact_id int4  UNIQUE DEFAULT nextval('Contact_Sequence'),
+name text unique,
+phone text,
+website text
+);
+
+ --- Insert two values for contacts.
+ --- I am not making stored procedures for this table, just jobs. 
+insert into contact (name,phone,website) 
+  values ('Mark Nielsen','(408) 891-6485','http://www.gnujobs.com');
+insert into contact (name,phone,website)
+  values ('Joe Shmoe','(1234) 111-1111','http://www.gnujobs.net');
+insert into contact (name,phone,website)
+  values ('Lolix.org','(12345) 111-1111','http://www.lolix.org');
+
+
+ --- Select info from contact to see if it is there.
+select * from contact;
+
+ --- Let use create perl function (which is probably not needed)
+ --- which will verify if inputted data in not blank. 
+
+drop function job_values_verify (int4,text,text);
+CREATE FUNCTION  job_values_verify (int4,text,text) RETURNS int4 AS '
+    my $Contact_Id = shift;
+    my $Job_Name = shift;
+    my $Job_Description = shift;
+    my $Error = 0;
+    if ($Contact_Id < 1) {$Error = -100;}
+    if (!($Job_Name =~ /[a-z0-9]/i)) {$Error = -101;}
+    if (!($Job_Description =~ /[a-z0-9]/i)) {$Error = -102;}
+  return $Error;
+' LANGUAGE 'plperl';
+
+drop function clean_text (text);
+CREATE FUNCTION  clean_text (text) RETURNS text AS '
+  my $Text = shift;
+    # Get rid of whitespace in front. 
+  $Text =~ s/^\\s+//;
+    # Get rid of whitespace at end. 
+  $Text =~ s/\\s+$//;
+    # Get rid of anything not text.
+  $Text =~ s/[^ a-z0-9\\/\\`\\~\\!\\@\\#\\$\\%\\^\\&\\*\\(\\)\\-\\_\\=\\+\\\\\\|\\[\\{\\]\\}\\;\\:\\''\\"\\,\\<\\.\\>\\?\\t\\n]//gi;
+    # Replace all multiple whitespace with one space. 
+  $Text =~ s/\\s+/ /g;
+  return $Text;
+' LANGUAGE 'plperl';
+ -- Just do show you what this function cleans up. 
+select clean_text ('       ,./<>?aaa aa      !@#$%^&*()_+| ');
+--
+

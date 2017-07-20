@@ -1,0 +1,699 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Inter-Process Communication - Part II LG #105</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="price.html" >&lt;-- prev</A> | <A HREF="seymour.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Inter-Process Communication - Part II</h1>
+<p id="by"><b>By <A HREF="../authors/ramankutty.html">Hiran Ramankutty</A></b></p>
+
+<p>
+<p>
+I hope everyone enjoyed <a href="../104/ramankutty.html">Part I</a> of this
+article, where we had an introductory discussion of IPC mechanisms and then
+continued with detailed descriptions of mechanisms such as
+<strong>pipes</strong>, <strong>fifos</strong> and <strong>shared
+memory</strong>. We shall now continue with the other IPC mechanisms such as
+<strong>memory mapping</strong>, <strong>semaphores</strong>,
+<strong>message queues</strong>, and <strong>sockets</strong>. 
+
+<h3><strong>Memory Mapping</strong></h3>
+<p>
+We have seen that <strong>fifos</strong> are basically named
+<strong>pipes</strong>. Similarly, <strong>mapped memory</strong> is like
+<strong>shared memory</strong> with a name. With this little bit of
+information, we can conclude that there is some sort of relationship
+between files in the file system and <strong>memory mapping</strong>
+techniques - and, in fact, there is. Simply put, the <strong>memory
+mapping</strong> mechanism deals with the mapping of a file in the file
+system to a portion of memory. 
+
+<p>
+Say, for example, we have a file that contains some data in a specific
+format that the user knows. That file may be required by some application.
+We will have to write some parsing function for the application that will
+search specific data in the file. To be more specific, we will have the
+parsing function return some data to the application whenever any requests
+for specific data come from the application. Then, our parsing function
+will have to access the file for every request. 
+
+<p>
+This is only acceptable if the application makes requests for data a few times.
+But this is time-consuming when the application sends frequent requests 
+for data and processing. One may wonder what makes it time-consuming.
+
+<p>
+Let us look at the operations involved in reading data from a file in
+the file system in the hard drive. The major operations involved are as
+follows:
+<ol type=i>
+<li>invoking system calls like <em>open, read, write</em> and <em>close</em>, and 
+<li>I/O operations by accessing a device (the hard drive). 
+</ol>
+
+<p>
+The two operations mentioned above consume considerable system services as
+compared to simply reading the data from memory. A program working in
+user space, when invoking a system call, transfers control from the user
+program to the kernel, which places it in the kernel space. That is, kernel
+space is consumed in the execution of the system calls. Also, accessing the
+disk (hard drive) frequently will be comparatively slow, since it requires
+I/O operations on a physical device. 
+
+<p>
+The overhead caused by frequently invoking system calls and accessing 
+disk to obtain data can be avoided by the <strong>memory
+mapping</strong> technique, which involves logically associating the file
+with a portion of the virtual memory or the program's user space. Any file
+I/O operations can then be replaced with simple memory access.
+
+<p>
+Linux provides system calls such as <strong>mmap</strong> and
+<strong>munmap</strong> for the purpose of using the memory mapping
+mechanism, which allows the sharing of mapped files. We have to associate the 
+file in such a manner that the mapping is accessible to any process. We may
+have an application or a program running several processes, and one or more
+of the processes may access data from one or more files. So if we have a
+mapping for a file with sharing rights for any process, we can use the same
+mapping in all processes. See the manual page for <strong>mmap</strong> for
+more details.
+
+<p>
+Again, synchronization problems can arise. Will the reads happen before or
+after the writes?  An entirely unrelated process might have memory-mapped
+the file and might be modifying it, unknown to us, at the same time as our
+process. A number of problems may come from the design of the
+application and the usage of the mechanism as well. So, let's take a look
+at the proper usage of this mechanism.
+
+(See <a href="misc/ramankutty/listing1.c.txt">listing1.c.txt</a>)
+
+<p>
+The logic behind the program is simple. The code first creates a temporary
+file with name <em>test_file</em> and writes the string
+<strong>HELLO_STR</strong> (defined as macro) into the file.  We then map
+the file <em>test_file</em> to memory using <strong>mmap</strong>. The
+format for this call, as described in the manual page for
+<strong>mmap</strong> is <code>void * mmap(void *start, size_t length, int
+prot, int flags, int fd, off_t offset)</code>.  The first field, which
+specifies the starting address, is usually given as '0'. Of course, the
+starting address of the memory location from which <strong>length</strong>
+bytes (second field) of the file are mapped is non-zero. Instead,
+<strong>mmap</strong> returns the starting address. The third argument is
+the protection that is to be provided to the mapped memory region. This
+should be same as the mode with which the file was opened.  We have given
+here <strong>PROT_READ</strong>, which gives read permissions to the memory
+page to which mapping has been done; the various memory protection options
+are further detailed in the above man page. The fourth argument is a flag
+which specifies the type of the mapped object. The flag
+<strong>MAP_FLAG</strong> specifies that the mapping is for a regular file
+or a character special device file. The fifth argument is a valid file
+descriptor of the file to be mapped, and the sixth argument is the
+<strong>offset</strong>, which has to be a multiple of the page size as
+returned by <strong>getpagesize()</strong> (see manual page for details) or
+is the starting offset for the file. A zero as the sixth argument means
+that the starting offset for reading the file is zero (i.e., the file is to
+be read starting from byte 0.) One notable point in the
+<strong>mmap</strong> man page is that the memory mapped using
+<strong>mmap</strong> is preserved across <strong>fork</strong> calls with
+the same attributes. This feature can be useful when we have more than one
+process accessing some file regularly. 
+
+<p>
+So, just how much benefit do we gain from memory mapping versus reading a
+file? We can demonstrate the gains by comparing this program against the
+use of the <strong>open, read</strong> and <strong>close</strong> calls
+that we mentioned above.
+
+(See <a href="misc/ramankutty/listing2.c.txt">listing2.c.txt</a>)
+
+<p>
+This program gives the output in the same format as the previous one. One
+can compare the performance of both the programs by running their
+respective executables with the <strong>time</strong> command, that is, if
+<em>test1</em> is the executable for <em>listing1.c</em> then run the
+program as <strong>time ./test1</strong>. Do the same for
+<em>listing2.c</em>. Note the difference between the performance of the two
+programs. My Pentium III machine with a processor speed of 733MHz and a
+128MB SD RAM showed following results:
+<pre>
+#Time for listing1.c
+real    0m20.360s
+user    0m1.600s
+sys     0m18.670s
+</pre>
+<p>
+and
+<pre>
+#Time for listing2.c
+real    0m24.325s
+user    0m1.990s
+sys     0m22.300s
+</pre>
+
+<p>
+It is obvious that the results may vary from machine to machine. It is also
+possible that a machine with a similar configuration like that of my test
+machine gives different results. One can also do the testing with different
+values of <strong>NTHLOOP</strong>, which will help you to get a better
+understanding of the difference in performance as the number of accesses to
+a file increases.
+
+<p>
+What I have shown here is a very simple scenario. In practical cases, we
+will often deal with files that are larger in size and have more and more
+complex data. The efficiency of the mapping method becomes much more
+apparent as files sizes go up and the complexity of parsing increases.
+
+<p>
+One thing to note is that when the process terminates the mapped region is
+automatically unmapped. Closing the file descriptor does not unmap the
+region automatically. To unmap a memory region we can use the system call
+<strong>munmap</strong>.  The address and the offset are the two arguments
+needed to unmap a memory region. 
+
+<p>
+Experimenting with the third and the fourth arguments to
+<strong>mmap</strong> can be very useful, and will promote a deeper
+understanding of where the use of <strong>memory mapping</strong> mechanism
+will be most effective.
+
+<h3>Message Queues</h3>
+<p>
+Message queues are one of the three different types of System V IPC
+mechanisms. This mechanism enables processes to send information to each
+other asynchronously. The word <em>asynchronous</em> in the present context
+signifies that the sender process continues with its execution without
+waiting for the receiver to receive or acknowledge the information. On the
+other side, the receiver does not wait if no messages are there in the
+queue. The queue being referred to here is the queue implemented and
+maintained by the kernel. 
+
+<p>
+Let us now take a look at the system calls associated with this mechanism. 
+<ol type=a>
+<li>msgget: This, in a way similar to <strong>shmget</strong>, gets a
+message queue identifier. The format is 
+<pre>
+int msgget(ket_t key, int msgflg);
+</pre>
+The first argument is a unique <strong>key</strong>, which can be generated
+by using <strong>ftok</strong> algorithm.  The second argument is the flag
+which can be <strong>IPC_CREAT</strong>, <strong>IPC_PRIVATE</strong>, or
+one of the other valid possibilities (see the man page); the permissions
+(read and/or write) are logically ORed with the flags.
+<strong>msgget</strong> returns an identifier associated with the
+<strong>key</strong>. This identifier can be used for further processing of
+the message queue associated with the identifier.
+<li>msgctl: This controls the operations on the message queue. The format is 
+<pre>
+int msgctl(int msqid, int cmd, struct msqid_ds *buf);
+</pre>
+Here <strong>msqid</strong> is the message queue identifier returned by
+<strong>msgget</strong>. The second argument is <strong>cmd</strong>, which
+indicates which action is to be taken on the message queue.  The third
+argument is a buffer of type <strong>struct msqid_ds</strong>. Each message
+queue has this structure associated with it; it is composed of records for
+queues to be identified by the kernel. This structure also defines the
+current status of the message queue. If one of the <strong>cmd</strong>s is
+<strong>IPC_SET</strong>, some fields in the <strong>msqid_ds</strong>
+structure (pointed by the third argument) will be set to the specified
+values. See the man page for the details. 
+<li>msgsnd: This is for sending messages. The format is 
+<pre>
+int msgsnd(int msqid, struct msgbuf *msgp, size_t msgsz, int msgflg);
+</pre>
+The first argument is the message queue identifier returned by
+<strong>msgget</strong>. The second argument is a structure that the
+calling process allocates. A call to <strong>msgsnd</strong> appends a copy
+of the message pointed to by <strong>msgp</strong> to the message queue
+identified by <strong>msqid</strong>. The third argument is the size of the
+message text within the <strong>msgbuf</strong> structure. The fourth
+argument is the flag that specify one of several actions to be taken as
+and when a specific situation arises.
+<li>msgrcv: This is for receiving messages. The format is 
+<pre>
+ssize_t  msgrcv(int msqid, struct msgbuf *msgp, size_t msgsz, long msgtyp, int msgflg);
+</pre>
+Besides the four arguments mentioned above for <strong>msgsnd</strong>,
+we also have <strong>msgtyp</strong>, which specifies the type of message
+requested. See the man page for the options.
+</ol>
+
+<p>
+Let's take a look at an example of using message queues.
+
+(See <a href="misc/ramankutty/send.c.txt">send.c.txt</a>)
+
+<p>
+First, we create a message queue using <strong>msgget</strong> with the
+flag set to <strong>IPC_CREAT</strong> and permissions set to read/write.
+Once we get the message queue identifier, we send the messages that in the
+above code are read from standard input. <cite>Note the output of the command
+<strong>ipcs</strong> before and after running the above program.  Try to
+interpret the output. One command that will be of use in doing this is
+<strong>ipcrm</strong>; see its man page for more details.</cite>
+
+<p>
+The code for receiving the sent messages is given below.
+
+(See <a href="misc/ramankutty/recv.c.txt">recv.c.txt</a>)
+
+<p>
+Note that here we are using <strong>msgget</strong> without the field
+<strong>IPC_CREAT</strong>. This is because we have not destroyed the
+message queue associated with the key <strong>9999</strong>. This can be
+seen in <a href="misc/ramankutty/send.c">send.c</a>. When we call
+<strong>msgrcv</strong>, we get the messages that were typed into
+the <strong>send</strong> program. This is confirmed by writing the
+received messages to the standard output.
+
+<p> Experimenting with message queues can be fun, but you have to realize
+their limitations.  Only repeated experimentation with this mechanism will
+enable one to actually learn it. Using message queues in applications has
+to be done only after careful consideration. Before thinking more on this,
+let us move on to the last of the System V IPC mechanisms, the
+<strong>Semaphores</strong>.
+
+<h3><strong>Semaphores</strong></h3>
+<p>
+A <strong>semaphore</strong> is best defined as a synchronization variable
+among processes communicating with each other. The processes may
+communicate data among themselves, or it may be communicated by a shared
+data object. The application should then see that the shared data object is
+not being written simultaneously by two or more process. A simple solution
+will be to have a locking mechanism that will prevent simultaneous changes in
+the shared data object. To be more precise, if we have a semaphore variable
+- say, <strong>S</strong> - then give a process access to the shared data
+object if <strong>S</strong> is not set. Once access is granted, 
+<strong>S</strong> is set, and is reset once operations on the shared
+data object are over.
+
+<p>
+The setting and resetting of the semaphore variable are commonly known as
+<strong>wait</strong> and <strong>post</strong> operations. The pseudo code
+for the <strong>wait</strong> and <strong>post</strong> operations are
+given below:
+<pre>
+wait(S) {
+	while(S &lt;= 0) 
+		; /* some operations. */
+	S--;
+}
+
+
+post(S) {
+	S++;
+}
+</pre>
+
+<p>
+Linux provides three system calls that enable the use of the semaphore
+mechanism. 
+<ol type=i>
+<li>semget: Counterpart of shmget and msgget, the format is 
+<pre>
+int semget(key_t key, int nsems, int semflg);
+</pre>
+This returns a semaphore identifier for a set of <strong>nsems</strong>
+number of semaphores for a set, associated with the <strong>key</strong>
+where <strong>semflg</strong> determines permissions and action to be 
+taken (like IPC_CREAT etc.)
+<li>semop: This is for controlling operations on the semaphore. The format is 
+<pre>
+int semop(int semid, struct sembuf *sops, unsigned nsops);
+</pre>
+The <strong>semid</strong> is an identifier that points to the semaphore
+set. The second field is a structure that describes the operations. The
+structure as defined in /usr/include/sys/sem.h is:
+<pre>
+struct sembuf {
+	unsigned short int sem_num;   /* semaphore number */
+	short int sem_op;             /* semaphore operation */
+	short int sem_flg;            /* operation flag */
+};
+</pre>
+The third argument <strong>nsops</strong> is the index in the array pointed
+to by <strong>sops</strong>. It is set to 1 if there is one semaphore in
+the complete set.  
+<li>semctl: Counterpart of shmctl and msgctl, the format is
+<pre>
+int semctl(int semid, int semnum, int cmd, ...);
+</pre>
+This is the administrator of the semaphore set. It performs operations
+specified by <strong>cmd</strong> on the n<sup>th</sup> semaphore where n
+is same as <strong>semnum</strong> and the semaphore set is identified by
+<strong>semid</strong>.
+</ol>
+
+(See <a href="misc/ramankutty/semaphore.c.txt">semaphore.c.txt</a>)
+
+<p>
+If you take a look at the 'keyboard-hit' program that I used 
+in my <a href="../104/ramankutty.html">previous article</a> to explain the
+use of <strong>pipes</strong>, <strong>fifos</strong> and <strong>shared
+memory</strong> mechanisms, the code above is essentially the same. We
+accept input from the keyboard and check whether the input is a digit
+between 0 and 9 inclusive; however, we now have two processes trying to
+take inputs from the keyboard. Since this can lead to conflict, we keep a
+lock, so that when one process is active, the other one waits.
+
+<p>
+First, we register a signal <strong>SIGINT</strong>, so that whenever the
+signal is raised, the signal handler <strong>process_exit</strong> is
+executed, bringing about the termination of the process for which the
+signal is registered. We then have <strong>init_semaphore</strong>, which
+creates a semaphore set with <strong>NUM</strong> members in the set (here
+it is 1). On successful creation of the semaphore set,
+<strong>semget</strong> returns a semaphore set identifier, which will be
+used for further operations on the semaphore set. We then invoke
+<strong>set_sem_val</strong>. Initially, this may seem useless, but it can
+actually be used to confirm that you can run your program with the code
+above and with the code that does not call <strong>set_sem_val</strong>.
+The manual page for <strong>semctl</strong> gives a brief description on
+the union <strong>semun</strong>. The union as defined is 
+<pre>
+union semun {
+	int val;                  /* value for SETVAL */
+	struct semid_ds *buf;     /* buffer for IPC_STAT, IPC_SET */
+	unsigned short int *array;    /* array for GETALL, SETALL */
+	struct seminfo *__buf;    /* buffer for IPC_INFO */
+};
+</pre>
+
+<p> We set the field <em>val</em> in the union to 1. This signifies that
+access to the critical resource can be provided only once (or one process).
+It the value is set as 2, then only two process can hold access to the
+shared resource at a time. 
+
+<p>
+Next, we initialize two processes that take the same action. We fork it in
+such a manner that only the child processes run. If semaphore operation for
+the lock is successful, then we invoke <strong>critical_resource</strong>;
+otherwise we try again (much like an infinite loop). If a lock is
+successful, then that process is provided access to
+<strong>critical_resource</strong>. Once it comes out of the
+<strong>critical_resource</strong>, we remove the lock.
+
+<cite>Note that we have a <strong>sleep(1)</strong> in the process, which
+enables the scheduling of the two process to provide enough time slices to
+both the process. Confusing, right? Try running the code without that
+sleep; the results are educational.</cite>
+
+<p> The <strong>critical_resource</strong> simply reads keyboard characters
+other than '\n' and when a digit between 0 and 9 is read, it asks the user
+to raise the keyboard interrupt. 
+
+<p> This may look as simple as the concept explained in almost all
+textbooks on Operating Systems.  But this is because we are dealing with
+only one member in the semaphore set. The complexity increases as the
+number of semaphores increases. One may also wonder, why not use a simple
+flag kept in shared memory instead? That would be fine if we were dealing
+with programs as simple as the one given as example here, but would
+restrict the usage and features that are available with semaphores.  I
+suggest experimenting with this mechanism, with more complex programs where
+you deal with more than just one semaphore in the set. 
+
+
+<h3>Sockets</h3>
+Sockets are the most popular of all the IPC mechanisms for a simple reason:
+other mechanisms do not support communication between two machines. Sockets
+provide a full-duplex communication channel between processes that do not
+necessarily run on the same machine.
+
+<p>
+Generally, sockets are associated with the concept of network communication
+in the form of client-server programming; a pair of processes of which one
+will be a client and one a server. The client process will send requests to
+the server, and the server process will send replies as an acknowledgment
+to the client requests.  Of course, when creating a socket, we have to
+specify the type of communication that will be needed, since different
+modes of communication requires different protocols.
+
+<p>
+The different system calls associated with this form of IPC mechanism are given below:
+
+<ol type=a>
+<li>socket: This system call returns the descriptor, which is
+used for further communication. The format is 
+<pre>
+int socket(int domain, int type, int protocol);
+</pre>
+The first argument <strong>domain</strong> specifies the communication
+domain. The domain here indicates which protocol family is to be used for
+communication and the third argument <strong>protocol</strong> specifies a
+particular protocol to be used with the socket. See the manual page for
+<strong>socket</strong> for more details on the protocols supported. The
+second argument <strong>type</strong> specifies the properties, features or
+limitations of the socket.
+<li>bind: This binds the socket with a name. The format is 
+<pre>
+int bind(int sockfd, struct sockaddr *my_addr, socklen_t addrlen);
+</pre>
+Here, the address <strong>my_addr</strong> of length
+<strong>addrlen</strong> is given to the socket whose descriptor is
+<strong>sockfd</strong>. The address is initialized before a call to
+<strong>bind</strong> is made.
+<li>listen: listen for connections on a socket. The format is 
+<pre>
+int listen(int s, int backlog);
+</pre>
+This tells the kernel to queue up a maximum of <strong>backlog</strong>
+number of connections for the socket with the descriptor
+<strong>s</strong>. If the queue becomes full, then appropriate action is
+taken based on the protocol being used.
+</pre>
+<li>accept: accept the connection on a socket. The format is 
+<pre>
+int accept(int s, struct sockaddr *addr, socklen_t *addrlen);
+</pre>
+This accepts connections and fills up the <strong>addr</strong> with the
+socket address of the client. Sockets support connection-oriented as well
+as connectionless communication. This system call is associated only with
+connection-oriented communication. 
+<br>
+<cite>For more details on connection-oriented and connectionless
+communication, please refer the book <strong>Computer Networks</strong> by
+<strong>Andrew S Tanenbaum</strong>.</cite>
+<li>connect: initiate a connection in a socket. The format is 
+<pre>
+int  connect(int  sockfd,  const  struct sockaddr *serv_addr, socklen_t addrlen);
+</pre>
+This is invoked by the client to connect to a socket with descriptor
+<strong>sockfd</strong> on a server with the address
+<strong>serv_addr</strong>. Once <strong>connect</strong> call succeeds, it
+returns zero, otherwise <em>errno</em> is set appropriately.
+</ol>
+
+(See <a href="misc/ramankutty/client.c.txt">client.c.txt</a> and <a href="misc/ramankutty/server.c.txt">server.c.txt</a>)
+
+<p>
+The structure of the two programs <strong>client.c</strong> and
+<strong>server.c</strong> are similar; both programs initially create
+sockets. The sockets are created using the <strong>AF_INET</strong> family
+of protocols, which is same as <strong>PF_INET</strong>. The field
+<strong>SOCK_STREAM</strong> indicates that it will be a sequenced,
+reliable, full-duplex and connection-based socket. The protocol specified
+during creation of socket is '0'. This can also be 
+<strong>IPPROTO_TCP</strong> for tcp sockets and
+<strong>IPPROTO_UDP</strong> for udp sockets.
+
+<p>
+In the case of the server, we name the sockets using the
+<strong>bind</strong> system call. We have a structure
+<strong>sockaddr</strong> and <strong>sockaddr_in</strong>. The former
+specifies the generic socket address, whereas the latter describes the
+internet socket address. The structure as one can see in the manual page
+for <strong>ip</strong> is 
+<pre>
+struct sockaddr_in {
+	sa_family_t    sin_family; /* address family: AF_INET */
+	u_int16_t      sin_port;   /* port in network byte order */
+	struct in_addr  sin_addr;  /* internet address */
+}
+</pre>
+and <strong>in_addr</strong> is 
+<pre>
+struct in_addr {
+	u_int32_t s_addr;	/* address in network byte order */
+}
+</pre>
+
+<p>
+Here, the <strong>sin_family</strong> field is same as the family of
+protocols being used, that is, <strong>AF_INET</strong>. The
+<strong>sin_port</strong> field is the port number (in network byte order),
+which will be used by the socket. Finally, <strong>sin_addr</strong> field
+is the internet address (again in network byte order), which here I have
+given as the loopback address. The socket is bound to these details, once
+a successful call is made on <strong>bind</strong>.
+
+<p>
+The <strong>listen</strong> system call specifies that the created socket
+is willing to accept incoming connections, but with a restriction that
+there will be a limitation for the number of connections.  In our code, the
+limitation is given as '1', which specifies the queue size for the number
+of pending connections.
+
+<p> An <strong>accept</strong> call returns the descriptor of the accepted
+connection. If the server needs to serve n &gt; 1 number of connections,
+then we have to make repeated calls to <strong>accept</strong>.
+
+<p>
+After that, we can do the usual file operations (e.g.,
+<strong>read</strong> and <strong>write</strong>) on the descriptor
+returned by the <strong>accept</strong> system call. Alternate
+<strong>read</strong> and <strong>write</strong> operations will 
+help the server to communicate with the client.
+
+<p> Coming to the structure of the client program, once a socket is
+created, the client tries to connect to the server using the
+<strong>connect</strong> system call. This, again, is done after setting
+the internet socket address before binding the socket to a name.  Once the
+call to <strong>connect</strong> is successful, the client program can
+start communicating with the server. 
+
+<cite>Note: obviously, the client program can only connect to a running
+server. However, for testing purposes, please run the client program
+without running the server.</cite>
+
+<p> The example shown here illustrates the use of sockets for loopback
+communication. The client and server programs may be run on different
+machines by changing the internet address to the required ones. There are
+also several other families of protocols which support communication via
+sockets. Some of the interesting ones are <strong>PF_LOCAL</strong> for
+local communication, <strong>PF_PACKET</strong> for low-level packet
+interface, <strong>PF_NETLINK</strong> for communication between the kernel
+and the user, etc. It's a good idea to try out these options to
+understand the flexibility and domains (in the application level) where one
+can use this mechanism. The example above is for connection
+oriented communication. Exploring the use of sockets in an
+connectionless-oriented communication is left as an exercise to the
+readers.
+
+<h3>Conclusion</h3>
+<p> Finally, I come to an end of my article. I have tried to present the
+concepts of Inter-Process Communication in a manner which will make it
+easier for novice programmers to write their own code whenever they come
+across any of the problems that I have mentioned here.  This two-part
+article will not, of course, make you an expert in this field, but should
+form a good base for future exploration.
+
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<P>
+<img ALIGN="LEFT" ALT="[BIO]" SRC="../gx/authors/ramankutty.jpg" width="200" height="200" class="bio">
+<em>
+
+I completed my B. Tech in Computer Science &amp; Engineering from a small town
+called Trichur, in Kerala, God's Own Country in India. Presently I am
+working in Naturesoft Pvt. Ltd, Chennai, India as a Programmer. I spend my
+free time reading books on Linux and exploring the same. Also, I have a
+good appetite for Physics. My motive in life is to go forward, onward and
+upward.
+
+</em>
+<br CLEAR="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2004, Hiran Ramankutty. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 105 of Linux Gazette, August 2004
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="price.html" >&lt;-- prev</A> | <A HREF="seymour.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">August 2004 (#105)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

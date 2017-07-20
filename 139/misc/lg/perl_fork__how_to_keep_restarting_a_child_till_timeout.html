@@ -1,0 +1,1006 @@
+<!DOCTYPE html
+	PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+	 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en-US" xml:lang="en-US">
+<head>
+<title>perl fork: How to keep restarting a child till timeout?</title>
+<link rel="stylesheet" type="text/css" href="../../../lg.css" />
+<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1" />
+</head>
+<body>
+<a href="../../../"><img alt="Linux Gazette" src="../../../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" /></a><img alt="Tux" src="../../../gx/tux_86x95_indexed.png" id="tux" /><p id="fun">...making Linux just a little more fun!</p><div class='content articlecontent'><a name="top"></a><h3>perl fork: How to keep restarting a child till timeout?</h3>
+<p>
+<b><p>
+Karl-Heinz Herrmann [kh1 at khherrmann.de]
+</p>
+</b><br />
+<b>Sat, 5 May 2007 22:43:01 +0200</b>
+</p>
+
+<p>
+Hi tag,
+</p>
+
+
+<p>
+I'm trying to write a perl progam to automatically record internet
+radio. The current setup uses at to start a recording process which
+checks the radios webpage, filters the proper straming adress and wget
+it for wget'able streams -- otherwise mplayer is used to dump the
+stream. 
+</p>
+
+<p>
+My increasing problem is, that the recording process exits prematurely.
+What I currently do in perl is a main routine which does all the
+webfetching and then forks out two processes:
+</p>
+
+<p>
+* the recorder
+* the killer -- waiting and then killing the recorder after preprogrammed time
+</p>
+
+<p>
+main program exits. This protects mplayer from any input on stdin as
+this immediately kills mplayer (a problem if perl program is started
+by atd as I had to find out).
+</p>
+
+
+<p>
+Now I tried to setup a signal handler for SIGCHLD in the main part  and
+then let the main go to sleep instead of exiting. On receiving a
+SIGCHLD it checks if this was because of the killer (time up, killer
+exited) or if the time is not yet up and the recorder exited too early.
+In the latter case I restart the recorder, kill and restart the killer
+for the new recorder-pid  and then I want back in main, set the
+sighandler and go to sleep as before.... but I seem unable to get out
+of the sighandler. So this restarted recording exactly once -- but not
+again. 
+</p>
+
+<p>
+Is something like the above possible? Or do I have to switch to a
+loop in main checking regularly on the status and react actively
+without the use of sighandler to get any number of restarts? 
+</p>
+
+<p>
+I'm not too worried of too fast forking as wget/mplayer takes a while
+till they decide to fail -- but just in case a small delay and restart
+counter (or count/time) could be calculated and watched in case network
+is down and wget/mplayer are exiting to quick. 
+</p>
+
+<p>
+Since I would very much like to learn how the sighandlers are supposed
+to work and how to use them I would find the first strategy more
+interesting.....  
+</p>
+
+<p>
+As reading material I've the perl CD bookshelf including Programming
+perl and the cookbook (Advanced Perl Programming doesn't have much on
+forking and signal handlers). Both are not too deep into what's to do
+once the sighandler was activated and I don't just want to terminate
+after some cleaning up.  
+</p>
+
+
+
+<p>
+K.-H.
+</p>
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_mail.html#mb-perl_fork__how_to_keep_restarting_a_child_till_timeout">Back</a><hr width="50%" align="left" /><p><br /></p><p>
+<b><p>
+Thomas Adam [thomas.adam22 at gmail.com]
+</p>
+</b><br />
+<b>Sun, 6 May 2007 02:32:56 +0100</b>
+</p>
+
+<p>
+On Sat, May 05, 2007 at 10:43:01PM +0200, Karl-Heinz Herrmann wrote:
+</p>
+
+
+<pre>
+&gt; Now I tried to setup a signal handler for SIGCHLD in the main part  and
+&gt; then let the main go to sleep instead of exiting. On receiving a
+&gt; SIGCHLD it checks if this was because of the killer (time up, killer
+&gt; exited) or if the time is not yet up and the recorder exited too early.
+&gt; In the latter case I restart the recorder, kill and restart the killer
+&gt; for the new recorder-pid  and then I want back in main, set the
+&gt; sighandler and go to sleep as before.... but I seem unable to get out
+&gt; of the sighandler. So this restarted recording exactly once -- but not
+&gt; again. 
+</pre>
+
+<p>
+You should probably look at using alarm() and hence SIGALRM for this.
+</p>
+
+<p>
+Post a code snippet or something so that some context can be applied
+here.
+</p>
+
+<p>
+-- Thomas Adam
+</p>
+
+<pre>-- 
+"He wants you back, he screams into the night air, like a fireman going
+through a window that has no fire." -- Mike Myers, "This Poem Sucks".
+</pre>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_mail.html#mb-perl_fork__how_to_keep_restarting_a_child_till_timeout">Back</a><hr width="50%" align="left" /><p><br /></p><p>
+<b><p>
+Karl-Heinz Herrmann [kh1 at khherrmann.de]
+</p>
+</b><br />
+<b>Sun, 6 May 2007 19:45:35 +0200</b>
+</p>
+
+<p>
+Hi Thomas,
+</p>
+
+<p>
+On Sun, 6 May 2007 02:32:56 +0100
+Thomas Adam &lt;thomas.adam22@gmail.com&gt; wrote:
+</p>
+
+
+
+<pre>
+&gt; Post a code snippet or something so that some context can be applied
+&gt; here.
+</pre>
+
+<p>
+see other post -- this crossed over with a second post from me. 
+</p>
+
+
+
+<pre>
+&gt; You should probably look at using alarm() and hence SIGALRM for this.
+</pre>
+
+<p>
+I did -- and it seems I found a working solution. 
+</p>
+
+
+<p>
+At first I still had the problem to protect mplayer from any input, but
+then I found a chapter on daemon programming. So what I do now is start
+the perl-script, do my web fetching and then fork, let the parent exit
+and create a new session ID along with a new Process group ID -- which
+I keep to kill this whole group later.
+</p>
+
+<p>
+Then I'm forking the recording part which calls system to run either
+wget or mplayer inside an infinite loop which blocks at:
+waitpid($mplayerpid,0)
+if this comes back mplayer is simply reforked. 
+</p>
+
+<p>
+The parent in the meantime set a SIGALRM and got to sleep using a
+blocking waitpid statement as well. 
+</p>
+
+<p>
+On SIGALRM I jump to a simple sighandler which kills the negative PGID
+-- which by itself should be sufficient to kill everything -- but
+somehow isn't quite reliable. Occasionally the mplayer continues 
+running. 
+</p>
+
+<p>
+"ps axjf" shows the perlscript which is parent to a copy of itself which
+is parent to the wget or an mplayer which forks another mplayer. 
+</p>
+
+<p>
+<pre class="code">
+    1 11578 11578 11578 ?           -1 SNs   1000   0:00 /usr/bin/perl -w /home/khh/bin/getradio_restart.pl dlr 90
+11578 11579 11578 11578 ?           -1 SN    1000   0:00  \_ /usr/bin/perl -w /home/khh/bin/getradio_restart.pl dlr 90
+11579 11582 11578 11578 ?           -1 SN    1000   0:00      \_ wget <a href="http://dradio-ogg.t-bn.de/dkultur_high.ogg">http://dradio-ogg.t-bn.de/dkultur_high.ogg</a> [...]
+ 
+    1 13187 13187 13187 ?           -1 Ss    1000   0:00 /usr/bin/perl -w /home/khh/bin/getradio_restart.pl br2 1
+13187 13188 13187 13187 ?           -1 S     1000   0:00  \_ /usr/bin/perl -w /home/khh/bin/getradio_restart.pl br2 1
+13188 13191 13187 13187 ?           -1 S     1000   0:00      \_ mplayer mms://a1069.l674138049.c6741.e.lm.akamaistream.net/D/1069/6741/v0001/reflecto
+13191 13194 13187 13187 ?           -1 S     1000   0:00          \_ mplayer mms://a1069.l674138049.c6741.e.lm.akamaistream.net/D/1069/6741/v0001/refl
+</pre>
+The SID of the newly created session is 11578 (13187), so a:
+<pre>
+kill("TERM",-$PID); 
+</pre>
+should be killing everything, or not? sometimes mplayer survived 
+this. Will the PGID always be the PID of the top-most parent creating a
+new session? And without creating a new session? 
+</p>
+
+
+
+<p>
+sample output of the code below matching the upper "ps axjf" output is:
+<pre>
+starting new session 11578
+grandparent: 11577: this is  PID 11577  (just forked pid 11578)
+ -- now exiting to disown the child
+</pre>
+so $$ and $SID should both be 11578 -- $grandparent is 11577 and exiting. 
+</p>
+
+
+<p>
+at least this seems to work reliable now, but I shouldn't need all
+these kill-shotguns at all the pids to make the terminating it reliable.
+Killing $SID (see code at very bottom) should be sufficent, or not? 
+</p>
+
+
+
+<p>
+The current code looks like this: (run with two parameters -- station
+(dlr) and duration in minutes):
+</p>
+
+
+<p>
+<pre class="code">
+#!/usr/bin/perl -w
+ 
+use WWW::Mechanize;
+use POSIX;
+ 
+if (@ARGV != 2){
+  print "wrong arguments\n";
+  print "Usage:\n";
+  print "  getradio.pl [br2|br4|wdr3|wdr5|dlr|einslive|figaro] duration\n";
+  exit;
+}
+ 
+$sender=shift  @ARGV;
+$duration=shift @ARGV;
+ 
+print "recording $sender for $duration min.\n";
+ 
+if ($sender eq "dlrmms"){
+ 
+#[...]
+ 
+}elsif($sender eq "dlr"){
+  print "don't mess around for ogg dlr, just use standard link\n";
+  $link1="<a href="http://dradio-ogg.t-bn.de/dkultur_high.ogg">http://dradio-ogg.t-bn.de/dkultur_high.ogg</a>";
+ 
+#[... other stations]
+ 
+}elsif($sender eq "br4"){
+  print "recording $sender for $duration min.\n";
+  my $mech = WWW::Mechanize-&gt;new();
+  $mech-&gt;get( "<a href="http://www.br-online.de/streaming/bayern4klassik/bayern4klassik_red.asx">http://www.br-online.de/streaming/bayern4klassik/bayern4klassik_red.asx</a>" );
+  $file= $mech-&gt;content();
+  $file =~ /href="(mms:.*)"/;
+  print "found the mms-link:\n $1\n";
+  $link1=$1;
+}
+ 
+ 
+$grandparent=$$;  # keep original PID
+ 
+die "can't fork: $!" unless defined($daemonizepid = fork());
+ 
+if ($daemonizepid){
+  print "grandparent: $grandparent: this is  PID $$  (just forked pid $daemonizepid)\n -- now exiting to disown the child\n";
+  exit 0;
+}
+ 
+ 
+# this is the disowned process -- mplayer should be save from keyboard
+# input and atd
+ 
+# start new session ID -- than this should be new Program group ID (PGID) to kill later
+ 
+$SID=POSIX::setsid()
+    or die "Can't start a new session: $!";
+ 
+print "starting new session $SID\n";
+ 
+die "can't fork: $!" unless defined($kidpid = fork());
+ 
+if ($kidpid){ 
+    
+  print "forked: started recorder pid $kidpid\n";
+  
+  # this is parent thread
+ 
+  local $SIG{ALRM} = \&amp;timed_out;      # I want only the parent to set an alarm -- will this localiste the sighandler? 
+				       # recording child is already forked at this point
+  alarm($duration*60+10);
+ 
+  waitpid($kidpid,0);   # just to block parent till alarm goes off
+  # $buf=&lt;&gt;; is not good -- return from atd would trigger that.
+  # no idea why we still get STDIN for this process. (Grand)Parent disowned us to init already
+  print "parent ($$) -- child $kidpid came back.\n";
+  $left=alarm(0);
+  print "alarm had $left time left!\nexiting anyway...\n";
+   
+}else{
+  
+  # child process
+  # here we run mplayer to record the stuff to a wav file
+  
+  $part="-0";
+  $pn=1;
+  $date=`date +"%Y%m%d-%R"`;
+  $date=~s/:/_/g;
+  chomp($date);
+ 
+  if ($sender eq "dlr" || $sender eq "dlf"){
+    # ok -- this is wget stuff
+    while (1){
+      system("wget",$link1,"-O",$sender."-".$date.$part.".ogg","-nv","-t","500");
+      waitpid($kidpid,0);
+      print "recording process came back. restarting\n";
+      $part="-".$pn++;
+    }
+  }else{
+     
+    
+    while (1){
+      # paranoia -- there shouldn't be two recordings of the same stuff 
+      # so thenames should be unique -- but nevertheless at least try to keep two 
+      # processes from overwriting each other. (should be a while checking till a nonexisitng file is generated)
+      if ( -f $sender."-".$date.$part.".wav" ){
+	print "looks like the outputfile exists already....\n";
+	$date=$date."-a";
+      }
+      system ('mplayer',$link1, "-vc", "dummy", "-vo", "null", "-ao", "pcm:waveheader:file=$sender-".$date.$part.".wav");
+      waitpid($kidpid,0);
+      print "recording process came back. restarting\n";
+      $part="-".$pn++;
+    }
+  }
+}
+ 
+print "program reached code after all the forking code....shouldn't happen.\nkilling myself and all my children.\n";
+ kill("TERM" =&gt; -$$);
+ 
+ 
+sub timed_out{
+  kill("TERM" =&gt; -$$);            # shouldn't this one be enough? The process with the ALRM timer is the topmost parent
+                                  # or could the set alarm be "inherited" to the child and get things out of sequence? 
+  kill("TERM" =&gt; -$SID);          # the new session ID -- this should also kill of all remaining processes
+  kill("TERM" =&gt; -$grandparent);  # this process shouldn't be there anymore
+  die "recording finished\n";
+}
+ 
+</pre>
+K.-H.
+</p>
+
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_mail.html#mb-perl_fork__how_to_keep_restarting_a_child_till_timeout">Back</a><hr width="50%" align="left" /><p><br /></p><p>
+<b><p>
+Karl-Heinz Herrmann [kh1 at khherrmann.de]
+</p>
+</b><br />
+<b>Sun, 6 May 2007 09:38:25 +0200</b>
+</p>
+
+<p>
+Hi TAGS's,
+</p>
+
+<p>
+I seem to have found the problem with "getting out of the sighandler".
+Actually I did get out but The main program was not returning to what
+it was doing (i.e. sleeping) it just ran on and exited. I wrapped a
+while(true){} around that part and tried to set an alarm to get me out. 
+</p>
+
+<p>
+But this got somewhat into a mess: 
+</p>
+
+<p>
+1) I *should not* keep main running -- or at least have to decouple the
+   mplayer recording process totally from input on STDIN. Right now
+   mplayer spews its output to STDOUT and receives STDIN -- which
+   terminates mplayer. 
+</p>
+
+<p>
+   -&gt; I have to fork a child which forks mplayer and child exits to decouple it
+      where do I get the proper PID for the mplayer now ? 
+      The parent (main) can't even kill itself and all in the process group with it 
+      sind mplayer now belongs to init.
+</p>
+
+<p>
+The first version where main programmed a killer and then exited
+decoupled mplayer and knew both pids to do program the killer. But then
+there is nothing waiting for a SIGCHILD....
+</p>
+
+<p>
+2) I had a look at alarm -- setting an alarm in main and simply cause
+   main to kill everything would be nice and easy. But if I set an alarm I
+   should not use sleep as it might use the same timer mechanism. How do I
+   keep main from running 99% of CPU then? Doing a blocking read on
+   something I'm sure nothing is coming in? Seems ugly.... A blocking waitpid 
+   maybe? 
+</p>
+
+<p>
+   This still doesn't solve the decoupling of mplayer.
+</p>
+
+
+<p>
+Hm.... getting late around here. Maybe I dream something weird enough
+to help with this tomorrow ;-)
+</p>
+
+
+<p>
+Any strategic hints would be very much welcome.... 
+</p>
+
+<p>
+If anybody would like to have a peak at the current code see below....
+Currently restarting mplayer works but <strong>ending</strong> mplayer does not.
+parent just exits. killer kills the wrong process if it has been
+restarted inbetween. To make mplayer die just press return. 
+</p>
+
+
+<p>
+<pre class="code">
+#!/usr/bin/perl -w
+ 
+use WWW::Mechanize;
+use POSIX;
+ 
+[..... all the html analysis, getting the mms-links]
+ 
+# programm alarm for main so we wake up and 
+# can terminate in main as well
+ 
+alarm($duration*60+10);
+ 
+die "can't fork: $!" unless defined($kidpid = fork());
+ 
+if ($kidpid){ 
+  
+  print "forked: started recorder pid $kidpid\n";
+ 
+  # this is parent thread
+  # first send off the record-killer 
+ 
+  die "can't fork: $!" unless defined($killerpid = fork());
+    
+  if ($killerpid){
+     
+    print "forked again: killer is $killerpid\n";
+     
+    # again parent -- to protect the recording pid from keyboard interactive we just exit.
+    print "************ parent setting watch\n";
+    $SIG{CHLD} = \&amp;REAPER;
+    while(true){
+      my $timeleft=alarm(0);
+      print "alarm clock say $timeleft time is still left!\n";
+      alarm($timeleft);
+      sleep($timeleft);
+    }
+    # finished -- full recording time has gone buy
+    exit 0;
+  }else{
+    # so this is the killer
+    sleep($duration*60+10);
+    print "killer woke up -- killing recording process pid $kidpid\n";
+    kill("TERM" =&gt; $kidpid);
+    exit 0;
+  }
+}else{
+  
+  # child process
+  # here we run mplayer to record the stuff to a wav file
+  
+  $date=`date +"%Y%m%d-%R"`;
+  $date=~s/:/_/g;
+  chomp($date);
+  if ( -f $sender."-".$date.".wav" ){
+    print "looks like the outputfile exists already....\n";
+    $date=$date."-a";
+  }
+  exec ('mplayer',$link1, "-vc", "dummy", "-vo", "null", "-ao", "pcm:waveheader:file=$sender-".$date.".wav");
+ 
+   
+}
+ 
+ 
+print "program reached code after all the forking code....shouldn't happen.\nkilling myself and all my children.\n";
+ kill("TERM" =&gt; -$$);
+ 
+ 
+sub REAPER {
+  my $stiff;
+  while (($stiff = waitpid(-1, &amp;WNOHANG)) &gt; 0) {
+    # do something with $stiff if you want
+    print "\nThis is the reaper.... $stiff came back\n\n";
+    if ($stiff == $killerpid){
+      print "killer $killerpid has exited... so recording is finished\n";
+      exit 0;
+    }
+    if ($stiff == $kidpid){
+      print "Recording pid exited, checking killer\n";
+      $killerstat=waitpid($killerpid,&amp;WNOHANG);
+      print "Killerstauts is: $killerstat\n";
+      if ($killerstat == 0){
+	print "Killer still running, restarting recording process\n";
+	die "can't fork: $!" unless defined($kidpid = fork());
+	if ($kidpid){
+	  print "start a new killer...(just forget about the old one for now, would trigger another SIGCHILD)\n";
+ 	  
+	  ### here the killer should be restarted with the new child pid
+          ### this has to be after recording child is restarted or we use the wrong PID
+ 
+	  print "parent going to sleep again\n";
+	  $SIG{CHLD} = \&amp;REAPER;
+	  return;
+	}else{
+	  $date=`date +"%Y%m%d-%R-%S"`;
+	  $date=~s/:/_/g;
+	  chomp($date);
+	  exec ('mplayer',$link1, "-vc", "dummy", "-vo", "null", "-ao", "pcm:waveheader:file=$sender-".$date.".wav");
+	}
+      }
+    }
+    
+  }
+   
+  $SIG{CHLD} = \&amp;REAPER;                  # install <strong>after</strong> calling waitpid
+}
+ 
+</pre>
+K.-H.
+</p>
+
+
+
+
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_mail.html#mb-perl_fork__how_to_keep_restarting_a_child_till_timeout">Back</a><hr width="50%" align="left" /><p><br /></p><p>
+<b><p>
+Ben Okopnik [ben at linuxgazette.net]
+</p>
+</b><br />
+<b>Sun, 6 May 2007 20:41:00 -0400</b>
+</p>
+
+<p>
+Hi, Karl-Heinz -
+</p>
+
+<p>
+On Sun, May 06, 2007 at 09:38:25AM +0200, Karl-Heinz Herrmann wrote:
+</p>
+
+<pre>
+&gt; Hi TAGS's,
+&gt; 
+&gt; I seem to have found the problem with "getting out of the sighandler".
+&gt; Actually I did get out but The main program was not returning to what
+&gt; it was doing (i.e. sleeping) it just ran on and exited. I wrapped a
+&gt; while(true){} around that part and tried to set an alarm to get me out. 
+&gt; 
+&gt; But this got somewhat into a mess: 
+&gt; 
+&gt; 1) I *should not* keep main running -- or at least have to decouple the
+&gt;    mplayer recording process totally from input on STDIN. Right now
+&gt;    mplayer spews its output to STDOUT and receives STDIN -- which
+&gt;    terminates mplayer. 
+&gt; 
+&gt;    -&gt; I have to fork a child which forks mplayer and child exits to decouple it
+&gt;       where do I get the proper PID for the mplayer now ? 
+&gt;       The parent (main) can't even kill itself and all in the process group with it 
+&gt;       sind mplayer now belongs to init.
+</pre>
+
+<p>
+I'm very suspicious of forks and such, and only use them in the most
+basic ways - e.g., launching a child process and dropping its privs for
+security, or just running a simple daemon - but I find that I can
+usually get an answer for fork/wait related questions from 'perldoc
+perlipc'. The people who wrote it are clearly aware that it's a complex
+issue, and have spent a lot of time documenting this.
+ 
+</p>
+
+<pre>
+&gt; 
+&gt; sub REAPER {
+&gt;   my $stiff;
+&gt;   while (($stiff = waitpid(-1, &amp;WNOHANG)) &gt; 0) {
+&gt;     # do something with $stiff if you want
+&gt;     print "\nThis is the reaper.... $stiff came back\n\n";
+&gt;     if ($stiff == $killerpid){
+&gt;       print "killer $killerpid has exited... so recording is finished\n";
+&gt;       exit 0;
+&gt;     }
+</pre>
+
+<p>
+This is, of course, taken straight from the example in 'perldoc perlipc'
+- but did you note the advice in the long comment following the 'my'
+declaration?
+</p>
+
+<p>
+<pre class="code">
+  use POSIX ":sys_wait_h";
+  sub REAPER {
+      my $child;
+      # If a second child dies while in the signal handler caused by the
+      # first death, we won't get another signal. So must loop here else
+      # we will leave the unreaped child as a zombie. And the next time
+      # two children die we get another zombie. And so on.
+      while (($child = waitpid(-1,WNOHANG)) &gt; 0) {
+          $Kid_Status{$child} = $?;
+      }
+      $SIG{CHLD} = \&amp;REAPER;  # still loathe sysV
+  }
+  $SIG{CHLD} = \&amp;REAPER;
+  # do something that forks...
+</pre>
+This sounds like it's specifically intended to handle the kind of
+problem that you're having. Also, the initial "loathe sysV: it makes us
+not only reinstate the handler, but place it after the wait" comment
+pretty much underscores the point: the handler is non-reentrant, and has
+to be reinstated on every call. It's sort of like trying to place a
+delay in a 'trap' statement - the trap is not operating during the
+declaration itself...
+</p>
+
+<p>
+Like I said, I try to stay away from all but the most basic calls to
+fork() and wait(). There's Dark and Ancient Evil in those precincts.  Oh
+- be sure to set '$|' (a.k.a. 'autoflush') to some non-null value in
+your program; it's a highly necessary belt-and-suspenders measure when
+dealing with calls to the system, and often prevents/resolves problems
+associated with timing issues.
+</p>
+
+
+<pre>-- 
+* Ben Okopnik * Editor-in-Chief, Linux Gazette * <a href="http://LinuxGazette.NET">http://LinuxGazette.NET</a> *
+</pre>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_mail.html#mb-perl_fork__how_to_keep_restarting_a_child_till_timeout">Back</a><hr width="50%" align="left" /><p><br /></p><p>
+<b><p>
+Ben Okopnik [ben at linuxgazette.net]
+</p>
+</b><br />
+<b>Mon, 7 May 2007 17:27:25 -0400</b>
+</p>
+
+<p>
+Hi, Karl-Heinz -
+</p>
+
+<p>
+Please remember to CC TAG. <img src="../gx/smile.png" alt=":)">
+</p>
+
+<p>
+On Mon, May 07, 2007 at 08:00:13AM +0200, Karl-Heinz Herrmann wrote:
+</p>
+
+<pre>
+&gt; Hi Ben,
+&gt; 
+&gt; On Sun, 6 May 2007 20:41:00 -0400
+&gt; Ben Okopnik &lt;ben@linuxgazette.net&gt; wrote:
+&gt; 
+&gt; &gt; This is, of course, taken straight from the example in 'perldoc perlipc'
+&gt; &gt; - but did you note the advice in the long comment following the 'my'
+&gt; &gt; declaration?
+&gt; 
+&gt; thanks for that perldoc hint -- my sample code aboce is from the perl
+&gt; cookbook and/or Programming Perl Ed. 3. 
+</pre>
+
+<p>
+Oh - sorry, I thought you got it out of the docs, since the code (except
+for the variable name and the absence of the all-important 'while' loop)
+is exactly the same.
+</p>
+
+
+<pre>
+&gt; &gt; This sounds like it's specifically intended to handle the kind of
+&gt; &gt; problem that you're having. 
+&gt; 
+&gt; Not quite -- I've only one child which can die unexpectedly (the
+&gt; mplayer) -- the kill is just sitting in a sleep and biding its time.
+</pre>
+
+<p>
+There's an example for a timed child as well as a daemon that should be
+restarted (if it dies) in that doc. I'm a <strong>big</strong> fan of Perl
+documentation; those folks take the time and trouble to do it right.
+ 
+</p>
+
+<pre>
+&gt; &gt; Also, the initial "loathe sysV: it makes us
+&gt; &gt; not only reinstate the handler, but place it after the wait" comment
+&gt; &gt; pretty much underscores the point: the handler is non-reentrant, and has
+&gt; 
+&gt; Hmm... yes, this "non-reentrant" is still something I do not comprehend
+&gt; in all its consequences. 
+</pre>
+
+<p>
+When you're in the sig-handling code itself, the sig handler - even
+though it was previosly invoked - is not going to trigger. This is why
+the traditional thing is to make your sighandler do as little as
+possible - as quickly as possible. There's also the 'deferred'
+sighandler model, discussed in the same doc.
+ 
+</p>
+
+<pre>
+&gt; &gt; to be reinstated on every call. It's sort of like trying to place a
+&gt; &gt; delay in a 'trap' statement - the trap is not operating during the
+&gt; &gt; declaration itself...
+&gt; 
+&gt; I think most of my confusion  during my first try to get this worked
+&gt; out with SIGCHLD was, that some parts of the perl books 
+&gt; said with recent perl versions (&gt;5.6) after returning from the
+&gt; sighandler the main routine is "going back to what it was doing". 
+</pre>
+
+<p>
+[frown] I'm not really sure what that means, truth to tell.
+ 
+</p>
+
+<pre>
+&gt; &gt; Like I said, I try to stay away from all but the most basic calls to
+&gt; &gt; fork() and wait(). There's Dark and Ancient Evil in those precincts.  Oh
+&gt; &gt; - be sure to set '$|' (a.k.a. 'autoflush') to some non-null value in
+&gt; 
+&gt; That's most probably the reason why the sequence of the program output
+&gt; is not as I expect -- I'll set $| and see if that clears that part up. 
+&gt; 
+&gt; &gt; your program; it's a highly necessary belt-and-suspenders measure when
+&gt; &gt; dealing with calls to the system, and often prevents/resolves problems
+&gt; &gt; associated with timing issues.
+&gt; 
+&gt; Do you suggest there could be a deeper problem and not just output
+&gt; order? I'm not aware of one....
+</pre>
+
+<p>
+No, no - I was just underscoring the importance of unbuffering in
+situations like this one.
+</p>
+
+
+<pre>-- 
+* Ben Okopnik * Editor-in-Chief, Linux Gazette * <a href="http://LinuxGazette.NET">http://LinuxGazette.NET</a> *
+</pre>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_mail.html#mb-perl_fork__how_to_keep_restarting_a_child_till_timeout">Back</a><hr width="50%" align="left" /><p><br /></p><p>
+<b><p>
+Karl-Heinz Herrmann [kh1 at khherrmann.de]
+</p>
+</b><br />
+<b>Tue, 8 May 2007 21:08:25 +0200</b>
+</p>
+
+<p>
+Hi,
+</p>
+
+<p>
+On Mon, 7 May 2007 17:27:25 -0400
+Ben Okopnik &lt;ben@linuxgazette.net&gt; wrote:
+</p>
+
+
+<pre>
+&gt; &gt; Hmm... yes, this "non-reentrant" is still something I do not comprehend
+&gt; &gt; in all its consequences.   
+&gt; 
+&gt; When you're in the sig-handling code itself, the sig handler - even
+&gt; though it was previosly invoked - is not going to trigger. This is why
+&gt; the traditional thing is to make your sighandler do as little as
+</pre>
+
+<p>
+So -- nonreentrant is about a subroutine wich <strong>wont</strong> be called again
+while still active. In contrast to code which can not be called again
+while its still running (or suffer severe consequences)? 
+</p>
+
+<p>
+There was a mention in the cookbook that if one calls libc (e.g. print)
+from a sighandler and the sighandler is called again and enters libc routines
+again the process would core dump. So it seems possible with some signals. 
+</p>
+
+<p>
+If SIGCHLD is not triggered again when the sighandler is still running
+from the last call at least that problem would be gone. In my radio
+script I wouldn't have worried about uncought SIGCHLDs -- their was
+always only one process out which could terminate by itself.
+</p>
+
+<p>
+But the SIGALRM version works much nicer and is somewhat "cleaner".
+Less of these if clauses checking if time is up or not. On ALRM wake up
+and end everything is clear enough. 
+</p>
+
+
+
+<pre>
+&gt; &gt; I think most of my confusion  during my first try to get this worked
+&gt; &gt; out with SIGCHLD was, that some parts of the perl books 
+&gt; &gt; said with recent perl versions (&gt;5.6) after returning from the
+&gt; &gt; sighandler the main routine is "going back to what it was doing".   
+&gt; 
+&gt; [frown] I'm not really sure what that means, truth to tell.
+</pre>
+
+<p>
+There were code examples which used 
+<pre>
+$buf=&lt;&gt;;
+</pre>
+as blocking part in the parent processes. If a CHILD exited early
+verisons of perl would forget about the read and continue with the
+statement after the read. 
+</p>
+
+<p>
+In newer perl (&gt;5.6IIRC) versions perl is supposed to automatically
+return to the read statement and continue to wait for input. I assumed
+other blocking operations like a sleep would work the same -- but sleep
+is certainly not continuing on the return from the sighandler.
+</p>
+
+
+<p>
+K.-H.
+</p>
+
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_mail.html#mb-perl_fork__how_to_keep_restarting_a_child_till_timeout">Back</a><hr width="50%" align="left" /><p><br /></p><p>
+<b><p>
+Ben Okopnik [ben at linuxgazette.net]
+</p>
+</b><br />
+<b>Sat, 12 May 2007 11:48:00 -0400</b>
+</p>
+
+<p>
+On Tue, May 08, 2007 at 09:08:25PM +0200, Karl-Heinz Herrmann wrote:
+</p>
+
+<pre>
+&gt; Hi,
+&gt; 
+&gt; On Mon, 7 May 2007 17:27:25 -0400
+&gt; Ben Okopnik &lt;ben@linuxgazette.net&gt; wrote:
+&gt; 
+&gt; &gt; &gt; Hmm... yes, this "non-reentrant" is still something I do not comprehend
+&gt; &gt; &gt; in all its consequences.   
+&gt; &gt; 
+&gt; &gt; When you're in the sig-handling code itself, the sig handler - even
+&gt; &gt; though it was previosly invoked - is not going to trigger. This is why
+&gt; &gt; the traditional thing is to make your sighandler do as little as
+&gt; 
+&gt; So -- nonreentrant is about a subroutine wich <strong>wont</strong> be called again
+&gt; while still active. In contrast to code which can not be called again
+&gt; while its still running (or suffer severe consequences)? 
+</pre>
+
+<p>
+Um... again, I'm no expert, but I think it means something like "not
+<strong>available</strong> to be called again". Something like that Baron Munchhausen
+tale where he pulled himself up out of a swamp by his own bootlaces -
+it's possible if someone else (i.e., a process external to the handler)
+does it, but you can't do it yourself. 
+ 
+</p>
+
+<pre>
+&gt; There was a mention in the cookbook that if one calls libc (e.g. print)
+&gt; from a sighandler and the sighandler is called again and enters libc routines
+&gt; again the process would core dump. So it seems possible with some signals. 
+</pre>
+
+<p>
+[nod] "perldoc perlipc" describes situations like that for sighandler
+invocations, particularly in the old days (i.e., before Perl 5.6) and in
+cases involving non-standard timing routines for certain calls.
+ 
+</p>
+
+<pre>
+&gt; If SIGCHLD is not triggered again when the sighandler is still running
+&gt; from the last call at least that problem would be gone. In my radio
+&gt; script I wouldn't have worried about uncought SIGCHLDs -- their was
+&gt; always only one process out which could terminate by itself.
+&gt; 
+&gt; But the SIGALRM version works much nicer and is somewhat "cleaner".
+&gt; Less of these if clauses checking if time is up or not. On ALRM wake up
+&gt; and end everything is clear enough. 
+</pre>
+ 
+That makes sense. SIGCHLD, already has a rather ticklish job dealing
+with child processes (returning the SA_SIGINFO struct, etc.); SIGALRM is
+just a simple "time has passed" signal, and doesn't do much beyond that.
+Since my knowledge in this area is rather weak, I try to stick with
+simple things.
+ 
+</p>
+
+<pre>
+&gt; There were code examples which used 
+&gt; ``
+&gt; $buf=&lt;&gt;;
+&gt; ''
+&gt; as blocking part in the parent processes. If a CHILD exited early
+&gt; verisons of perl would forget about the read and continue with the
+&gt; statement after the read. 
+</pre>
+
+<p>
+Actually, according to the 'perlipc' doc (see "Interrupting IO"),
+interrupting '&lt;&gt;' can have very poor results in some cases. The fix
+appears to consist of using SIGALRM. <img src="../gx/smile.png" alt=":)">
+ 
+</p>
+
+<pre>
+&gt; In newer perl (&gt;5.6IIRC) versions perl is supposed to automatically
+&gt; return to the read statement and continue to wait for input. I assumed
+&gt; other blocking operations like a sleep would work the same -- but sleep
+&gt; is certainly not continuing on the return from the sighandler.
+</pre>
+
+<p>
+I can't say that I've ever seen it work that way (i.e., continuing where
+it left off) - but, again, given what I know about it, that's not much
+of an indicator.
+</p>
+
+
+<pre>-- 
+* Ben Okopnik * Editor-in-Chief, Linux Gazette * <a href="http://LinuxGazette.NET">http://LinuxGazette.NET</a> *
+</pre>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_mail.html#mb-perl_fork__how_to_keep_restarting_a_child_till_timeout">Back</a><hr width="50%" align="left" /><p><br /></p></div>
+</body>
+</html>

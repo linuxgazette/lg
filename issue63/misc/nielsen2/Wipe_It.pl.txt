@@ -1,0 +1,263 @@
+#!/usr/bin/perl
+
+##### Things to do
+# 1. Make sure we create a brand new directory for temporary mounting
+#     in order to avoid security risks in case someone is logged in.
+# 2. Use perl functions to handle a lot of the system calls. 
+# 3. Let it autodetect hard drives, and floppy drives, and only perform
+#    actions on unmounted hard drives and floppy drives.
+##### 
+
+use strict;
+use Expect;
+use Crypt::Blowfish;
+
+#-----------------------------------------------
+my $Junk;
+  ### Set the drive to the slave drive on the Primary IDE controller.
+my $Drive = "hdb";
+
+  ### Let us do a lot of random stuff, and get the last line from the
+  ### /etc/passwd file to make it really random, assuming one person
+  ### has been added to the computer. 
+my $time = time();
+my $Ran = rand($time);
+my $Ran = rand(10000000000000);
+my $LastLine = `tail -n 1 /etc/passwd`; chomp $LastLine;
+$LastLine = substr ($LastLine,0,30);
+my $Blowfish_Key = $LastLine . $Ran . $time;
+$Blowfish_Key = substr ($Blowfish_Key,0,20);
+while (length ($Blowfish_Key) < 56) 
+  {
+  $Blowfish_Key .= $Ran = rand($time);
+  }
+$Blowfish_Key = substr ($Blowfish_Key,0,56);
+
+  ### Done making up random key, now create Blowfish Encryption object.
+my $Blowfish_Cipher = new Crypt::Blowfish $Blowfish_Key;
+
+#------------------------------------
+system "clear";
+print "This will wipe out the hard drive on Drive /dev/$Drive\n";
+print "Press enter to continue\n";
+my $R = <STDIN>;
+
+  ### Get the list of mounted partitions on the drive we want to wipe out
+my @Mounted = `df`;
+@Mounted = grep($_ =~ /\/dev\/hdb/, @Mounted);
+  ### Foreach mounted partition, umount it
+foreach my $Mount (@Mounted)
+  {
+  my ($Partition,$Junk) = split(/\s+/, $Mount,2);
+  print "Unmounting $Partition\n";
+  my $Result = system ("umount $Partition");
+  if ($Result > 0) 
+    {
+    print "ERROR, unable to umount $Partition, aborting Script, Error = $Result\n";
+    exit;
+    }
+  }
+
+  ### Start the expect script, which will simulate someone doing this
+  ### commands manually.
+my $Fdisk = Expect->spawn("/sbin/fdisk /dev/$Drive");
+
+  ### Get a list of mounted partitions by printing the partition table 
+print $Fdisk "p\n";
+my $match=$Fdisk->expect(30,"Device Boot    Start");
+
+my $Temp = $Fdisk->exp_after();
+my @Temp = split(/\n/, $Temp);
+  ## Get the lines that tell us about the partitions
+my @Partitions = grep($_ =~ /^\/dev\//, @Temp);
+
+  ## Foreach line, delete the partition
+foreach my $Line (reverse @Partitions)
+  {
+    ## Get the /dev/hdb part, and its number
+  my ($Part,$Junk) = split(/[\t ]/, $Line,2);
+  my $No = $Part;
+  $No =~ s/^\/dev\/$Drive//;
+
+  print "Deleting no $Drive $No\n";     
+
+    ## Delete command
+  print $Fdisk "d\n";    
+  $match=$Fdisk->expect(30,"Partition number");
+   
+    ## Which partition number to delete
+  print $Fdisk "$No\n";
+  $match=$Fdisk->expect(30,"Command (m for help):");
+  }
+
+$Fdisk->clear_accum();
+
+  ### If we had partitions, write changes, or otherwise, just end it
+if (@Partitions < 1) {print $Fdisk "q\n"; $Fdisk->expect(2,":");}
+else 
+  {
+  print $Fdisk "w\n";
+  $Fdisk->expect(30,"Command (m for help):");
+  }
+
+#-------------------------------
+  ## Get the geometry of the hard drive
+my $Geometry = `/sbin/sfdisk -g /dev/$Drive`;
+my ($Junk, $Cyl, $Junk2, $Head, $Junk3, $Sector,@Junk) = split(/\s+/,$Geometry);
+if ($Cyl < 1) 
+   {print "ERROR: Unable to figure out cylinders for drive. aborting\n"; exit;}
+
+  ### Create a new expect script to simulate a person using fdisk
+my $Fdisk = Expect->spawn("/sbin/fdisk /dev/$Drive");
+
+   #### Tell fdisk to create new partition
+print $Fdisk "n\n";
+$Fdisk->expect(5,"primary");
+
+  ### Tell it the new partition should be a primary partition
+print $Fdisk "p\n";
+$Fdisk->expect(5,":");
+
+  ### Which partition, number 1
+print $Fdisk "1\n";
+$Fdisk->expect(5,":");
+
+  ### Start at cylinder 1
+print $Fdisk "1\n";
+$Fdisk->expect(5,":");
+
+  ### Go to the end
+print $Fdisk "$Cyl\n";
+$Fdisk->expect(5,":");
+
+  ### Write and save
+print $Fdisk "w\n"; 
+$Fdisk->expect(30,"Command (m for help):");
+
+#------------------------------------------
+### Format the partition and mount it
+
+my $Partition = "/dev/$Drive" . "1";
+my $Result = system ("mkfs -t ext2 $Partition");
+if ($Result > 0) {print "Error making partition, aborting.\n"; exit;}
+
+   ### There should be better error checking here
+system "umount /tmp/WIPE_IT";
+system "rm -rf /tmp/WIPE_IT";
+system "mkdir -p /tmp/WIPE_IT";
+system "chmod 700 /tmp/WIPE_IT";
+
+  ## See if we can mount the new partition.
+my $Result = system ("mount $Partition /tmp/WIPE_IT");
+if ($Result > 0) {print "Error mounting drive, aborting.\n"; exit;}
+system "chmod 700 /tmp/WIPE_IT";
+
+#--------------------------------
+### Now create the file and stop when we hit the size.
+
+my $Count = 0;
+my $Written_Size = 0;  
+
+  ### Open up a new file.
+open(FILE,">>/tmp/WIPE_IT/Message.txt");
+   ### If someone actually wants to screw around with your hard drive, 
+   ### let us play with them and waste their time by adding a teaser. 
+my $Ran = rand 259200000;   # between now and ten years ago (approx)
+($Ran, $Junk) = split(/\./, $Ran, 2);
+   ## New date minus random number of seconds
+my $Date = `date --date '-$Ran seconds'`;
+
+print FILE "DATE CREATED $Date\n";
+my $Ran = rand 50;
+($Ran, $Junk) = split(/\./, $Ran, 2);
+$Ran = $Ran + 10;
+print FILE "This document is extremely secure. It is a violation to let 
+any unauthorized persons read it. Known password holders need to 
+apply Method $Ran in order to decrypt binary data.\n"; 
+
+  ### Create random number plus 25000
+my $Ran = rand 25000;
+($Ran, $Junk) = split(/\./, $Ran, 2);
+$Ran = $Ran + 25000;
+
+  ### Create an array of numbers which we will use most of the time.
+my @Blank =  (1..$Ran);
+  ### Take the array and make into a string.
+my $Blank = "@Blank";
+  ### Empty the array to free up memory.
+@Blank = ();
+my $B_Length = length $Blank;
+
+  ### Let us get the amount of real space we have for the partition
+my @Temp = `df`;
+@Temp = grep($_ =~ /^$Partition/, @Temp);
+my $Line = $Temp[0];
+my ($Junk,$Blocks,@Junk) = split(/\s+/, $Line,4);
+  ### We are assuming 1k blocks. 
+my $Size = $Blocks*1000;
+
+  ## While the file we have written is less than the size of the
+  ## partition, print some more data. 
+while ($Written_Size < $Size)
+  {
+  $Count++;
+
+        ### 9 out of ten times, we just want to print blank spaces to hurry
+        ### up printing. One out of ten times, print garbage binary.
+     my $Ran = rand (10);
+     if ($Ran > 1) 
+       {
+       print FILE $Blank; 
+       $Written_Size = $Written_Size + $B_Length; 
+       }  
+     else 
+       {
+         ## This part makes a long string (upto 10000 bytes) of random data. 
+       my $Garbage = "";
+       my $Length = rand(10000);
+       ($Length, $Junk) = split(/\./, $Length, 2);
+       for (my $i = 0; $i < $Length; $i++)
+         {
+         my $Ran = rand 256;
+         ($Ran, $Junk) = split(/\./, $Ran, 2);
+         $Garbage .= chr $Ran;
+         }
+         ## This parts encrypts the random data 8 bytes at a time. 
+       my $Temp = $Garbage;
+       my $Encrypted = "";
+       while (length $Temp > 0)  
+         {
+         while (length $Temp < 8) {$Temp .= "\t";}
+         my $Temp2 = $Blowfish_Cipher->encrypt(substr($Temp,0,8));
+         $Encrypted .= $Temp2; 
+         if (length $Temp > 8) {$Temp = substr($Temp,8);} else {$Temp = "";}
+         }
+
+         ### Print the encrypted random data to file. 
+       print FILE $Encrypted;
+       $Length = length $Encrypted;
+
+       $Written_Size = $Written_Size + $Length;
+       my $Rest = $Size - $Written_Size;Securely 
+       print "$Size - $Written_Size = $Rest to go\n";
+       }
+
+   ### At every 500 prints, start saving to a new file.  
+  if ($Count =~ /500$/) 
+    {
+    close FILE;
+    open(FILE,">>/tmp/WIPE_IT/$Count");
+    }
+  }
+
+close FILE;
+#----------------------------------------------------
+
+my $Result = system ("umount $Partition");
+if ($Result > 0) {print "Error unmounting partition $Partition, aborting.\n"; exit; }
+
+  ### Let us reformat the partition. Doesn't delete data, just removes it
+  ### from the directory. 
+my $Result = system ("mkfs -t ext2 $Partition");
+if ($Result > 0) {print "Error making partition, aborting.\n"; exit;}
+

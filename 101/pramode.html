@@ -1,0 +1,341 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Simple Joystick control of a servo motor with RTAI/Linux LG #101</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="levkovich.html" >&lt;-- prev</A> | <A HREF="sunil.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Simple Joystick control of a servo motor with RTAI/Linux</h1>
+<p id="by"><b>By <A HREF="../authors/pramode.html">Pramode C.E.</A></b></p>
+
+<p>
+<p>
+The analog joystick which plugs onto the PC game port
+is a cool little device - you don't need to be a hardware
+wizard to learn how it works, and you can make it do
+fun and absolutely useless stuff like turn a stepper or
+servo motor. This article describes an experiment which
+I did with a joystick and a Futaba S2003 servo motor, both
+controlled by the  real time operating environment for
+Linux called <a href="http://www.aero.polimi.it/~rtai">RTAI</a>. Readers who
+are not familiar with RTAI might like to refer to the 
+<a href="../issue95/pramode.html">introductory article</a> I had
+written earlier before continuing.
+
+<h2>The Joystick</h2>
+<p>
+If you are game-crazy, you are sure to have used
+one. As far as electronics is concerned, it is a very 
+primitive device - so is the game port which it
+plugs into. You will find adequate hardware 
+descriptions <a href="http://documents.epanorama.net/documents/joystick/pc_joystick.html">here</a>. The <a href="http://www.tldp.org/HOWTO/IO-Port-Programming.html">
+Linux IO-Port Programming Mini-HOWTO</a> also provides 
+sufficient information to get started with hacking the joystick.
+
+<h2>Reading the buttons</h2>
+<p>
+Your first joystick programming assignment should
+be reading the state of the buttons. For this, you
+have to know the ISA port address which the gameport
+uses. Loading the standard Linux joystick driver
+(you will have to modprobe three modules - joydev,
+ns558 and analog) and doing `cat /dev/ioports' on
+my ASUS A7N266VM motherboard showed this to be 0x200.
+<p>
+The state of two of my joystick buttons is encoded
+in bits D4 and D5 of the 8 bit value returned by
+an `inb' on 0x200 (D0 is least significant bit and D7
+is most significant bit). If the value is 1, the 
+button is in the `released' state and if it is 0, the
+button is in the `pressed' state. Here is a small
+program which tests this out:
+<p>
+<a href="misc/pramode/button.txt">Listing 1</a>
+<pre>
+
+#include &lt;asm/io.h&gt;
+#define JS_PORT 0x200
+
+main()
+{
+    iopl(3);
+    while(1)
+        printf("%x\n", (inb(JS_PORT) &gt;&gt; 4)&amp;1);
+		
+}
+
+</pre>
+
+<h2>Reading the X and Y positions</h2>
+<p>
+
+Moving the joystick results in a potentiometer 
+turning - the potentiometer is connected to the game port,
+which contains a 555 timer based circuit. A simple
+`outb' to 0x200 (the value written doesn't matter)
+will result in the circuit getting `reset' - now
+a read (ie, an `inb') from 0x200 will yield a bit
+pattern whose D0 and D1 bits are 1's. Keep on reading
+- after a short time these bits become zero. Measure
+the time it takes for the bits to become zero. Take
+the measurements with the joystick at the extreme left,
+middle and extreme right endpoints of the X axis as
+well as the top, middle and bottom points of the Y axis
+as part of a `calibration' process. Now, whatever be
+the position of the joystick along the X-Y axes,
+measuring the time it takes
+for the D0 (X axis) and D1 (Y axis) bits to become zero's after a
+`reset' (note, we `reset' by writing something to 0x200)
+should help us find it out (assuming that time varies linearly
+with distance between the middle and left/top as well as middle and
+right/bottom endpoints - which I really haven't verified).
+
+<p>
+Here is a program which measures the time it takes for the X-axis
+bit to become zero after a reset. It uses the `time stamp counter'
+which is a 64 bit counter available on all machines with, I believe,
+a Pentium and above CPU. If you have a 1GHz CPU, the timer gets
+incremented at a rate of 1,000,000,000 per second. My Athlon XP CPU
+runs at a clock speed of 1462.904 MHz (read from /proc/cpuinfo) - 
+with this information, it is easy to compute the time elapsed 
+between any two points in your program. The time stamp counter
+(TSC) can be read using a macro called `rdtsc' defined in the 
+file /usr/src/linux/include/asm/msr.h.
+
+<p>
+<a href="misc/pramode/xmeasure.txt">Listing 2</a>
+<pre>
+
+#include &lt;asm/io.h&gt;
+#include &lt;asm/msr.h&gt;
+
+#define JS_PORT 0x200
+#define CPU_HZ 1462904000
+
+void  trigger(void)
+{
+    outb(0x0, JS_PORT);
+}
+
+main()
+{
+    unsigned int low1, high1, low2, high2;
+    iopl(3);
+    trigger();
+    rdtsc(low1, high1);
+    while(inb(JS_PORT) &amp; 1);
+    rdtsc(low2, high2);
+    printf("low1=%u, high1=%u, low2=%u, high2=%u\n", low1, high1, low2, high2);
+    printf("low2 - low1 = %u\n", low2 - low1);
+    printf("in ms = %f\n", (((double)(low2-low1))/CPU_HZ)*1000);
+}
+
+</pre>
+<p>
+The program should be compiled like this:
+<pre>
+
+cc -I/usr/src/linux/include -O2 xmeasure.c
+
+</pre>
+I got readings of 0.0262ms, 0.68ms and 1.60ms for the
+left, middle and right positions.
+<p>
+One  trouble with this crude form of analog-to-digital
+conversion is that you have to sit in a loop waiting for the
+bits to drop to zero - this burns up CPU cycles. A better
+design would have been for the joystick hardware itself to perform
+the A-D conversion and send the resulting numbers to the PC - thus
+avoiding lots of software overhead.
+
+<h2>Using a periodic RTAI task to sense joystick position</h2>
+<p>
+My experiment is this: I have a servo motor connected to the parallel
+port. The servo is not capable of rotating the full 360 degrees - it
+describes an arc of about 180 degrees. When  I turn the joystick left, the
+servo also moves to the left end of the arc. When the joystick is in the
+`middle' position, the servo positions itself near the centre of the 180
+degree arc and when the joystick moves towards the right end, the servo
+also moves towards the right end of the arc. Note that I try to sense only
+three joystick positions - left, middle and right.
+<p>
+<img src="misc/pramode/servosmall.jpg">
+<p>
+The picture above shows two servo motors - the one at the bottom serving to
+rotate the platform resting on it - it is this servo which I will be moving
+with the joystick.
+<p>
+The idea is simple. A periodic task (period .33 milliseconds) monitors
+the joystick. At the first activation of this task (lets say at time 0), we
+`trigger' the game port (by writing to it) and assume that joystick position
+is `LEFT'. The next activation of the task would be at 0.33 milliseconds. If
+reading from the game port tells us that the X axis bit (D0) is still set, we
+assume that the joystick is in the `MIDDLE' position. The next activation of
+the task would be at 0.66 milliseconds - but we are not interested in checking
+the X axis bit at this point - we will take it that the joystick is in the
+`MIDDLE' position if the bit stays high for a period between 0.33 and 0.99
+milliseconds (note that the `bit-high' times obtained experimentally were
+0.026, 0.68 and 1.60 milliseconds respectively for extreme left, middle and
+extreme right positions). The next activation would be at 0.99 milliseconds -
+if bit D0 still stays high, we assume that the joystick is in the `RIGHT'
+position. Only at this point are we sure of the actual position of the
+joystick - we shall set a global variable, `joystick_position' to LEFT, 
+RIGHT or MIDDLE.
+<p>
+Now we come to the 
+<a href="http://www.seattlerobotics.org/guide/servos.html">servo motor control</a> part - which is 
+fairly simple.
+A hobby servo motor requires a `control pulse' on its white wire. The
+total on-off time of the pulse should be around 20 milliseconds - it
+is the 'on' time which actually controls the servo's position. My servo
+moves to one end of a 180 degree arc for an 'on' time of about 0.5 millisecond
+and moves to the other end for an 'on' time of about 2.2 seconds. A separate
+RTAI task controls the generation of this signal. A global array called
+`on_time' maintains the three 'on'-time values which would move the servo
+to the left, middle and right points of its arc. The servo task makes
+pin 3 of the parallel port (to which the servo's control wire is connected)
+high for a period of on_time[LEFT] if the current joystick position is
+`LEFT' - similarly for MIDDLE and RIGHT also. The 'off' time of the control
+pulse is stored in a variable `off_time' and is computed in such a way that
+the total 'on' plus 'off' time is around 20 milliseconds. 
+
+<p>
+<a href="misc/pramode/control.txt">[Listing 3]</a>
+<pre>
+
+static void 
+pwm_servo(int t)
+{
+    /* Servo is controlled by
+     * signal on pin 3 of LPT1
+    */
+    while(1) {
+        outb(2, LPT1_BASE); /* Pin 3 high */
+        rt_sleep(on_time[joystick_position]);
+        outb(~2, LPT1_BASE);
+        rt_sleep(off_time);
+    }
+}
+</pre>
+
+<h2>Conclusion</h2>
+<p>
+It has been fun playing with the joystick. I would like to know
+if there is a good method to monitor the joystick position continuously
+without loading RTAI too much (by increasing the timer frequency
+or resorting to busy loops) - let me know if you come across anything
+interesting. I can be contacted via my home page at <a href="http://pramode.net">
+pramode.net</a>.
+
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<P>
+<img ALIGN="LEFT" ALT="[BIO]" SRC="../gx/2002/note.png" class="bio">
+<em>
+I am an instructor working for IC Software in Kerala, India. I would have loved
+becoming an organic chemist, but I do the second best thing possible, which is
+play with Linux and teach programming!
+</em>
+<br CLEAR="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2004, Pramode C.E.. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 101 of Linux Gazette, April 2004
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="levkovich.html" >&lt;-- prev</A> | <A HREF="sunil.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">April 2004 (#101)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/2003/sit3-shine.7-2.gif" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

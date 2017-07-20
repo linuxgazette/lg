@@ -1,0 +1,317 @@
+<!DOCTYPE html PUBLIC '-//W3C//DTD XHTML 1.0 Transitional//EN'
+		 'http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd'>
+<html xmlns='http://www.w3.org/1999/xhtml' lang='utf-8' xml:lang='utf-8'>
+<head>
+<title>udev rules ca't auto mount my pen drive</title>
+<meta http-equiv='Content-Type; charset=utf-8' />
+<link rel='stylesheet' type='text/css' href='../../../lg.css' />
+</head>
+<body>
+<a href="../../../"><img alt="Linux Gazette" src="../../../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" /></a><img alt="Tux" src="../../../gx/tux_86x95_indexed.png" id="tux" /><p id="fun">...making Linux just a little more fun!</p><div class='content articlecontent'><a name="top"></a><h3>udev rules ca't auto mount my pen drive</h3>
+<p>
+<b><p>
+J. Bakshi [j.bakshi at unlimitedmail.org]
+
+</p>
+</b><br />
+<b>Sat, 4 Apr 2009 00:44:46 +0530</b>
+</p>
+
+<p>
+Hello,
+</p>
+
+<p>
+Hope you all are well.
+</p>
+
+<p>
+Recently my attention is on udev rules. I was never bothered about it
+but during google search to find out how to automount my pendrive; I
+have found udev as the solution. I admit that I don't understand it
+properly but my intention to mount my pendrive to a pre-defined mount
+point pushed me to do some experiment with it. I have first collected
+the required information by   *udevinfo -a -p $(udevinfo -q path
+-n /dev/sda)*
+</p>
+
+
+
+<p>
+looking at device '/block/sda':
+<pre>
+    KERNEL=="sda"
+    SUBSYSTEM=="block"
+    DRIVER==""
+    ATTR{range}=="16"
+    ATTR{removable}=="1"
+    ATTR{size}=="15687680"
+    ATTR{stat}=="      77      421     2292     1436        0
+0        0        0        0      956     1436" ATTR{capability}=="13"
+</pre>
+
+<p>
+looking at parent device
+<pre>
+'/devices/pci0000:00/0000:00:10.3/usb4/4-5/4-5:1.0/host7/target7:0:0/7:0:0:0':
+KERNELS=="7:0:0:0" SUBSYSTEMS=="scsi"
+    DRIVERS=="sd"
+    ATTRS{device_blocked}=="0"
+    ATTRS{type}=="0"
+    ATTRS{scsi_level}=="3"
+    ATTRS{vendor}=="JetFlash"
+    ATTRS{model}=="Transcend 8GB   "
+    ATTRS{rev}=="8.07"
+</pre>
+
+<p>
+&lt;snip&gt;
+</p>
+
+<p>
+lots of other stuff
+</p>
+
+<p>
+&lt;/snip&gt;
+</p>
+
+<p>
+Then I constructed my rules as
+</p>
+
+<pre>
+10-usb.rules
+--------------------------------
+SUBSYSTEM=="block", KERNEL=="sda", ATTRS{vendor}=="JetFlash",
+ATTRS{model}=="Transcend 8GB   ", ACTION=="add", RUN+="mount -t
+reiserfs /dev/sda2 /mnt/pen"
+-------------------------------------
+</pre>
+
+<p>
+/mnt/usb is already there. From /var/log/syslog I can confirm that
+10-usb.rules has been read with out any error
+</p>
+
+<pre>
+---------------------------------------
+debian udevd[2874]: parse_file: reading
+'/etc/udev/rules.d/10-usb.rules' as rules file
+-----------------------------------------------
+</pre>
+
+<p>
+but after inserting my pendrive it is not auto mounted at /mnt/pen.
+</p>
+
+<p>
+I have no clue if my rule is wrong or any thing else is preventing the
+auto mount. My box is debian lenny.
+</p>
+
+<p>
+Could any one please enlighten me ?
+</p>
+
+<p>
+Thanks,
+</p>
+
+<p>
+PS: please CC to me
+</p>
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_mail.html#mb-udev_rules_ca_t_auto_mount_my_pen_drive">Back</a><hr width="50%" align="left" /><p><br /></p><p>
+<b><p>
+Ben Okopnik [ben at linuxgazette.net]
+
+</p>
+</b><br />
+<b>Sat, 4 Apr 2009 15:41:33 -0400</b>
+</p>
+
+<p>
+On Sat, Apr 04, 2009 at 12:44:46AM +0530, J. Bakshi wrote:
+</p>
+
+<pre>
+&gt; 
+&gt; Recently my attention is on udev rules. I was never bothered about it
+&gt; but during google search to find out how to automount my pendrive; I
+&gt; have found udev as the solution. I admit that I don't understand it
+&gt; properly but my intention to mount my pendrive to a pre-defined mount
+&gt; point pushed me to do some experiment with it. I have first collected
+&gt; the required information by   *udevinfo -a -p $(udevinfo -q path
+&gt; -n /dev/sda)*
+</pre>
+
+<p>
+[snip]
+</p>
+
+
+<pre>
+&gt; Then I constructed my rules as
+&gt; 
+&gt; 10-usb.rules
+</pre>
+
+<p>
+Mistake #1: user-constructed rules aren't supposed to happen that early.
+I recommend reading '/etc/udevd/README':
+</p>
+
+<pre>
+Files should be named xx-descriptive-name.rules, the xx should be
+chosen first according to the following sequence points:
+ 
+  00   rules that it is critical to be run first, usually
+       only WAIT_FOR_SYSFS
+ 
+  20   rules that change the name from the device from the default
+       (cannot be overriden)
+ 
+  40   rules that set the permissions of device nodes
+       (can be overriden by later rules)
+ 
+  60   rules that add symlinks to device nodes
+       (adds to those set in earlier rules)
+ 
+  80   rules that run programs (but do not load modules)
+ 
+  90   rules that load modules
+ 
+  99   rules that it is critical to be run last
+ 
+ 
+This scheme has been chosen so that user-supplied rules are normally
+named 50-*.rules for the right thing to happen.
+ 
+Packages should chose the approriate sequence point and add 5 to it
+(e.g. 25-iftab.rules, 45-libsane.rules, etc.) unless there is a need
+for a particular order.
+</pre>
+
+
+<pre>
+&gt; --------------------------------
+&gt; SUBSYSTEM=="block", KERNEL=="sda", ATTRS{vendor}=="JetFlash",
+&gt; ATTRS{model}=="Transcend 8GB   ", ACTION=="add", RUN+="mount -t
+&gt; reiserfs /dev/sda2 /mnt/pen"
+&gt; -------------------------------------
+</pre>
+
+<p>
+I'd suggest you examine some of the other rulesets in /etc/udevd. Note,
+for one thing, that none of them run "mount" explicitly; it's very
+unlikely that you need to either.
+ 
+</p>
+
+<pre>
+&gt; but after inserting my pendrive it is not auto mounted at /mnt/pen.
+&gt; 
+&gt; I have no clue if my rule is wrong or any thing else is preventing the
+&gt; auto mount. My box is debian lenny.
+&gt; 
+&gt; Could any one please enlighten me ?
+</pre>
+
+<p>
+I recently had to do this for a USB GPS, and found the "udev" methods
+unpleasantly dense and cryptic to work with, and the docs annoyingly
+sparse. Lots of other people seem to like it. [shrug]
+</p>
+
+
+<pre>-- 
+* Ben Okopnik * Editor-in-Chief, Linux Gazette * <a href='http://LinuxGazette.NET'>http://LinuxGazette.NET</a> *
+</pre>
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_mail.html#mb-udev_rules_ca_t_auto_mount_my_pen_drive">Back</a><hr width="50%" align="left" /><p><br /></p><p>
+<b><p>
+J. Bakshi [j.bakshi at unlimitedmail.org]
+
+</p>
+</b><br />
+<b>Sun, 5 Apr 2009 21:08:32 +0530</b>
+</p>
+
+<p>
+On Sat, 4 Apr 2009 15:41:33 -0400
+Ben Okopnik &lt;ben@linuxgazette.net&gt; wrote:
+</p>
+
+
+<pre>
+&gt; Mistake #1: user-constructed rules aren't supposed to happen that
+&gt; early. I recommend reading '/etc/udevd/README':
+&gt; 
+&gt; ``
+&gt; Files should be named xx-descriptive-name.rules, the xx should be
+&gt; chosen first according to the following sequence points:
+&gt; 
+&gt;   00   rules that it is critical to be run first, usually
+&gt;        only WAIT_FOR_SYSFS
+&gt; 
+&gt;   20   rules that change the name from the device from the default
+&gt;        (cannot be overriden)
+&gt; 
+&gt;   40   rules that set the permissions of device nodes
+&gt;        (can be overriden by later rules)
+&gt; 
+&gt;   60   rules that add symlinks to device nodes
+&gt;        (adds to those set in earlier rules)
+&gt; 
+&gt;   80   rules that run programs (but do not load modules)
+&gt; 
+&gt;   90   rules that load modules
+&gt; 
+&gt;   99   rules that it is critical to be run last
+&gt; 
+&gt; 
+&gt; This scheme has been chosen so that user-supplied rules are normally
+&gt; named 50-*.rules for the right thing to happen.
+&gt; 
+&gt; Packages should chose the approriate sequence point and add 5 to it
+&gt; (e.g. 25-iftab.rules, 45-libsane.rules, etc.) unless there is a need
+&gt; for a particular order.
+&gt; ''
+&gt; 
+&gt; &gt; --------------------------------
+&gt; &gt; SUBSYSTEM=="block", KERNEL=="sda", ATTRS{vendor}=="JetFlash",
+&gt; &gt; ATTRS{model}=="Transcend 8GB   ", ACTION=="add", RUN+="mount -t
+&gt; &gt; reiserfs /dev/sda2 /mnt/pen"
+&gt; &gt; -------------------------------------
+&gt; 
+&gt; I'd suggest you examine some of the other rulesets in /etc/udevd.
+&gt; Note, for one thing, that none of them run "mount" explicitly; it's
+&gt; very unlikely that you need to either.
+</pre>
+
+<p>
+Thanks a lot for your nice explanation. In the mean time I have found
+another nice tool called "pmount" in debian which supports userspace
+mount operation if the user belongs to plugdev group and it mounts under
+/media. But I'm still trying to fix udev which can do automount with out
+user intervention. If there will be any progress I'll come back with the
+information.
+</p>
+
+<p>
+thanks
+</p>
+
+<p>
+
+</p>
+<br /><a href="#top">Top</a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="../../lg_mail.html#mb-udev_rules_ca_t_auto_mount_my_pen_drive">Back</a><hr width="50%" align="left" /><p><br /></p></div>
+</body>
+</html>

@@ -1,0 +1,460 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Introduction to Shell Scripting, part 6 LG #116</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="okopnik1.html" >&lt;-- prev</A> | <A HREF="orr.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Introduction to Shell Scripting, part 6</h1>
+<p id="by"><b>By <A HREF="../authors/okopnik.html">Ben Okopnik</A></b></p>
+
+<p>
+<img src="../gx/reprint.png" alt="A Blast from the Past!">
+<strong><em>Originally published in Issue 57 of Linux Gazette, September
+2000</em></strong>
+
+
+<h3>Random Wanderings</h3>
+<p> Well, this should be the last article in the "Introduction to Shell
+Scripting" series - I've had great feedback from a number of readers (and
+thank you all for your kind comments!), but we've covered most of the
+<strong>basics</strong>; that was the original purpose of the series. I may
+yet pop up at some point in the future ("Oh, rats, I forgot to explain
+XYZ!"), but those of you who've been following along should now consider
+yourselves Big-Time Experts, qualified to carry a briefcase and sound important...
+erm, <em>not</em>. :) At least you should have a pretty good idea of how
+to write a script and make it work - and that's a handy skill.
+
+
+<h3>A Valued Assistant</h3>
+<p> Quite a while ago, I found myself in a quandary while writing a script;
+I had an array that contained a list of command lines that I needed to
+execute based on certain conditions.  I could read the array easily enough,
+or print out any of the variables - but what I needed was to execute them!
+What to do, what to do... as I remember, I gave up for lack of that one
+capability, and rewrote the whole (quite large) script (it was <em>not</em> a
+joyful experience). "eval" would have been the solution.
+
+<p> Here's how it works - create a variable called $cmd, like so:
+
+<pre>
+Odin:~$ cmd='cat .bashrc|sort'
+</pre>
+
+<p> Now, you can echo the thing -
+
+<pre>
+Odin:~$ echo $cmd
+cat .bashrc|sort'
+</pre>
+
+<p> - but how do you execute it? Just running "$cmd" produces an error:
+
+<pre>
+Odin:~$ $cmd
+cat: .bashrc|sort: No such file or directory
+</pre>
+
+<p> This is where "eval" comes into its own: "<code>eval $cmd</code>" would
+evaluate the string contained in the variable as if it had been entered at
+the command line. This is not something that comes up too often... but it
+is a capability of the shell that you need to be aware of.
+
+
+<h3>Trapped Like a Rat</h3>
+<p> One of the standard techniques in scripting (and in programming in general)
+is that of writing data to temporary files - there are many reasons to
+do this. But, and this is a big one, what happens when your users interrupt
+that script half-way through execution? (For those of you who have scripts
+like that and haven't thought of the issue, sorry to give you material
+for nightmares. At least I'll show you the solution as well.)
+
+<p> You guessed it: a mess. Files in "/tmp", perhaps important data left
+hanging in the breeze, files thought to be updated that are not... Yuck.
+How about a way for us to exit gracefully, despite a frantic
+keyboard-pounding user who just <em>has</em> to run Quake <strong>RIGHT
+NOW</strong>?
+
+<p> The "trap" command provides an answer of sorts (shooting said user is
+far more effective and enjoyable, but may get you talked about).
+
+<pre class="code"> 
+#!/bin/bash
+
+function cleanup ()
+{
+	# Ignore 'Ctrl-C'; let him pound away...
+	trap '' 2
+	
+	echo "Wake up, Neo."
+	sleep 2
+	clear
+	echo "The Matrix has you."
+	
+	echo "He's at it again."|mail admin -s "Update stopped by $USER"
+	
+	# Restore the original data
+	tar xvzf /mnt/backup/accts_recvbl -C /usr/local/acct
+	
+	# Delete 'tmp' stuff
+	rm -rf /tmp/in_process/
+	
+	# OK, we've taken care of the cleanup. Now, it's REVENGE time!!!
+	rm /usr/games/[xs]quake
+	
+	# Give him a nice new password...
+	chpasswd $USER:~X%y!Z@zF%HG72F8b@Moron!&amp;(~64sfgrnntQwvff########^
+	
+	# We'll back up all his stuff... Oh, what does "--remove-files" do?
+	tar cvz --remove-files -f /mnt/timbuktu/bye-bye.tgz /home/$USER
+	# Heh-heh-heh...
+	umount /mnt/timbuktu
+	
+	trap 2 # Set Ctrl-C back to normal
+	exit        
+	# Yep, I meant to do that...
+}
+
+trap 'cleanup' 2
+...
+</pre>
+
+<p> There's a little of the BOfH inside every admin. &lt;grin&gt; (For those
+of you not familiar with the "BOfH Saga", this is a <strong>must</strong> read for
+every Unix admin; appalling and hideously funny. Search the Web.)
+
+<p> DON'T run this script... yes, I know it's tempting. The point of "trap"
+is, we can define a behavior whenever the user hits `Ctrl-Break' (or for
+that matter, any time the script exits) that is much more useful to us than
+just crashing out of the program; it gives us a chance to clean up,
+generate warnings, etc.
+
+<p> "trap" can also catch other signals; the fact is that "kill", despite
+its name, does not of itself `kill' a process - it sends a signal. The
+process then decides what to do with that signal (this is a crude
+description, but generally correct). If you wish to see the entire list of
+signals, just type "trap -l" or "kill -l" or even "killall -l" (which does
+not list the signal numbers, just names). The ones most commonly used are
+1) SIGHUP, 2) SIGINT, 3) SIGQUIT, 9) SIGKILL, and 15) SIGTERM (this last
+one is the default for 'kill' when no signal name or number is specified.)
+
+<p> There are also the `special' signals. They are: 0) EXIT, which traps on
+any exit from the shell, and DEBUG (no number assigned), which can - here's
+a nifty thing! - be used to troubleshoot shell scripts (it traps every time
+a simple command is executed). DEBUG is actually more of an "info only"
+item: you can have this exact action without writing any "trap"s, simply by
+adding "-x" to your shebang (see "In Case Of Trouble...", below).
+
+<p> "trap" is a powerful tool. In LG#37, Jim Dennis had a short script
+fragment that created a secure directory under "/tmp" for just this sort of
+thing - temp files that you don't want exposed to the world. Pretty cool
+gadget; I've used it myself a few times since.
+
+
+<h3>In Case Of Trouble, Break Glass</h3>
+<p> Speaking of troubleshooting, Bash provides several very useful tools
+that can help you find the errors in your script. These are switches -
+part of the "set" command syntax - that are used in the shebang line
+of the script itself. These switches are:
+
+<ul>
+<li>-n     Read the shell script lines, but do not execute
+<li>-v     Print the lines as they're read
+<li>-f     Disable wildcard expansion
+<li>-x     Prints $PS4 (the "level of indirection" prompt), interprets, executes, and prints the command.
+</ul>
+
+<p> I've found that "-nv" and "-x" (and perhaps "-xf") are the most useful
+invocations: one gives you the exact location of a "bad" line (you can see
+where the script would crash); the other, `noisy' though it is, is handy
+for seeing where things aren't happening quite the right way (when, even
+though the syntax is right, the action is not what you want). Good
+troubleshooting tools both. As time passes and you get used to the quirks
+of error reporting, you'll probably use them less and less, but they're
+invaluable to a new shell script writer.
+
+
+<h3>Use The Source, Luke</h3>
+<p> Here's a line familiar to every "C" programmer:
+
+<pre>
+#include &lt;stdio.h&gt;
+</pre>
+
+<p> - a very useful concept, that of <em>sourcing external files</em>. What
+that means is that a "C" programmer can write routines (functions) that
+are used repeatedly, store them in a `library' (an external file),
+and bring them in as they are needed. Well - have I not said that shell
+scripting is a mature, capable programming language? - we can do the same
+thing!  The file doesn't even have to be executable; the syntax that we use
+in sourcing it takes care of that. The example below is a snippet of the
+top of my function library, "Funky". Currently, it is a single file, a
+couple of kB long, and growing apace.
+
+<p> There's a tricky little bit of Bash maneuvering that's worth knowing:
+if you create a variable called BASH_ENV in your .bash_profile, like so:
+
+<pre>
+export BASH_ENV="~/.bash_env"
+</pre>
+
+<p> then create a file called ".bash_env" in your home directory, that file
+will be re-read every time you start a `non-login non-interactive shell' -
+i.e., a shell script. That's where I source "Funky" from - that way, any
+changes in it are immediately available to any shell script. It can also be
+sourced right from the command line.
+
+<pre class="code">
+calc () # Integer-only command-line calculator
+{
+    printf "$(($*))\n"
+}
+
+getch () # silently gets a char from keyboard, returns $GETCH
+{
+    OLD=`stty -g`
+    stty raw -echo
+    dd if=/dev/tty bs=1 count=1 2&gt;/dev/null
+    stty $OLD
+}
+
+colsel () # Color selector - iterates through all the $TERM's color choices
+{
+trap 'echo -en "\E[$40;1m"; clear' 0	# Reset on exit
+n=49	# Max foreground color value
+while [ "$n" -ne 0 ]
+do
+	m=39	# Max background color value
+	while [ "$m" -ne 0 ]
+	do
+		echo -en "\E[$m;${n}m"
+        	clear
+		echo "This is a test."
+		echo -en "\E[$40;1m"
+        	echo -n " $n $m "
+        	read
+		(( m-- ))
+	done
+	(( n-- ))
+done
+}
+</pre>
+<p> Not too different from a script, is it? No shebang is necessary,
+since this file does not get executed by itself.  So, how do we use
+it in a script? Here it is (we'll pretend that I don't source "Funky" in
+".bash_env"):
+
+<pre class="code">
+#!/bin/bash
+. Funky
+declare -i Total=0
+leave ()
+{
+    echo "So youse are done shoppin'?"
+    [ $total -ne 0 ] &amp;&amp; echo "Dat'll be $total bucks, pal."
+    echo "Have a nice day."
+    exit
+}
+
+# Exec the 'leave' function on exit
+trap 'leave' 0
+
+clear
+
+# Infinite loop!
+while :
+do
+    echo
+    echo "Whaddaya want? I got Cucumbers, Tomatoes, Lettuce, Onions,"
+    echo "and Radishes today."
+    echo
+    
+    # Here's where we call a sourced function...
+    input=`getch`
+    # ...and reference a variable created by that function.
+    case $input
+    in
+	C|c) Total=$Total+1; echo "Them are good cukes." ;;
+	T|t) Total=$Total+2; echo "Ripe tomatoes, huh?" ;;
+	L|l) Total=$Total+2; echo "I picked da lettuce myself." ;;
+	O|o) Total=$Total+1; echo "Fresh enough to make youse cry!" ;;
+	R|r) Total=$Total+2; echo "Real crispy radishes." ;;
+	*) echo "Ain't got nuttin' like that today, mebbe tomorra." ;;
+    esac
+    sleep 2
+
+ done
+</pre>
+
+<p> Note the period before "Funky": that's an alias for the "source" command.
+When sourced, "Funky" acquires an interesting property: just as if we had
+asked "bash" to execute a file, it goes out and searches the path listed
+in $PATH. Since I keep "Funky" in "/usr/local/bin" (part of my $PATH),
+I don't need to give an explicit path to it.
+
+<p> If you're going to be writing shell scripts, I strongly suggest that
+you start your own `library' of functions. (HINT: Steal the functions from
+the above example!) Rather than typing them over and over again, a single
+"source" argument will get you lots and lots of `canned' goodies.
+
+
+<h3>Wrapping Up The Series</h3>
+
+<p> Well - overall, lots of topics covered, some "quirks" explained; all
+good stuff, useful shell scripting info. There's a lot more to it - remember,
+this series was only an <em>introduction</em> to shell scripting - but anyone
+who's stuck with me from the beginning and persevered in following my brand
+of pretzel-bending logic (poor people! irretrievably damaged, not even
+the best psychologist in the world can help you now... :) should now be
+able to design, write, and troubleshoot a fairly decent shell script. The
+rest of it - understanding and writing the more complex, more involved
+scripts - can only come with practice, otherwise known as "making lots
+of mistakes". In that spirit, I wish you all lots of "mistakes"!
+
+<p> Happy Linuxing!
+<hr width="20%">
+
+<strong>References</strong>
+<pre>
+The "man" pages for 'bash', 'builtins', 'stty'
+"Introduction to Shell Scripting - The Basics", LG #53
+"Introduction to Shell Scripting", LG #54
+"Introduction to Shell Scripting", LG #55
+"Introduction to Shell Scripting", LG #56
+"Introduction to Shell Scripting", LG #57
+"Introduction to Shell Scripting", LG #59
+</pre> 
+
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<P>
+<IMG ALT="picture" SRC="../gx/authors/okopnik.jpg" align="left"  hspace="10" vspace="10" class="bio">
+Ben is the Editor-in-Chief for Linux Gazette and a member of The Answer Gang.
+
+<em>
+<p>
+Ben was born in Moscow, Russia in 1962. He became interested in electricity
+at the tender age of six, promptly demonstrated it by sticking a fork into
+a socket and starting a fire, and has been falling down technological
+mineshafts ever since. He has been working with computers since the Elder
+Days, when they had to be built by soldering parts onto printed circuit
+boards and programs had to fit into 4k of memory. He would gladly pay good
+money to any psychologist who can cure him of the recurrent nightmares.
+
+<p>His subsequent experiences include creating software in nearly a dozen
+languages, network and database maintenance during the approach of a
+hurricane, and writing articles for publications ranging from sailing
+magazines to technological journals. After a seven-year Atlantic/Caribbean
+cruise under sail and passages up and down the East coast of the US, he is
+currently anchored in St. Augustine, Florida. He works as a technical
+instructor for Sun Microsystems and a private Open Source consultant/Web
+developer. His current set of hobbies includes flying, yoga, martial arts,
+motorcycles, writing, and Roman history; his Palm Pilot is crammed full of
+alarms, many of which contain exclamation points.
+
+<p>He has been working with Linux since 1997, and credits it with his complete
+loss of interest in waging nuclear warfare on parts of the Pacific Northwest.
+</em>
+<br CLEAR="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2005, Ben Okopnik. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 116 of Linux Gazette, July 2005
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="okopnik1.html" >&lt;-- prev</A> | <A HREF="orr.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">July 2005 (#116)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

@@ -1,0 +1,614 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Snort Inline Part I LG #117</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="raby.html" >&lt;-- prev</A> | <A HREF="seymour.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Snort Inline Part I</h1>
+<p id="by"><b>By <A HREF="../authors/savage.html">Pete Savage</A></b></p>
+
+<p>
+
+<h3>
+Introduction
+</h3>
+
+<p>Network Intrusion is an important aspect of network security. There's a
+wide variety of Intrusion Detection Systems (IDSes) out there. While these
+are extremely useful to gather information about an attack, or the
+beginnings of an attack, e.g., a port scan, they can only inform us that
+an attack has occurred. What would be really useful is a system that
+actually blocks these attacks in real time. snort_inline is a system
+designed to do just that.
+
+<p>This article describes how to compile, install, and test snort_inline.
+snort_inline is a modification of the freely available snort package to
+allow inspection and subsequent rejection of network packets, assuming
+they meet certain predefined criteria. This constitutes an Intrusion
+Prevention System (IPS), instead of just Intrusion Detection.
+
+<p>So, how does an IPS actually work? The system loads a large array of
+signatures. These signatures take the form of a string of data
+characteristic of some particular type of attack. When a data packet
+enters the network, the IDS/IPS examines that data against its database
+of signatures. If the data match, then the IDS/IPS takes appropriate
+action. In the case of an IDS, the intrusion attempt will be logged,
+whereas, in the case of an IPS, the system can drop the data packet, or
+even sever the offending machine's connection.
+
+<p>To begin with, if you are running a Red Hat/Fedora system, you may need
+the source code for your system's installed kernel. This may be true of
+other systems, too; please see below for more information on why this is
+required.  It is also useful to have a Web server running, as this
+article uses the Web service to validate snort_inline's behaviour.  You
+should not attempt this on a production server - at least not the first
+time that you try this procedure.  
+
+<p> snort_inline requires four packages to be installed in order to
+configure it on a Fedora Core 3/4 box. This may be true of other systems,
+too; please see below for more detail, later in the topic. We will assume
+all files are downloaded into /home/snort/; please replace this with your
+own download directory.
+
+<p> To begin with, you need the iptables source code. For reference, I used <a
+href="http://www.netfilter.org/files/iptables-1.3.1.tar.bz2">iptables-1.3.1</a>
+for this article. Once you have the source tarball, move it to
+/usr/src/, untar it, cd into its tree, and run 'make' with the
+install-devel option:
+
+<pre>
+mv /home/snort/iptables-1.3.1.tar.tar /usr/src/
+cd /usr/src
+tar xjvf iptables-1.3.1.tar.tar
+cd /usr/src/iptables-1.3.1
+make install-devel
+</pre>
+
+This will install the libipq library, allowing snort_inline to
+communicate with iptables. iptables is responsible for accepting or
+rejecting packets on the network interface.
+
+<p> Next, you need to build and install libnet, which is a high-level API
+allowing snort to construct and inject packets into the network. The
+version of libnet I used was <a
+href="http://www.packetfactory.net/libnet/dist/deprecated/libnet-1.0.2a.tar.gz">libnet-1.0.2a</a>,
+as specified in snort_inline's docs. The newer version of libnet is, as
+yet, incompatible with snort. Follow the instructions below, once you have
+downloaded libnet-1.1.0.tar.gz:
+
+<pre>
+mv /home/snort/libnet-1.0.2a.tar.gz /usr/src/
+cd /usr/src
+tar xzvf libnet-1.0.2a.tar.gz
+cd /usr/src/Libnet-1.0.2a
+./configure
+make
+make install
+</pre>
+
+Providing there are no errors, you can proceed to the next section. If
+at this stage you do find errors, you may need to install other
+packages.  The third package required is pcre, the Perl-Compatible
+Regular Expressions library. For reference, I used <a
+href="http://fresh.t-systems-sfr.com/unix/src/misc/pcre-6.1.tar.gz">pcre-6.1.tar.gz</a>.
+Once you have this file downloaded, follow the steps below, to install
+pcre:
+
+<pre>
+mv /home/snort/pcre-6.1.tar.gz /usr/src/
+cd /usr/src
+tar xzvf pcre-6.1.tar.gz 
+cd /usr/src/pcre-6.1
+./configure
+make
+make install
+</pre>
+
+Providing there are no errors, you can proceed to the next section.
+
+<strong>Important:</strong> On Red Hat/Fedora systems, you will need to
+perform an extra step before you can compile snort_inline. This has not
+been tested on other systems, but, if your build fails later with the
+error shown below...
+
+<pre>
+In file included from /usr/include/linux/netfilter_ipv4/ip_queue.h:10,
+from /usr/include/libipq.h:37,
+from ../../src/inline.h:8,
+from ../../src/snort.h:38,
+from spo_alert_fast.c:51:
+/usr/include/linux/if.h:59: redefinition of `struct ifmap'
+/usr/include/linux/if.h:77: redefinition of `struct ifreq'
+/usr/include/linux/if.h:126: redefinition of `struct ifconf'
+make[3]: *** [spo_alert_fast.o] Error 1
+make[3]: Leaving directory
+`/usr/src/snort_inline-2.3.0-RC1/src/output-plugins'
+make[2]: *** [all-recursive] Error 1
+make[2]: Leaving directory `/usr/src/snort_inline-2.3.0-RC1/src'
+make[1]: *** [all-recursive] Error 1
+make[1]: Leaving directory `/usr/src/snort_inline-2.3.0-RC1'
+make: *** [all] Error 2
+</pre>
+
+...you may need to perform the corrective steps below: The build fails
+because your glibc headers need to be updated <a
+href="#1"><strong>[1]</strong></a>, and this is why the kernel source is
+required, as stated above. To temporarily fix this problem, please make the
+following adjustments.  This step assumes you have your kernel's source
+installed, and that it resides in linux-2.6.9.  This directory is likely to
+change, depending on your kernel/distro version.
+
+<pre>
+cd /usr/include
+mv linux linux.orig
+ln -s /usr/src/redhat/SOURCES/linux-2.6.9/include/linux/ linux
+</pre>
+
+This step can always be reversed at a later date, should problems arise.
+You now need to obtain the latest snort_inline package. For reference, I used 
+<a href="http://prdownloads.sourceforge.net/snort-inline/snort_inline-2.3.0-RC1.tar.gz?download">snort_inline-2.3.0-RC1.tar.gz</a>
+in this guide. Now, perform the steps outlined below.
+
+<pre>
+mv /home/snort/snort_inline-2.3.0-RC1.tar.gz /usr/src/
+cd /usr/src
+tar xzvf snort_inline-2.3.0-RC1.tar.gz 
+cd snort_inline-2.3.0-RC1
+./configure
+make
+make install
+</pre>
+
+If there are no errors, then congratulations: You have just successfully
+compiled and installed snort_inline.
+
+<h3>
+Initial Configuration
+</h3>
+
+We need to perform just a few more tweaks to the snort_inline
+configuration, before it is ready to be run. To begin with, we need to
+modify snort_inline's configuration file, making it point to the correct
+path in order to obtain its rules. These rules tell snort_inline which
+packets are malicious, and which are normal traffic. A quick workaround
+is to move the classification and reference rule files to the rules
+folder, like so:
+
+<pre style="font-size: 90%">
+cp /usr/src/snort_inline-2.3.0-RC1/etc/classification.config /usr/src/snort_inline-2.3.0-RC1/rules/
+cp /usr/src/snort_inline-2.3.0-RC1/etc/reference.config /usr/src/snort_inline-2.3.0-RC1/rules/
+</pre>
+
+We are going to move the configuration and rule definition files to the
+/etc folder, where files of this type normally reside.
+
+<pre>
+mkdir /etc/snort_inline
+cp /usr/src/snort_inline-2.3.0-RC1/etc/* /etc/snort_inline/
+cp /usr/src/snort_inline-2.3.0-RC1/rules /etc/snort_inline/ -R
+</pre>
+
+Save the file and exit. Eventually, we are going to set up snort_inline
+to run as a daemon, i.e., as a background process, although it is
+perfectly conceivable that you may prefer to run it as a normal process.
+In fact, to begin with, we won't be running it as a background service,
+either: running non-daemon mode will let us view snort_inline's output,
+and ensure that it is running as expected, without any errors. We must
+now check /etc/snort_inline/snort_inline.conf to ensure that the rules
+pathspec is as required below. Load the file in your favourite text
+editor, and modify the line
+
+<pre>
+var RULE_PATH /etc/snort_inline/drop_rules
+</pre>
+
+to
+
+<pre>
+var RULE_PATH /etc/snort_inline/rules 
+</pre>
+
+We now need to create a directory for snort_inline, to log the malicious
+activity.
+
+<pre>
+mkdir /var/log/snort_inline
+</pre>
+
+By default, all traffic flowing to the kernel and back to user space must
+be intercepted by snort_inline, to check for malicious network packets.
+The kernel accomplishes this by pushing the data into a queue using the
+ip_queue module.  You can load ip_queue and verify its presence as follows:
+
+<pre>
+modprobe ip_queue
+lsmod | grep ip_queue
+</pre>
+
+Providing you get see a line similar to the one below, ip_queue is
+running and ready to interface with snort_inline.
+
+<pre>
+ip_queue 9945 0
+</pre>
+
+Next, iptables must be configured to send the traffic to ip_queue. You
+accomplish that redirection using the following line, which redirects
+all network packets destined for port 80 to the ip_queue module. If the
+server is running a Web daemon, then this is an easy way to verify that
+iptables is working. It is not recommended that you test this on a
+production server, as your Web users WILL experience downtime.
+
+<pre>
+iptables -I INPUT -p tcp --dport 80 -j QUEUE
+</pre>
+
+If you now try browsing a Web site hosted on the server from a different
+machine, you should notice that your browser hangs. This is because all
+packets are being routed to the ip_queue, and are awaiting release by
+iptables. Once snort_inline is running in background, all that traffic
+will be released to the Web server, which will reply to the user's
+request in the usual manner.
+
+<h3>
+Testing snort_inline
+</h3>
+
+The snort_inline installation can now be tested using the command below:
+snort_inline should begin to process the packets being held in the
+ip_queue, and hence resume normal network activity.
+
+<pre>
+snort_inline -c /etc/snort_inline/snort_inline.conf -Q -N -l /var/log/snort_inline/ \
+	-t /var/log/snort_inline/ -v
+</pre>
+
+You should see some text flash by, and snort_inline should present a
+message similar to:
+
+<pre>
+__== Initialisation Complete ==__
+</pre>
+
+If so, congratulations; snort_inline is now running. Try making that
+connection via your Web browser again, and you should now see the Web
+page you expected.
+
+If you get a message similar to that below, then you forgot to load the
+ip_queue module:
+
+<pre>
+Reading from iptables
+Running in IDS mode
+Initializing Inline mode 
+InitInline: : Failed to send netlink message: Connection refused
+</pre>
+
+Back on the snort_inline box, hit [ctrl+c] to end the current
+snort_inline process. It is now time to add a test rule so that you can
+see if snort_inline is actually working. In this example we are going to
+drop all port 80 activity. To do this, you need to edit
+/etc/snort_inline/rules/web-attacks.rules.  Open it using your favourite
+editor, and add the following line before the first "alert" statement,
+but below the comments.
+
+<pre>
+drop tcp any any -&gt; any 80 (classtype:attempted-user; msg:"Port 80 connection initiated";)
+</pre>
+
+Note that all other lines in this file start with the word "alert". This
+means that snort_inline will only log and alert malicious packets: it
+WILL NOT DROP them. This will be addressed in a short while. Re-run
+snort_inline again with the following command:
+
+<pre>
+snort_inline -c /etc/snort_inline/snort_inline.conf -Q -N -l /var/log/snort_inline/ \
+	-t /var/log/snort_inline/ -v
+</pre>
+
+Try once more to make that Web page connection. You may be required to
+hit [ctrl+F5] to force page refresh and prevent your browser using a
+cached version. Your request should now fail. Let us now quickly check
+the logs, to see if snort_inline captured the "malicious attempt." Back
+on the snort_inline box, hit [ctrl+c] once more to stop the snort_inline
+process, and use the following command:
+
+<pre>
+cat /var/log/snort_inline/snort_inline_full
+</pre>
+
+You should be presented with an output sequence similar to the following.
+
+<pre>
+[**] [1:0:0] Port 80 connection initiated [**]
+[Classification: Attempted User Privilege Gain] [Priority: 1]
+07/03-16:56:24.401627 192.168.16.68:2433 -&gt; 192.168.16.7:80
+TCP TTL:128 TOS:0x0 ID:24295 IpLen:20 DgmLen:48 DF
+******S* Seq: 0x1EB0AE32 Ack: 0x0 Win: 0xFFFF TcpLen: 28
+TCP Options (4) =&gt; MSS: 1460 NOP NOP SackOK
+[**] [1:0:0] Port 80 connection initiated [**]
+[Classification: Attempted User Privilege Gain] [Priority: 1]
+07/03-16:56:27.341326 192.168.16.68:2433 -&gt; 192.168.16.7:80
+TCP TTL:128 TOS:0x0 ID:24297 IpLen:20 DgmLen:48 DF
+******S* Seq: 0x1EB0AE32 Ack: 0x0 Win: 0xFFFF TcpLen: 28
+TCP Options (4) =&gt; MSS: 1460 NOP NOP SackOK
+[root@localhost 20050625]# 
+</pre>
+
+If so, congratulations for the third time; snort_inline has successfully
+used your rule to drop the packets. The string "Port 80 connection
+Initiated" was the line you entered into web-attacks.rules, above. We
+can also view a more-abridged version, by issuing the command
+
+<pre>
+cat /var/log/snort_inline/snort_inline_fast
+</pre>
+
+<p>This should provide output similar to that shown below:
+
+<pre>
+07/03-16:56:24.401627 [**] [1:0:0] Port 80 connection initiated [**] [Classification:
+Attempted User Privilege Gain] [Priority: 1] {TCP} 192.168.16.68:2433 -&gt; 192.168.16.7:80
+07/03-16:56:27.341326 [**] [1:0:0] Port 80 connection initiated [**] [Classification:
+Attempted User Privilege Gain] [Priority: 1] {TCP} 192.168.16.68:2433 -&gt; 192.168.16.7:80
+[root@localhost 20050625]#
+</pre>
+
+<p>In order to use snort_inline effectively, you must now remove the drop
+rule inserted earlier.  Edit the file
+/etc/snort_inline/rules/web-attack.rules, and prepend # to the line you
+added earlier, making;
+
+<pre>
+drop tcp any any -&gt; any 80 (classtype:attempted-user; msg:"Port 80 connection initiated";)
+</pre>
+
+<p>become
+
+<pre>
+#drop tcp any any -&gt; any 80 (classtype:attempted-user; msg:"Port 80 connection initiated";)
+</pre>
+
+<p>The last step is to modify all the rule files, turning alert rules into
+drop rules. This can be done with a simple command, which must be typed
+out exactly. If you are unsure, please make a backup of the rules folder
+before you type this command, something that should be done as a matter
+of practice.
+
+<pre>
+cd /etc/snort_inline/rules/
+for file in $(ls -1 *.rules)
+do
+	sed -e 's:^alert:drop:g' ${file} &gt; ${file}.new
+	mv ${file}.new ${file} -f
+done
+</pre>
+
+<p>The last thing to do is run snort_inline as a daemon with the line
+below, the only difference being the presence of the "-D":
+
+<pre>
+snort_inline -c /etc/snort_inline/snort_inline.conf -Q -N -l /var/log/snort_inline/ \
+	-t /var/log/snort_inline/ -v -D
+</pre>
+
+<h3>
+Returning Your System to Normal
+</h3>
+
+<p>Congratulations: you have just installed a working IPS. For
+completeness's sake, the following instructions demonstrate how to stop
+snort_inline and return your system to normal operation. Be advised that
+you can alternatively accomplish this by simply rebooting the machine. 
+
+<p>To stop snort, as it is now running in daemon mode, we need to find its
+process ID number, and then issue a kill signal.  To do this, run the
+following command;
+
+<pre>
+ps aux | grep snort_inline
+</pre>
+
+<p>This should present you with output similar to that below; the number we
+are looking for is the "15705":
+
+<pre>
+root     15705  1.1 21.8  31184 27464 ?        Ss   22:37   0:01 snort_inline -c \
+	/etc/snort_inline/snort_inline.conf -Q -N -l /var/log/snort_inline       \
+	-t /var/log/snort_inline -v -D
+root     15727  0.0  0.5   3760   720 pts/0    S+   22:39   0:00 grep snort_inline#
+</pre>
+
+<p>You can now go ahead and issue the kill command, as follows, where the
+number following kill is the one obtained in the previous step.
+
+<pre>
+kill 15705
+</pre>
+
+<p>This will exit snort, but ip_queue will still be receiving packets and
+disrupting network traffic flow. As previously stated, in this example,
+all port 80 traffic will be disabled. To re-enable this traffic, we must
+remove the iptables rule with the following command:
+
+<pre>
+iptables -D INPUT -p tcp --dport 80 -j QUEUE
+</pre>
+
+<p>Your server should now resume normal network activity on port 80. 
+
+<h3>
+Where Do We Go from Here?
+</h3>
+
+<p>This article has been a primer on the world of snort_inline.  Next
+month's piece will be dedicated to updating snort_inline's rules,
+writing your own custom rules, and creating a snort_inline startup
+script to enable it at boot-up.
+
+<hr>
+
+<a name="1"></a>
+<p> [1] <span class="editorial">Rick Moen comments</span>:  I advise caution about fooling with
+one's kernel headers.    The old advice to do this by fetching new
+kernel source and unpacking it to /usr/src/linux was always problematic,
+and has now been obsoleted by better and less breakage-prone ways.
+Short explanation:  Your kernel header files used in compilation  
+need to always be compatible with the installed libc; therefore, you
+should never fool with them, except by installing a new libc package
+that furnishes new, matching headers.
+
+<p> Long explanation:  Some kernel header files get invoked from locations
+within /usr/include/linux, during compiles.  Early in the history of
+Linux, someone implemented the seemed-good-at-the-time notion of 
+<em>not</em> carrying such headers inside /usr/include/linux, but
+rather -- to save disk space, perhaps? -- to symlink from there to those
+same header files' locations within a kernel source code tree unpacked at
+/usr/src/linux.  Unfortunately, as you maintained your system over time, 
+newer kernel source trees' header files inevitably accumulated subtle
+incompatibilities with the installed C library's entry points.
+Eventually, compiles begin to fail for mysterious reasons.  
+
+<p> The cause of this syndrome was understood early on, but the habit of
+symlinking headers to /usr/src/linux locations became so ingrained 
+that it took until about 1999 to eradicate it from Linux
+distributions, despite <a href="http://linuxmafia.com/faq/Kernel/usr-src-linux-symlink.html">
+Torvalds's repeated urgings</a> and
+<a href="http://linuxgazette.net/issue62/tag/4.html">exhaustive analysis</a>
+from the Answer Gang.
+
+<p> What the author calls "updating glibc headers" looks to this
+commentator like an instance of the "symlink madness" Torvalds and others
+tried for eight years to stamp out.  I personally wouldn't go there.  If
+"the build fails" because of header problems, I'm betting you induced those
+problems yourself through prior fooling with /usr/include/linux contents,
+and your real cure is to stop doing that and let your system header files
+remain the way your glibc package wrote them.
+
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<p>
+<img align="left" alt="[BIO]" src="../gx/2002/note.png" class="bio">
+
+<!-- 
+If the author has sent his pic, save it to the right directory
+and enable the line below.
+
+<img align="left" alt="[BIO]" src="../gx/authors/pic.jpg" class="bio">
+
+-->
+
+<em>
+
+<p> Pete has been programming since the age of 10 on an old Atari 800 XE.
+Though he took an Acoustical Engineering degree from the world-renowned
+ISVR in Southampton UK, the call of programming brought him back and he
+has been working as a Web developer ever since. He uses both Linux and
+Windows platforms. He still lives in the UK, and is currently living
+happily with his wife.
+
+</em>
+<br clear="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2005, Pete Savage. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 117 of Linux Gazette, August 2005
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="raby.html" >&lt;-- prev</A> | <A HREF="seymour.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">August 2005 (#117)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

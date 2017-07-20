@@ -1,0 +1,700 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Automatic Backups with rsync and Anacron LG #104</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="kapil.html" >&lt;-- prev</A> | <A HREF="oregan.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Automatic Backups with rsync and Anacron</h1>
+<p id="by"><b>By <A HREF="../authors/odonovan.html">Barry O'Donovan</A></b></p>
+
+<p>
+<h3>1. Introduction</h3>
+
+<p>
+The thing about backups is that they can just be a pain. Everyone 
+<em>knows</em> just how important they are, but very few people actually take 
+the time to perform proper backups. Even after they have felt the pain of 
+losing all those important files. 
+
+<p>
+In this article I am going to show you how to quickly set up your computer for 
+simple, hassle-free, and transparent backups using only rsync and cron (or 
+Anacron). The premise is simple: every night your computer will make an 
+automatic mirror of all the files you wish to backup, and at chosen intervals 
+these mirrors will be archived and kept for a specified period of time.
+
+<p>
+Before you get our hands dirty on actual implementation you need to design 
+your own backup policy. In section 3 I discuss what a backup policy should and 
+should not be. I will then introduce the necessary background information on 
+rsync and cron separately. Finally, I will put it all together leaving you with 
+a simple but effective backup regime.
+
+<h3>2. Intended Audience</h3>
+
+<p>
+This article and the presented backup procedure is intended for anyone wishing 
+to keep an effective backup of their important data. It is definitely not 
+intended for large organisations or businesses with mission critical data. I 
+would imagine the ideal candidates would include: home users, home office/small
+office users, students/postgraduates, and researchers.
+
+<h3>3. Backup Policies</h3>
+
+<p>
+A common misconception among many people is that a good backup policy is as
+simple as making a regular copy of your data ("mirroring your data"),
+always overwriting the previous copy. This, although more effort than most
+might make, is almost as bad as doing nothing. 
+
+<p>
+Consider, for example, if one of your files becomes corrupt over time. It takes
+you a week or two before you use it again. In that time, you have made two
+"backups". You open your file to find your data destroyed. "But", you think to 
+yourself, "that's alright, I'll just turn to my backup". You open your backup 
+to find the exact same corrupted file. You realise only too late how useless 
+your backup policy was.
+
+<p>
+Most of us have hundreds, if not thousands, of important files in our home
+directories; address books, e-mails, letters, work related data, programs we
+have been working on, etc. Some of these files we might use every week, while
+others might not be looked at for months or even years. 
+	
+<p>
+A good backup policy is one which takes "snapshots" of your data and
+keeps them for a specified period of time. It is up to each individual to
+decide just how many snapshots to keep and at what intervals. Often this will
+be decided for you by storage limitations. Where possible, data that changes
+regularly will benefit from snapshots of smaller intervals, while data that
+rarely changes requires fewer intervals. The following table demonstrates my
+own backup procedure:
+
+<p>
+
+<table border="1" summary="Sample backup policy">
+<thead>
+  <tr>
+    <th>Data</th>
+    <th>Change Freq.</th>
+    <th>Size</th>
+    <th>Daily Mirror</th>
+    <th colspan="3">Weekly Snapshots</th>
+    <th colspan="6">Monthly Snapshots</th>
+    <th>Space Required</th>
+  </tr>
+  <tr>
+    <td colspan="4"></td>
+    <th>1</th>
+    <th>2</th>
+    <th>3</th>
+    <th>1</th>
+    <th>2</th>
+    <th>3</th>
+    <th>4</th>
+    <th>6</th>
+    <th>12</th>
+    <td></td>
+  </tr>
+</thead>
+<tbody>
+  <tr>
+    <th>E-mails</th>
+    <td align="center">Daily</td>
+    <td align="center">100Mb</td>
+    <td align="center">Y</td>
+    <td align="center">Y</td>
+    <td align="center">Y</td>
+    <td align="center">Y</td>
+    <td align="center">Y</td>
+    <td align="center">N</td>
+    <td align="center">Y</td>
+    <td align="center">N</td>
+    <td align="center">Y</td>
+    <td align="center">Y</td>
+    <td align="center">500Mb</td>
+  </tr>
+  <tr>
+    <th>MySQL Data</th>
+    <td align="center">Daily</td>
+    <td align="center">30Mb</td>
+    <td align="center">Y</td>
+    <td align="center">Y</td>
+    <td align="center">N</td>
+    <td align="center">N</td>
+    <td align="center">Y</td>
+    <td align="center">N</td>
+    <td align="center">Y</td>
+    <td align="center">N</td>
+    <td align="center">Y</td>
+    <td align="center">N</td>
+    <td align="center">70Mb</td>
+  </tr>
+  <tr>
+    <th>Website</th>
+    <td align="center">Monthly</td>
+    <td align="center">900Mb</td>
+    <td align="center">Y</td>
+    <td align="center">Y</td>
+    <td align="center">N</td>
+    <td align="center">N</td>
+    <td align="center">Y</td>
+    <td align="center">N</td>
+    <td align="center">N</td>
+    <td align="center">Y</td>
+    <td align="center">N</td>
+    <td align="center">N</td>
+    <td align="center">3,200Mb</td>
+  </tr>
+  <tr>
+    <th><code>/etc</code></th>
+    <td align="center">2-3 Weeks</td>
+    <td align="center">28Mb</td>
+    <td align="center">Y</td>
+    <td align="center">Y</td>
+    <td align="center">Y</td>
+    <td align="center">Y</td>
+    <td align="center">Y</td>
+    <td align="center">Y</td>
+    <td align="center">Y</td>
+    <td align="center">Y</td>
+    <td align="center">Y</td>
+    <td align="center">Y</td>
+    <td align="center">200Mb</td>
+  </tr>
+  <tr>
+    <th>Thesis</th>
+    <td align="center">Daily</td>
+    <td align="center">25Mb</td>
+    <td align="center">Y</td>
+    <td align="center">Y</td>
+    <td align="center">Y</td>
+    <td align="center">Y</td>
+    <td align="center">Y</td>
+    <td align="center">Y</td>
+    <td align="center">Y</td>
+    <td align="center">Y</td>
+    <td align="center">Y</td>
+    <td align="center">N</td>
+    <td align="center">190Mb</td>
+  </tr>
+  <tr>
+    <th>Research Code</th>
+    <td align="center">Rarely</td>
+    <td align="center">60Mb</td>
+    <td align="center">Y</td>
+    <td align="center">Y</td>
+    <td align="center">N</td>
+    <td align="center">N</td>
+    <td align="center">Y</td>
+    <td align="center">N</td>
+    <td align="center">Y</td>
+    <td align="center">N</td>
+    <td align="center">Y</td>
+    <td align="center">Y</td>
+    <td align="center">200Mb</td>
+  </tr>
+  <tr>
+    <td colspan="13" align="right">Total space required:</td>
+    <td align="center">4,360Mb</td>
+  </tr>
+</tbody>
+</table>
+
+<p>
+Each of the snapshots is compressed to reduce space. The largest data in my 
+policy is the website. This rarely changes so I keep only a few snapshots. My 
+systems <code>/etc</code> directory also changes rarely, but as it is only 28Mb 
+I have chosen to keep all possible snapshots. You should now make a similar 
+table and decide which data you want to backup and how often.
+
+<p>
+The next consideration is where to store your backups. Again, this is your own 
+choice. Some locations simply won't be available to you while others might just 
+seem like overkill. The following list gives the various options listed from 
+the best to the worst:
+
+<dl>
+<dt><b>1</b>. On a networked computer in a remote location (such as backing up 
+from home to your office computer or vice-versa)</dt>
+<dd>This is clearly the ideal situation. Your data will be protected from fire, 
+theft, electrical outages, power surges, water/sprinkler damage, etc.</dd>
+<p>
+<dt><b>2</b>. On a networked computer in another room of you home or office</dt>
+<dd>Not as good as (1) above as both original and backup computers could be 
+caught by fire, power surges, etc.</dd>
+<p>
+<dt><b>3</b>. On a second disk drive in your computer</dt>
+<dd>Far better than having no backups at all, and you will be protected if one 
+of the hard drives fails, but you will still be vulnerable to fire, theft, etc. 
+I would certainly recommend a power surge protector if your PSU (power supply 
+unit) doesn't have one built in.</dd>
+<p>
+<dt><b>4</b>. On a separate partition on the same disk drive</dt>
+<p>
+<dt><b>5</b>. On the same partition on the same disk drive</dt>
+<dd>The last two on my list are by far the worst. This couldn't really be 
+considered a backup policy of merit. Any hard drive problems, a virus, an 
+accidental mistake, etc could ruin you. You are really only insuring yourself 
+against accidental deletion or similar operation on the original files.</dd>
+</dl>
+
+<p>
+If you do not have access to a remote computer yourself, then consider joining 
+up with a friend; each of you backing up to the others computer. Security 
+concerns can be addressed by encrypting the data before/during transfer and 
+only placing the encrypted versions on the remote computer.
+
+<h3>4. rsync - The Fast, Flexible File Transfer Utility</h3>
+
+<p>
+rsync is a very fast and flexible file transfer utility. It uses its own 
+"remote update" protocol to transfer just the differences between two sets of 
+files. It can operate locally or across a network link using rcp, ssh or its 
+own daemon. rsync is included with most standard Linux distributions by 
+default, or it can be downloaded from its website (<a 
+href="http://rsync.samba.org">http://rsync.samba.org</a>).
+
+<p>
+We are going to use rsync to mirror our files every night. rsync is the ideal 
+choice as it will <em>only</em> transfer new files, the differences between 
+existing files that have changed, and remove old files, minimising the 
+bandwidth usage for dial-up/broadband customers. 
+
+<p>
+The mirrors are easiest to implement when we take entire directories and its 
+sub-directories. Let's take the case where you are mirroring all your e-mail 
+files from your home computer to your office computer. We would use rsync as 
+follows:
+<p>
+
+<pre class="code">
+rsync -r -e ssh --delete /home/username/mail username@mycomputer.mycompany.com:/backups/mail
+</pre><p>
+where:
+<blockquote>
+<dl>
+<dt><code>-r</code></dt>
+<dd>Instructs rsync to copy directories recursively.</dd>
+<dt><code>-e ssh</code></dt>
+<dd>Tells rsync to use the ssh remote shell. More about this below.</dd>
+<dt><code>--delete</code></dt>
+<dd>Instructs rsync to delete files on the receiving side which do not exist 
+on the sending side.</dd>
+<dt><code>/home/username/mail</code></dt>
+<dd>The directory we are mirroring.</dd>
+<dt><code>username@mycomputer.mycompany.com:/backups/mail</code></dt>
+<dd>Log in as user <code>username</code> on 
+<code>mycomputer.mycompany.com</code> and create/update the mirror in 
+<code>/backups/mail</code> </dd>
+</dl> 
+</blockquote>
+
+<p>
+This will create a mirror of <code>/home/username/mail</code> on 
+<code>mycomputer.mycompany.com</code> under the directory 
+<code>/backups/mail/mail</code>. This is what we want. If you wanted the 
+reverse (backing-up from <code>mycomputer.mycompany.com</code> to your home 
+computer) you would simply switch the source and destination:
+<br><br>
+<code>rsync -r -e ssh --delete username@mycomputer.mycompany.com:/home/username/mail /backups/mail</code><br><br>
+	
+<p>
+I recommend that you use the ssh protocol to ensure the secrecy of your data 
+while it is being transferred. If you are performing this backup on a closed 
+network, feel free to use the older rsh protocol or rsync's own daemon. Using 
+networked backups creates one more problem: we want this to be automatic, with 
+no user interaction, but using rsh or ssh generally requires a password to be 
+entered. We will overcome this by using public/private keys 
+<strong>without pass-phrases</strong> to achieve this.
+
+<h4>4.1 Setting up password-less authentication for ssh</h4>
+
+<p>
+This article is not intended as a tutorial on ssh so I will only provide a 
+brief instruction on setting up private/public key authentication using ssh. 
+Please refer to the ssh documentation for a more thorough discussion.
+
+<p>
+The following two commands will set up password-less authentication from your 
+computer to <code>mycomputer.mycompany.com</code>:
+
+<blockquote>
+<code>$ ssh-keygen -b 1024 -t rsa -f /home/username/.ssh/id_rsa</code><br>
+<em>(do not enter a pass-phrase - leave it blank)</em><br>
+<code>$ scp /home/username/.ssh/id_rsa.pub username@mycomputer.mycompany.com:/home/username/.ssh/authorized_keys</code><br>
+</blockquote>
+
+<p>
+Usually any problems encountered are down to the permissions of the various 
+key files. Use ssh in verbose mode (<code>ssh -v</code>) and check the ssh 
+daemon logs on both machines (usually <code>/var/log/secure</code>).
+
+<p>
+In using this method it is important for you to be aware of the security 
+concerns that arise. The <code>ssh-keygen</code> command produced two files:
+<ul>
+<li><code>/home/username/.ssh/id_rsa</code>: the private key
+<li><code>/home/username/.ssh/id_rsa.pub</code>: the public key
+</ul>
+You should ensure the permissions of the private key are 
+<code>-rw-------</code> (i.e., only readable by the owner). This file is the 
+equivalent of having a text file containing your login password to your account 
+at <code>mycomputer.mycompany.com</code>; <strong>anyone who gets their hands 
+on this file will be able to log into that account without knowing your 
+password</strong>. However, any potential hacker must first gain access to your 
+home computer in order to get at this file. 
+	 
+<p>
+If you use this method you should also consider the following security measures:
+<ul>
+<li>ensure both machines have an effective firewall configured (see my article 
+in last month's edition <a href="../103/odonovan.html">here</a>). You can
+use some of the features of iptables such as specifying the exact IPs
+that are allowed access to the system.</li>
+<li>set-up a new user account on the backup machine and use that account for 
+backups only.</li>
+</ul>
+
+<h3>5. cron - Daemon to Execute Scheduled Commands</h3>
+
+<p>
+cron is an integral part of most Linux distributions. It is used to execute 
+commands at specific times according to a schedule you set. We will use it to 
+set-up a nightly mirror of all the files we wish to backup, and to create the 
+snapshots at the intervals we determined in section 3.
+
+<p>
+Each user on a Linux system has their own cron table ("crontab") which 
+contains the schedule of commands. This can be listed using 
+'<code>crontab -l</code>', removed with '<code>crontab -r</code>' and edited 
+with '<code>crontab -e</code>'. Let's add the daily mirror command so that
+it occurs at 2am every day by placing the following in our crontab:
+
+<p>
+<pre class="code">
+00 02 * * * rsync -r -e ssh --delete /home/username/mail username@mycomputer.mycompany.com:/backups/mail
+</pre>
+
+<p>
+where the five fields (<code>0 2 * * *</code>) are (respectively):
+<p>
+<blockquote>
+<table border="1" summary="">
+<thead>
+<tr>		
+    <td align="center">Field</td><td align="center">Allowed Values</td>
+</tr>
+</thead>
+<tr>
+    <td align="center">
+	minute<br>
+	hour<br>
+	day of month<br>
+	month<br>
+	day of week
+    </td>
+    <td align="center">
+	0-59<br>
+	0-23<br>
+	1-31<br>
+	1-12<br>
+	0-7<sup>*</sup>
+    </td>
+</tr>
+</table>
+( <sup>*</sup>0 or 7 is Sunday)
+</blockquote>
+	
+<p>
+So, in our case, we will mirror the contents of 
+<code>/home/username/mail</code> at 02:00 on every day of every month. We can 
+place similar entries for all other directories you wish to mirror. 
+Alternatively, we could create a script containing all the entries and use cron 
+to execute that script.
+
+<p>
+There are two useful environment variables you can also set when editing the 
+crontab to override the defaults:<br>
+<code>
+SHELL=/bin/sh<br>
+MAILTO=username</code>
+	
+<p>
+The <code>MAILTO</code> is important as all error messages will only be sent 
+by e-mail and so you will notified if your backups are failing. Refer to the 
+crontab man page for more information and examples.
+
+<h3>6. Putting It All Together</h3>
+
+<p>
+Now that we have the basics of rsync and cron, all we have left to do is to put 
+them all together to create our backup policy. Let's continue with the example 
+where your home computer is sending its daily mirror to your office computer. 
+You office computer will now be responsible for the remainder of the backup 
+policy: the snapshots at the predefined intervals. We will use another crontab 
+on the office machine to accomplish this and I will demonstrate using the 
+schedule for my thesis from section 3.
+
+<p>
+The method is quite simple. For example, every Sunday we will move the 3 week 
+old snapshot to 1 month old snapshot, the 2 week old to the 3 week old, the 1 
+week old to the 2 week old and archive the mirror to the 1 week old. So, 
+depending on the time of the week, the 3 week old snapshot could be as young 
+as 2 weeks or as old as 3 weeks.
+
+<p>
+My schedule requires snapshots that are 1, 2, and 3 weeks old and 1, 2, 3, 4, and 6 
+months old. We will work from the oldest down (as otherwise we would only be 
+propagating the new snapshot):
+
+<pre class="code">
+# Back up mail files with snapshots of 6, 4, 3, 2, 1 months and 3, 2, 1 weeks
+# Order 4m-&gt;6m, 3m-&gt;4m, 2m-&gt;3m, 1m-&gt;2m, 3w-&gt;1m, 2w-&gt;3w, 1w-&gt;2w, mirror-&gt;1w
+
+# At 3am on the 1st of Jan,Mar,May,Jul,Sep,Nov copy the 4m to the 6m
+00 03 1 1,3,5,7,9,11 * cp -f /backups/thesis/backup/4month.tar.gz /backups/thesis/backup/6month.tar.gz
+
+# At 3.02am on the 1st of every month move the 3m to the 4m (and continue for other months)
+02 03 1 * * cp -f /backups/thesis/backup/3month.tar.gz /backups/thesis/backup/4month.tar.gz
+04 03 1 * * cp -f /backups/thesis/backup/2month.tar.gz /backups/thesis/backup/3month.tar.gz
+06 03 1 * * cp -f /backups/thesis/backup/1month.tar.gz /backups/thesis/backup/2month.tar.gz
+08 03 1 * * cp -f /backups/thesis/backup/3week.tar.gz  /backups/thesis/backup/1month.tar.gz
+
+# And then every Sunday take care of the weekly snapshots and the archiving of the mirror
+10 03 * * 0 cp -f /backups/thesis/backup/2week.tar.gz  /backups/thesis/backup/3week.tar.gz
+12 03 * * 0 cp -f /backups/thesis/backup/1week.tar.gz  /backups/thesis/backup/2week.tar.gz
+14 03 * * 0 rm -f /backups/thesis/backup/1week.tar.gz
+16 03 * * 0 tar zcf /backups/thesis/backup/1week.tar.gz /backups/thesis/thesis/*
+</pre>
+
+<p>
+And that my friends is your automatic, hassle-free, and effective backup system.
+
+<p>
+A few points on the above:
+<ul>
+<li>I have placed each command 2 minutes apart to allow the previous one to 
+complete. Adjust this depending on your own file sizes, system load, hard disk 
+speed, etc.
+<li>In the example in section 5 for the automatic mirroring I set the mirror 
+time to 2 a.m. Ensure, as I have done here, that the snapshots get created after 
+the mirror (i.e., allow enough time for the mirroring to complete)
+<li>Before the first run you should ensure all directories are created, 
+archive the existing mirror, and copy it to all the required files (copy 
+<code>1week.tar.gz</code> to <code>2week.tar.gz</code>, 
+<code>3week.tar.gz</code>, etc) to prevent unnecessary error messages
+</ul>
+
+<h3>7. Anacron vs. cron</h3> 
+
+<p>
+Anacron is a periodic command scheduler similar to some uses of cron, but it 
+does not assume that the system is running continuously. It can therefore be 
+used for our backup policy on systems that don't run 24 hours a day. Just like 
+rsync and cron, Anacron is now part of most standard Linux distributions.
+
+<p>
+Every time Anacron is run, it reads a configuration file that specifies the 
+jobs Anacron controls, and their periods in days. If a job wasn't executed in 
+the last n days, where n is the period of that job, Anacron executes it. The 
+configuration file is usually <code>/etc/anacrontab</code>.
+
+<p>
+For the daily mirroring we could add a line to this configuration file such as:
+<p>
+<pre class="code">
+1   20  mirror  rsync -r -e ssh --delete /home/username/thesis username@mycomputer.mycompany.com:/backups/thesis
+</pre>
+<p>
+where the fields mean:
+<dl>
+<dt><code>1</code></dt>
+<dd>the period in days indicating how often this command should be executed</dd>
+<dt><code>20</code></dt>
+<dd>the delay in minutes after Anacron begins before it should execute this 
+command</dd>
+<dt><code>mirror</code></dt>
+<dd>a unique identifier for this job so Anacron can keep track of when it was 
+last executed</dd>
+<dt><code>rsync...</code></dt>
+<dd>the command to execute</dd>
+</dl>
+
+<p>
+And similarly on the backup machine we would place the following in the Anacron configuration file:
+<pre class="code">
+# Back up mail files with snapshots of 6,4,3,2,1 months and 3,2,1 weeks
+# Order 4m-&gt;6m, 3m-&gt;4m, 2m-&gt;3m, 1m-&gt;2m, 3w-&gt;1m, 2w-&gt;3w, 1w-&gt;2w, mirror-&gt;1w
+
+# Every 60 days (2 months)
+60 20 bup1 cp -f /backups/thesis/backup/4month.tar.gz /backups/thesis/backup/6month.tar.gz
+
+# every 30 days (1 month)
+30 22 bup2 cp -f /backups/thesis/backup/3month.tar.gz /backups/thesis/backup/4month.tar.gz
+30 24 bup3 cp -f /backups/thesis/backup/2month.tar.gz /backups/thesis/backup/3month.tar.gz
+30 26 bup4 cp -f /backups/thesis/backup/1month.tar.gz /backups/thesis/backup/2month.tar.gz
+30 28 bup5 cp -f /backups/thesis/backup/3week.tar.gz  /backups/thesis/backup/1month.tar.gz
+
+# And every 7 days
+7 30 bup5 cp -f /backups/thesis/backup/2week.tar.gz  /backups/thesis/backup/3week.tar.gz
+7 32 bup7 cp -f /backups/thesis/backup/1week.tar.gz  /backups/thesis/backup/2week.tar.gz7 
+7 34 bup8 rm -f /backups/thesis/backup/1week.tar.gz
+7 36 bup9 tar zcf /backups/thesis/backup/1week.tar.gz /backups/thesis/thesis/*
+</pre>
+
+A few notes on this:
+<ul>
+<li>You really need to plan well if using Anacron. What if the office machine 
+is regularly off while the home machine is trying to rsync? Anacron can work 
+best in this situation if it is the <em>source</em> machine that is not always running; 
+it can perform the rsync and then take care of the snapshots.
+<li>Ensure you make proper use of the delay time to ensure one job has 
+finished before the other starts
+<li>Anacron is also ideal for laptop users 
+</ul>
+
+<h3>8. Resources</h3> 
+
+<p>
+For a more professional backup solution:
+<ul>
+<li>Amanda, The Advanced Maryland Automatic Network Disk Archiver, <a 
+href="http://www.amanda.org/">http://www.amanda.org/</a>
+</ul>
+
+<p>
+Get advance notification before your hard disk fails:
+<ul>
+<li>smartmontools Home Page - <a 
+href="http://smartmontools.sourceforge.net/">http://smartmontools.sourceforge.net/</a>
+</ul>
+
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<p>
+<! -- REPLACE THE FOLLOWING WITH AUTHOR'S ~200x200 PIC. -->
+<img align="left" alt="[BIO]" src="../gx/authors/odonovan.jpg" class="bio">
+<em>
+
+<! -- BIO GOES HERE -->
+
+Barry O'Donovan graduated from the National University of Ireland, Galway
+with a B.Sc. (Hons) in computer science and mathematics. He is currently
+completing a Ph.D. in computer science with the <a
+href="http://www.ihl.ucd.ie/">Information Hiding Laboratory</a>, University
+College Dublin, Ireland in the area of audio watermarking.
+
+<p> Barry has been using Linux since 1997 and his current flavor of choice
+is Fedora Core. He is a member of the <a href="http://www.linux.ie/">Irish
+Linux Users Group</a>. Whenever he's not doing his Ph.D. he can usually be
+found supporting his finances by doing some work for <a 
+href="http://www.openhosting.ie/" title="An Irish based web hosting and web 
+design company">Open Hosting</a>, in the pub with friends or running in the local 
+park.
+</em>
+<br clear="all">
+<!-- *** END bio *** -->
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2004, Barry O'Donovan. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 104 of Linux Gazette, July 2004
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="kapil.html" >&lt;-- prev</A> | <A HREF="oregan.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">July 2004 (#104)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/2003/sit3-shine.7-2.gif" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

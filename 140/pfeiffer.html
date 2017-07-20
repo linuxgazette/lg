@@ -1,0 +1,434 @@
+<!DOCTYPE html
+	PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+	 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="utf-8" xml:lang="utf-8">
+<head>
+<title>Encrypted Storage with LUKS, RAID and LVM2 LG #140</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link rel="stylesheet" href="../lg.css" type="text/css" media="screen, projection"  />
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+<link rel="shortcut icon" href="../favicon.ico" />
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+</head>
+<body>
+
+<a href="../">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+<div id="navigation">
+<table summary="masthead" width="100%">
+<tr>
+<td align="center" colspan="3" style="font-size: 10px; font-weight: bold">
+<a href="../index.html">Home</a>
+<a href="http://linuxgazette.net">Main Site</a>
+<a href="../faq/index.html">FAQ</a>
+
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/mailman/listinfo/">Mailing Lists</a>
+<a href="../jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+<hr width="99%" style="border: 1px inset #000033">
+</td>
+</tr>
+<tr>
+<td width="40%" align="left" style="font-size: 10px; font-weight: bold">
+The Free International Online Linux Monthly
+</td>
+<td width="20%" align="center" style="font-size: 10px; font-weight: bold">
+ISSN: 1934-371X
+</td>
+<td width="40%" align="right" style="font-size: 10px; font-weight: bold">
+Main site: <a href="http://linuxgazette.net">http://linuxgazette.net</a> 
+</td>
+</table>
+</div>
+
+
+<div id="breadcrumbs1">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">July 2007 (#140)</a> &gt; 
+Article
+
+</div>
+
+<div class="articlecontent1">
+<div class="content">
+
+<div id="previousnexttop">
+<A HREF="kapil.html" >&lt;-- prev</A> | <A HREF="tiemann.html" >next --&gt;</A>
+</div>
+
+<h1>Encrypted Storage with LUKS, RAID and LVM2</h1>
+<p id="by"><b>By <a href="../authors/pfeiffer.html">Ren&eacute; Pfeiffer</a></b></p>
+
+<p>
+Some people have a need for storing data securely. Sometimes this means not only redundant
+disks (and a good backup strategy) but also encryption. Fortunately, the Linux kernel has
+all the features to use multiple RAID devices, pool them to a Logical Volume, and encrypt
+every block of the filesystem. Just don't forget your passphrase!
+</p>
+
+<h2>
+Creating RAID devices
+</h2>
+
+<p>
+The first step involves the creation of a Linux software RAID device. For the sake of
+simplicity we will stick to RAID level 1, i.e. mirroring two disks or disk partitions.
+A RAID1 can be done with any two (or more) parts of block devices that have the same size.
+Usually you mark these partitions when installing the system. The installers of most
+GNU/Linux distributions have an editor that allows you to do this. We will assume that
+we already have a system, and prepare four partitions for the use of two RAID1 devices.
+You simply have to edit the partition table. I like to use the <tt>cfdisk</tt> tool
+for that.
+<pre>
+osiris:~# cfdisk /dev/sdc
+</pre>
+Prepare your partitions and mark them with the type code <b>FD</b>. This code marks the
+partitions as <i>Linux RAID autodetect</i> and allows the system to activate them at
+boot time. Remember, all the partitions should be of the same size.
+<pre>
+osiris:~# cfdisk /dev/sdd
+</pre>
+I chose <tt>/dev/sdc1</tt> and <tt>/dev/sdd1</tt>. Now let's create the RAID. You will
+need the <tt>mdadm</tt> tool for this.
+<pre>
+osiris:~# mdadm --create /dev/md6 --level=1 --raid-devices=2 /dev/sdc1 /dev/sdd1
+</pre>
+After pressing enter the kernel creates the device and starts synchronising the
+blocks. You can check the progress of this operation by looking into <tt>/proc/mdstat</tt>.
+This file gives you status of all RAID devices in the system.
+<pre>
+osiris:~# cat /proc/mdstat 
+Personalities : [raid1] 
+md1 : active raid1 sdb2[1] sda2[0]
+      3903680 blocks [2/2] [UU]
+      
+md5 : active raid1 sdb3[1] sda3[0]
+      4883648 blocks [2/2] [UU]
+      
+md2 : active raid1 sdb5[1] sda5[0]
+      1951744 blocks [2/2] [UU]
+      
+md4 : active raid1 sdb7[1] sda7[0]
+      297435328 blocks [2/2] [UU]
+      
+md6 : active raid1 sdd1[1] sdc1[0]
+      488383936 blocks [2/2] [UU]
+      
+md0 : active raid1 sdb1[1] sda1[0]
+      489856 blocks [2/2] [UU]
+      
+unused devices: <none>
+osiris:~#
+</pre>
+If you see an output like this, the RAID devices are in a consistent state. The
+<tt>mdadm</tt> packages provides utilities for monitoring the state of RAIDs.
+This is very useful otherwise you may not notice when your disks and your RAID
+is dying.
+</p>
+<p>
+Now create a second RAID device. I use <tt>/dev/md4</tt> from the output above
+as the second device to be added to our encrypted logical volume.
+</p>
+
+<h2>
+Encrypting the Block Devices
+</h2>
+
+<p>
+Our tool of choice will be <tt>cryptsetup</tt> for enabling encryption. Before you
+use block devices as encrypted storage, it is recommended that you overwrite them
+with random bit patterns. The easiest way to do this is by using <tt>dd</tt>.
+<pre>
+osiris:~# dd if=/dev/urandom of=/dev/md4
+osiris:~# dd if=/dev/urandom of=/dev/md6
+</pre>
+Depending on your hardware this can take several hours. Make sure not to use
+<tt>/dev/random</tt> or these commands will take several days or weeks. You don't
+have to do this. However if you leave any recognisable pattern on the device,
+it is easier to spot the encrypted blocks, and concentrate code breaking on them.
+</p>
+<p>
+After your disks have been overwritten with random garbage you can encrypt them.
+<pre>
+osiris:~# cryptsetup -c aes-cbc-essiv:sha256 -y -s 256 luksFormat /dev/md4
+osiris:~# cryptsetup -c aes-cbc-essiv:sha256 -y -s 256 luksFormat /dev/md6
+</pre>
+Make sure you don't forget your passphrase! If you forget it, your data is pretty
+secure and unrecoverable. Bear in mind encrypting data and throwing the keys away 
+is the industrial standard for data destruction (of course assuming that you are
+using something better than ROT13 or XOR). The block devices are now ready for
+encryption.
+</p>
+<p>
+The commands above initialise the devices for use with the AES algorithm. The key
+length is 256 bit, and we use a method called ESSIV or <i>E(Sector|Salt)</i> in order
+to avoid weaknesses in the choice of initial values for the encryption algorithm.
+</p>
+
+<h2>
+Unlocking the Block Devices
+</h2>
+
+<p>
+Every time you wish to use your encrypted block devices you have to unlock them.
+That's the idea. Unlocking can also be done with <tt>cryptsetup</tt>.
+<pre>
+osiris:~# cryptsetup luksOpen /dev/md4 crypt1
+osiris:~# cryptsetup luksOpen /dev/md6 crypt2
+</pre>
+You will be prompted for your passphrase. After unlocking, the devices can
+be accessed by using <tt>/dev/mapper/crypt1</tt> and <tt>/dev/mapper/crypt2</tt>.
+Note that we won't use the RAID devices directly anymore. We access the storage
+space through an encryption layer. The data stored in the blocks of our RAID
+is encrypted.
+</p>
+
+<h2>
+Pooling Block Devices into a Logical Volume
+</h2>
+
+<p>
+The Logical Volume Manager (LVM) is a tool for combining multiple physical
+block devices into volume groups, and for creating logical volumes out of them.
+The LVM2 has its own HOWTO where everything is explained in great
+detail. We only need to know how the storage areas are organised. The order is
+as follows.
+<ol>
+<li> Physical extents (block devices, partitions)</li>
+<li> Volume groups (consisting of physical extents)</li>
+<li> Logical volumes (combining parts of volume groups)</li>
+</ol>
+So far we have only the RAID devices which correspond to the lowest layer of the LVM2.
+We still need to create physical extents, assign them to a volume group and create
+a logical volume. Filesystems can only reside on these logical volumes. The following
+figure illustrates how the different storage layers are connected.<br>
+<img src="misc/pfeiffer/lvm2.png" width="624" height="244" alt="LVM2 diagram">
+</p>
+<p>
+Ok, so let's mark our encrypted RAID1 devices as physical extents and create a volume
+group.
+<pre>
+osiris:~# pvcreate /dev/mapper/crypt1
+osiris:~# pvcreate /dev/mapper/crypt2
+osiris:~# vgcreate -v cryptvg /dev/mapper/crypt1 /dev/mapper/crypt2
+</pre>
+The commands <tt>pvscan</tt> and <tt>vgdisplay</tt> shows you the result of the commands
+above. The <tt>vgdisplay</tt> is especially useful since it shows you the number of
+physical extents available in a volume group. We now want to use the complete
+volume group <tt>cryptvg</tt> for a logical volume. Therefore we tell <tt>lvcreate</tt>
+the number of extents to use.
+<pre>
+osiris:~# lvcreate -l 191849 -n backuplv cryptvg
+</pre>
+That's all we need. Our new logical volume can now be accessed by the device file 
+<tt>/dev/backup/backuplv</tt>. We format this device with an XFS filesystem (of course you
+can use whatever filesystem you wish, XFS is just an example).
+<pre>
+osiris:~# mkfs.xfs -d agcount=48 -L backup /dev/backup/backuplv
+</pre>
+That's it. We can now mount this volume and use it as we like. Don't forget
+to write an entry for your <tt>/etc/fstab</tt> in order to have all mount options
+ready. A possible configuration would be like this one:
+<pre>
+/dev/backup/backuplv /backup xfs ikeep,noatime 0 0
+</pre>
+</p>
+
+<h2>
+Mounting and umounting 
+</h2>
+
+<p>
+You have to do some steps to activate and deactive your new encrypted volume. Most
+things will be taken care of by the Linux kernel (such as autodetecting the RAID
+devices and starting them). Some things can't be taken care of automatically.
+Here is a simple script that does all the necessary steps.
+<pre>
+#!/bin/sh
+
+echo "Unlocking /dev/md4"
+cryptsetup luksOpen /dev/md4 crypt1
+echo "Unlocking /dev/md6"
+cryptsetup luksOpen /dev/md6 crypt2
+echo "Scanning for volume groups"
+vgscan --mknodes
+vgchange -ay
+echo "Mounting /backup"
+mount /backup
+</pre>
+<tt>cryptsetup</tt> will ask you once per RAID device for your passphrase(s).
+The shutdown sequence is the reverse order.
+<pre>
+#!/bin/sh
+
+umount /backup
+# Mark the logical volume INACTIVE (can be restored with 'lvchange -ay')
+lvchange -an backuplv
+# Mark the volume group INACTIVE (can be restored with 'vgchange -ay')
+vgchange -an cryptvg
+cryptsetup remove crypt1
+cryptsetup remove crypt2
+</pre>
+
+
+Most GNU/Linux distributions have start/stop scripts that can take care of
+the activation and deactivation sequences. Nevertheless it's good to know
+how to do it (maybe for cases when the system isn't available anymore).
+</p>
+
+<h2>
+Important: Field Tests
+</h2>
+
+<p>
+Now that your new shiny encrypted logical volume is empty, you have a once in a lifetime
+chance of <b>testing</b> the storage mechanism. Don't miss to do this! Try simulating
+a disk failure. Switch off the power and reboot. Do a filesystem check. Create
+thousands of files and delete them. Copy loads of big ISO images. Do whatever
+could happen to your storage and see if your data is still there. XFS' <tt>mkfs</tt>
+command has the <tt>-p</tt> switch that allows you to populate a freshly created
+XFS filesystem with files and directories according to a prewritten description
+of the filesystem layout. This is a very useful feature for testing.
+Use it. Simulate everything that can go wrong. When you are satisfied with your testing,
+put your valuable data on it. And always keep backups.
+</p>
+
+<h2>
+Useful links
+</h2>
+
+<p>
+No blocks or disks were harmed while preparing this article. You might wish to take a
+look at the following tools and articles suitable to encrypt yourself to death.
+<ul>
+<li> <a href="http://linux.yyz.us/why-software-raid.html">Linux: Why software RAID?</a></li>
+<li> <a href="http://clemens.endorphin.org/LinuxHDEncSettings">Linux hard disk encryption settings</a></li>
+<li> <a href="http://luks.endorphin.org/">LUKS - Linux Unified Key Setup</a></li>
+<li> <a href="http://www.tldp.org/HOWTO/LVM-HOWTO/index.html">LVM HOWTO</a></li>
+<li> <a href="http://mareichelt.de/pub/texts.cryptoloop.php">Why Mainline Cryptoloop Should Not Be Used</a></li>
+<li> <a href="http://tldp.org/HOWTO/Software-RAID-HOWTO.html">The Software-RAID HOWTO</a></li>
+<li> <a href="http://oss.sgi.com/projects/xfs/">XFS: A high-performance journaling filesystem</a></li>
+</ul>
+</p>
+
+<script type="text/javascript">
+digg_url = 'http://linuxgazette.net/140/pfeiffer.html';
+digg_title = 'Encrypted Storage with LUKS, RAID and LVM2';
+digg_bodytext = 'Some people have a need for storing data securely. Sometimes this means not only redundant disks (and a good backup strategy) but also encryption. Fortunately the Linux kernel has all the features to use multiple RAID devices, pool the to a Logical Volume and encrypt every block of the filesystem. Just don\'t forget your passphrase!';
+digg_topic = 'linux_unix';
+</script>
+<script src="http://digg.com/tools/diggthis.js" type="text/javascript"></script> 
+
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:140/pfeiffer.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<!-- *** BEGIN bio *** -->
+<hr>
+<p>
+
+<img align="left" alt="Bio picture" src="../gx/authors/pfeiffer.jpg" class="bio">
+
+</p>
+<em>
+
+<p>
+Ren&eacute; was born in the year of Atari's founding and the release of the game Pong.
+Since his early youth he started taking things apart to see how they work. He
+couldn't even pass construction sites without looking for electrical wires that
+might seem interesting. The interest in computing began when his grandfather
+bought him a 4-bit microcontroller with 256 byte RAM and a 4096 byte operating
+system, forcing him to learn assembler before any other language.
+</p>
+
+<p>
+After finishing school he went to university in order to study physics. He then
+collected experiences with a C64, a C128, two Amigas, DEC's Ultrix, OpenVMS and
+finally GNU/Linux on a PC in 1997. He is using Linux since this day and still
+likes to take things apart und put them together again. Freedom of tinkering
+brought him close to the Free Software movement, where he puts some effort into
+the right to understand how things work. He is also involved with civil liberty
+groups focusing on digital rights.
+</p>
+
+<p>
+Since 1999 he is offering his skills as a freelancer. His main activities
+include system/network administration, scripting and consulting. In 2001 he
+started to give lectures on computer security at the Technikum Wien. Apart from
+staring into computer monitors, inspecting hardware and talking to network
+equipment he is fond of scuba diving, writing, or photographing with his digital
+camera. He would like to have a go at storytelling and roleplaying again as soon
+as he finds some more spare time on his backup devices.
+</p>
+
+</em>
+</p>
+<br clear="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2007, Ren&eacute; Pfeiffer. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication License</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 140 of Linux Gazette, July 2007
+</p>
+
+</div>
+
+<div id="previousnextbottom">
+<A HREF="kapil.html" >&lt;-- prev</A> | <A HREF="tiemann.html" >next --&gt;</A>
+</div>
+
+</div>
+</div>
+
+<script src="http://www.google-analytics.com/urchin.js"
+type="text/javascript">
+</script>
+<script type="text/javascript">
+_uacct = "UA-1204316-1";
+urchinTracker();
+</script>
+
+
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+</body>
+</html>
+

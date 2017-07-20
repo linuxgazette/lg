@@ -1,0 +1,294 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>Home Folder Server For Windows Clients LG #101</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="foolish.html" >&lt;-- prev</A> | <A HREF="pramode.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>Home Folder Server For Windows Clients</h1>
+<p id="by"><b>By <A HREF="../authors/levkovich.html">Avinoam Levkovich</A></b></p>
+
+<p>
+<p>
+One of the strategies to protect the data on user's personal computer is
+using a Home-Folders Server. This server contains folders for each user
+where the user can save his precious data, the server is backed up every
+night. At login, the Home-Folders Share (which contains your home folder)
+is mounted on the local machine, and the user can access it like any other
+local drive.
+
+<p>
+Home-Folders Server has a big overhead for the IT staff. Managing the
+ownership, shares, quota, permissions, and the never ending changes isn't
+one of the most pleasant tasks for any Sys-Admin.
+
+<p>
+The story begins when my organization old Home-Folders Server started
+showing signs of retirement wishes, we decided that it is time to build a new
+Home-Folders server. We started looking for a solution that will take the
+management overhead from the IT stuff, since our budget was low we wanted
+cheap but reliable system. Naturally, we started thinking about building a
+Linux server. We wanted this system to perform the following tasks:
+
+<b>
+<ol>
+<li>This system will be integrated into the organization's existing Win-2K
+active directory infrastructure.
+
+<li>
+The system should function automatically. When we add a new user to the
+domain, the system will automatically create his home folder, grant the
+appropriate permissions and configure the user's quota.
+
+<li>
+We will map the home-folder by using login scripts (<a href="http://www.kixtart.org/">KIX</a>).
+
+<li> The System will monitor the Server RAID-System, when the RAID is out of
+sync (damaged disk, Bad Controller, etc.) the script send a warning e-mail
+to the IT staff.
+</ol>
+</b>
+
+<p>
+Since our budget was low, we decided to save money and still get good
+performance by using a new desktop PC (P4 1.6GHZ, 1GB RAM). To make the
+system reliable we decided to use four HDs (IDE, 120GB each) configured as
+RAID-5, for the Home-Folders partition. All other system partitions will use
+two HD (IDE, 12GB each) with RAID-1 (mirror). To get the extra IDE
+controllers I used PROMISE 133TX2, IDE Card (PCI), which works great with
+RedHat.
+
+<h2>The Home-Folder System Installation and Configuration</h2>
+
+<p>
+After installing Linux (we used Redhat) and configuring the RAID system,
+take the following steps to finish the configuration of the Home-Folders
+Server:
+
+<ol>
+<li>Install and configure the Samba server, share the Home-Folders partition
+with read/write permission (we will limit the access to the users' folders
+by using the system permissions.)
+
+<li> Configure Winbind. Winbind is part of the Samba package which makes
+the integration to the windows domain easy.
+
+<br> By using Winbind, Windows Users can access the Linux server using their
+logon credentials. Winbind verifies the user with the domain controller like
+any other Windows server. You can find more info on Winbind installation in
+this article : <a
+href="http://us2.samba.org/samba/docs/man/winbindd.8.html">http://us2.samba.org/samba/docs/man/winbindd.8.html</a>
+<br>
+After installing Winbind, check its functionality by running the command:
+
+<pre>
+# getent passwd
+</pre>
+
+The output should be the list of users in the domain. If you do not receive
+this output, check your Winbind configuration.
+
+<li>  Configure quota support for the Home-Folders partition. You can find
+more info about quota configuration here:
+<a href="http://www.tldp.org/HOWTO/Quota.html">http://www.tldp.org/HOWTO/Quota.html</a>
+
+<br>
+Next, plan and decide how much space you wish to grant to each user, create a
+template user and assign a quota equal to the amount of space you decided.
+Later on we will use this user as a quota template.
+
+<p>
+<b>Note:</b> this step is optional and only required if you want to use the quota
+system.
+</ol>
+
+<h2>Home-Folders Creator Script</h2>
+
+The following script is the heart of the system, the script retrieves the
+domain users list from the domain controller server into a file and removes
+all the unneeded data from the list. At this stage the system verifies that
+each user in this list owns a home-folder. If the user already has a
+home-folder the system write the char "." to the stdout and moves on, if
+the user is a new user and he still doesn't have a home-folder, the system
+will create a folder (the folder name will be the same as the username),
+grant ownership to the user, and apply the quota for this folder by copying
+the quota from the template quota user to this new user.
+
+<p>
+The system will log the new users home-folder creation to the system log file
+(/var/log/messages).
+
+<p>
+The Home-Folders creator script can be found <a
+href="misc/levkovich/home-folders.bash.txt"><b>here</b></a>.
+
+You need to change the following parameters to reflect your server configuration:
+
+<p>
+<b>HOME_FOLDERS_PATH</b> - Assign the path to the Home-Folders
+Directory/Partition, it is essential to put the character "/" at the end of
+the path (e.g. /home/).
+
+<p>
+<b>SEPERATOR</b> - Assign the Winbind separator as it configured in the smb.conf
+file.
+
+<p>
+<b>TEMP_USER</b> - (OPTIONAL) if you want to use quota, you should uncomment this
+variable and Assign the username you created to act as a quota template. if
+so please remember to uncomment the line "edquota -p $TEMP_USER $DOMAIN$SEPERATOR$Folder_Name"
+
+<h2>The RAID system watchdog script</h2>
+
+<p>
+The following script creates an endless loop that check the RAID system
+every 5 minutes, if the RAID is out of sync (damaged disk, Bad Controller
+etc..) the script will send an e-mail to a predefine mail address ( change
+the MAIL variable to reflect your mail address).
+
+<p>
+you can use this script as an independent RAID WatchDog for your other
+RAID-Systems.
+
+<p>
+In order to start this script automatically after reboot, you can add the
+path to the script to your rc.local file.
+
+The script can be found <a
+href="misc/levkovich/watchdog.bash.txt"><b>here</b></a>.
+
+<p>
+
+<h2>Make the system function automatically</h2>
+
+<p>
+To automate the system you should execute the Home-Folders creator script
+as root at predefined intervals. By adding the following line to the root's cron
+jobs (using "crontab -e"), the Home-Folders script will execute every hour.
+(Change the script path to match your configuration.)
+
+<pre>
+*/59 * * * * /etc/Home-Folders-creator.sh
+</pre>
+
+<h2>Mapping the Home-Folder to the users during the logon process</h2>
+
+<p>
+By using a simple logon scripts system (I use <a
+href="http://www.kixtart.org/">KIX</a>) you can map the Home-Folder Samba
+share during the user login process.
+
+
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<P>
+<img ALIGN="LEFT" ALT="[BIO]" SRC="../gx/2002/note.png" class="bio">
+<em>
+Avinoam Levkovich is an RHCE in Israel, currently working
+as the Linux Sys-Admin at the Rambam Medical Center.
+      
+</em>
+<br CLEAR="all">
+<!-- *** END bio *** -->
+
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2004, Avinoam Levkovich. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 101 of Linux Gazette, April 2004
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="foolish.html" >&lt;-- prev</A> | <A HREF="pramode.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">April 2004 (#101)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/2003/sit3-shine.7-2.gif" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

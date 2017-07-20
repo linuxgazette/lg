@@ -1,0 +1,51 @@
+# script checking for an ssh agent
+# if none can be found we start a new one
+# works on *OLDER* ssh-add versions (SuSE 7.x?)
+# exit codes of ssh-add -l are:
+# 	* 0 for agent found (woith or without keys)
+# 	* 1 no agent found
+
+# better have null expansion
+shopt -s nullglob
+
+# is there a ssh-agent of this user? (to complicated, I know)
+user=`whoami`
+result=`ps ux | grep ssh-agent | grep $user | grep -v grep`
+
+
+if [ -z "$result" ] ; then
+	echo -n no ssh-agent found, starting new one...
+	eval `ssh-agent`
+fi
+
+# now there should run an ssh-agent
+# let's make sure we can talk to it
+
+if ssh-add -l > /dev/null 2>&1 ; then
+	echo "ok, ssh-agent is there."
+else
+	echo "ssh-agent should run, but we can't talk to it"
+	echo -n "attempting to set environment variables:"
+
+	for socket in /tmp/ssh-*/agent* ; do
+	    echo "trying $socket...."
+	    SSH_AUTH_SOCK=$socket
+	    export SSH_AUTH_SOCK
+	    if ssh-add -l > /dev/null 2>&1 ; then
+		echo OK.
+		SAVE_SSH_SOCKET=$socket
+	    else
+		echo "dead socket, deleting..."
+		rm -rf `dirname $socket`
+	    fi
+	done
+	export SSH_AUTH_SOCK=$SAVE_SSH_SOCKET
+
+	if  ssh-add -l > /dev/null 2>&1 ; then
+           echo
+	else
+	    echo "*** still no working ssh-agent"
+	    echo "something is wrong, manual fix needed!"
+        fi
+fi
+

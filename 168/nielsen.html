@@ -1,0 +1,1038 @@
+<!DOCTYPE html
+	PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+	 "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="utf-8" xml:lang="utf-8">
+<head>
+<title>Setting up a MySQL Cluster for your Linux desktop LG #168</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<link rel="stylesheet" href="../lg.css" type="text/css" media="screen, projection"  />
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<!-- link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" / -->
+<link rel="shortcut icon" href="../favicon.ico" />
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+</head>
+<body>
+
+<a href="../">
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+</a>
+<p id="fun">...making Linux just a little more fun!</p>
+
+<div id="navigation">
+<table summary="masthead" width="100%">
+<tr>
+<td align="center" colspan="3" style="font-size: 10px; font-weight: bold">
+<a href="../index.html">Home</a>
+<a href="http://linuxgazette.net">Main Site</a>
+<a href="../faq/index.html">FAQ</a>
+
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/mailman/listinfo/">Mailing Lists</a>
+<a href="../jobs.html">Join Us!</a>
+<a href="../contact.html">Contact Us</a>
+
+<hr width="99%" style="border: 1px inset #000033">
+</td>
+</tr>
+<tr>
+<td width="40%" align="left" style="font-size: 10px; font-weight: bold">
+The Free International Online Linux Monthly
+</td>
+<td width="20%" align="center" style="font-size: 10px; font-weight: bold">
+ISSN: 1934-371X
+</td>
+<td width="40%" align="right" style="font-size: 10px; font-weight: bold">
+Main site: <a href="http://linuxgazette.net">http://linuxgazette.net</a> 
+</td>
+</table>
+</div>
+
+
+<div id="breadcrumbs1">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">November 2009 (#168)</a> &gt; 
+Article
+
+</div>
+
+<div class="articlecontent1">
+<div class="content">
+
+<div id="previousnexttop">
+<A HREF="dyckoff1.html" >&lt;-- prev</A> | <A HREF="silva.html" >next --&gt;</A>
+</div>
+
+<h1>Setting up a MySQL Cluster for your Linux desktop</h1>
+<p id="by"><b>By <a href="../authors/nielsen.html">Mark Nielsen</a></b></p>
+
+
+<ol>
+<li><a href="#intro">Introduction</a>
+</li>
+<li><a href="#row">Row Level Replication and why it frustrates me</a>
+</li>
+<li><a href="#setup">Misc Setup</a>
+</li>
+<li><a href="#general">General Approach</a>
+</li>
+<li><a href="#config">Configuration Files</a> 
+</li>
+<li><a href="#install">Installing MySQL Cluster on Ubuntu</a> 
+</li>
+<li><a href="#rep">Setting up and Testing Replication to a Slave and Cluster Slave</a> 
+</li>
+<li><a href="#test">Let's test MySQL</a> 
+</li>
+<li><a href="#sp">Installing Stored procedure on Slaves and Masters</a>
+</li>
+<li><a href="#con">Conclusion and Future Topics</a>
+</li>
+<li><a href="#ssd">Some SSD preliminary testing</a>
+</li>
+</ol>
+<hr>
+<h2><a name="intro"></a>Introduction</h2>
+
+<p>
+MySQL Cluster has come a long way in the 4 years since I experimented with
+it. Compared to when I first got the cluster working on my home computer, I
+didn't have to change much get the latest version up and running.
+</p>
+
+<p>
+So, what is MySQL Cluster? It is a database solution which tries to
+solve high availability issues by using multiple synchronous masters (for
+the lack of a better phrase) in a shared-nothing environment. In order to
+solve a lot of the latency issues associated with multiple masters, it
+keeps all the indexed data in memory to enable fast processing of the data.
+</p>
+
+<p>
+So then what is the purpose of this article? To let you setup a MySQL
+Cluster for fun, on a single box, so you can test out its features<sup>1</sup>.
+The main things I wanted to test out are:
+</p>
+<ul>
+<li>Setting up a cluster on one or two boxes. People tell me this is
+impossible.  For personal and business reasons, this article attempts to
+squash those rumors so I can just point people to this article instead of
+explaining the details to them.  There are advantages to setting up a
+cluster on 3 boxes as compared to 2 boxes, however. There is a difference
+between a network outage and a single server becoming unavailable and 3
+servers help with this.
+</li>
+<li>Using other storage engines and setup dangerous replication between the
+frontend MySQL servers.  </li>
+<li>Replicating data to a cluster slave as well as a normal slave. </li>
+</ul>
+
+<p>
+There is also one important item to keep in mind about MySQL Cluster. I
+have no idea why they make "MySQL Cluster" as a separate product from the
+main MySQL server. In the past, the "MySQL Cluster" was just the NDB engine
+running in MySQL. It seems to be the same way even now and I suspect that
+it might just be due to politics and marketing that they have something
+called a "MySQL Cluster" when it is really just MySQL with the NDB engine.
+The mysqld server running in "MySQL Cluster" can still store data in InnoDB
+and MyISAM formats. </p>
+
+<p>For more info about MySQL Cluster, refer to:
+</p>
+
+<ul>
+<li><a href="http://dev.mysql.com/doc/refman/4.1/en/mysql-cluster.html">http://dev.mysql.com/doc/refman/4.1/en/mysql-cluster.html</a>
+</li>
+<li><a href="http://www.mysql.com/products/database/cluster/">http://www.mysql.com/products/database/cluster/</a>
+</li>
+<li>For non-cluster MySQL, I highly recommend the "percona" version.
+I'd like to see a MySQL Cluster supported version of MySQL. Download
+MySQL from <a href="http://www.percona.com/docs/wiki/release:start">http://www.percona.com/docs/wiki/release:start</a>
+</li>
+</ul>
+The MySQL Cluster uses these types of servers:
+<ol>
+<li>Data Node: Where all the data is stored. </li>
+<li>MySQL frontend server: The MySQL frontend doesn't store any data
+itself (unless you really want it to, like I do). It handles the processing
+of the queries and gets the data from the data nodes. </li>
+<li>Management Node: Manages all the nodes. </li>
+</ol>
+I highly recommend that you view the limitations of MySQL Cluster. If you
+are used to using InnoDB, you will need to change some practices.
+<ul>
+<li>Read the <a
+href="http://dev.mysql.com/doc/refman/5.1/en/mysql-cluster-limitations.html">Limitations</a>.
+</li>
+<li>Specifically:
+<a href="http://dev.mysql.com/doc/refman/5.1/en/mysql-cluster-limitations-unsupported-missing.html">http://dev.mysql.com/doc/refman/5.1/en/mysql-cluster-limitations-unsupported-missing.html</a>
+</li>
+<li>Statement level replication:
+<a href="http://dev.mysql.com/doc/refman/5.1/en/mysql-cluster-replication-general.html">http://dev.mysql.com/doc/refman/5.1/en/mysql-cluster-replication-general.html</a>
+</li>
+<li>MySQL Cluster replication issues:
+<a href="http://mirror.facebook.net/mysql/doc/refman/5.1/en/mysql-cluster-replication-issues.html">http://mirror.facebook.net/mysql/doc/refman/5.1/en/mysql-cluster-replication-issues.html</a>
+</li>
+</ul>
+<hr>
+<h2><a name="row"></a>Row Level Replication and why it frustrates me</h2>
+Please read <a
+href="http://dev.mysql.com/doc/refman/5.1/en/replication-sbr-rbr.html">Comparison
+of Statement-Based and Row-Based Replication</a>.
+<p>MySQL copies data from one computer to another computer through
+MySQL Replication. The old way of replicating data was to copy over and
+execute all the SQL commands from one MySQL server to the other MySQL
+servers. This type of replication was called "Statement Level
+Replication.". This copying and executing of queries was NOT real-time
+and had some issues. Basically, it was like this:
+</p>
+<ul>
+<li>Query is executed on the master. Let's say the query took 30
+seconds to finish. </li>
+<li>Query is saved to a log and then each slave server downloads the
+query. There is a time delay in downloading the query. Usually it isn't
+very much. </li>
+<li>Query gets executed on the slave servers. From the point the slaves
+start to execute the query, they will take an equal amount of time to
+execute the query as the master did. If the master took 30 seconds to
+execute an insert, update, or delete command, it will take 30 seconds for
+each slave to do the same (usually). Thus, right before a slave finishes
+the 30 second query, it is behind in replication by 30 seconds, or rather
+its data won't be in sync until 30 seconds later (after the query is
+finished). </li>
+</ul>
+
+<p>
+For most practical purposes, most small queries finish very fast and
+replication is also very fast.
+</p>
+
+<p>So what is Row level Replication? Basically, the SQL query which
+executes the changes on the master is forgotten and we only record the
+actual row differences and copy them over. For example, let us say that
+a query updates a table and sets the country code to 'US' for all
+entries that are NULL. In a table with 1 million rows, let's say only
+10 rows were NULL and thus 10 rows get updated. The difference between
+Statement and Row Level Replication is the following:
+</p>
+<ul>
+<li>Statement Replication will copy the query and execute it.</li>
+<li>Row Replication will copy only the changes for those 10 rows and
+ignore what the original query is.
+</li>
+</ul>
+<p>Row Level Replication doesn't care what the SQL query was. It only
+looks at the data that has changed and copies those changes to the
+slaves. </p>
+<p>Why does this frustrate me? For a few reasons:
+</p>
+<ol>
+
+<li>Everything is moving towards Row Level Replication and Statement Level
+Replication is being made incompatible under some conditions. I think both
+are very powerful and you should let the end user decide what they want to
+use. I understand that Statement Level Replication can cause problems
+(under some circumstances), so my attitude is that they should work around
+the problems. The power retained by keeping both as an option at all times
+is the ability to customize how you do things. I have been in many
+situations where a slight improvement in performance meant a big deal.
+Thus, you want all your options open.</li>
+
+<li>Also, Row Level Replication is MUCH HARDER to debug. Statement Level
+Replication is very easy to debug. I have seen weird replication issues
+with MySQL in the past and I don't like to be in a situation where I can't
+debug things easily. Everything about being a DBA is debugging database
+problems and finding out where the problem is.  All the advantages of Row
+Level Replication are almost irrelevant if you can't debug issues in
+replication.</li>
+
+</ol>
+
+<p> I am glad we have Row Level Replication as an option and it can be nice
+to use depending on your needs.  I just wish Statement Level Replication
+could be used if handled correctly under all all configurations. To give
+you a better perspective of why Statement Level Replication is nice to
+debug, we had a weird case one time where 1 byte in a replication stream
+would change for no reason over a WAN. If it changed in the data, nobody
+would notice (that's really bad). But if it changed in one of the SQL
+words, replication would break. We were easily able to compare the master's
+binlogs to the slave's binlogs and find out what the problem was. I remain
+sceptical how easy it will be to verify why things break with row level
+replication. Maybe I am just paranoid, but you have to be when managing
+databases. </p>
+
+<hr>
+<h2><a name="setup"></a>Misc Setup</h2>
+I have two systems I am using to test MySQL Cluster on.
+<ul>
+<li>First computer: Laptop with 3 GB of RAM running Ubuntu.
+</li>
+<li>Second computer: Desktop with 2 GB of RAM running Ubuntu 9
+and also using a Vortex SSD hard drive. I have an external drive
+enclosure so I could test the SSD hard drive on other systems. 
+</li>
+<li>Third system: 2 GB server with CentOS. 
+</li>
+</ul>
+Some things to NOTE: 
+<ul>
+<li> It's interesting to note I only get a max of 30 MB/sec transfer rate from
+my laptop hard drive to the Vortex drive. I think it's because of the speed
+of USB and also the internal hard drive. I've read that USB 2.0 maxes out
+at 40 MB/sec. In theory, if I attach the Vortex drive directly to the
+motherboard on my desktop computer, it should go a lot faster. In case you
+wonder why I am mentioning this, at the time of this article, the Intel
+X25-e SSD drive looks very promising in regard to database use. I expect
+that 90% of the databases using MySQL will be using SSD drives in the next
+few years, because most MySQL servers have less than 100 GB of data. Also,
+the SSD hard drives will get faster and bigger. I bought the Vortex because
+it was cheaper and I just wanted to test SSD out in general and later use
+it for my laptop. If it works out well, I'll buy the Intel X25-e and put it
+in my desktop and beat the daylights out of it running database
+simulations. </li>
+<li>Also, when I connected the Vortex SSD hard drive to the motherboard
+on my desktop, I could only get about 35 MB/sec written to the
+SSD hard drive when reading files from cache. It seems to go faster
+than the new 1.5 TB SATA hard drive I bought though, which was about 23 MB/sec 
+if I remember right. </li>
+<li>Have a Gb free of diskspace. You don't need all of that, maybe
+300 MB at most. </li>
+<li>Of course, you should have Python installed. You don't really need
+Python installed for anything in this article, but you should have it
+installed anyways. (<a href="http://xkcd.com/353/">353</a>, <a
+href="http://xkcd.com/413/">413</a>, <a href="http://xkcd.com/409/">409</a>,
+<a href="http://xkcd.com/521/">521</a>, <a href="http://xkcd.com/482/">482</a>)
+</li>
+</ul>
+
+
+And also, add these IP addresses to your system:
+<pre>
+/sbin/ifconfig lo:1 127.0.0.101 netmask 255.0.0.0
+/sbin/ifconfig lo:2 127.0.0.102 netmask 255.0.0.0
+/sbin/ifconfig lo:3 127.0.0.103 netmask 255.0.0.0
+/sbin/ifconfig lo:4 127.0.0.104 netmask 255.0.0.0
+</pre>
+<p>
+
+
+As a side note, it is interesting to see how Ubuntu is taking off on the desktop 
+market and how it is starting to creep into the server market. For me, I just like to 
+use the same operating system for the desktops and servers because then I know that
+the operating system is flexible and can work under multiple environments. 
+After all, isn't a desktop just a server running Xwindows with OpenOffice and FireFox?
+To me, the words "desktop" and  "server" are just marketing terms. 
+
+<hr>
+<h2><a name="general"></a>General Approach</h2>
+The goal of setting up a MySQL Cluster is to make sure that if any node
+goes down, a backup node can take over. This is true for all the
+nodes including the management node. What is
+the minimum number of servers you need for a redundant MySQL Cluster?
+Two. People often
+claim that the management node needs its own server, which is totally BOGUS.
+You can have backup management nodes. Also, a management node doesn't
+do anything most of the time, so if you use a separate server for the
+management node, it is a waste.
+<p>Here's the setup for our article:
+</p>
+<ol>
+<li>Add 4 IP addresses to your box: 127.0.0.101, 127.0.0.102,
+127.0.0.103, 127.0.0.104. This can be accomplished through standard linux
+networking commands. </li>
+<li>For each IP address, bind a data node, mysqld node, and
+management node to its default ports. Each IP address will have its own
+set of nodes. </li>
+<li>One management node will be a backup management node. </li>
+<li>Define NDB databases with a prefix to make it easy to separate
+NDB databases from InnoDB and MyISAM databases. </li>
+<li>Setup replication between the MySQL servers on 127.0.0.101
+and 127.0.0.102 in dual master mode excluding replication of the NDB
+databases (the cluster takes care of the NDB databases). </li>
+<li>Setup replication to a cluster slave and a normal slave using Row
+Level Replication. You could do Statement Level Replication, but then
+all writes would have to go to exactly one of the mysqld servers in the
+Cluster. </li>
+</ol>
+<table SUMMARY="Replication Summary" border="1">
+<tbody>
+<tr>
+<th>&nbsp;</th>
+<th colspan="5">Replication Type</th>
+<th>Row Level<br>
+Replication </th>
+<th>Special<br>
+Rep Config</th>
+<th>Hacks<br>
+necessary</th>
+<th>Problems</th>
+<th>Notes</th>
+<th>Weird Purpose </th>
+</tr>
+<tr>
+<th>&nbsp;</th>
+<th>Cluster</th>
+<th>Other<br>
+Engines</th>
+<th>MySQLD<br>
+Master<br>
+Replication</th>
+<th>Slave</th>
+<th>Cluster<br>
+Slave</th>
+<th colspan="10">&nbsp;</th>
+</tr>
+<tr>
+<td>1.</td>
+<td align="center">&bull; </td>
+<td> &nbsp; </td>
+<td> &nbsp; </td>
+<td> &nbsp; </td>
+<td> &nbsp; </td>
+<td>&nbsp; </td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>Basic configuration.</td>
+</tr>
+<tr>
+<td>2.</td>
+<td align="center">&bull; </td>
+<td align="center">&bull; </td>
+<td> &nbsp; </td>
+<td> &nbsp; </td>
+<td> &nbsp; </td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>1 </td>
+<td>Non-ndb data is split across mysqld nodes</td>
+<td>1</td>
+</tr>
+<tr>
+<td>3.</td>
+<td align="center">&bull; </td>
+<td align="center">&bull; </td>
+<td align="center">&bull; </td>
+<td> &nbsp; </td>
+<td> &nbsp; </td>
+<td>Y </td>
+<td> Y </td>
+<td> Y </td>
+<td>2</td>
+<td>Can use other storage engines. </td>
+<td>1</td>
+</tr>
+<tr>
+<td>5.</td>
+<td align="center">&bull; </td>
+<td align="center">&bull; </td>
+<td align="center">&bull; </td>
+<td align="center">&bull; </td>
+<td> &nbsp; </td>
+<td>Y </td>
+<td>Y </td>
+<td>Y</td>
+<td>2</td>
+<td>Convert tables to non-NDB tables on Slave.</td>
+<td>1,2</td>
+</tr>
+<tr>
+<td>6.</td>
+<td align="center">&bull; </td>
+<td> &nbsp; </td>
+<td> &nbsp; </td>
+<td> &nbsp; </td>
+<td align="center">&bull; </td>
+<td>Y </td>
+<td>&nbsp; </td>
+<td>&nbsp;</td>
+<td>&nbsp;</td>
+<td>Standard Cluster Replication.</td>
+</tr>
+<tr>
+<td>7.</td>
+<td align="center">&bull; </td>
+<td align="center">&bull; </td>
+<td align="center">&bull; </td>
+<td> &nbsp; </td>
+<td align="center">&bull; </td>
+<td>Y </td>
+<td> Y </td>
+<td> Y </td>
+<td>2</td>
+<td>Cluster Replication with non-NDB tables.</td>
+<td>1</td>
+</tr>
+<tr>
+<td>8.</td>
+<td align="center">&bull; </td>
+<td align="center">&bull; </td>
+<td align="center">&bull; </td>
+<td align="center">&bull; </td>
+<td align="center">&bull; </td>
+<td>Y </td>
+<td> Y </td>
+<td>Y </td>
+<td>2</td>
+<td>Convert replication to non-NDB tables on Slave.</td>
+<td>1,2</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>Special Rep Config: The MySQLd nodes need to replicate non-NDB
+data. </li>
+<li>Hacks Necessary: The stored procedure I use is needed to start
+replication if a MySQLd node gets restarted. </li>
+</ul>
+<p>
+Problems:
+</p>
+<ol>
+<li>Inconsistent data on non-NDB tables.
+</li>
+<li>Replication configurations are needed to avoid duplicate entries
+in the binlogs. Non-NDB data replicated on the MySQLd servers will
+need to be setup in a Replication Circle. </li>
+</ol>
+<p>
+Weird Purposes:
+</p>
+<ol>
+<li>Keep log data out of cluster to keep the data small in the
+cluster.
+</li>
+<li>Use Read-Repeatable mode in InnoDB on the normal slave. This can
+be useful for *snapshot* reports. </li>
+</ol>
+<hr>
+<h2><a name="config"></a>Configuration Files</h2>
+Place all of these files in "/etc/mysql".
+I make NO APOLOGIES for the configuration of these files. I haven't
+finished tuning the configurations yet. I just did the bare minimum to get
+it to work. Use at your own risk.
+<ul>
+<li>There is one "config.ini" file which is needed by all the
+servers. It is here: <a href="files/etc/config.ini.txt">config.ini.txt</a>.
+</li>
+<li>MySQL config file for Master1 mysql node1 server. It is here: <a
+href="files/etc/my.cnf_node1.txt">my.cnf_node1.txt</a>.
+</li>
+<li>MySQL config file for Master2 mysql node2 server. It is here: <a
+href="files/etc/my.cnf_node2.txt">my.cnf_node2.txt</a>.
+</li>
+<li>MySQL config file for Slave1 mysql server. It is here: <a
+href="files/etc/my.cnf_slave1.txt">my.cnf_slave1.txt</a>.
+</li>
+<li>Cluster Slave1 config.ini file. It is here: <a
+href="files/etc/config.ini_cslave1.txt">config.ini_cslave1.txt</a>.
+</li>
+<li>MySQL config file for Cluster Slave1 mysql server. It is here: <a
+href="files/etc/my.cnf_cslave1.txt">my.cnf_cslave1.txt</a>.
+</li>
+</ul>
+<p>
+These files I use to stop and start MySQL. I put it in
+/usr/local/mysql_cluster.
+</p>
+<ul>
+<li>Commands I used to setup MysQL. It is here: <a
+href="files/restart_cluster.sh.txt">commands.txt</a>.
+</li>
+</ul>
+<hr>
+<h2><a name="install"></a>Installing MySQL Cluster on Ubuntu</h2>
+Compile and install OR download.
+<p>There are 3 ways to install MySQL: Do-It-Yourself, get it from a 3rd party, or
+from
+MySQL. It is unlikely that the official website for MySQL will have consistent
+downloads for Ubuntu versions. We'll see if things change in the
+future. You have two real options: Download and compile it yourself or
+download from a third party. I'll explain both here:
+</p>
+<h3> Download and Install MySQL </h3>
+Download my <a href="files/cfiles.tgz">config files</a> and untar
+them.
+<pre>tar -zxvf cfiles.tgz</pre>
+It should be safe to download and untar them in the working source
+directory of MySQL right after you have downloaded and untarred the
+source code for MySQL.
+<p>Note: The download steps below only work for a specific version of
+MySQL. Please refer to
+<a target="download" href="http://dev.mysql.com/downloads/cluster/">http://dev.mysql.com/downloads/cluster/</a>
+for newer versions. </p>
+<p>Use my <a href="files/install.txt">install script</a> to install
+MySQL. You can read the various comments in the script. Please read the
+comments before you execute each section in the script. In general, it
+will attempt to setup three things:
+</p>
+<ol>
+<li>A MySQL Cluster
+</li>
+<li>A regular slave
+</li>
+<li>A MySQL cluster slave
+</li>
+</ol>
+No replication will be setup however. This install script downloads,
+compiles, and sets up the basic environment. To execute this script:
+<ul>
+<li>You must have sudo access. If not, just log in as the root user.
+For example: <font color="blue">su -l root</font>
+</li>
+<li>Download the script.
+</li>
+<li>mv install.txt install.sh
+</li>
+<li>bash install.sh # However, I recommend only doing sections at a time. 
+I got the script to work all the way through, but this script doesn't allow 
+for errors, so it is safer to just do sections at a time. Copy and 
+paste sections into a terminal session.
+</li>
+</ul>
+<hr>
+<h2><a name="rep"></a>Setting up and Testing Replication to a Slave
+and Cluster Slave</h2>
+We assume
+the MySQL cluster and the slaves are running. Replication is not setup
+yet, but it will be. Now we will setup replication where each of the
+two MySQL nodes will replicate non-NDB tables
+to each other. Also, we will setup replication from the first MySQL
+node to a MySQL slave and the 2nd MySQL node to the cluster slave. 
+The important thing to note is that the slaves
+will replicate all the data from all databases.
+<p>NOTE: We only use Row Level Replication. It is possible to do this
+with Statement Level Replication, but it gets more complicated. </p>
+<p>Look at my <a href="files/slave_setup.txt">slave setup script</a>.
+</p>
+<hr>
+<h2><a name="test"></a>Let's test MySQL</h2>
+<pre class="code">./bin/mysql -u root -S instances/mysqlnode1/tmp/mysql.sock -e "create database if not exists ndb"<br>
+./bin/mysql -u root -S instances/mysqlslave1/tmp/mysql.sock -e "show databases"
+./bin/mysql -u root -S instances/mysqlslave1/tmp/mysql.sock -e "create database if not exists ndb"<br>
+./bin/mysql -u root -S instances/mysqlslave1/tmp/mysql.sock -e "create table if not exists ndb.ndb1 (i int) engine=InnoDB;"
+./bin/mysql -u root -S instances/mysqlnode1/tmp/mysql.sock -e "create table if not exists ndb.ndb1 (i int) engine=ndb;" 
+./bin/mysql -u root -S instances/mysqlnode1/tmp/mysql.sock -e "create table if not exists rep.rep1 (i int) engine=InnoDB;" <br>
+./bin/mysql -u root -S instances/mysqlnode1/tmp/mysql.sock -e "insert into ndb.ndb1 values (1);" 
+./bin/mysql -u root -S instances/mysqlnode2/tmp/mysql.sock -e "insert into rep.rep1 values (1);"<br>
+# These tables should contain one row each. 
+./bin/mysql -N -u root -S instances/mysqlnode1/tmp/mysql.sock -e "select * from ndb.ndb1"
+./bin/mysql -N -u root -S instances/mysqlnode1/tmp/mysql.sock -e "select * from rep.rep1"
+./bin/mysql -N -u root -S instances/mysqlnode2/tmp/mysql.sock -e "select * from ndb.ndb1"
+./bin/mysql -N -u root -S instances/mysqlnode2/tmp/mysql.sock -e "select * from rep.rep1"
+./bin/mysql -N -u root -S instances/mysqlslave1/tmp/mysql.sock -e "select * from ndb.ndb1"
+./bin/mysql -N -u root -S instances/mysqlslave1/tmp/mysql.sock -e "select * from rep.rep1"
+./bin/mysql -N -u root -S instances/mysqlcslave1/tmp/mysql.sock -e "select * from ndb.ndb1"
+./bin/mysql -N -u root -S instances/mysqlcslave1/tmp/mysql.sock -e "select * from rep.rep1"<br>
+# Test replication for the non-replicating database. 
+./bin/mysql -u root -S instances/mysqlnode1/tmp/mysql.sock -e "create table if not exists norep.norep1 (i int) engine=InnoDB;"
+./bin/mysql -u root -S instances/mysqlnode2/tmp/mysql.sock -e "create table if not exists norep.norep1 (i int) engine=InnoDB;"
+./bin/mysql -u root -S instances/mysqlslave1/tmp/mysql.sock -e "create table if not exists norep.norep1 (i int) engine=InnoDB;"
+./bin/mysql -u root -S instances/mysqlcslave1/tmp/mysql.sock -e "create table if not exists norep.norep1 (i int) engine=InnoDB;"<br>
+./bin/mysql -u root -S instances/mysqlnode1/tmp/mysql.sock -e "insert into norep.norep1 values (1);"
+./bin/mysql -u root -S instances/mysqlnode2/tmp/mysql.sock -e "insert into norep.norep1 values (2);"
+./bin/mysql -u root -S instances/mysqlslave1/tmp/mysql.sock -e "insert into norep.norep1 values (3);"
+./bin/mysql -u root -S instances/mysqlcslave1/tmp/mysql.sock -e "insert into norep.norep1 values (4);"<br>
+# These tables should contain one unique value.
+./bin/mysql -N -u root -S instances/mysqlnode1/tmp/mysql.sock -e "select * from norep.norep1"
+./bin/mysql -N -u root -S instances/mysqlnode2/tmp/mysql.sock -e "select * from norep.norep1"
+./bin/mysql -N -u root -S instances/mysqlslave1/tmp/mysql.sock -e "select * from norep.norep1"
+./bin/mysql -N -u root -S instances/mysqlcslave1/tmp/mysql.sock -e "select * from norep.norep1"<br>
+</pre>
+You should see one line of data in both tables on the slave.
+<hr>
+<h2><a name="sp"></a>Installing Stored procedure on Slave</h2>
+<p>
+When a MySQLd server using NDB restarts, it sends out an error message.
+It is not usually a good idea to restart replication without knowing
+what is going on and
+checking the logs. However, there may be times when you don't care. For
+that case, I have created a stored procedure using an event to kick off
+replication when a known
+error occurs. This stored procedure only works for the first 5 days. If
+you wish, you can modify it for a longer period of time. </p>
+<p>Let's kill replication, install the stored procedure, and then see
+if it fixes replication. </p>
+<ol>
+<li>Download this file: <a href="files/stored_procedure_rep.sp">files/stored_procedure_rep.sp</a>
+</li>
+<li>
+<pre>if [ -e "instances/mysqlnode1/tmp/mysqld.pid" ]; then
+ k=`cat instances/mysqlnode1/tmp/mysqld.pid`
+ echo "Killing $k"
+ kill $k
+fi
+if [ -e "instances/mysqlnode2/tmp/mysqld.pid" ]; then
+ k=`cat instances/mysqlnode2/tmp/mysqld.pid`
+ echo "Killing $k"
+ kill $k
+fi
+
+sleep 2
+if [ -e "instances/mysqlnode1/tmp/mysqld.pid" ]; then
+ echo "Mysql node 1 still running."
+else
+ echo "starting node 1 mysql"
+ sudo -u mysql nohup ./libexec/mysqld --defaults-file=etc/my.cnf_node1 &amp;
+fi
+if [ -e "instances/mysqlnode2/tmp/mysqld.pid" ]; then
+ echo "Mysql node 2 still running."
+else
+ echo "starting node 2 mysql"
+ sudo -u mysql nohup ./libexec/mysqld --defaults-file=etc/my.cnf_node2 &amp;
+fi
+
+</pre>
+</li>
+<li>Add the following to the config files if it is not already
+done: "event_scheduler=ON". The config files in this article already
+have that setting. If you had to add this to your config, restart the MySQLd servers.</li>
+<li>Check replication. One of the two fields should be 'No'.
+<pre>./bin/mysql -u root -S instances/mysqlnode1/tmp/mysql.sock -e "show slave status\G" | grep -i running
+./bin/mysql -u root -S instances/mysqlnode2/tmp/mysql.sock -e "show slave status\G" | grep -i running
+./bin/mysql -u root -S instances/mysqlslave1/tmp/mysql.sock -e "show slave status\G" | grep -i running
+./bin/mysql -u root -S instances/mysqlcslave1/tmp/mysql.sock -e "show slave status\G" | grep -i running
+</pre>
+</li>
+<li>Install the stored procedure below on the slave.
+<pre>./bin/mysql -u root -S instances/mysqlnode1/tmp/mysql.sock -e "source stored_procedure_rep.sp" mysql
+./bin/mysql -u root -S instances/mysqlnode2/tmp/mysql.sock -e "source stored_procedure_rep.sp" mysql
+./bin/mysql -u root -S instances/mysqlslave1/tmp/mysql.sock -e "source stored_procedure_rep.sp" mysql
+./bin/mysql -u root -S instances/mysqlcslave1/tmp/mysql.sock -e "source stored_procedure_rep.sp" mysql
+</pre>
+</li>
+<li>Wait 1 minute. Slave_IO_Running and Slave_SQL_Running should be
+'Yes'.
+<pre>./bin/mysql -u root -S instances/mysqlnode1/tmp/mysql.sock -e "show slave status\G"
+./bin/mysql -u root -S instances/mysqlnode2/tmp/mysql.sock -e "show slave status\G"
+./bin/mysql -u root -S instances/mysqlslave1/tmp/mysql.sock -e "show slave status\G"
+./bin/mysql -u root -S instances/mysqlcslave1/tmp/mysql.sock -e "show slave status\G"<br>
+# or just
+
+./bin/mysql -u root -S instances/mysqlnode1/tmp/mysql.sock -e "show slave status\G" | grep -i running
+./bin/mysql -u root -S instances/mysqlnode2/tmp/mysql.sock -e "show slave status\G" | grep -i running
+./bin/mysql -u root -S instances/mysqlslave1/tmp/mysql.sock -e "show slave status\G" | grep -i running
+./bin/mysql -u root -S instances/mysqlcslave1/tmp/mysql.sock -e "show slave status\G" | grep -i running<br>
+</pre>
+</li>
+<li>"Show slave status" should have both the io_thread and sql_thread
+as 'Yes' after the stored procedure kicks in.
+</li>
+</ol>
+<hr>
+<h2><a name="con"></a>Conclusion and Future Topics</h2>
+Well, there's nothing much to conclude except that you can setup a MySQL
+Cluster on a single box. It works for Ubuntu and CentOS pretty well.
+<p>Here are some future topics:
+</p>
+<ol>
+<li>Stress test MySQL Cluster on a single box and get it to break.
+Hint: The config files in this article were made so that I could load
+real production data on a server at work without having the cluster
+kick out the data nodes. </li>
+<li>Break MySQL Cluster by pounding it to death or filling up
+diskspace or filling up the index in memory and see what happens. </li>
+<li>Split the configurations out to two servers. </li>
+<li>Setup Statement Level Replication. </li>
+<li>Perform backups via cluster or slave. </li>
+<li>Managing the cluster and Nagios alarms for the cluster to detect
+when things go bad. </li>
+<li>Adding and dropping nodes manually.
+</li>
+<li>Creating Ubuntu and CentOS packages. </li>
+<li>Testing my SSD drive.
+</li>
+</ol>
+
+<hr>
+<h2><a name="ssd"></a>Some SSD Preliminary Testing</h2>
+I ran a quick test on the performance of my SSD drive compared to the brand new SATA drive that I bought. 
+However, it is not a very good test because my computer is 4.5 years old. 
+The important thing to keep in mind is that SSD drives perform much better with random writes and reads.
+They are somewhat better for sequential writes and reads. For a database server, random writes
+and reads are the most important. When you look at the tables below, you might except the sequential 
+copying of cds should go about as fast as sequential inserts into MySQL Cluster. However, even 
+sequential inserts, are not exactly sequential in all respects. As I expected, straight inserts went 
+a lot faster on the SSD drive and looked closer to random write speed improvements.  
+<p>
+I loaded data onto both the SSD and the SATA drives I have. I have separate MySQL Cluster 
+installations on each hard drive. 
+My computer is from late 2004, so it probably only a SATA I bus. So this is a really bad test for 
+testing real performance, but I just wanted to get a rough idea of what I am dealing with. Both the 
+SATA drive and the SSD drive were brand new. I was using an SSD Vertex 60 gig drive. I loaded a 200 MB 
+file onto the system, but, there were 4 MySQL instances running. The two data nodes for the cluster, a 
+slave, and a cluster slave. In addition, the binlogs would have a copy of all the data for the MySQLd 
+instances. Thus, there are 8 copies of the data (4 in the databases, 4 in logs). I expect on a system 
+with just one MySQL instance it would run a lot faster. 
+<p>
+For cdrom copying times of 700 megs, look at this table. The SSD drives appears to be about 
+66% faster. However, when you compare this to the next table, SSD shows to be even better (as expected).
+<table SUMMARY="Results Summary" border=1>
+<tr><td>Cd copy count<th>SATA seconds <th>SSD seconds</tr>
+<tr><td>1<td>28<td>20</tr>
+<tr><td>2<td>29<td>19</tr>
+<tr><td>3<td>34<td>20</tr>
+<tr><td>4<td>32<td>19</tr>
+<tr><td>5<td>30<td>19</tr>
+<tr><td>6<td>32<td>20</tr>
+<tr><td>7<td>32<td>18</tr>
+<tr><td>8<td>32<td>20</tr>
+</table>
+<p>
+
+We can see that the MySQL Cluster is running 2 to 5 times faster on the SSD drive. This is not surprising if the latency on the
+SSD drive is better. The inserts below were at 1000 rows at a time. The python script has the detailed schema information. I compared 3 different points in the log files
+for the inserts. I compared the recent time for 1000 rows being inserted and the total time up to that point. The loading stopped at 1 million rows. 
+<table SUMMARY="Detailed Results" border=1>
+<tr><th>Rows<th>SATA Drive<th>SSD Drive<th>Total time  Ratio<th>1000 time ratio</tr>
+<tr><td>122,000 rows 
+<td><pre>Query OK, 1000 rows affected (0.13 sec)
+Records: 1000  Duplicates: 0  Warnings: 0
+
++-------------------------+--------+
+| seconds_diff            | 122000 |
++-------------------------+--------+
+|                      31 | 122000 |
++-------------------------+--------+
+1 row in set (0.00 sec)
+</pre>
+<td><pre>Query OK, 1000 rows affected (0.08 sec)
+Records: 1000  Duplicates: 0  Warnings: 0
+
++-------------------------+--------+
+| seconds_diff            | 122000 |
++-------------------------+--------+
+|                      13 | 122000 |
++-------------------------+--------+
+1 row in set (0.00 sec)
+</pre>
+<td>2.3<td>1.6</tr>
+
+<tr><td>715,000 rows<td><pre>
++-------------------------+--------+
+| seconds_total           | 715000 |
++-------------------------+--------+
+|                    1819 | 715000 |
++-------------------------+--------+
+1 row in set (0.00 sec)
+
+Query OK, 1000 rows affected (4.96 sec)
+Records: 1000  Duplicates: 0  Warnings: 0
+</pre></td>
+<td><pre>
++-------------------------+--------+
+| seconds_total           | 715000 |
++-------------------------+--------+
+|                     353 | 715000 |
++-------------------------+--------+
+1 row in set (0.00 sec)
+
+Query OK, 1000 rows affected (1.18 sec)
+Records: 1000  Duplicates: 0  Warnings: 0
+</pre><td>5.1<td>4.2
+</tr>
+
+
+<tr><td>1 million rows 
+<td><pre>Query OK, 1000 rows affected (4.46 sec)
+Records: 1000  Duplicates: 0  Warnings: 0
+
++-------------------------+---------+
+| seconds_diff            | 1000000 |
++-------------------------+---------+
+|                    3188 | 1000000 |
++-------------------------+---------+
+1 row in set (0.00 sec)
+</pre>
+<td><pre>Query OK, 1000 rows affected (1.40 sec)
+Records: 1000  Duplicates: 0  Warnings: 0
+
++-------------------------+---------+
+| seconds_diff            | 1000000 |
++-------------------------+---------+
+|                     743 | 1000000 |
++-------------------------+---------+
+1 row in set (0.00 sec)
+</pre>
+<td>4.2<td>3.1
+</tr>
+
+</table>
+
+To reproduce the results for yourself, install MySQL Cluster twice. Once on a normal drive and once on an SSD drive. 
+<p>
+Execute the following in the MySQL cluster for the SSD drive and then later for the normal drive and then compare the times. 
+Also, download my 
+<a href="files/Insert_200_megs_random.py">insert python script</a>. I wrote it up very quick. It isn't that elegant. 
+<pre>
+Insert_200_megs_random.py &gt; insert1.sql
+bin/mysql -u root  -S  instances/mysqlnode1/tmp/mysql.sock
+</pre>
+
+Inside the mysql client program
+<pre>
+tee insert1.log
+source insert1.log
+
+</pre>
+
+Here's the output of my dmesg, if this helps.
+<pre>
+[    1.338264] sata_promise 0000:00:08.0: version 2.12
+[    1.338294] sata_promise 0000:00:08.0: PCI INT A -&gt; GSI 18 (level, low) -&gt; IRQ 18
+[    1.352185] scsi0 : sata_promise
+[    1.352328] scsi1 : sata_promise
+[    1.352388] scsi2 : sata_promise
+[    1.352430] ata1: SATA max UDMA/133 mmio m4096@0xf7a00000 ata 0xf7a00200 irq 18
+[    1.352434] ata2: SATA max UDMA/133 mmio m4096@0xf7a00000 ata 0xf7a00280 irq 18
+[    1.352436] ata3: PATA max UDMA/133 mmio m4096@0xf7a00000 ata 0xf7a00300 irq 18
+[    1.672036] ata1: SATA link up 1.5 Gbps (SStatus 113 SControl 300)
+[    1.707733] ata1.00: ATA-8: ST31500341AS, CC1H, max UDMA/133
+[    1.707736] ata1.00: 2930277168 sectors, multi 0: LBA48 NCQ (depth 0/32)
+[    1.763738] ata1.00: configured for UDMA/133
+[    2.080030] ata2: SATA link up 1.5 Gbps (SStatus 113 SControl 300)
+[    2.088384] ata2.00: ATA-7: OCZ-VERTEX 1275, 00.P97, max UDMA/133
+[    2.088387] ata2.00: 125045424 sectors, multi 16: LBA48 NCQ (depth 0/32)
+[    2.096398] ata2.00: configured for UDMA/133
+[    2.252082] isa bounce pool size: 16 pages
+[    2.252207] scsi 0:0:0:0: Direct-Access     ATA      ST31500341AS     CC1H PQ: 0 ANSI: 5
+[    2.252323] sd 0:0:0:0: [sda] 2930277168 512-byte hardware sectors: (1.50 TB/1.36 TiB)
+[    2.252342] sd 0:0:0:0: [sda] Write Protect is off
+[    2.252345] sd 0:0:0:0: [sda] Mode Sense: 00 3a 00 00
+[    2.252370] sd 0:0:0:0: [sda] Write cache: enabled, read cache: enabled, doesn't support DPO or FUA
+[    2.252449] sd 0:0:0:0: [sda] 2930277168 512-byte hardware sectors: (1.50 TB/1.36 TiB)
+[    2.252462] sd 0:0:0:0: [sda] Write Protect is off
+[    2.252464] sd 0:0:0:0: [sda] Mode Sense: 00 3a 00 00
+[    2.252487] sd 0:0:0:0: [sda] Write cache: enabled, read cache: enabled, doesn't support DPO or FUA
+[    2.252492]  sda: sda1 sda2 sda4
+[    2.282713] sd 0:0:0:0: [sda] Attached SCSI disk
+[    2.282781] sd 0:0:0:0: Attached scsi generic sg0 type 0
+[    2.282842] scsi 1:0:0:0: Direct-Access     ATA      OCZ-VERTEX 1275  00.P PQ: 0 ANSI: 5
+[    2.282924] sd 1:0:0:0: [sdb] 125045424 512-byte hardware sectors: (64.0 GB/59.6 GiB)
+[    2.282938] sd 1:0:0:0: [sdb] Write Protect is off
+[    2.282941] sd 1:0:0:0: [sdb] Mode Sense: 00 3a 00 00
+[    2.282963] sd 1:0:0:0: [sdb] Write cache: enabled, read cache: enabled, doesn't support DPO or FUA
+[    2.283011] sd 1:0:0:0: [sdb] 125045424 512-byte hardware sectors: (64.0 GB/59.6 GiB)
+[    2.283024] sd 1:0:0:0: [sdb] Write Protect is off
+[    2.283026] sd 1:0:0:0: [sdb] Mode Sense: 00 3a 00 00
+[    2.283049] sd 1:0:0:0: [sdb] Write cache: enabled, read cache: enabled, doesn't support DPO or FUA
+
+</pre>
+
+Some proc info
+<pre>
+gt;more /proc/scsi/sg/device_strs
+ATA             ST31500341AS            CC1H
+ATA             OCZ-VERTEX 1275         00.P
+DVDRW           IDE1008                 0055
+</pre>
+
+For more info on SSD:
+<ul>
+<li><a href="http://www.anandtech.com/storage/showdoc.aspx?i=3531&amp;p=25">http://www.anandtech.com/storage/showdoc.aspx?i=3531&amp;p=25</a>
+</li>
+<li><a href="http://www.anandtech.com/storage/showdoc.aspx?i=3531&amp;p=1">http://www.anandtech.com/storage/showdoc.aspx?i=3531&amp;p=1</a>
+</li>
+<li><a href="http://www.anandtech.com/storage/showdoc.aspx?i=3535">http://www.anandtech.com/storage/showdoc.aspx?i=3535</a>
+</li>
+<li><a href="http://www.anandtech.com/cpuchipsets/intel/showdoc.aspx?i=3403&amp;p=11">http://www.anandtech.com/cpuchipsets/intel/showdoc.aspx?i=3403&amp;p=11</a>
+</li>
+<li><a href="http://www.anandtech.com/storage/showdoc.aspx?i=3531&amp;p=25">http://www.anandtech.com/storage/showdoc.aspx?i=3531&amp;p=25</a>
+</li>
+</ul>
+<p>
+As a side note, SLC SSD drives last 10 times longer for writes comapared to the MLC SSD drives, from what I understand. 
+Thus, the Intel x25-e is far more important than the Intel x25-m for database servers. You want the drives to last as long as possible
+and have the best random write performance. On one of my contracting jobs, because I showed them how the Vortex behaved on my home
+computer, I will get to test an Intel x25-e at their place. That's the second time when I invested in my computer at home it helped me 
+in my career. The first time was getting an AMD 64 bit system before most companies had it and using it at home with Linux and MySQL. 
+The ex complained it was a waste of money, but it was a hell of an impressive thing to say at the time during interviews that I had
+64 bit Linux and MySQL running at home, and it proved to be true. If you get a good raise because you show initiative when investing money into
+your home equipment to prove something, it pays for itself. 
+</p>
+
+
+<br clear="all" />
+
+<script type='text/javascript'>
+digg_url = 'http://linuxgazette.net/168/nielsen.html';
+digg_title = 'Setting up a MySQL Cluster for your Linux desktop';
+digg_bodytext = '<p> MySQL Cluster has come a long way in the 4 years since I experimented with it. Compared to when I first got the cluster working on my home computer, I didn\'t have to change much get the latest version up and running. </p> ';
+digg_topic = 'linux_unix';
+</script>
+<script src="http://digg.com/tools/diggthis.js" type="text/javascript"></script>
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:168/nielsen.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<!-- *** BEGIN bio *** -->
+<hr>
+<P>
+<img ALIGN="LEFT" ALT="Bio picture" SRC="../gx/2002/note.png" class="bio">
+<em>
+Mark leads the Ubuntu California Team. You can reach him at
+ubuntu.ca.team@gmail.com .
+</em>
+<br CLEAR="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2009, Mark Nielsen. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication License</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 168 of Linux Gazette, November 2009
+</p>
+
+</div>
+
+<div id="previousnextbottom">
+<A HREF="dyckoff1.html" >&lt;-- prev</A> | <A HREF="silva.html" >next --&gt;</A>
+</div>
+
+</div>
+</div>
+
+<script src="http://www.google-analytics.com/urchin.js"
+type="text/javascript">
+</script>
+<script type="text/javascript">
+_uacct = "UA-1204316-1";
+urchinTracker();
+</script>
+
+
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+</body>
+</html>
+

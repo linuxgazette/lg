@@ -1,0 +1,485 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>A $10 Linux Answering Machine LG #120</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="orr.html" >&lt;-- prev</A> | <A HREF="vinayak.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>A $10 Linux Answering Machine</h1>
+<p id="by"><b>By <A HREF="../authors/smith.html">Bob Smith</A></b></p>
+
+<p>
+
+<p>
+<img src="misc/smith/modem537.jpg" alt="A Linux telephone answering machine"
+hspace="10" vspace="10" border="2" align="right">
+<p><a href="#Intro">Introduction</a><br>
+<a href="#Arch">Architecture of a Linux Telephone Interface</a><br>
+<a href="#Installsw">Install Drivers and Libraries</a><br>
+<a href="#Installhw">Select and Install the Softmodem</a><br>
+<a href="#Improvements">Next Steps ...</a><br></p>
+
+
+<a name="Intro"></a>
+<h3>Introduction</h3>
+This article describes how to build a Linux-based telephone
+answering machine using a low cost winmodem (softmodem) for the
+telephone interface. We describe how to install the drivers and
+libraries, and how to select and install the proper modem card. Our
+answering machine program is a couple of hundred lines of C code in
+a single file. If you've ever used a telephone you should have no
+trouble understanding the code.
+
+<p>The requirements for the project are:<br>
+ - An Intel 537-based modem (softmodem)<br>
+ - A PCI slot that does not share interrupts</p>
+
+<p>Intel 537-based modems are readily available for less than $10. The
+driver we are going to use requires the Intel chip, so be sure you have the
+right modem before starting.</p>
+
+
+<a name="Arch"></a>
+<h3>Architecture of a Linux Telephone Interface</h3>
+<img src="misc/smith/zapata_arch.png" alt=
+"Architecture of a Linux Telephone Application" hspace="10" vspace=
+"10" border="2" align="right"> Our answering machine uses drivers
+and libraries which are a part of the Asterisk open-source PBX.
+Asterisk can work as an answering machine, but Asterisk is huge and
+has a steep learning curve for installation and configuration. The
+uncompressed Asterisk package is over 16 megabytes, well in excess
+of our 5 kilobyte source file. The overall architecture of our
+answering machine is shown in the attached diagram.
+
+<p>The driver for the modem card is the wcfxo module. This
+interfaces to a higher-level driver called "zaptel". The division
+of the driver into two pieces helps the Asterisk developers
+minimize how much code they need to write for new types of PC
+telephony interface cards. The zaptel driver delivers a 64 Kbps
+stream of <em>mu-law</em> samples to the user space application. Zaptel also
+has IO control routines (IOCTLs) to go on-hook, off-hook, and to
+indicate that the phone line is ringing. (<a href="http://www.voipreview.org">VoIP Providers</a>)
+
+The Zapata library (libzap) processes the 64 Kbps stream of data to
+extract caller ID and DTMF signals. The competence of libzap is why
+our answering machine application is so simple.
+
+<p>Our answering machine is pretty minimal as telephony
+applications go. It extracts and displays the
+caller ID information for incoming calls. If the phone rings more
+than four times, it answers the phone and plays a greeting. The
+greeting message asks the caller to press '1' to leave a message.
+Having the caller press a button eliminates messages from so called
+"bulk dialers". Voice mail is left as <em>mu-law</em>-encoded data in a file
+with the date and time encoded into the file name.</p>
+
+
+<a name="Installsw"></a><h3>Install Drivers and Libraries</h3>
+<p>
+Our answering machine requires the zaptel drivers and the Zapata
+library, both of which are available from the <a
+href="http://www.asterisk.org/">Asterisk web site</a>.
+</p>
+
+
+<h3>Installing the Drivers</h3>
+<p>
+Two drivers, wcfxo and zaptel, are required. Both are in the zaptel
+package. You can get to the package from the Downloads link on the
+Asterisk home page or you can get it directly from Digium which
+hosts the download site.
+
+<p><a href=
+"http://ftp.digium.com/pub/zaptel/zaptel-1.0.9.2.tar.gz">http://ftp.digium.com/pub/zaptel/zaptel-1.0.9.2.tar.gz</a></p>
+
+<p>Untar the file, do a 'make linux26' and a 'make install' (as
+root). If you are using udev, be sure to follow the directions in
+README.udev. Specifically, you need to add the following lines to
+your /etc/udev/rules.d/50-udev.rules file:<br></p>
+
+<pre>
+<code>
+KERNEL="zapctl",     NAME="zap/ctl"
+KERNEL="zaptimer",   NAME="zap/timer"
+KERNEL="zapchannel", NAME="zap/channel"
+KERNEL="zappseudo",  NAME="zap/pseudo"
+KERNEL="zap[0-9]*",  NAME="zap/%n"
+</code>
+</pre>
+
+<p>I run the answering machine as myself so I've added the
+following line to the udev permissions file
+(/etc/udev/permissions.d/00-udev.permissions):</p>
+
+<pre>zap/*:bobsmith:bobsmith:660</pre>
+
+<p>The final piece of zaptel configuration is to tell it that we
+have one interface to the telephone "central office". Edit
+/etc/zaptel.conf and add the following line to the end:</p>
+
+<pre>fxsks=1</pre>
+
+<p>If you don't live in the US, you should should make one other
+change to zaptel.conf. You need to uncomment the line with your
+country code and make that country code the defaultzone.</p>
+
+
+<h3>Installing the Zapata Library</h3>
+<p>The Zapata library is no longer used by Asterisk, so it has been
+relegated to the 'old' directory on the download site.
+</p>
+
+<p><a href=
+"http://ftp.digium.com/pub/zaptel/old/zapata-0.9.1.tar.gz">http://ftp.digium.com/pub/zaptel/old/zapata-0.9.1.tar.gz</a></p>
+
+<p>Untar the file, do a 'make' and a 'make install' (as root). The
+Zapata library does not need any configuration.</p>
+
+
+<a name="Installhw"></a><h3>Select and Install the Intel Modem</h3>
+
+<p>As mentioned above, you need to be sure to get an Intel 537-compatible
+modem. These modems should be easy to find and should be
+relatively inexpensive.
+
+<p>To call it a "modem" is not quite correct. It is really more of
+a "phone line interface". Its 64Kbps stream is 8000 bytes per
+second, which the wcfxo/zaptel driver delivers in 8 byte chunks.
+This means a thousand interrupts per second! It is the interrupt
+load that makes installing the modem card a little tricky. You need
+to install it in a PCI slot with an interrupt that is <b>not</b>
+shared by any other device. Check the documentation for your
+motherboard to find which interrupts are used for which slots and
+how those interrupts are used by the internal peripherals. If you
+are very unlucky, you may find that the interrupt for every slot on
+your motherboard is shared and used. You can try disabling internal
+peripherals but wcfxo just won't work on some motherboards.</p>
+
+<p>The other, less common problem is that the wcfxo driver does not
+recognize your modem. To fix this you need to edit the
+wcfxo_pci_tbl table near the bottom of wcfxo.c in the zaptel build
+directory. Use 'lspci -nv' to get the needed vendor ID, product ID,
+and subsystem ID. The following vendor, product, and subsystem IDs
+are already recognized by wcfxo:</p>
+
+<pre>
+ - e159:0001 8085
+ - e159:0001 8086
+ - e159:0001 8087
+</pre>
+
+<h3>System Check-out</h3>
+<p>If you've completed the hardware and software installation, you
+can verify your system with a few commands. Install the modules and examine
+the resulting syslog output.</p>
+
+<pre>
+<code>
+#modprobe zaptel
+#modprobe wcfxo
+#tail /var/log/messages
+Sep 18 23:30:41 kernel: Zapata Telephony Interface Registered on major 196
+Sep 18 23:30:51 kernel: PCI: Found IRQ 5 for device 0000:00:0b.0
+Sep 18 23:30:51 kernel: PCI: Sharing IRQ 5 with 0000:00:07.5
+Sep 18 23:30:51 kernel: wcfxo: DAA mode is 'FCC'
+Sep 18 23:30:51 kernel: Found a Wildcard FXO: Generic Clone
+Sep 18 23:30:51 kernel: Registered tone zone 0 (United States / North America)
+</code>
+</pre>
+
+<p>
+Don't worry about the "Sharing IRQ 5" log message. This reports
+that the IRQ can be shared but does not imply that another Linux
+device is using it.  An <code>lsmod</code> should show the following three
+modules:</p>
+
+<pre>
+<code>
+# lsmod
+Module                  Size  Used by
+wcfxo                  10848  0 
+zaptel                185572  3 wcfxo
+crc-ccitt               1664  1 zaptel
+</code>
+</pre>
+
+<p>Verify that the wcfxo driver is generating a thousand interrupts
+per second and that it is not shared with any other
+devices:</p>
+
+<pre>
+<code>cat /proc/interrupts; sleep 10; cat /proc/interrupts</code>
+</pre>
+
+<p>The wcfxo entry in /proc/interrupts should be on a line by
+itself, and the interrupt count should have gone up by ten thousand
+during the above 10 second sleep. If wcfxo is not on a line by
+itself, you need to move the modem to another PCI slot.
+Specifically, you want something like this:</p>
+
+<pre>
+<code>5:   3003856        XT-PIC  wcfxo</code>
+</pre>
+
+<b>not</b> something like this:<br>
+
+<pre>
+<code>9:         0        XT-PIC  uhci_hcd, uhci_hcd, wcfxo</code>
+</pre>
+
+<p>The zaptel driver includes a utility to view the driver
+configuration. Use it to verify that it has one interface. If this
+fails, check the fxsks=1 line in the configuration file.<br></p>
+<pre>
+<code>
+# ztcfg -v
+
+Zaptel Configuration
+======================
+
+
+1 channels configured.
+</code>
+</pre>
+
+
+<h3>Installation and Use of the Answering Machine</h3>
+<p>The code for the answering machine is in a single C file which is
+available <a href="misc/smith/answering_machine.c">here</a>. Compile the
+program with the command:</p>
+
+<pre>
+<code>gcc -lzap -o answering_machine answering_machine.c</code>
+</pre>
+
+<p>
+Run the program with the command:</p>
+
+<pre>
+<code>./answering_machine</code>
+</pre>
+
+<p>The program expects to find an 8 KHz <em>mu-law</em>-encoded greeting
+message called "leave_a_msg.ul" in the working directory. You can
+record the greeting using any tool you like and then convert the
+WAV file to <em>mu-law</em> using <tt>sox</tt>. The command is:</p>
+
+<pre>
+<code>sox leave_a_msg.wav leave_a_msg.ul</code>
+</pre>
+
+<p>Sox interprets files with the .ul extension as <em>mu-law</em>-encoded
+audio at 8 KHz. You can hear your voice mail by using the
+<tt>play</tt> command. For example:</p>
+
+<pre>
+<code>play 2005_09_22_13_30_22.ul</code>
+</pre>
+
+
+<h3>Code Review of the Answering Machine</h3>
+<p>The hard work in the answering machine is done by the Zapata
+library. It does the caller ID, DTMF tone detection, and reads and
+writes <em>mu-law</em> audio files. Here is the skeleton of the code in the
+answering machine:</p>
+
+<pre>
+<code>
+  zp = zap_open("/dev/zap/1", 0);
+
+  while (1) {
+    /* Wait for a ring and get caller ID info */
+    zap_clid(zp, cidnumber, cidname);
+    { Display caller ID to user.  Do logs or black list checking here. }
+
+    /* Wait for an additional RINGS-1 rings before answering */
+    zap_waitcall(zp, (RINGS - 1), ZAP_OFFHOOK, TM_OUT/1000);
+
+    /* Tell Zapata that we want DTMF digits */
+    zap_digitmode(zp, ZAP_DTMF) &amp;&amp; zap_clrdtmf(zp);
+
+    /* Play our outgoing message.  Abort on DTMF or hang-up. */
+    zap_playf(zp, "leave_a_msg.ul", ZAP_DTMFINT | ZAP_HOOKEXIT);
+    { Continue if caller hung up }
+
+    /* Wait up to TM_OUT ms for the caller to enter a DTMF digit */
+    zap_getdtmf(zp, 1, (char *)0, 0, 0, TM_OUT, ZAP_HOOKEXIT);
+    { Hang-up/continue if time-out and no DTMF digit. }
+
+    /* Get the DTMF digit the caller entered.  Hang-up if wrong digit */
+    pDigits = zap_dtmfbuf(zp);
+    { Hang-up/continue if caller entered wrong digit }
+
+    /* Save voice mail to 'date_time' file. */
+    zap_recf(zp, date_time, 0, ZAP_BEEPTONE | ZAP_SILENCEINT);
+
+    /* Done with message.  Hang-up and wait for next call. */
+    zap_sethook(zp, ZAP_ONHOOK);
+  }
+}
+</code>
+</pre>
+
+<p>The above code should give you a feel for how to write telephony
+applications using the Zapata library. The library also has
+routines that you can use to make outgoing calls and to help make
+conference calls.</p>
+
+
+<a name="Improvements"></a><h3>Next Steps...</h3>
+<p>For a simple answering machine, this program works surprisingly
+well. Its simplicity is its best feature.</p>
+
+<p>If we were to add features to the answering machine, we would
+probably add:</p>
+
+<ul>
+<li><strong>Remote access to voice mail</strong>: We should be able to retrieve our
+voice mail over a phone line. Saving to a file at least gives us
+some remote access. Still...</li>
+<li><strong>Caller ID routing</strong>: The call would be routed based on the phone
+number of the caller. Some callers would go directly to voice
+mail.</li>
+<li><strong>Capture outgoing calls</strong>: The answering machine should be able to
+log the number dialed and duration of outgoing calls.</li>
+<li><strong>In-Progress call recording</strong>: Wouldn't it be handy to be able to
+press a button and have your current call recorded. This would be a
+more reliable way to take notes during a call. Of course you'd want
+to tell the other person that you are recording the call and you'd
+want the machine to play a beep every 10 seconds or so.</li>
+<li><strong>A web interface</strong>: It might be nice to have a web interface to
+configure the answering machine. Something like the Run Time Access
+library might help. (See <a href=
+"http://www.runtimeaccess.com">http://www.runtimeaccess.com</a>)</li>
+<li><strong>Email delivery of voice mail</strong>: We could convert the mu-law voice
+mail files to WAV and have the voice mail emailed to us.</li>
+<li><strong>Pager or message forwarding</strong>: Use libzap's ability to dial out
+to tell a pager that there is a new message, or have the
+application call your cell phone and play the voice mail.</li>
+</ul>
+
+<p>The Zapata library uses blocking IO, making it a little
+difficult to use a <code>select()</code> loop to manage a user interface while
+waiting for incoming calls. Perhaps a threaded application could
+step around this problem.</p>
+
+
+</p>
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<hr>
+<p>
+
+<img align="left" alt="[BIO]" src="../gx/authors/smith.jpg" class="bio">
+
+</p>
+<p>
+<em>
+
+Bob is an electronics hobbyist and Linux programmer.  He
+is one of the authors of "Linux Appliance Design" to be
+published by No Starch Press.
+
+
+</em>
+</p>
+<br clear="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2005, Bob Smith. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 120 of Linux Gazette, November 2005
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="orr.html" >&lt;-- prev</A> | <A HREF="vinayak.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">November 2005 (#120)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

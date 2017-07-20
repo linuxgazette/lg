@@ -1,0 +1,377 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>Encryption using OpenSSL's crypto libraries LG #87</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="sunil.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../lg_faq.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="lg_backpage.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+
+<!--endcut ============================================================-->
+
+<TABLE BORDER><TR><TD WIDTH="200">
+<A HREF="http://www.linuxgazette.net/">
+<IMG ALT="LINUX GAZETTE" SRC="../gx/2002/lglogo_200x41.png" 
+	WIDTH="200" HEIGHT="41" border="0"></A> 
+<BR CLEAR="all">
+<SMALL>...<I>making Linux just a little more fun!</I></SMALL>
+</TD><TD WIDTH="380">
+
+
+<CENTER>
+<BIG><BIG><STRONG><FONT COLOR="maroon">Encryption using OpenSSL's crypto libraries</FONT></STRONG></BIG></BIG>
+<BR>
+<STRONG>By <A HREF="../authors/vinayak.html">Vinayak Hegde</A></STRONG>
+</CENTER>
+
+</TD></TR>
+</TABLE>
+<P>
+
+<!-- END header -->
+
+
+
+<h2> Motivation for the article </h2>
+
+<p align="justify">
+Linux has already made quite a few inroads into the corporate world.
+One of the persistent demands of the corporate world has been a need
+for better data security. This is where encryption comes in, to hide
+sensitive data from a third party intruder. Open-source software 
+has a reputation for secure programming. This article is another
+step in that direction.
+</p>
+
+<p align="justify">
+OpenSSL's libcrypto is a really good library if you want to use encryption
+without bothering with the details of underlying implementation of the 
+algorithm. The problem is that the documentation is really minimal.
+You can obviously read the source and figure out what going on. Also the 
+fact that function names are intuitive helps to some extent. Another way 
+of getting help is joining the various mailing lists from the 
+<a href="www.openssl.org"> OpenSSL </a> website.
+However the command line tools of OpenSSL are pretty well documented and 
+easy to use. I shall explain in this article how to use the blowfish 
+algorithm for encryption using OpenSSL's crypto libraries.
+</p>
+
+<h2> Some Background Information</h2>
+
+<p align="justify"> 
+During the early days of cryptography, algorithms as well as keys were
+secret. However now that trend has changed. Now algorithms are publicly
+known and keys are kept secret. The best example of this is the RSA
+algorithm which is widely known and implemented. The public key are
+known to the world but the private keys are kept secret. RSA is an
+asymmetric algorithm as it does not use the same key for encryption
+and decryption. Also it is generally not advisable to use RSA for 
+encrypting large amounts of data as the it is computationally intensive.
+</p>
+
+<p align="justify">
+For encrypting large amounts of data, generally less computationally
+intensive algorithms are prefered. In this article we use the blowfish
+algorithm for encrypting and decrypting data. Blowfish is a symmetric
+algorithm which means it uses the same key for encryption and
+decryption. Blowfish was designed by the famous cryptographer Bruce Schneier.
+Blowfish is a fast algorithm for encryption/decryption.
+</p>
+
+<h2> Generating the key</h2>
+
+<p align="justify">
+For the purposes of demonstration we shall use a 128-bit key. This is 
+stored as an character array in the program. We also generate an 64 bit 
+initialization vector(IV). For our program we will use <b> Cipher Block
+Chaining (CBC) </b> mode. Also we will not use the blowfish functions directly 
+but use then through a the higher level interface. 
+</p>
+
+<p align="justify">
+An <b>initialization vector</b> is a bit of random information that is used as 
+an input in chained encryption algorithms, that is, when each stage of 
+encrypting a block of input data provides some input to the encryption 
+of the next block. (blowfish uses 64-bit blocks for encryption).
+The IV provides the first bit of input for encrypting the
+1st block of data, which then provides input for the
+2nd block and so on. The bit left over at the end is discarded.
+</p>
+
+<p align="justify">
+The random bits are generated from the character special file <b> /dev/random
+</b> which provides a good source for random numbers. See the manpage for more
+information.
+</p>
+
+<table border = 2>
+<tr> <td bgcolor=#FFFF99> 
+<pre>
+
+int
+generate_key ()
+{
+	int i, j, fd;
+	if ((fd = open ("/dev/random", O_RDONLY)) == -1)
+		perror ("open error");
+
+	if ((read (fd, key, 16)) == -1)
+		perror ("read key error");
+
+	if ((read (fd, iv, 8)) == -1)
+		perror ("read iv error");
+	
+	printf("128 bit key:\n");
+	for (i = 0; i < 16; i++)
+		printf ("%d \t", key[i]);
+	printf ("\n ------ \n");
+
+	printf("Initialization vector\n");
+	for (i = 0; i &lt; 8; i++)
+		printf ("%d \t", iv[i]);
+
+	printf ("\n ------ \n");
+	close (fd);
+	return 0;
+}
+
+</pre> 
+</td> </tr>
+</table>
+
+<h2> The Encryption routine </h2>
+
+<p align="justify">
+The encryption routine takes two parameters - the file descriptors of input file and
+the output file to which the encrypted data is to be saved. It is always a good idea
+to zero-fill your buffers using the memset or bzero commands before using the buffers 
+with data. This is especially important if you plan to reuse the buffers. In the program
+below, the input data is being encrypted in blocks of 1K each.
+</p>
+
+<p align="justify">
+The steps for encryption are as follows :-
+
+<ol>
+	<li> Create a cipher context </li>
+	<li> Initialize the cipher context with the values of Key and IV </li>
+	<li> Call EVP_EncryptUpdate to encrypt successive blocks of 1k eack </li>
+	<li> Call EVP_EncryptFinal to encrypt "leftover" data </li>
+	<li> Finally call EVP_CIPHER_CTX_cleanup to discard all the sensitive information from memory </li>
+</ol>
+
+</p>
+
+<p align="justify">
+You may be wondering what "leftover" data is? As mentioned earlier, Blowfish
+encrypts information in blocks of 64-bit each. Sometimes we may not have 64 bits
+to make up a block. This may happen if the buffer size in the program below or 
+the file/input data size is not a integral multiple of 8 bytes(64-bits).So 
+accordingly the data is padded and then the partial block is encrypted using
+EVP_EncryptFinal. The length of the encoded data block is stored in the 
+variable tlen and added to the final length.
+</p>
+
+<table border = 2>
+<tr> <td bgcolor = #FFFF99> 
+<pre>
+
+int
+encrypt (int infd, int outfd)
+{
+	unsigned char outbuf[OP_SIZE];
+	int olen, tlen, n;
+	char inbuff[IP_SIZE];
+	EVP_CIPHER_CTX ctx;
+	EVP_CIPHER_CTX_init (&amp; ctx);
+	EVP_EncryptInit (&amp; ctx, EVP_bf_cbc (), key, iv);
+
+	for (;;)
+	  {
+		  bzero (&amp; inbuff, IP_SIZE);
+
+		  if ((n = read (infd, inbuff, IP_SIZE)) == -1)
+		    {
+			    perror ("read error");
+			    break;
+		    }
+		  else if (n == 0)
+			  break;
+
+		  if (EVP_EncryptUpdate (&amp; ctx, outbuf, &amp; olen, inbuff, n) != 1)
+		    {
+			    printf ("error in encrypt update\n");
+			    return 0;
+		    }
+
+		  if (EVP_EncryptFinal (&amp; ctx, outbuf + olen, &amp; tlen) != 1)
+		    {
+			    printf ("error in encrypt final\n");
+			    return 0;
+		    }
+		  olen += tlen;
+		  if ((n = write (outfd, outbuf, olen)) == -1)
+			  perror ("write error");
+	  }
+	EVP_CIPHER_CTX_cleanup (&amp; ctx);
+	return 1;
+}
+</pre> 
+</td> </tr>
+</table>
+
+
+<h3> The Decryption routine </h3>
+
+<p align="justify">
+The decryption routine basically follows the same steps as the encryption routine. The following code show how the decryption is done.
+<table border = 2>
+<tr> <td bgcolor = #FFFF99> 
+<pre> 
+
+int
+decrypt (int infd, int outfd)
+{
+	unsigned char outbuf[IP_SIZE];
+	int olen, tlen, n;
+	char inbuff[OP_SIZE];
+	EVP_CIPHER_CTX ctx;
+	EVP_CIPHER_CTX_init (&amp; ctx);
+	EVP_DecryptInit (&amp; ctx, EVP_bf_cbc (), key, iv);
+
+	for (;;)
+	  {
+		  bzero (&amp; inbuff, OP_SIZE);
+		  if ((n = read (infd, inbuff, OP_SIZE)) == -1)
+		    {
+			    perror ("read error");
+			    break;
+		    }
+		  else if (n == 0)
+			  break;
+
+		  bzero (&amp; outbuf, IP_SIZE);
+
+		  if (EVP_DecryptUpdate (&amp; ctx, outbuf, &amp; olen, inbuff, n) != 1)
+		    {
+			    printf ("error in decrypt update\n");
+			    return 0;
+		    }
+
+		  if (EVP_DecryptFinal (&amp; ctx, outbuf + olen, &amp; tlen) != 1)
+		    {
+			    printf ("error in decrypt final\n");
+			    return 0;
+		    }
+		  olen += tlen;
+		  if ((n = write (outfd, outbuf, olen)) == -1)
+			  perror ("write error");
+	  }
+
+	EVP_CIPHER_CTX_cleanup (&amp; ctx);
+	return 1;
+}
+</pre> 
+</td> </tr>
+</table>
+
+<h2> The complete code </h2>
+
+<p align="justify">
+A minimal interactive program implementing the above routines can be 
+downloaded from <a href="misc/vinayak/sym_funcs.c.txt"> here </a>.
+The command for compiling the program is 
+
+<table border = 2 >
+<tr> <td bgcolor = #FFAADD>
+
+<pre>
+# gcc -o blowfish sym_funcs.c -lcrypto
+</pre>
+
+<td> </tr> 
+</table>
+
+The program takes three files from the command line
+
+<ol>
+	<li> File to be encrypted </li>
+	<li> File is which the encrypted data is to be stored </li>
+	<li> File in which decrypted data is to be stored </li>
+</ol>
+
+Don't forget to generate a key before encrypting ;).
+</p>
+ 
+<h2> An Example Application - A Secure Instant Messenger </h2>
+
+<p align="justify">
+Consider an instant messenger software (IM) which wants to communicate with 
+another IM securely. The following approach could be followed.
+
+<ol>
+	<li> Each IM client has it's own public and private key.
+	<li> The IM client has the public keys of all the IMs it wants to communicate with. 
+ 		(say friends' IMs).
+	<li> The session key is generated by the client which initiates the connection.
+ 		This session key is used for encrypting the messages between the two clients.
+	<li> The session key is encrypted and exchanged between two/multiple clients using public-Key 
+		encryption.(eg. RSA algorithm). Thus Authentication is also taken care of.
+	<li> The exchange of encrypted data (using Blowfish symmetric encryption) thereafter
+		takes place between the different clients after this "security handshake".
+</ol>
+</p>
+
+<h2> Resources </h2>
+
+<ol>
+	<li> <a href="http://www.openssl.org"> OpenSSL Homepage </a>
+	<li> <a href="http://www.counterpane.com/blowfish.html"> The Blowfish Algorithm </a>
+	<li> <a href="http://www.cacr.math.uwaterloo.ca/hac/"> Handbook of Applied Cryptography </a>
+</ol>
+
+
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<P>
+<img ALIGN="LEFT" ALT="[BIO]" SRC="../gx/2002/note.png">
+<em>My life changed since I discovered Linux. Suddenly Computers became
+interesting as i could try out lots of stuff on my Linux box due to the easy
+availabily of source code. My interests are predominantly in the fields of
+networking, embedded systems and programming languages. I currently work for
+Aparna Web services where we make Linux accessible for academia/corporations by
+configuring remote boot stations (Thin Clients).
+</em>
+<br CLEAR="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+
+<!-- *** BEGIN copyright *** -->
+<hr>
+<CENTER><SMALL><STRONG>
+Copyright &copy; 2003, Vinayak Hegde.
+Copying license <A HREF="../copying.html">http://www.linuxgazette.net/copying.html</A><BR> 
+Published in Issue 87 of <i>Linux Gazette</i>, February 2003
+</STRONG></SMALL></CENTER>
+<!-- *** END copyright *** -->
+<HR>
+
+<!--startcut ==========================================================-->
+<CENTER>
+<!-- *** BEGIN navbar *** -->
+<IMG ALT="" SRC="../gx/navbar/left.jpg" WIDTH="14" HEIGHT="45" BORDER="0" ALIGN="bottom"><A HREF="sunil.html"><IMG ALT="[ Prev ]" SRC="../gx/navbar/prev.jpg" WIDTH="16" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="index.html"><IMG ALT="[ Table of Contents ]" SRC="../gx/navbar/toc.jpg" WIDTH="220" HEIGHT="45" BORDER="0" ALIGN="bottom" ></A><A HREF="../index.html"><IMG ALT="[ Front Page ]" SRC="../gx/navbar/frontpage.jpg" WIDTH="137" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><IMG ALT="[ Talkback ]" SRC="../gx/navbar/talkback.jpg" WIDTH="121" HEIGHT="45" BORDER="0" ALIGN="bottom"  ><A HREF="../lg_faq.html"><IMG ALT="[ FAQ ]" SRC="./../gx/navbar/faq.jpg"WIDTH="62" HEIGHT="45" BORDER="0" ALIGN="bottom"></A><A HREF="lg_backpage.html"><IMG ALT="[ Next ]" SRC="../gx/navbar/next.jpg" WIDTH="15" HEIGHT="45" BORDER="0" ALIGN="bottom"  ></A><IMG ALT="" SRC="../gx/navbar/right.jpg" WIDTH="15" HEIGHT="45" ALIGN="bottom">
+<!-- *** END navbar *** -->
+</CENTER>
+</BODY></HTML>
+<!--endcut ============================================================-->

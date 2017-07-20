@@ -1,0 +1,671 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>Yacc - Parser Generator - Part 2 LG #93</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<!-- *** BEGIN navbar *** -->
+<A HREF="bhaskaran.html">&lt;&lt;&nbsp;Prev</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="index.html">TOC</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../index.html">Front Page</A>&nbsp;&nbsp;|&nbsp;&nbsp;Talkback&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../faq/index.html">FAQ</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="webmaster.html">Next&nbsp;&gt;&gt;</A>
+<!-- *** END navbar *** -->
+
+<!--endcut ============================================================-->
+
+<TABLE BORDER><TR><TD WIDTH="200">
+<A HREF="http://www.linuxgazette.net/">
+<IMG ALT="LINUX GAZETTE" SRC="../gx/2002/lglogo_200x41.png" 
+	WIDTH="200" HEIGHT="41" border="0"></A> 
+<BR CLEAR="all">
+<SMALL>...<I>making Linux just a little more fun!</I></SMALL>
+</TD><TD WIDTH="380">
+
+
+<CENTER>
+<BIG><BIG><STRONG><FONT COLOR="maroon">Yacc - Parser Generator - Part 2</FONT></STRONG></BIG></BIG>
+<BR>
+<STRONG>By <A HREF="../authors/ramankutty.html">Hiran Ramankutty</A></STRONG>
+</CENTER>
+
+</TD></TR>
+</TABLE>
+<P>
+
+<!-- END header -->
+
+
+
+
+
+
+<html>
+<body>
+
+<h2><b>1. Calculator - Next Version</b></h2>
+<p>
+The next version of the calculator to be described below is substantially 
+much more complex with major changes in the inclusion of <i>if-then-else</i>
+and <i>while</i> constructs. In addition a syntax tree is constructed 
+during parsing. We can traverse or walk down the tree to get the output. 
+Designing of the tree walk routine can be done in two ways:
+</p>
+<p></p>
+<ul>
+<li>an interpreter that executes statements during the tree walk, and
+<li>a compiler that generates code for a hypothetical stack-based machine. 
+</ul>
+<p>
+To make things more concrete, here is a sample program.
+</p>
+<p></p>
+<pre>
+x = 0;
+while(x &lt; 3) {
+	print x;
+	x = x + 1;
+}
+</pre>
+<p>
+The output of the interpretive version will be:
+</p>
+<p></p>
+<pre>
+1
+2
+3
+</pre>
+<p>
+while that of the compiler version will be:
+</p>
+<p></p>
+<pre>
+	push 0
+	push x
+LC0:
+	push x
+	push 3
+	complt
+	jz LC1
+	push x
+	print
+	push x
+	push 1
+	add
+	pop x
+	jmp LC0
+LC1:
+	ret
+</pre>
+<p>
+The <b>include file</b> contains declarations for the syntax tree and 
+symbol table. The symbol table, <b>sym</b> allows for single character 
+variable names. A node in the syntax tree may hold a constant, an 
+identifier or an internal node with an operator. All three variants are 
+encapsulated in a union <b>nodetype</b> and the structure we have can be 
+determined by <b>nodetype.type</b>.
+</p>
+<p>
+The <b>lex input file</b> contains patterns for <b>VARIABLE</b> and 
+<b>INTEGER</b> tokens. In addition, tokens are identified for two-character 
+operators such as <b>EQ</b> and <b>NE</b>. Single character operators are 
+simply returned as themselves.
+</p>
+<p>
+The <b>yacc input file</b> defines <b>YYSTYPE</b>, the type of 
+<b>yylval</b>, as
+</p>
+<p></p>
+<pre>
+%union {
+	int ivalue;		/* integer value */
+	char sIndex;		/* symbol table index */
+	nodeType *nPtr;		/* node pointer */
+};
+</pre>
+<p>
+This causes the following to be generated in <i>y.tab.h</i>:
+</p>
+<p></p>
+<pre>
+typedef union {
+	int iValue;		/* integer value;
+	char sIndex;            /* symbol table index */
+	nodeType *nPtr;         /* node pointer */
+}YYSTYPE;
+
+extern YYSTYPE yylval;
+</pre>
+<p>
+Constants, variables and nodes can be represented by <b>yylval</b> in the 
+parser's value stack. Notice the type definitions
+</p>
+<p></p>
+<pre>
+%token &lt;iValue&gt;	INTEGER
+%token &lt;nPtr&gt;	expr
+</pre>
+<p>
+This binds <b>expr</b> to <b>nPtr</b>, and <b>INTEGER</b> to <b>iValue</b> 
+in the <b>YYSTYPE</b> union. This is essential so that yacc can generate 
+the correct code. For example, the rule
+</p>
+<p></p>
+<pre>
+expr: INTEGER { $$ = con($1); }
+</pre>
+<p>
+should generate the following code.
+</p><p></p>
+<pre>
+yylval.nPtr = con(yyvsp[0].iValue);
+</pre>
+<p>
+Note that <b>yyvsp</b> is the value stack pointer and <b>yyvsp[0]</b> 
+addresses the top of the value stack, or the value associated with 
+<b>INTEGER</b>.
+</p>
+<p>
+The unary minus operator is given higher priority than binary operators as 
+follows:
+</p>
+<p></p>
+<pre>
+%left GE LE EQ NE '&lt;' '&gt;'
+%left '+' '-'
+%left '*' '/'
+%nonassoc UMINUS
+</pre>
+<p>
+The <i>%nonassoc</i> indicates no associativity is implied. It is frequently 
+used in conjunction with <i>%prec</i> to specify precedence as a rule.
+</p>
+<p>
+The bottom-up technique is used to construct the syntax tree. Leaf nodes 
+are allocated as integers and variables are reduced. When operators are 
+encountered, a node is allocated and pointers to previously allocated nodes 
+are entered as operands. As statements are reduced, <b>ex</b> is called to 
+do a depth-first walk of the syntax tree. Since the tree was constructed 
+bottom-up, a depth first walk visits nodes in the order that they were 
+originally allocated. This results in operators being applied in the order 
+that they were encountered during parsing.
+</p>
+
+<h2><b>2. Include File</b></h2>
+<pre>
+typedef enum { typeCon, typeId, typeOpr } nodeEnum; 
+ 
+/* constants */ 
+typedef struct { 
+    nodeEnum type;              /* type of node */ 
+    int value;                  /* value of constant */ 
+} conNodeType; 
+ 
+/* identifiers */ 
+typedef struct { 
+    nodeEnum type;              /* type of node */ 
+    int i;                      /* subscript to ident array */ 
+} idNodeType; 
+ 
+/* operators */ 
+typedef struct { 
+    nodeEnum type;              /* type of node */ 
+    int oper;                   /* operator */ 
+    int nops;                   /* number of operands */ 
+    union nodeTypeTag *op[1];   /* operands (expandable) */ 
+} oprNodeType; 
+ 
+typedef union nodeTypeTag { 
+    nodeEnum type;              /* type of node */ 
+    conNodeType con;            /* constants */ 
+    idNodeType id;              /* identifiers */ 
+    oprNodeType opr;            /* operators */ 
+} nodeType; 
+ 
+extern int sym[26];
+</pre>
+<h2><b>3. Lex Input</b></h2>
+<pre>
+%{ 
+#include &lt;stdlib.h&gt; 
+#include "calc3.h" 
+#include "y.tab.h" 
+void yyerror(char *); 
+%} 
+ 
+%% 
+ 
+[a-z]       {  
+                yylval.sIndex = *yytext - 'a'; 
+                return VARIABLE; 
+            } 
+ 
+[0-9]+      { 
+                yylval.iValue = atoi(yytext); 
+                return INTEGER; 
+            } 
+ 
+[-()&lt;&gt;=+*/;{}.] { 
+                return *yytext; 
+             } 
+ 
+"&gt;="         return GE; 
+"&lt;="         return LE; 
+"=="            return EQ; 
+"!="            return NE; 
+"while"         return WHILE; 
+"if"            return IF; 
+"else"          return ELSE; 
+"print"         return PRINT; 
+ 
+[ \t\n]+        ;       /* ignore whitespace */ 
+ 
+.               yyerror("Unknown character"); 
+%% 
+int yywrap(void) { 
+    return 1; 
+}
+</pre>
+<h2><b>4. Yacc Input</b></h2>
+<pre>
+%{ 
+#include &lt;stdio.h&gt; 
+#include &lt;stdlib.h&gt; 
+#include &lt;stdarg.h&gt; 
+#include "calc3.h" 
+ 
+/* prototypes */ 
+nodeType *opr(int oper, int nops, ...); 
+nodeType *id(int i); 
+nodeType *con(int value); 
+void freeNode(nodeType *p); 
+int ex(nodeType *p); 
+int yylex(void); 
+void yyerror(char *s); 
+int sym[26];                    /* symbol table */ 
+%} 
+ 
+%union { 
+    int iValue;                 /* integer value */ 
+    char sIndex;                /* symbol table index */ 
+    nodeType *nPtr;             /* node pointer */ 
+}; 
+ 
+%token &lt;iValue&gt; INTEGER 
+%token &lt;sIndex&gt; VARIABLE 
+%token WHILE IF PRINT 
+%nonassoc IFX 
+%nonassoc ELSE 
+ 
+%left GE LE EQ NE '&gt;' '&lt;' 
+%left '+' '-' 
+%left '*' '/' 
+%nonassoc UMINUS 
+ 
+%type &lt;nPtr&gt; stmt expr stmt_list 
+ 
+%% 
+ 
+
+program: 
+        function                { exit(0); } 
+        ; 
+ 
+function: 
+          function stmt         { ex($2); freeNode($2); } 
+        | /* NULL */ 
+        ; 
+ 
+stmt: 
+          ';'                   { $$ = opr(';', 2, NULL, NULL); } 
+        | expr ';'              { $$ = $1; } 
+        | PRINT expr ';'        { $$ = opr(PRINT, 1, $2); } 
+        | VARIABLE '=' expr ';' { $$ = opr('=', 2, id($1), $3); } 
+        | WHILE '(' expr ')' stmt         
+                { $$ = opr(WHILE, 2, $3, $5); } 
+        | IF '(' expr ')' stmt %prec IFX  
+                { $$ = opr(IF, 2, $3, $5); } 
+        | IF '(' expr ')' stmt ELSE stmt  
+                { $$ = opr(IF, 3, $3, $5, $7); } 
+        | '{' stmt_list '}'     { $$ = $2; } 
+        ; 
+ 
+stmt_list: 
+          stmt                  { $$ = $1; } 
+        | stmt_list stmt        { $$ = opr(';', 2, $1, $2); } 
+        ; 
+ 
+expr: 
+          INTEGER               { $$ = con($1); } 
+        | VARIABLE              { $$ = id($1); } 
+        | '-' expr %prec UMINUS { $$ = opr(UMINUS, 1, $2); } 
+        | expr '+' expr         { $$ = opr('+', 2, $1, $3); } 
+        | expr '-' expr         { $$ = opr('-', 2, $1, $3); } 
+        | expr '*' expr         { $$ = opr('*', 2, $1, $3); } 
+        | expr '/' expr         { $$ = opr('/', 2, $1, $3); } 
+        | expr '&lt;' expr      { $$ = opr('&lt;', 2, $1, $3); } 
+        | expr '&gt;' expr      { $$ = opr('&gt;', 2, $1, $3); } 
+        | expr GE expr          { $$ = opr(GE, 2, $1, $3); } 
+        | expr LE expr          { $$ = opr(LE, 2, $1, $3); } 
+        | expr NE expr          { $$ = opr(NE, 2, $1, $3); } 
+        | expr EQ expr          { $$ = opr(EQ, 2, $1, $3); } 
+        | '(' expr ')'          { $$ = $2; } 
+        ; 
+ 
+%% 
+ 
+
+nodeType *con(int value) { 
+    nodeType *p; 
+ 
+    /* allocate node */ 
+    if ((p = malloc(sizeof(conNodeType))) == NULL) 
+        yyerror("out of memory"); 
+ 
+    /* copy information */ 
+    p-&gt;type = typeCon; 
+    p-&gt;con.value = value; 
+ 
+    return p; 
+} 
+ 
+nodeType *id(int i) { 
+    nodeType *p; 
+ 
+    /* allocate node */ 
+    if ((p = malloc(sizeof(idNodeType))) == NULL) 
+        yyerror("out of memory"); 
+ 
+    /* copy information */ 
+    p-&gt;type = typeId; 
+    p-&gt;id.i = i; 
+ 
+    return p; 
+} 
+ 
+nodeType *opr(int oper, int nops, ...) { 
+    va_list ap; 
+    nodeType *p; 
+    size_t size; 
+    int i; 
+ 
+    /* allocate node */ 
+    size = sizeof(oprNodeType) + (nops - 1) * sizeof(nodeType*); 
+    if ((p = malloc(size)) == NULL) 
+        yyerror("out of memory"); 
+ 
+    /* copy information */ 
+    p-&gt;type = typeOpr; 
+    p-&gt;opr.oper = oper; 
+    p-&gt;opr.nops = nops; 
+    va_start(ap, nops); 
+    for (i = 0; i &lt; nops; i++) 
+        p-&gt;opr.op[i] = va_arg(ap, nodeType*); 
+    va_end(ap); 
+    return p; 
+} 
+ 
+
+void freeNode(nodeType *p) { 
+    int i; 
+ 
+    if (!p) return; 
+    if (p-&gt;type == typeOpr) { 
+        for (i = 0; i &lt; p-&gt;opr.nops; i++) 
+            freeNode(p-&gt;opr.op[i]); 
+    } 
+    free (p); 
+} 
+ 
+void yyerror(char *s) { 
+    fprintf(stdout, "%s\n", s); 
+} 
+ 
+int main(void) { 
+    yyparse(); 
+    return 0; 
+}
+</pre>
+<h2><b>5. Interpreter</b></h2>
+<pre>
+#include &lt;stdio.h&gt; 
+#include "calc3.h" 
+#include "y.tab.h" 
+ 
+int ex(nodeType *p) { 
+    if (!p) return 0; 
+    switch(p-&gt;type) { 
+    case typeCon:    return p-&gt;con.value; 
+    case typeId:     return sym[p-&gt;id.i]; 
+    case typeOpr: 
+        switch(p-&gt;opr.oper) { 
+        case WHILE:  while(ex(p-&gt;opr.op[0]))  
+                         ex(p-&gt;opr.op[1]);  
+                     return 0; 
+        case IF:     if (ex(p-&gt;opr.op[0])) 
+                         ex(p-&gt;opr.op[1]); 
+                     else if (p-&gt;opr.nops &gt; 2) 
+                         ex(p-&gt;opr.op[2]); 
+                     return 0; 
+        case PRINT:  printf("%d\n", ex(p-&gt;opr.op[0]));  
+                     return 0; 
+        case ';':    ex(p-&gt;opr.op[0]);  
+                     return ex(p-&gt;opr.op[1]); 
+        case '=':    return sym[p-&gt;opr.op[0]-&gt;id.i] =  
+                         ex(p-&gt;opr.op[1]); 
+        case UMINUS: return -ex(p-&gt;opr.op[0]); 
+        case '+':    return ex(p-&gt;opr.op[0]) + ex(p-&gt;opr.op[1]); 
+        case '-':    return ex(p-&gt;opr.op[0]) - ex(p-&gt;opr.op[1]); 
+        case '*':    return ex(p-&gt;opr.op[0]) * ex(p-&gt;opr.op[1]); 
+        case '/':    return ex(p-&gt;opr.op[0]) / ex(p-&gt;opr.op[1]); 
+        case '&lt;':    return ex(p-&gt;opr.op[0]) &lt; ex(p-&gt;opr.op[1]); 
+        case '&gt;':    return ex(p-&gt;opr.op[0]) &gt; ex(p-&gt;opr.op[1]); 
+        case GE:     return ex(p-&gt;opr.op[0]) &gt;= ex(p-&gt;opr.op[1]); 
+        case LE:     return ex(p-&gt;opr.op[0]) &lt;= ex(p-&gt;opr.op[1]); 
+        case NE:     return ex(p-&gt;opr.op[0]) != ex(p-&gt;opr.op[1]); 
+        case EQ:     return ex(p-&gt;opr.op[0]) == ex(p-&gt;opr.op[1]); 
+        } 
+    } 
+}
+</pre>
+<h2<b>6. Compiler</b></h2>
+<pre>
+#include &lt;stdio.h&gt; 
+#include "calc3.h" 
+#include "y.tab.h" 
+ 
+static int lbl; 
+ 
+int ex(nodeType *p) { 
+    int lbl1, lbl2; 
+ 
+    if (!p) return 0; 
+    switch(p-&gt;type) { 
+    case typeCon:        
+        printf("\tpush\t%d\n", p-&gt;con.value);  
+        break; 
+    case typeId:         
+        printf("\tpush\t%c\n", p-&gt;id.i + 'a');  
+        break; 
+    case typeOpr: 
+        switch(p-&gt;opr.oper) { 
+        case WHILE: 
+            printf("L%03d:\n", lbl1 = lbl++); 
+            ex(p-&gt;opr.op[0]); 
+            printf("\tjz\tL%03d\n", lbl2 = lbl++); 
+            ex(p-&gt;opr.op[1]); 
+            printf("\tjmp\tL%03d\n", lbl1); 
+            printf("L%03d:\n", lbl2); 
+            break; 
+        case IF: 
+            ex(p-&gt;opr.op[0]); 
+            if (p-&gt;opr.nops &gt; 2) { 
+                /* if else */ 
+                printf("\tjz\tL%03d\n", lbl1 = lbl++); 
+                ex(p-&gt;opr.op[1]); 
+                printf("\tjmp\tL%03d\n", lbl2 = lbl++); 
+                printf("L%03d:\n", lbl1); 
+                ex(p-&gt;opr.op[2]); 
+                printf("L%03d:\n", lbl2); 
+            } else { 
+                /* if */ 
+                printf("\tjz\tL%03d\n", lbl1 = lbl++); 
+                ex(p-&gt;opr.op[1]); 
+                printf("L%03d:\n", lbl1); 
+            } 
+            break; 
+         
+
+        case PRINT:      
+            ex(p-&gt;opr.op[0]); 
+            printf("\tprint\n"); 
+            break; 
+        case '=':        
+            ex(p-&gt;opr.op[1]); 
+            printf("\tpop\t%c\n", p-&gt;opr.op[0]-&gt;id.i + 'a'); 
+            break; 
+        case UMINUS:     
+            ex(p-&gt;opr.op[0]); 
+            printf("\tneg\n"); 
+            break; 
+        default: 
+            ex(p-&gt;opr.op[0]); 
+            ex(p-&gt;opr.op[1]); 
+            switch(p-&gt;opr.oper) { 
+            case '+':   printf("\tadd\n"); break; 
+            case '-':   printf("\tsub\n"); break;  
+            case '*':   printf("\tmul\n"); break; 
+            case '/':   printf("\tdiv\n"); break; 
+            case '&lt;':   printf("\tcompLT\n"); break; 
+            case '&gt;':   printf("\tcompGT\n"); break; 
+            case GE:    printf("\tcompGE\n"); break; 
+            case LE:    printf("\tcompLE\n"); break; 
+            case NE:    printf("\tcompNE\n"); break; 
+            case EQ:    printf("\tcompEQ\n"); break; 
+            } 
+        } 
+    } 
+} 
+<h2><b>7. If-Else Ambiguity</b></h2>
+<p>
+The shift-reduce conflict (as explained in Part 1) that frequently occurs 
+involves the <i>if-else</i> construct. Assume we have the following rules: 
+</p>
+<p></p>
+<pre>
+stmt:
+	IF expr stmt
+	|	IF expr stmt ELSE stmt
+	...
+</pre>
+<p>
+and the following state:
+</p>
+<p></p>
+<pre>
+IF expr stmt IF expr stmt . ELSE stmt
+</pre>
+<p>
+During parsing what do we do when we come across <i>ELSE</i>.Do we shift 
+the <i>ELSE</i>, or reduce the <i>IF expr stmt</i> at the top of the stack. 
+If we shift, then we have
+</p>
+<p></p>
+<pre>
+IF expr stmt IF expr stmt . ELSE stmt
+IF expr stmt IF expr stmt ELSE . stmt
+IF expr stmt IF expr stmt ELSE stmt .
+IF expr stmt stmt .
+</pre>
+<p>
+where the second <i>ELSE</i> is paired with the second <i>IF</i>. If we 
+reduce, we have
+</p>
+<p></p>
+<pre>
+IF expr stmt IF expr stmt . ELSE stmt
+IF expr stmt stmt . ELSE stmt
+IF expr stmt . ELSE stmt
+IF expr stmt ELSE . stmt
+IF expr stmt ELSE stmt .
+</pre>
+<p>
+where the <i>ELSE</i> is paired with the first <i>IF</i>. Modern 
+programming languages pair an <i>ELSE</i> with the most recent unpaired 
+<i>IF</i>, and so the former behaviour is expected. This works well with 
+yacc. The default action of shifting is taken whenever a shift-reduce 
+conflict arises. Bur along with it, yacc issues a warning message. To 
+remove the message, give <i>IF-ELSE</i> a higher precedence than the simple 
+<i>IF</i> statement:
+</p>
+<p></p>
+<pre>
+%nonassoc IFX
+%nonassoc ELSE
+
+stmt:
+	IF expr stmt %prec IFX
+	|	IF expr stmt ELSE stmt
+</pre>
+<h2><b>8. Conclusion</b></h2>
+<p>
+The conflicts resolved by precedence are not counted in the number of
+shift/reduce and reduce/reduce conflicts reported by Yacc. This means that
+mistakes in the specification of precedences may disguise errors in the
+input grammar; it is a good idea to be sparing with precedences, and use
+them in an essentially ``cookbook'' fashion, until some experience has been
+gained. The y.output file is very useful in deciding whether the parser is
+actually doing what was intended.
+</p>
+<p>
+Yacc usually generates warnings. But errors may also arise. A message like 
+<b>"syntax error"</b> would leave you wandering where the error occurred and 
+what the error is. Error handling is much more difficult and I am not 
+dealing with it right now.
+</p>
+
+</body>
+</html>
+
+
+
+
+
+
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<P>
+<img ALIGN="LEFT" ALT="[BIO]" SRC="../gx/2002/note.png">
+<em>
+I have just given my final year B.Tech examinations in Computer Science and 
+Engineering and a native of Kerala, India.
+</em>
+<br CLEAR="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+
+<!-- *** BEGIN copyright *** -->
+<hr>
+<CENTER><SMALL><STRONG>
+Copyright &copy; 2003, Hiran Ramankutty.
+Copying license <A HREF="../copying.html">http://www.linuxgazette.net/copying.html</A><BR> 
+Published in Issue 93 of <i>Linux Gazette</i>, August 2003
+</STRONG></SMALL></CENTER>
+<!-- *** END copyright *** -->
+<HR>
+
+<!--startcut ==========================================================-->
+<CENTER>
+<!-- *** BEGIN navbar *** -->
+<A HREF="bhaskaran.html">&lt;&lt;&nbsp;Prev</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="index.html">TOC</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../index.html">Front Page</A>&nbsp;&nbsp;|&nbsp;&nbsp;Talkback&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../faq/index.html">FAQ</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="webmaster.html">Next&nbsp;&gt;&gt;</A>
+<!-- *** END navbar *** -->
+</CENTER>
+</BODY></HTML>
+<!--endcut ============================================================-->

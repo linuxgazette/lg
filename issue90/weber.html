@@ -1,0 +1,699 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<title>Programming with User Mode Linux LG #90</title>
+</HEAD>
+<BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+
+<!-- *** BEGIN navbar *** -->
+<A HREF="ward.html">&lt;&lt;&nbsp;Prev</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="index.html">TOC</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../index.html">Front Page</A>&nbsp;&nbsp;|&nbsp;&nbsp;Talkback&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../faq/index.html">FAQ</A>
+<!-- *** END navbar *** -->
+
+<!--endcut ============================================================-->
+
+<TABLE BORDER><TR><TD WIDTH="200">
+<A HREF="http://www.linuxgazette.net/">
+<IMG ALT="LINUX GAZETTE" SRC="../gx/2002/lglogo_200x41.png" 
+	WIDTH="200" HEIGHT="41" border="0"></A> 
+<BR CLEAR="all">
+<SMALL>...<I>making Linux just a little more fun!</I></SMALL>
+</TD><TD WIDTH="380">
+
+
+<CENTER>
+<BIG><BIG><STRONG><FONT COLOR="maroon">Programming with User Mode Linux</FONT></STRONG></BIG></BIG>
+<BR>
+<STRONG>By <A HREF="../authors/weber.html">Nick Weber</A></STRONG>
+</CENTER>
+
+</TD></TR>
+</TABLE>
+<P>
+
+<!-- END header -->
+
+
+
+
+
+
+ Introduction<br>
+ Installation<br>
+ Running<br>
+ Example 1: Networking<br>
+ Example 2: System Calls<br>
+ Example 3: Device Drivers<br>
+ Example 4: SysV IPC<br>
+ Code<br>
+ References<br>
+ 
+<p>  
+<h3 align="center">Introduction</h3>
+User Mode Linux (UML) is a port of Linux to Linux.  It creates a virtual
+Linux machine that runs on top of a current Linux installation.  This virtual
+machine can be run in usermode, which allows you to complete access the linux
+kernel of the virtual machine as a normal user.  This type of power and flexibility
+allows you to try things out on the kernel of the virtual machine without
+having to be root on the host machine or rebooting the host machine.  Testing
+is one of many applications of UML.  In this article we will explore some
+common things you would do in an operating systems class and see how these
+things can be done with UML.  The UML project can be found at user-mode-linux.sourceforge.net
+and is maintained by Jeff Dike.  There is also two mailing lists for the
+UML project: the user and development lists.   
+<p>  
+
+<h3 align="center">Installation</h3>
+Before beginning note that these instructions will not work on a 2G/2G
+host.  UML installation is straight forward and easy enough to accomplish
+in a short period of time.  Three things are required to successfully install
+UML:
+<ul>
+ <li>Linux kernel 
+ <li>UML patch that is the same version as the kernel 
+ <li>A root file system 
+</ul>
+You can obtain the Linux kernel from a mirror or go to www.kernel.org to
+obtain a Linux kernel.  The kernel version must be the same as the UML patch
+version.  At the time of this writing I used the Linux 2.4.19 kernel with
+the uml-patch-2.4.19-45.bz2 patch.  The UML patch and root file system can
+be acquired from the UML sourceforge site at user-mode-linux.sourceforge.net/UserModeLinux-HOWTO-2.html.
+ Recommendation: apply the latest skas patch from the UML website to the
+host (your machine) kernel.  SKAS stands for separate kernel address space.
+ Without this patch, UML will use tt mode by default.  This mode creates
+quite a few threads for the UML that is running.  The main advantage  of
+skas mode is that the UML instance will run noticeably faster.  From here
+there are 4 steps to complete the installation: 
+
+<ol>
+<li>Unpack the Linux kernel into a directory.  It is recommended that you
+set up a separate directory other than the one where the source for your
+main kernel is stored (Russell).  After all, the whole point is to get this
+running in user mode and you shouldn't be able to create a Linux kernel in
+/usr/src/linux unless you are root. 
+<li>Apply the UML patch (Russell).  cat uml-patch-2.4.19-45.bz2 | bunzip2
+- | patch -p1 (Russell) 
+<li>Create a Linux config file from the source that was unpacked in step
+one.  make xconfig ARCH=um (Russell, p.2).  The defaults are good enough
+for the first try. 
+<li>Compile the kernel with 'make linux ARCH=um' (Russell). 
+</ol>
+<p>  
+
+<h3 align="center">Running UML</h3>
+Once you have a compiled kernel all you have to do now is run it with the
+command 'linux' (Russell).  This assumes that you have a root filesystem
+in the current directory called root_fs.  If you don't then use this command
+'linux ubd0=name-of-root-filesystem' (Russell).  You should now see a Linux
+machine booting up like normal, but in you terminal that you are working
+with.  The root filesystems that are on the UML website all have a login/password
+of root/root and guest/guest for the root and guest account respectively. 
+<p>  
+
+<h3 align="center">Example 1: Networking</h3>
+Now that we can run multiple UMLs it's time to make them talk to each other.
+There are six ways to get the UMLs to communicate: a switch daemon, ethertap,
+TUN/TAP, multicast, slip, slirp, and pcap.  The instructions to set up each
+of the methods is described at user-mode-linux.sourceforge.net/networking.html.
+The method that I found the easiest to set up was TUN/TAP. 
+<p>
+The first step to get TUN/TAP is to install uml_utilities.  This
+can be obtained from the UML website.  To install the utilities untar the
+file, cd into the created directory and type 'make install'.  This will install
+five programs into /usr/bin with uml_net being the one that we are interested
+in.  uml_net will help do the setup so that the host and UML can communicate.
+ The only drawback of this method is that uml_net is a setuid program and
+can be a possible security vulnerability.  The setup that the uml_net program
+does can also be done on the host machine as the root user.  This will be
+covered in a later addition. 
+<p> 
+For this example we will setup the host with an ip of 10.0.0.1 and
+the UML with 10.0.0.2.  On the host machine assign the ip address to the
+eth0 interface with 'ifconfig eth0 10.0.0.1'.  Now we boot the the UML machine
+with the following command './linux eth0=tuntap,,,10.0.0.1'.  There are four
+paramaters that can be specified for eth0, but we are interested in the first
+and last one for now.  The first one tells UML which transport to use and
+the last paramter specifies the ip of the host machine.  A point of confusion
+for many is the last paramter.  This is the ip of the host machine and not
+what you want the ip of the UML to be.  After booting login and run 'ifconfig
+eth0 10.0.0.2' on the UML machine.  Now you should be able to ping, ssh,
+ftp, etc to the host machine from UML and vice versa. 
+<p>  
+    
+<h3 align="center">Example 2: System Calls</h3>
+A fun thing to do with a kernel is to add to it with our own system calls.
+This normaly requires root access to the machine and a reboot to use the
+system call.  Since UML is easy to reboot and we have root access to it we
+have everything we need to implement our new system call without rebooting
+the host machine or needing root access to it. 
+<p> 
+You will need to make changes to three files in the UML kernel directory.
+Starting from the UMLkernel directory they are include/asm/arch/unistd.h,
+arch/um/kernel/sys_call_table.c, arch/um/kernel/Makefile.  The code for the
+system call will go in the arch/um/kernel directory.  Using the code from
+code section as an example do the following: 
+
+<ol>
+<li>To unistd.h add:<br>
+#define __NR_my_new_call 243<br>
+The number after __NR_my_new_call may be different in your case but is the
+last number of the #define section plus 1. 
+<li>In sys_call table.c the following changes are required (Karypidis):<br>
+extern syscall_handler_t sys_my_new_call;<br>
+#define LAST_GENERIC_SYSCALL __NR_my_new_call<br>
+[ __NR_my_new_call ] = sys_my_new_call, 
+<li>In the Make file add:<br>
+my_new_call.o to the list of build targets. 
+<li>Now add the source code for the system call to the arch/um/kernel directory 
+<li>Compile the UML kernel 
+</ol>
+
+<br>
+To use the system call within UML do the following: 
+<ol>
+<li>Boot and login to UML 
+<li>Create a user program to make use of the new call.  This will also contain the library wrapper for the system call. 
+<li>Mount the host by 'mount none /mnt -t hostfs' 
+<li>Compile the test program with 'gcc -I/mnt/path-to-uml-code/include testprogram.c' 
+<li>Run the test program 
+</ol>
+The reason we have to mount the host machine into UML is that the code for
+the system call is located outside of the UML filesystem.  This is the only
+comparable difference between using a system call in UML and one on the host
+machine. 
+<p> 
+ 
+<h3 align="center">Example 3: Device Drivers</h3>
+Another Useful thing to do with UML is to test code for device drivers.
+Adding a driver to the UML kerenel is the same process as adding one the
+host kernel.  First thing is to boot up UML and login.  Using the file pp.c
+from the code section compile pp.c with 'gcc -Wall -c -O2 pp.c'.  This will
+produce pp.o, which we will load into the running UML kerenel.  More than
+likely you will get an error message when trying to insmod the driver about
+different kerenel versions between the kernel used to compile the driver
+and that of the one used to create the filesystem for the UML root_fs.  You
+can force the driver to be loaded with the -f switch like so 'insmod -f pp.o'.
+Before you can use the driver you will probably need to check /var/log/messages
+for the command to add proper device in /dev. To test the driver compile
+the test program with 'gcc testprogram.c' and then run the executable.  Check
+/var/log/messages to be sure the program ran correctly.  If it did you should
+see a message telling you that the device was opened and then one for the
+device being closed.  The code and information in this section relies on
+Alessandro Rubini's book Linux Device Drivers.
+<p> 
+ 
+<h3 align="center">Example 4: SysV IPC</h3>
+These examples are taken from the book Beginning Linux Programming.
+<p>
+<b>Shared Memory</b><br>
+Shared memory allows you to map unused memory to be used by multiple processes.
+There are four functions that are used to set up and use a shared memory
+segment.  They are: shmget(), shmat(), shmdt(), shmctl().  Since these functions
+are implemented through system calls we can expect to find the underlying
+system call of: sys_shmget(), sys_shmat(), sys_shmdt(), sys_shmctl() for
+each of the functions respectively.  Shared memory in UML is done the same
+as you would for the host kernel.  Check out shrmem1_sysV.c and shrmem2_sysV.c
+for the source code of two programs using a segment of shared memory.  Compile
+each program with gcc, start shrmem2_sysV in the background then run shrmem1_sysV. 
+<p> 
+<b>Message Passing</b><br>
+Another way to share data between programs is throught the use of the message
+passing API.  Like shared memory, the message passing API also has four functions
+with underlying system calls.  The user functions are msgget(), msgsnd(),
+msgrcv(), and msgctl(), while the system calls are sys_msgget(), sys_msgsnd(),
+sys_msgrcv(), and sys_msgctl.  For an example of message passing compile
+the two source files recvmsg_sysV.c and sendmsg_sysV.c.  Start recvmsg_sysV
+in the background then run sendmsg_sysV to see message passing in action. 
+<p>  
+<h3 align="center">Example of Code</h3>
+  
+<h4 align="center">Example 2: System Call Code</h4>
+
+<a href="misc/weber/sys_call.c.txt">my_new_call.c</a><p>
+#include &lt;linux/kernel.h&gt;<p>
+
+asmlinkage int sys_my_new_call(void) {<br>
+  printk(KERN_ALERT "sys_my_new_call at your service\n");<br>
+  return 0;<br>
+}  
+<p>
+
+<a href="misc/weber/test_sys_call.c.txt">testprogram.c</a><p>
+#include &lt;sys/types.h&gt;<br>
+#include &lt;linux/unistd.h&gt;<p>
+
+static inline _syscall0(int, my_new_call);<br>
+
+int main() {<br>
+  int result;<br>
+  result = my_new_call();<br>
+}<p>
+
+<h4 align=center>Example 3: Device Driver Code</h4>
+
+<a href="misc/weber/pp.c.txt">pp.c</a><br>
+#define __KERNEL__<br>
+#define MODULE<br>
+#include &lt;linux/module.h&gt;<br>
+#include &lt;linux/version.h&gt;<br>
+#include &lt;linux/wrapper.h&gt;<br>
+#include &lt;linux/fs.h&gt;<br>
+#include &lt;linux/sched.h&gt;<br>
+#include &lt;linux/ioport.h&gt;<br>
+#include &lt;linux/delay.h&gt;<br>
+#include &lt;linux/param.h&gt;<br>
+#include &lt;linux/interrupt.h&gt;<br>
+#include &lt;linux/time.h&gt;<br>
+#include &lt;linux/timer.h&gt;<br>
+#include &lt;asm/uaccess.h&gt;   <br>
+#include &lt;asm/io.h&gt;<p>
+
+#define true 1<br>
+#define false 0<p>
+
+/* This will be the name we choose for our device. We will also
+   use this as a prefix on functions such as the entry points 
+   appearing in the file_operations struct.
+*/<br>
+#define DEV_NAME "pp"<br>
+  
+static int Major;<p>
+
+/* These are prototypes for residents of the file_operations struct
+*/<br>
+static ssize_t pp_read(struct file *, char *, size_t, loff_t *);<br>
+static ssize_t pp_write(struct file *, const char *, size_t, loff_t *);<br>
+static int pp_open(struct inode *, struct file *);<br>
+static int pp_close(struct inode *, struct file *);<p>
+
+/* This is the file_operations struct. The init_module function 
+   will register this with the kernel so the kernel will know all
+   the entry points it contains.
+*/<br>
+struct file_operations Fops = {<br>
+  owner: THIS_MODULE,<br>
+  read: pp_read,<br>
+  write: pp_write,<br>
+  open: pp_open,<br>
+  release: pp_close,<br>
+};<p>
+/* The pp_probe function does nothing here, but reminds us that a 
+   'real' driver may need to probe for hardware resources. These
+   resources might later be allocated in init_module.
+*/<br>
+static int pp_probe(void){<br>
+  return 0;<br>
+}<p>
+
+/* The pp_read function is a stub, but at least does a printk, 
+   for tracing purposes, when it is called.
+*/<br>
+static ssize_t pp_read(struct file *file, char *buff, size_t ctr, loff_t *woof) {<br>
+  printk(KERN_ALERT "\npp_read active.\n");<br>
+  return 0;  <br>
+}<p>
+
+/* The pp_write function is a stub, but at least does a printk, 
+   for tracing purposes, when it is called.
+*/<br>
+static ssize_t pp_write(struct file *file, const char *buff, size_t ctr, loff_t *woof) {<br>
+  printk(KERN_ALERT "\npp_write active.\n");<br>
+  return 0;  <br>
+}<p>
+
+/* The pp_open function does a printk for tracing purposes.
+*/<br>
+static int pp_open(struct inode *inode, struct file *file) {<br>
+  printk(KERN_ALERT "\nAn instance of %s has been opened.\n", DEV_NAME);<br>
+  return 0;<br>
+}<p>
+
+/* The pp_close function does a printk for tracing purposes.
+*/<br>
+static int pp_close(struct inode *inode, struct file *file) {<br>
+  printk(KERN_ALERT "\nOne instance of %s has been closed.\n", DEV_NAME);<br>
+  return 0;<br>
+}<p>
+
+/* Next we'll see that that init_module<br>
+ * registers the file_operations struct so the kernel will know
+   about the entry points therein<br>
+ * gets back a major number<br>
+ * calls pp_probe, to look for hardware resources<br>
+ Had hardware resources been found, they would need to be allocated  
+ for use by this driver, probably within the scope of init_module.
+*/<br>
+int init_module(void) {<br>
+  Major = register_chrdev( 0, DEV_NAME, &Fops);<br>
+  if (Major < 0) {<br>
+    printk("Registration Failure!\n");<br>
+    return Major; <br>
+  }<br>
+  if (pp_probe() < 0) {<br>
+    unregister_chrdev(Major, DEV_NAME);<br>
+    printk(KERN_ALERT "pp_probe() failure!\n");<br>
+    return -1;<br>
+  }<br>
+  printk(KERN_ALERT "\nRegistered %s, at major number = %d.\n\n", DEV_NAME, Major);<br>
+  printk("To use %s, you must create a device file.\n", DEV_NAME);<br>
+  printk("If this has not already been done, then enter:\n");<br>
+  printk("  mknod /dev/%s c %d 0\n\n", DEV_NAME, Major);<br>
+  printk("Also set appropriate permissions for /dev/%s.\n\n", DEV_NAME);         <br>
+  return 0;<br>
+}<p>
+/* The cleanup_module function unregisters the driver and, in a
+   'real' driver would free up any resources allocated by
+   init_module.
+*/<br>
+void cleanup_module(void) {  <br>
+  int ret;<br>
+  ret = unregister_chrdev(Major, DEV_NAME);<br>
+  if (ret < 0)<br>
+    printk(KERN_ALERT "\nUnregistration problem where ret = %d\n\n", ret);<br>
+  else <br>
+    printk(KERN_ALERT "\nUnregistered %s, at major number = %d\n\n", DEV_NAME, Major);    <br>
+}<p>
+
+<a href="misc/weber/test_driver.c.txt">testprogram.c</a><p>
+#include &lt;stdio.h&gt;<br>
+#include &lt;stdlib.h&gt;<br>
+#include &lt;fcntl.h&gt;<br>
+#include &lt;unistd.h&gt;<p>
+
+#define DEVICE "/dev/pp"<p>
+
+int main() {<br>
+  int ddfd = 0;<br>
+  int ret = 0;<br>
+  ddfd = open(DEVICE, O_RDWR);<br>
+  if (ddfd < 0) {<br>
+    printf("\nOpen of %s failed.\n", DEVICE);<br>
+    exit(-1);<br>
+  }<br>
+  printf("\nOpen of %s succeeded.\n", DEVICE);<br>
+
+  ret = close(ddfd);<br>
+  if (ret < 0) {<br>
+    printf("\nClosing %s failed.\n", DEVICE);<br>
+    exit(-1);<br>
+  }<br>
+  printf("\n Close of %s succeeded.\n", DEVICE);<br>
+  
+  exit(0);<br>
+}    <p>
+
+<h4 align=center>Example 4: Shared Memory</h4>
+
+<a href="misc/weber/shrmem1_sysV.c.txt">shrmem1_sysV.c</a><br>
+/* sysV IPC shared memory - write to shared memory<br>
+   shrmem1_sysV.c<br>
+    
+    meant to be used with shrmem2_sysV:<br>
+      start shrmem2_sysV in background,<br>
+      then start shrmem1_sysV
+    */<p>
+    #include &lt;unistd.h&gt;<br>
+    #include &lt;stdlib.h&gt;<br>
+    #include &lt;stdio.h&gt;<br>
+    #include &lt;string.h&gt;<br>
+    #include &lt;sys/types.h&gt;<br>
+    #include &lt;sys/ipc.h&gt;<br>
+    #include &lt;sys/shm.h&gt;<br>
+    #define MEM_SZ 4096<p>
+    
+    struct shared_use_st {<br>
+      int writ_by_you;<br>
+      char some_text[BUFSIZ];<br>
+    };<p>
+
+    int main() {<br>
+      int run = 1;<br>
+      void *shared_mem = (void *) 0;<br>
+      struct shared_use_st *shared_stuff;<br>
+      char buffer[BUFSIZ];<br>
+      int shmid;<p>
+    
+      shmid = shmget( (key_t)1234, MEM_SZ, 0666 | IPC_CREAT);<br>
+      if (shmid == -1) {<br>
+        perror("shmget in shrmem1_sysV failed");<br>
+        exit(EXIT_FAILURE);<br>
+      }<br>
+      
+      shared_mem = shmat(shmid, (void *)0, 0);<br>
+      if (shared_mem == (void *)-1) {<br>
+        perror("shmat in shrmem1_sysV failed");<br>
+        exit(EXIT_FAILURE);<br>
+      }<br>
+      printf("memory attached at %X\n", (int)shared_mem);<br>
+      shared_stuff = (struct shared_use_st *)shared_mem;<br>
+      
+      while (run) {<br>
+        while (shared_stuff->writ_by_you == 1) {<br>
+          sleep(3);<br>
+          printf("Waiting for client ...\n");<br>
+        }<br>
+        printf("Enter some text: ");<br>
+        fgets(buffer, BUFSIZ, stdin);<br>
+        
+        strcpy(shared_stuff->some_text, buffer);<br>
+        shared_stuff->writ_by_you = 1;<br>
+        
+        if (strncmp(buffer, "end", 3) == 0) {<br>
+          run = 0;<br>
+        }<br>
+      }<br>
+      if (shmdt(shared_mem) == -1) {<br>
+        perror("shmdt in shrmem1_sysV failed");<br>
+        exit(EXIT_FAILURE);<br>
+      }<br>
+      
+      exit(EXIT_SUCCESS);<br>
+    }<p>
+
+<a href="misc/weber/shrmem2_sysV.c.txt">shrmem2_sysV.c</a><br>
+/* sysV IPC shared memory - read from shared memory<br>
+   shrmem2_sysV.c<br>
+    
+    meant to be used with shrmem1_sysV:<br>
+      start shrmem2_sysV in background,<br>
+      then start shrmem1_sysV<br>
+    */<p>
+
+    #include &lt;unistd.h&gt;<br>
+    #include &lt;stdlib.h&gt;<br>
+    #include &lt;stdio.h&gt;<br>
+    #include &lt;string.h&gt;<br>
+    #include &lt;sys/types.h&gt;<br>
+    #include &lt;sys/ipc.h&gt;<br>
+    #include &lt;sys/shm.h&gt;<br>
+    #define MEM_SZ 4096<p>
+    
+    struct shared_use_st {<br>
+      int writ_by_you;<br>
+      char some_text[BUFSIZ];<br>
+    };<p>
+    
+    int main() {<br>
+      int run = 1;<br>
+      void *shared_mem = (void *) 0;<br>
+      struct shared_use_st *shared_stuff;<br>
+      int shmid;<p>
+    
+      shmid = shmget( (key_t)1234, MEM_SZ, 0666 | IPC_CREAT);<br>
+      if (shmid == -1) {<br>
+        perror("shmget in shrmem2_sysV failed");<br>
+        exit(EXIT_FAILURE);<br>
+      }<br>
+      
+      shared_mem = shmat(shmid, (void *)0, 0);<br>
+      if (shared_mem == (void *)-1) {<br>
+        perror("shmat in shrmem2_sysV failed");<br>
+        exit(EXIT_FAILURE);<br>
+      }<br>
+      printf("memory attached at %X\n", (int)shared_mem);<br>
+      shared_stuff = (struct shared_use_st *)shared_mem;<br>
+      
+      shared_stuff->writ_by_you == 0;<br>
+      while (run) {<br>
+        if (shared_stuff->writ_by_you == 1) {<br>
+          printf("You_wrote: %s", shared_stuff->some_text);<br>
+          sleep(rand() % 4);<br>
+          shared_stuff->writ_by_you = 0;<br>
+          if (strncmp(shared_stuff->some_text, "end", 3) == 0) {<br>
+            run = 0;<br>
+          }<br>
+        }<br>
+      }<br>
+      
+      if (shmdt(shared_mem) == -1) {<br>
+        perror("shmdt in shrmem2_sysV failed");<br>
+        exit(EXIT_FAILURE);<br>
+      }<br>
+      
+      if (shmctl(shmid, IPC_RMID, 0) == -1) {<br>
+        perror("shmctl in shrmem2_sysV failed");<br>
+        exit(EXIT_FAILURE);<br>
+      }<br>
+        
+      exit(EXIT_SUCCESS);<br>
+    }<br>
+
+<h4 align=center>Example 4(cont): Message Passing</h4>
+
+<a href="misc/weber/sendmsg_sysV.c.txt">sendmsg_sysV.c</a><br>
+/* sysV IPC message passing - sender<br>
+   sendmsg_sysV.c<br>
+    
+    meant to work with recvmsg_sysV:<br>
+      start rcvmesg_sysV in background,<br>
+      then start sendmsg_sysV<br>
+    */<p>
+    
+    #include &lt;stdlib.h&gt;<br>
+    #include &lt;stdio.h&gt;<br>
+    #include &lt;string.h&gt;<br>
+    #include &lt;sys/types.h&gt;<br>
+    #include &lt;sys/ipc.h&gt;<br>
+    #include &lt;sys/msg.h&gt;<br>
+    #define BUF 1024<p>
+    
+    struct my_msg_st {<br>
+      long int my_msg_type;<br>
+      char some_text[BUFSIZ];<br>
+    };<br>
+    
+    int main() {<br>
+      int run = 1;<br>
+      struct my_msg_st some_data;<br>
+      int msqid;<br>
+      char buffer[BUF];<br>
+      
+      msqid = msgget( (key_t)1234, 0666 | IPC_CREAT);<br>
+      if (msqid == -1) {<br>
+        perror("msgget in sendmsg_sysV failed");<br>
+        exit(EXIT_FAILURE);<br>
+      }<br>
+      
+      while (run) {<br>
+        printf("Enter some text:");<br>
+        fgets(buffer, BUF, stdin);<br>
+        some_data.my_msg_type = 1;<br>
+        strcpy(some_data.some_text, buffer);<br>
+        
+        if (msgsnd(msqid, &some_data, BUF, 0) == -1) {<br>
+          perror("msgsnd in sendmsg_sysV failed");<br>
+          exit(EXIT_FAILURE);<br>
+        }<br>
+        
+        if (strncmp(buffer, "end", 3) == 0) {<br>
+          run = 0;<br>
+        }<br>
+      }<br>
+      
+      exit(EXIT_SUCCESS);<br>
+    }<p>
+
+<a href="misc/weber/recvmsg_sysV.c.txt">recmsg_sysV.c</a><br>
+/* sysV IPC message passing - receiver 
+   recvmsg_sysV.c
+    
+    meant to work with sendmsg_sysV:
+      start recvmsg_sysV in background,
+      then start sendmsg_sysV
+    */<p>
+    
+    #include &lt;stdlib.h&gt;<br>
+    #include &lt;stdio.h&gt;<br>
+    #include &lt;string.h&gt;<br>
+    #include &lt;sys/types.h&gt;<br>
+    #include &lt;sys/ipc.h&gt;<br>
+    #include &lt;sys/msg.h&gt;<p>
+    
+    struct my_msg_st {<br>
+      long int my_msg_type;<br>
+      char some_text[BUFSIZ];<br>
+    };<p>
+    
+    int main() {<br>
+      int run = 1;<br>
+      struct my_msg_st some_data;<br>
+      int msqid;<br>
+      long int msg_to_recv = 1;<br>
+      
+      msqid = msgget( (key_t)1234, 0666 | IPC_CREAT);<br>
+      if (msqid == -1) {<br>
+        perror("msgget in recvmsg_sysV failed");<br>
+        exit(EXIT_FAILURE);<br>
+      }<br>
+      
+      while (run) {<br>
+        if (msgrcv(msqid, &some_data, BUFSIZ, msg_to_recv, 0) == -1) {<br>
+          perror("msgrcv in recvmsg_sysV failed");<br>
+          exit(EXIT_FAILURE);<br>
+        }<br>
+        printf("You wrote: %s", some_data.some_text);    <br>
+        if (strncmp(some_data.some_text, "end", 3) == 0) {<br>
+          run = 0;<br>
+        }  <br>
+      }<br>
+      
+      if (msgctl(msqid, IPC_RMID, 0) == -1) {<br>
+        perror("msgctl in recvmsg_sysV failed");<br>
+        exit(EXIT_FAILURE);<br>
+      }<br>
+      
+      exit(EXIT_SUCCESS);<br>
+    }<p>
+
+<p> 
+<h3 align="center">References</h3>
+
+Karypidis, Alexandros. "Adding a System Call" Online. Internet. 25, March 2002 	Available: user-mode-linux.sourceforge.net/lksct. 
+    
+<p> Mathew, Neil, Richard Stones <u>Beginning Linux Programming.</u> 2nd ed. Wrox Press, Inc., September 1999. 
+    
+<p> Rubini, Alessandro, Jonathan Corbert. <u>Linux Device Drivers.</u> 2nd ed. O'Reilly Associates, Incorporated, July 2001. 
+    
+<p> Russell, Rusty. "User Mode Linux HOWTO". Online. Internet. 18, June 2002. Available: user-mode-linux.sourceforge.net/UserModeLinux-HOWTO.html. 
+
+
+
+
+
+
+
+
+<!-- *** BEGIN author bio *** -->
+<P>&nbsp;
+<P>
+<!-- *** BEGIN bio *** -->
+<P>
+<img ALIGN="LEFT" ALT="[BIO]" SRC="../gx/2002/note.png">
+<em>
+I am currently pursuing a graduate degree in Computer Science from Eastern
+Washington University in Cheney, Washington, USA.
+</em>
+<br CLEAR="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+
+<!-- *** BEGIN copyright *** -->
+<hr>
+<CENTER><SMALL><STRONG>
+Copyright &copy; 2003, Nick Weber.
+Copying license <A HREF="../copying.html">http://www.linuxgazette.net/copying.html</A><BR> 
+Published in Issue 90 of <i>Linux Gazette</i>, May 2003
+</STRONG></SMALL></CENTER>
+<!-- *** END copyright *** -->
+<HR>
+
+<!--startcut ==========================================================-->
+<!-- *** BEGIN navbar *** -->
+<A HREF="ward.html">&lt;&lt;&nbsp;Prev</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="index.html">TOC</A>&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../index.html">Front Page</A>&nbsp;&nbsp;|&nbsp;&nbsp;Talkback&nbsp;&nbsp;|&nbsp;&nbsp;<A HREF="../faq/index.html">FAQ</A>
+<!-- *** END navbar *** -->
+</BODY></HTML>
+<!--endcut ============================================================-->

@@ -1,0 +1,358 @@
+
+<html>
+<head>
+<link href="../lg.css" rel="stylesheet" type="text/css" media="screen, projection"  />
+<link rel="shortcut icon" href="../favicon.ico" />
+<title>How Fonts Interact with the X Server and X Clients LG #128</title>
+
+<style type="text/css" media="screen, projection">
+<!--
+
+-->
+</style>
+
+<link rel="alternate" type="application/rss+xml" title="LG RSS" href="lg.rss" />
+<link rel="alternate" type="application/rdf+xml" title="LG RDF" href="lg.rdf" />
+<link rel="alternate" type="application/atom+xml" title="LG Atom" href="lg.atom.xml" />
+
+</head>
+
+<body>
+
+
+<img src="../gx/2003/newlogo-blank-200-gold2.jpg" id="logo" alt="Linux Gazette"/>
+<p id="fun">...making Linux just a little more fun!</p>
+
+
+<div class="content articlecontent">
+
+<div id="previousnexttop">
+<A HREF="lg_tips.html" >&lt;-- prev</A> | <A HREF="adam1.html" >next --&gt;</A>
+</div>
+
+
+
+<h1>How Fonts Interact with the X Server and X Clients</h1>
+<p id="by"><b>By <A HREF="../authors/adam.html">Thomas Adam</A></b></p>
+
+<p class="editorial">[ The following is taken from a reply the author sent
+to TAG in response to a question about fonts. Some of the answers in TAG
+are so good that they simply deserve to be made into articles. :) -- Ben ]</p>
+
+<hr>
+
+<h3>Introduction</h3>
+
+<p>Behind the scenes, there's a fair amount that happens when an
+application requests the use of a font.  Because many default
+installations include both the X server and their respective clients on
+the same machine, a lot of the functionality is masked.  However, the
+X server plays a pivotal role in managing the fonts stored under
+it.</p>
+
+<p>There are usually two different mechanisms at work, as far as fonts
+are concerned:  one of them makes use of a font server, the other does
+not.</p>
+
+<h3>Fonts and their location</h3>
+
+<p>Taking a typical system that doesn't use a font server, font definitions
+are a property of the X server; that is, it knows and keeps track of which
+fonts are on your system. X11 defaults to looking for fonts in 
+<code>/usr/lib/X11/fonts/*</code>.
+
+<p>Typically, a standard definition from /etc/X11/XF86Config-4 (and
+newer xorg.conf) files might look like:</p>
+
+<pre class="code">
+Section "Files"
+    FontPath        "unix/:7100"          # local font server
+    # if the local font server has problems, we can fall back on these
+    FontPath        "/usr/lib/X11/fonts/misc"
+    FontPath        "/usr/lib/X11/fonts/cyrillic"
+    FontPath        "/usr/lib/X11/fonts/75dpi/"
+    FontPath        "/usr/lib/X11/fonts/100dpi/"
+    FontPath        "/usr/X11R6/lib/X11/fonts/sgi"
+    FontPath        "/usr/lib/X11/fonts/Type1"
+    FontPath        "/usr/lib/X11/fonts/CID"
+    FontPath        "/usr/lib/X11/fonts/100dpi:unscaled"
+    FontPath        "/usr/lib/X11/fonts/75dpi:unscaled"
+</pre>
+
+<p>An application can request a font to display, and
+the X server will obligingly look for it in the hash of directories it
+stores (much like the one above). The command '<code>xset q</code>'
+will list that information <a name="1_back"></a><a href="#1">[1]</a>, and indeed font 
+paths can be added to with '<code>xset +fp /some/location/</code>'.
+
+<p>However, that does nothing more than append the directory definition.  
+In order for the X server to become aware of the fact that a new location
+has been added, one has to rehash that with '<code>xset fp rehash</code>'.
+</p>
+
+<h3>Font descriptions</h3>
+
+<p>There's a convenience mechanism within X11 fonts, and that is to alias
+font names.  If we ignore TrueType fonts for the moment, the command
+'xlsfonts' lists fonts like this:</p>
+
+<pre>
+-adobe-avant garde gothic-book-o-normal--0-0-0-0-p-0-iso8859-1
+-adobe-courier-bold-o-normal--17-120-100-100-m-100-iso10646-1
+...
+[ Many more lines elided ]
+</pre>
+
+<p>Let's take one of them as an example &mdash; here's what each part
+does:</p>
+
+<center>
+  <img src="misc/adam/font_info.png" alt="font description" /><br />
+  <b>Figure 1:  Structure of a typical font.</b>
+</center>
+
+<p>That's a lot of information, right?  Well, yes, it is, but it's 
+a lot of very <em>useful</em> information.  Roughly (and off the top of 
+my head) here's what each part means:
+</p>
+
+<ul>
+<li> Foundry refers to the company that produced the font (Adobe in this case).
+<li> The family refers to the font type.
+<li> The weight is the display of the font (which also includes normal).
+<li> The various pixels and points refer to the size of the font with respect to the resolution of the displayed font (that's horizontal and vertical resolutions.)
+<li> Spacing refers to whether the font is monospaced (m) or proportional (p).
+</ul>
+
+<p>All of this is very dull and boring, and of course it would be a
+nightmare if one had to remember all of that information in one go.
+This is where aliasing and wildcarding become useful.</p>
+
+<p>Most X11 applications that use the X11 Resource Database (XRDB) allow
+various resources to be set with an appropriate font. Example:</p>
+
+<pre class="code">
+*xterm.font: *courier-bold-o-*-120*
+</pre>
+
+<p>That should be pretty self-explanatory, right?  That's analogous to the
+often used command-line <a name="2_back"></a><a href="#2">[2]</a> of:</p>
+
+<pre class="code">
+&lt;program&gt; -fn '*courier-bold-o-*-120*'
+</pre>
+
+<p>The X server then has to look up that font, expanding the wildcard as it
+goes.  This is largely left down to the user to ensure that the correct
+placement of any wildcards is accurate, since it will on many occasions
+match nothing or unintentional fonts due to it.  The X server will traverse
+whatever is in its fontpath, <strong>in the order the directories are
+listed</strong>, until a matched font is found. I cannot stress the order
+enough &mdash; it's analogous to the way a binary is searched for, in one's
+$PATH. The first matching font is whatever is found within the list of
+fontpaths, even if two or more fonts are matched by the wildcard.</p>
+
+<p>Aliasing is slightly different, in that rather than the user relying 
+on wildcard matching, a "font.alias" file holds short names for fonts
+(alternate names, if you will).  Here's a snippet of one:</p>
+
+<pre>
+lucidasans-bolditalic-8    -b&amp;h-lucida-bold-i-normal-sans-11-80-100-100-p-69-iso885 9-1</pre>
+
+<p>Essentially, it's a two column file, with the alternate name in column
+one, and the actual font name in the second column.  As before, if you
+use an alias to load a font, the X server will search each font
+directory in turn.  This has the added benefit of being able to specify
+aliases for fonts in other directories.</p>
+
+<p>A fonts.alias file is also associated with a fonts.dir file.  You can
+think of this file as a massive database that the XServer uses.  It's a bit
+like font.alias, except that this file lists the following:</p>
+
+<pre>
+Actual Font Name		Font Name
+</pre>
+
+<p>When you ask the X server to search for a font, it will look in
+fonts.dir to ascertain the font based on either the long name, or the alias
+(since the alias is mapped before the fonts.dir is looked in.)  If you've
+ever used the mkfontdir(1) command, this is what it does &mdash; creates
+font.dir files in each and every fontpath listed.</p>
+
+<h3>Font Servers</h3>
+
+<p>Now onto font servers:  You don't need them.  Really &mdash; unless
+you're in some large multinational corporation that has hundreds of
+workstations connecting to an X server with different vendors.  In the R5
+release of X11, they were used for uniformity, to ensure that font
+names remained consistent, so that applications could load fonts, thus
+<em>sharing</em> them. What happens is something like the following:</p>
+  
+<center>
+  <img src="misc/adam/xfs_comms.png" alt="XFS Comms" /><br />
+  <b>Figure 2: How XFS interacts with the X server and X client(s)</b>
+</center>
+
+<p>The machine "Server" has a number of services running on it --
+including the XFS (X Font Server).  The local X server running on a
+client is hence told to use a font server (which is typical of the
+line):</p>
+
+<pre>
+FontPath "unix/:7100" 
+</pre>
+
+<p>The font server responds by supplying the X server on the client with a
+list of font names applications (X clients) can load and display on
+the screen.  (Under the hood there's a lot which goes on, but I'll skip
+that.)   Note the "role reversal" here <a name="3_back"></a><a href="#3">[3]</a>: the X server is the client with
+respect to the font server &mdash; hence it is itself a "font client" 
+&mdash; other examples include a printer, which would also talk to the font
+server, where necessary (although not shown in the above diagram).</p>
+
+<p>Old versions of Red Hat used to insist on running a TrueType font
+server, for no other reason than presumably to annoy everyone.</p>
+
+<hr />
+
+<p>
+<a name="1"></a><a href="#1_back">[1]</a> Programatically, this can be
+achieved via the XSetFontPath() call.
+</p>
+<p>
+<a name="2"></a><a href="#2_back">[2]</a> Note the hard quotation marks
+here, so as not to perform globbing at the shell.
+</p>
+<p>
+<a name="3"></a><a href="#3_back">[3]</a> Rick Moen comments:  Unix
+newcomers are often confused by the notion of applications being X11
+clients and the graphical display being driven by a server process, which
+somehow is opposite to people's expectations.  They think: surely the
+applications are serving up display data, thus making them servers, which
+the graphical display is receiving, thus making it a client.  However,
+what's being served up, to both local applications and remote ones via X11
+network access, is the graphical display software's drawing services, as a
+central system facility for all applications that need it.  Thus the
+applications are, for that purpose, clients.
+</p>
+
+
+
+<p class="talkback">
+Talkback: <a
+href="mailto:tag@lists.linuxgazette.net?subject=Talkback:128/adam.html">Discuss this article with The Answer Gang</a>
+</p>
+
+<!-- *** BEGIN author bio *** -->
+<!-- *** BEGIN bio *** -->
+<hr>
+<br />
+<img alt="picture" src="../gx/2003/authors/adam.jpg" width="240"
+height="223" align="left" hspace="10" vspace="10" class="bio">
+<em>
+
+<p>I used to write the long-running series "The Linux Weekend Mechanic",
+which was started by John Fisk (the founder of Linux Gazette) in 1996 and
+continued until 1998.  Articles in that format have been intermittent, but
+might still continue in the future.  I currently write occasional articles
+for LG, whilst doing a few things behind the scenes for it.  I'm also a
+member of The Answer Gang.</p>
+
+<p> I was born in Hammersmith (London UK) in 1983.  When I was 13, I moved to
+the sleepy, thatched-roofed, village of East Chaldon in the county of Dorset.
+It is very near the coast, and Lulworth Cove, which is where I used to work.
+Since then I have moved to Southampton, and currently attend University
+there, studying for a degree in Software Engineering.</p>
+
+<p> I first got interested in Linux in 1996 having seen a review of it in a
+magazine (Slackware 2.0). I was fed up with the instability that the then-new
+operating system Win95 had and so I decided to give it a go.
+Slackware 2.0 was great. I have been a massive Linux enthusiast ever
+since.  I ended up with running SuSE on both my desktop and laptop
+computers.  Although I now use Debian as my primary operating system.</p>
+
+<p>I am actively involved with the <a href="http://www.fvwm.org">FVWM</a>
+project, writing documentation, providing user-support, writing ad-hoc and
+somewhat esoteric patches for it.</p>
+
+<p> Other hobbies include reading. I especially enjoy reading plays (Henrik
+Ibsen, Chekhov, George Bernard Shaw), and I also enjoy literature (Edgar Allan
+Poe, Charles Dickens, Jane Austen to name but a few).</p>
+
+<p> I am also a keen musician. I play the piano in my spare time.</p>
+
+<p>Some would consider me an arctophile (teddy bear collector).</p>
+
+<P> I listen to a <a href="http://edulinux.homeunix.org/music.rbx">
+variety of music</a>.</p>
+</em>
+<br clear="all">
+<!-- *** END bio *** -->
+
+<!-- *** END author bio *** -->
+
+<div id="articlefooter">
+
+<p>
+Copyright &copy; 2006, Thomas Adam. Released under the <a
+href="http://linuxgazette.net/copying.html">Open Publication license</a>
+unless otherwise noted in the body of the article. Linux Gazette is not
+produced, sponsored, or endorsed by its prior host, SSC, Inc.
+</p>
+
+<p>
+Published in Issue 128 of Linux Gazette, July 2006
+</p>
+
+</div>
+
+
+<div id="previousnextbottom">
+<A HREF="lg_tips.html" >&lt;-- prev</A> | <A HREF="adam1.html" >next --&gt;</A>
+</div>
+
+
+</div>
+
+
+
+
+
+
+<div id="navigation">
+
+<a href="../index.html">Home</a>
+<a href="../faq/index.html">FAQ</a>
+<a href="../lg_index.html">Site Map</a>
+<a href="../mirrors.html">Mirrors</a>
+<a href="../mirrors.html">Translations</a>
+<a href="../search.html">Search</a>
+<a href="../archives.html">Archives</a>
+<a href="../authors/index.html">Authors</a>
+<a href="http://lists.linuxgazette.net/mailman/listinfo/">Mailing Lists</a>
+<a href="../contact.html">Contact Us</a>
+
+</div>
+
+
+
+<div id="breadcrumbs">
+
+<a href="../index.html">Home</a> &gt; 
+<a href="index.html">July 2006 (#128)</a> &gt; 
+Article
+
+</div>
+
+
+
+
+
+<img src="../gx/tux_86x95_indexed.png" id="tux" alt="Tux"/>
+
+
+
+
+</body>
+</html>
+

@@ -1,0 +1,272 @@
+<!--startcut  ==============================================-->
+<!-- *** BEGIN HTML header *** -->
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML><HEAD>
+<META NAME="generator" CONTENT="lgazmail v1.4G.l">
+<TITLE>The Answer Gang 96: Kernel 2.6.0-test2 and qm_modules error</TITLE>
+</HEAD><BODY BGCOLOR="#FFFFFF" TEXT="#000000" LINK="#0000FF" VLINK="#0000AF"
+ALINK="#FF0000">
+<!-- *** END HTML header *** -->
+<!--endcut  ==============================================-->
+<!-- begin 4 -->
+<H3 align="left"><img src="../../gx/dennis/qbubble.gif" 
+	height="50" width="60" alt="(?) " border="0"
+	>Kernel 2.6.0-test2 and qm_modules error</H3>
+
+
+<p><strong>From Thomas Adam 
+</strong></p> 
+<p></strong></p>
+
+<p align="right"><strong>Answered By:  Thomas Adam, Kapil Hari Paranjape, Jim Dennis
+</strong></p>
+<P><STRONG>
+Dear All,
+</STRONG></P>
+<P><STRONG>
+I decided to upgrade my kernel from 2.4.20 to 2.6.0-test2. "No probem",
+I thought. So off I trotted to www.kernel.org, selected my UK mirror and
+downloaded it, and bunzip/untarred it in <TT>/usr/src.</TT>
+</STRONG></P>
+<P><STRONG>
+I had planned to implement an ACPI/swsusp patch so that I could
+effectively make use of some of the more advanced features of my laptop
+in terms of power management. I applied to ACPI patch fine, but the
+swsusp patch didn't work, so I removed it.
+</STRONG></P>
+<P><STRONG>
+I copied my <TT>/boot/config-2.4.20</TT> to <TT>/usr/src/.config</TT> and ran a "make
+menuconfig". Yay, no problems. I simply added my ACPI settings,
+eye-balled the rest of the options, removed support for things like ADFS
+and AFS (Andrew's File System) and did a classic:
+</STRONG></P>
+
+<pre><strong>fakeroot make-kpkg --revision=rev0.1 kernel_image modules_image
+</strong></pre>
+<P><STRONG>
+Prior to this I had installed and setup "ccache". For those of you who
+haven't got this: "apt-get install ccache". Seriously, I recommend it.
+It makes successive compilations much faster; by ccache caching the
+results. But I digress...
+</STRONG></P>
+<P><STRONG>
+The make went fine, and I was soon "dpkg -i <TT>../kernel_image-rev0.1*.deb</TT>"
+I did notice that as this was happening, I got a lot of "** Unresolved
+Symbols **", but that was alright, because it was in modules that I was
+never really going to load, and had put them there for a "just in case"
+scenario.
+</STRONG></P>
+<P><STRONG>
+So I went through the motions of "liloconfig" et al and was soon
+rebooting my nice new kernel. I have to say that I am impressed thus far
+with 2.6.0-test2. Finally Framebuffer support is getting better with the
+maintainer of that section actually removing that huge flashing block
+and replacing it with a static "_" cursor 
+<IMG SRC="../../gx/dennis/smily.gif" ALT=":)" 
+		height="24" width="20" align="middle">
+</STRONG></P>
+<P><STRONG>
+As I watched the screen, nothing out of the ordinary was happening, and
+I was soon at a login prompt. I did notice that "acpid" (the acpi
+software control) didn't load due to "QM_MODULES function not
+implemented". Odd I thought. So I logged in (as 'root'), and did a:
+</STRONG></P>
+
+<pre><strong>lsmod
+</strong></pre>
+<P><STRONG>
+hmm, I got the following error message:
+</STRONG></P>
+<P><STRONG><BLOCKQuote>
+QM_MODULES function not implemented
+</BLOCKQuote></STRONG></P>
+<P><STRONG>
+"Ok", I thought, how about this:
+</STRONG></P>
+
+<pre><strong>depmod -a
+</strong></pre>
+<P><STRONG>
+hmm, same error message.
+</STRONG></P>
+<P><STRONG>
+I wasn't sure what was causing this error, and it was nothing that I had
+seen before. So I did the following:
+</STRONG></P>
+
+<pre><strong>cd /usr/src/linux-2.6.0-test2 &amp;&amp; find . | xargs grep -i qm_modules
+</strong></pre>
+<P><STRONG>
+...guess what? I got nothing! Grep had let me down 
+<IMG SRC="../../gx/dennis/unsmily.gif" ALT=":(" 
+		height="24" width="20" align="middle">. So now I am
+thinking that maybe the error isn't listed in any of the textual based
+files but that it is statically built into the ".o" files. So....
+</STRONG></P>
+
+<pre><strong>find . | xargs strings | grep -i qm_modules
+</strong></pre>
+<P><STRONG>
+...sigh. Nothing, zilch. Of course this last command is slightly
+superfluous because in order for the string "qm_modules" to be there, it
+would have to come from one of the ".c" files that created the compiled
+object file, but I couldn't see how the command could hurt. Now what
+should I do???
+</STRONG></P>
+<P><STRONG>
+.... enter "strace" 
+<IMG SRC="../../gx/dennis/smily.gif" ALT=":)" 
+		height="24" width="20" align="middle"> One of my friends. At this point I was thinking
+that maybe I should see just where the "depmod -a" command was failing.
+Why did I choose this command and not "lsmod"? Well, in order for the
+kernel to know about it's modules and dependencies, it has to make use
+of "<TT>/lib/modules/$</TT>(uname -r)/modules.dep". So, I typed:
+</STRONG></P>
+
+<pre><strong>strace -o ~/.strace/depmod_2.6.0-test2 depmod -a
+</strong></pre>
+<P><STRONG>
+had a quick look in the file and yes, sure as I was I could see it
+complaining about "qm_modules". Pah, makes no sense to me, really.
+</STRONG></P>
+<P><STRONG>
+What I did next was to boot my "old" 2.4.20 kernel. "liloconfig" is
+sufficiently clever to actually keep your old kernel for you. I did
+that, and ran:
+</STRONG></P>
+
+<pre><strong>strace -o ~/.strace/depmod_2.4.20 depmod -a
+</strong></pre>
+<P><STRONG>
+had a look and that worked fine. Hmmmm, what could be wrong? I ran a
+"diff" on the two files, but my brain just cannot make any head nor tail
+of what it all means.
+</STRONG></P>
+<P><STRONG>
+I cannot see what, or more importantly where the "QM_MODULES" function
+exists. The fact that grepping the kernel source tree returns no
+results, suggests that this is a function that is called from no where
+within the kernel but rather externally, perhaps from one of the rarer
+"glibc" libs?
+</STRONG></P>
+<P><STRONG>
+I tried a google/linux search, but found nothing conclusive. Perhaps I
+have compiled something incorrectly in the kernel? I have tried
+compiling it many times now, but still the same result. While I am aware
+that 2.6.0-test3 exists, the ACPI patch only works for the test-2
+branch.
+</STRONG></P>
+<P><STRONG>
+Three files to help you...
+</STRONG></P>
+<P><STRONG>
+1. depmod_2.4.20
+2. depmod_2.6.0-test2
+3. diff
+</STRONG></P>
+<P><STRONG>
+They can be found here:
+</STRONG></P>
+<P><STRONG><BLOCKQuote>
+<A HREF="http://www.darksatanic.net/ta"
+	>http://www.darksatanic.net/ta</A>
+</BLOCKQuote></STRONG></P>
+<P><STRONG>
+My thanks to Hugo Mills for very kindly hosting them. Cheers, Hugo 
+<IMG SRC="../../gx/dennis/smily.gif" ALT=":)" 
+		height="24" width="20" align="middle">
+</STRONG></P>
+<P><STRONG>
+(number 3 is the difference between the two files. I neglected to do a
+unified diff).
+</STRONG></P>
+<P><STRONG>
+Any ideas, tips, points of error would be appreciated.
+</STRONG></P>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [Kapil]
+</blockQuote>
+<blockQuote>
+Hello,
+</blockQuote>
+<blockQuote>
+On Tue, Aug 12, 2003 at 11:48:28AM +0100, Thomas Adam wrote on the
+problems he had with the upgrade from 2.4.20 to 2.6.0-test2.
+</blockQuote>
+<blockQuote>
+1. Problem with module loading.
+</blockQuote>
+<blockQuote>
+2. Problem with Software Suspend (swsusp).
+</blockQuote>
+<blockQuote>
+Has any tagger got 2.6.0-testn working successfully?
+</blockQuote>
+<blockQuote>
+I did manage to solve problem (1) --- one needs a newer version of
+modutils.
+</blockQuote>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [JimD] 
+:r!ssh vega.starshine.org uname -r
+2.6.0-test3
+</blockQuote>
+<blockQuote>
+I've been running 2.5.x and 2.6.x kernels most of the time for most
+of the last year on vega (my living room desktop system).  One of my
+housemates (Tabitha) used that system's console more than I did for
+most of the last year (she was made to sit in the "comfy chair" 
+<IMG SRC="../../gx/dennis/smily.gif" ALT=":)" 
+		height="24" width="20" align="middle">).
+I used it quite alot from the other machine in the living room
+(usually booted off of KNOPPIX, with ssh and X11 forwarding making it
+mostly just a really smart terminal).  (An Xterminal with a local
+running copy of OpenOffice.org ... hmmmm).
+</blockQuote>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [Kapil]
+</blockQuote>
+<blockQuote>
+Problem (2) eludes me. The swsusp patch from swsusp.sf.net for 2.4.21 is
+working fine with 2.4.21. I notice that swsusp in 2.6.0 has run into
+stormy weather developer-wise so maybe that's the reason.
+</blockQuote>
+<blockQuote>
+My main reason for trying out 2.6.0-textn was the support for the i815
+framebuffer---just can't do without the Penguin at boot-time 
+<IMG SRC="../../gx/dennis/smily.gif" ALT=":-)" 
+		height="24" width="20" align="middle">
+</blockQuote>
+<blockQuote>
+<IMG SRC="../../gx/dennis/bbub.gif" ALT="(!)"
+	HEIGHT="28" WIDTH="50" BORDER="0"
+	> [Thomas]
+</blockQuote>
+<blockQuote>
+I did mention that the original reason I was using 2.6.0-test2 was to do
+with the swsusp patch. Because 2.6.0 at the time was VERY new (in terms of
+the latest stable release), the swsusp people hadn't yet released one that
+would work with that version -- hence I dropped it from my patch'd kernel.
+</blockQuote>
+<blockQuote>
+I did, however, apply the ACPI patch so that actions such as "lid_close"
+on my laptop would be registered by the kernel.
+</blockQuote>
+<blockQuote>
+Having updated "module-init-tools" (as I mentioned in my original thread
+to this) it still didn't work -- what I <EM>did</EM> do to try and fix it was to
+NOT use "make-kpkg" to compile the kernel. This then fixed my problem.
+</blockQuote>
+<blockQuote>
+The only thing i can think of here (albeit loosely) is that fakeroot
+caused some weird permissions and/or the package that was produced was
+corrupt somehow.
+</blockQuote>
+
+<!-- end 4 -->

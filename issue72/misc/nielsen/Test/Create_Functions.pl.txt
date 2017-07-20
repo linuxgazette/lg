@@ -1,0 +1,648 @@
+#!/usr/bin/perl
+
+#              Create Functions for Perl/PostgreSQL version 1.0
+
+#                       Copyright 2001, Mark Nielsen
+#                            All rights reserved.
+#    This Copyright notice was copied and modified from the Perl 
+#    Copyright notice. 
+#    This program is free software; you can redistribute it and/or modify
+#    it under the terms of either:
+
+#        a) the GNU General Public License as published by the Free
+#        Software Foundation; either version 1, or (at your option) any
+#        later version, or
+
+#        b) the "Artistic License" which comes with this Kit.
+
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See either
+#    the GNU General Public License or the Artistic License for more details.
+
+#    You should have received a copy of the Artistic License with this
+#    Kit, in the file named "Artistic".  If not, I'll be glad to provide one.
+
+#    You should also have received a copy of the GNU General Public License
+#   along with this program in the file named "Copying". If not, write to the 
+#   Free Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 
+#    02111-1307, USA or visit their web page on the internet at
+#    http://www.gnu.org/copyleft/gpl.html.
+  
+use strict;
+
+  ### Verify that we are connecting to the correct database. 
+my @List = @ARGV;
+my $Database = shift @List;
+my $Table = $List[0];
+system "clear";
+if ($Database eq "") 
+  {print "No database specified, not doing anything.\n"; exit;}
+my $Message="We are going to delete and create all tables for '$Database'.\n";
+if ($Table ne "") 
+  {$Message = "We are going to delete and create the table '$Table'.\n";}
+print "We are going to connect to the database '$Database'.\n";
+print $Message;
+print "Type 'y' for yes or 'n' for no and press enter.\n";  
+my $R = <STDIN>; chomp $R;
+if ($R =~ /n/i) {exit;}
+elsif (!($R =~ /y/i)) {exit;}
+
+  ### We want to define some variables WHICH YOU SHOULD CHANGE FOR YOUR
+  ### OWN COMPUTER. 
+  ### These two variables are defined by general configuration.
+my $Pre_Home = "/var/www/html/database";
+my $Server_Root = "/usr/local/apache";
+  ### Now grab any local configuration for this database.
+  ### We should put a check in here detecting if we are executing in the
+  ### directory that this script is in. 
+if (!(-e "Config.txt"))
+  {
+  print "Error, no Config.txt file. Aborting. We need the main Config.txt file to be defined.\n";
+  exit;
+  }
+  ### Now load the file, parse it, and assign variables.
+open(FILE,"Config.txt"); my @File = <FILE>; close FILE;
+grep(chomp $_, @File);
+@File = grep($_ =~ /[a-z0-9]/i, @File);
+grep($_ =~ s/\t/ /g, @File);
+grep($_ =~ s/^ +//g, @File);
+grep($_ =~ s/ +$//g, @File);
+@File = grep(!($_ =~ /\#/), @File); # Delete any lines with '#' in them.
+foreach my $Line (@File)
+  {
+  my ($Key,$Value) = split(/ /, $Line, 2);
+  if ($Key eq "PRE_HOME") {$Pre_Home = $Value;}
+  elsif ($Key eq "SERVER_ROOT") {$Server_Root = $Value;}
+#  print "$Key = $Value\n";
+  }
+
+  ### We should put a chdir command here to force us to the right directory. 
+
+  ### These 4 variables are defined by the database. Create the directory.
+if (!(-e "$Pre_Home/$Database")) 
+  {
+  system "mkdir -p $Pre_Home/$Database/Output/Tables";
+  system "mkdir -p $Pre_Home/$Database/Output/Perl/HTML";
+  system "mkdir -p $Pre_Home/$Database/Custom/Perl";
+  system "mkdir -p $Pre_Home/$Database/Custom/Sql";
+  system "mkdir -p $Pre_Home/$Database/Backups";
+  }
+my $Package = "SAMPLE_DATABASE";
+my $Blowfish_Key = "MAI BLOWFISH KEY 123456789012345";
+my $Destination_Html = "$Server_Root/htdocs_ges/sample/$Database";
+my $Destination_Modules = "$Server_Root/lib/perl/SAMPLE_DATABASE";
+my $TempDir = "/tmp/temp_dir";
+my $Web_Root = "$TempDir";
+
+  ### Now grab any local configuration for this database. 
+if (!(-e "$Pre_Home/$Database/Config.txt")) 
+  {
+  print "Error, no Config.txt file. Aborting.\n We need the file\n$Pre_Home/$Database/Config.txt\n to be defined.\n"; 
+  exit;
+  }
+  ### Now load the file, parse it, and assign variables. 
+open(FILE,"$Pre_Home/$Database/Config.txt"); my @File = <FILE>; close FILE;
+grep(chomp $_, @File);  ## delete newlines. 
+@File = grep($_ =~ /[a-z0-9]/i, @File); ## Delete blank lines. 
+grep($_ =~ s/\t/ /g, @File); # Convert tabs to spaces.
+grep($_ =~ s/^ +//g, @File); # Delete beginning spaces.
+grep($_ =~ s/ +$//g, @File); # Delete ending spaces. 
+@File = grep(!($_ =~ /\#/), @File); # Delete any lines with '#' in them.
+
+foreach my $Line (@File) 
+  {
+  my ($Key,$Value) = split(/ /, $Line, 2);
+  if ($Key eq "BLOWFISH_KEY") {$Blowfish_Key = $Value;}
+  elsif ($Key eq "DESTINATION_HTML") {$Destination_Html = $Value;}
+  elsif ($Key eq "DESTINATION_MODULES") { $Destination_Modules = $Value;}
+  elsif ($Key eq "PACKAGE") { $Package = $Value;}
+  elsif ($Key eq "TEMPDIR") { $TempDir = $Value;}
+  elsif ($Key eq "WEB_ROOT") { $Web_Root = $Value;}
+  else {print "Uknown configuration, aborting. $Key = $Value\n"; exit;}
+  }
+  ## Make the directories if they don't exist.
+if (!(-e $Destination_Html)) {system "mkdir -p $Destination_Html";}
+if (!(-e $Destination_Modules)) {system "mkdir -p $Destination_Modules";}
+if (!(-e $TempDir)) {system "mkdir -p $TempDir";}
+
+   ### Variables after this point should not be touched. 
+   ### Define all the variables for the Perl script
+my $Home = "$Pre_Home/$Database";
+my $File = "$Home/Tables.txt";
+   ### I don't think I use the $TempFile anywhere. For future use. 
+my $TempFile = "$Home/Tempfile.txt";
+
+my $Main_Templates = "$Pre_Home/Templates";
+my $SQL_Template = "$Main_Templates/Generic.fun";
+my $SQL_Custom = "$Main_Templates/Custom.sql";
+my $Perl_Module_Set_Header = "$Main_Templates/Set_Info.pm_header";
+my $Perl_Module_Set_Template = "$Main_Templates/Set_Info.pm_template";
+my $Perl_Module_Get_Header = "$Main_Templates/Get_Info.pm_header";
+
+   ### Define all the variables for this database
+my $Templates = "$Home";
+my $Perl_Module_Set_Output = "$Home/Output/Perl/Set_Info.pm";
+my $Perl_Module_Set_Custom = "$Templates/Custom/Perl/Set_Info.pm_custom";
+my $Perl_Module_Get_Output = "$Home/Output/Perl/Get_Info.pm";
+my $Perl_Module_Get_Custom = "$Templates/Custom/Perl/Get_Info.pm_custom";
+my $Perl_Module_Email_Custom = "$Templates/Custom/Perl/Email.pm_custom";
+
+#------------------------------------------------------------------------
+
+  ## Let us create the directories we need if they are not there. 
+if (!(-e "$Home")) {system "mkdir -p $Home";}
+if (!(-e "$Home/Output/Tables")) {system "mkdir -p $Home/Output/Tables"}
+if (!(-e "$Home/Backups")) {system "mkdir -p $Home/Backups"}
+if (!(-e "$Home/Custom")) {system "mkdir -p $Home/Custom"}
+if (!(-e "$Home/Output/Perl/HTML")) {system "mkdir -p $Home/Output/Perl/HTML"}
+   ## Of course, I haven't done the php, java, python stuff, but
+   ## I want to set it up so that it is obvious how i want to do it. 
+if (!(-e "$Home/Output/Php/HTML")) {system "mkdir -p $Home/Output/Php/HTML"}
+if (!(-e "$Home/Output/Python/HTML")) 
+  {system "mkdir -p $Home/Output/Python/HTML"}
+if (!(-e "$Home/Output/Java/HTML")) {system "mkdir -p $Home/Output/Java/HTML"}
+
+  ### Open up the template for the functions and the file that contains
+  ### the info to create the tables.
+  ### If the file with tables doesn't exit, abort.  
+if (!(-e "$Home/Tables.txt")) 
+  {print "Error, $Home/Tables.txt does not exist, aborting.\n"; exit;}
+open(FILE,$SQL_Template); my @SQL_Template = <FILE>; close FILE;
+open(FILE,$File); my @File = <FILE>; close FILE;
+open(FILE,$SQL_Custom); my @SQL_Custom = <FILE>; close FILE;
+open(FILE,$Perl_Module_Set_Template); my @Perl_S_T = <FILE>; close FILE;
+
+  ### Filter out lines that have no numbers or letters. 
+@File = grep($_ =~ /[a-z0-9]/i, @File);
+  ### Get rid of any line which contains a #
+@File = grep(!($_ =~ /\#/), @File);
+  ### Get rid of the newline. 
+grep(chomp $_, @File);
+  ### Get rid of tabs and replace with spaces. . 
+grep($_ =~ s/\t/ /g, @File);
+  ### Convert all multiple spaces to one.  
+grep($_ =~ s/  +/ /g, @File);
+  ### Next two lines get rid of spaces and front and end.  
+grep($_ =~ s/^ //g, @File);
+grep($_ =~ s/ $//g, @File);
+  ### Delete any commas at the end, we will put them back on later. 
+grep($_ =~ s/\,+$//g, @File);
+
+my $Tables = {};
+my $Table_Fields = {};
+my $TableName = "";
+my @Table_List = ();
+  ### For each line in the file, either make a new array for the table, 
+  ### or store the lines in the array for a table.  
+foreach my $Line (@File)  
+  {
+  my $Junk = "";
+    ### If the line starts with "TABLENAME" then create a new array. 
+  if ($Line =~ /^TABLENAME/) 
+    {
+    ($Junk,$TableName, $Junk) = split(/ /,$Line);
+       ### This creates the aray for the table. 
+    $Tables->{$TableName} = [];
+    $Table_Fields->{$TableName} = {};
+    push (@Table_List, $TableName);
+    }
+  else 
+    {
+       ### Storing lines for the table. 
+    push (@{$Tables->{$TableName}}, $Line) ;
+        ### This part is redundant, but we need this info.
+    my ($Name,$Type,$Ext) = split(/ /,$Line,3);
+      ## Backup field names for Perl and other Scripts.
+    $Table_Fields->{$TableName}->{$Name} = "$Type $Ext";
+    }
+  }
+
+  ### If we listed specific tables, then only do those. 
+if (@List) 
+  {
+  foreach my $TableName (sort keys %$Tables)
+    { 
+    if (!(grep($_ eq $TableName, @List))) 
+      {@Table_List = grep($_ ne $TableName, @Table_List);} 
+    }
+  }
+
+  ### Get the keys of the reference to an array $Tables
+  ### and get the data for that array, create our file, and then use the file. 
+foreach my $TableName (@Table_List) 
+  {
+    ## Create a temporary array which contains the table definitions
+  my @Temp = @{$Tables->{$TableName}};
+
+  my $Backup_Columns = "";  my $Backup_Values = ""; my $Update_Fields = "";
+  my $Field_Copy_Values = "";  my $FieldTypes = "";
+  my $CleanVariables = ""; my $RemakeVariables = ""; 
+    ### The two tables are different in one respect, the backup table 
+    ### does not require uniqueness and it doesn't use a sequence.  
+  my $Table = qq($TableName\_id int4 NOT NULL PRIMARY KEY DEFAULT nextval('$TableName\_sequence'),
+    date_updated  timestamp NOT NULL default CURRENT_TIMESTAMP,
+    date_created  timestamp NOT NULL default CURRENT_TIMESTAMP,
+    active int2 CHECK (active in (0,1)) DEFAULT 0,
+);
+    ## I should allow null for the id instead of 0, but since the sequence
+    ### starts at 1, I use 0 as null. I hate nulls.  
+  my $Table_Backup = qq(backup_id int4 NOT NULL UNIQUE DEFAULT nextval('$TableName\_sequence_backup'), 
+    $TableName\_id int4 NOT NULL DEFAULT 0,
+    date_updated  timestamp NOT NULL default CURRENT_TIMESTAMP,
+    date_created  timestamp NOT NULL default CURRENT_TIMESTAMP,
+    active int2 CHECK (active in (0,1)) DEFAULT 0,
+    );
+
+  print "Creating functions for table '$TableName'\n";
+  my $No = 1;
+    ### For each line for this table do this. 
+    ### We want to create a few variables that are going to be placed into
+    ### the template.  
+  my $Fields = "";
+     ## Foreach line in the table definition
+  foreach my $Line (@Temp) 
+    {
+    my ($Name,$Type,$Ext) = split(/ /,$Line,3);
+      ### Detect if name ends in "_id", and if so, add forieng keys constraint.
+    my $Additional = "";
+    if ($Name =~ /_id$/)
+      {
+      my $TableName = $Name; $TableName =~ s/_id$//g;
+        ### ON DELETE NO ACTION and FORIEGN KEY ($Name) are not needed,
+        ### but I want to be explicit what I am doing. 
+      $Additional = qq( REFERENCES $TableName
+       ON DELETE NO ACTION
+       ON UPDATE CASCADE );
+      }
+    $Table .= "$Line $Additional,\n";
+    $Table_Backup .= "$Line,\n";
+      ### Make an array of the fields. 
+    $Fields .= "'$Name',";
+      ### The backup columns
+    $Backup_Columns .= ", $Name"; 
+      ### The update fields
+    $No++; $Update_Fields .= ", $Name = var_$No"; 
+      ### Backup values
+    $Backup_Values .= ", record_backup.$Name";
+      ### Now the fields when we copy stuff in the cyop function. 
+    $Field_Copy_Values .= ", clean_text(record2.$Name)";
+      ### Now the field types for the update function. 
+    $FieldTypes .= ", $Type";
+      ### We need to define the variables for the updating function.
+    $CleanVariables .= "          var_$No $Type;\n";
+      ### We need to define the type, I only check for text and int4 for now. 
+    my $Temp = "\$$No";  
+    if ($Type eq "int4") {$Temp = "clean_numeric($Temp)";}
+    elsif  ($Type eq "text") {$Temp = "clean_text($Temp)";}
+      ### Now we need to set the variables. 
+    $RemakeVariables .= "         var_$No := $Temp;\n";
+
+     ### We also need to add the function to clean out the variables before
+     ### they are submitted. 
+    }
+   ### Chop off the last comma for $Fields;
+  chop $Fields;
+   ### Record how many rows we had. Make a line for the update command for
+   ### testing. 
+  my $Number_Of_Rows = $No;
+  my $Update_Test = "1";
+  for (my $i = 1; $i < $Number_Of_Rows - 1; $i++) {$Update_Test .= ",$i";}
+
+    ### We need to chop off the last comma. 
+  chomp $Table; chop $Table; chomp $Table_Backup; chop $Table_Backup;
+    ### Now let us setup dropping and creating of the table and backup table. 
+  my $Tables = qq(drop table $TableName;\ncreate table $TableName (\n$Table\n);); 
+  $Tables .= "drop table $TableName\_backup;\n";
+  $Tables .= "create table $TableName\_backup (\n$Table_Backup, error_code text NOT NULL DEFAULT ''\n);\n";
+    ### Let us create a view for active stuff in our table. 
+  $Tables .= "drop view $TableName\_active;\n";
+  $Tables .= "create view $TableName\_active as select * from $TableName
+        where active = 1;\n";
+    ### Create a view for inactive or deleted items. 
+  $Tables .= "drop view $TableName\_deleted;\n";
+  $Tables .= "create view $TableName\_deleted as select * from $TableName
+        where active = 0;\n";
+    ### Create a view for a list of unique backup ids. 
+  $Tables .= "drop view $TableName\_backup_ids;\n";
+  $Tables .= "create view $TableName\_backup_ids as 
+           select distinct $TableName\_id from $TableName\_backup;\n";
+    ### Create a list of purged data (lastest data per id).  
+  $Tables .= "drop view $TableName\_purged;\n";
+  $Tables .= "create view $TableName\_purged as
+   select * from $TableName\_backup where oid = ANY (
+     select max(oid) from $TableName\_backup where $TableName\_id = ANY
+        (
+        select distinct $TableName\_id from $TableName\_backup
+          where $TableName\_backup.error_code = 'purge'
+           and NOT $TableName\_id = ANY (select $TableName\_id from $TableName)
+        )
+        group by $TableName\_id
+     )
+    ;\n";
+
+     ### I use grep commands to search and replace stuff for arrays.
+     ### I could use map, but I like greps.  
+  my @Temp = @SQL_Template;
+
+  push (@Temp,@SQL_Custom);
+    ## Now, if there is a custom made file for this table, add it. 
+  if (-e "$Home/Custom/Sql/$TableName\.sql")  
+    {  
+    open(FILE,"$Home/Custom/Sql/$TableName\.sql"); my @Temp2 = <FILE>; close FILE; 
+    push (@Temp,@Temp2);
+    }
+
+  grep($_ =~ s/TABLENAME/$TableName/g, @Temp);
+  grep($_ =~ s/BACKUPCOLUMNS/$Backup_Columns/g, @Temp);
+  grep($_ =~ s/BACKUPVALUES/$Backup_Values/g, @Temp);
+  grep($_ =~ s/UPDATEFIELDS/$Update_Fields/g, @Temp);
+  grep($_ =~ s/COPYFIELDS/$Field_Copy_Values/g, @Temp);
+  grep($_ =~ s/FIELDS/$FieldTypes/g, @Temp);
+  grep($_ =~ s/HOME/$Home/g, @Temp);
+  grep($_ =~ s/CLEANVARIABLES/$CleanVariables/g, @Temp);
+  grep($_ =~ s/REMAKEVARIABLES/$RemakeVariables/g, @Temp);
+
+    ### Now move the stuff from the array @Temp to @Template_Copy.
+  my @Template_Copy = @Temp;
+
+    ### Now we save the file. We won't delete it (unless you run this script
+    ### again) so that we can figure out what was done.  
+  open(FILE,">$Home/Output/Tables/$TableName\.table_functions");
+    ### Create the sequence for the table . 
+  print FILE "drop sequence $TableName\_sequence;\n";
+  print FILE "create sequence $TableName\_sequence;\n";
+  print FILE "drop sequence $TableName\_sequence_backup;\n";
+  print FILE "create sequence $TableName\_sequence_backup;\n";
+    ### Print out the table and backup table.   
+  print FILE $Tables;
+    ### Print out the 4 functions, insert, delete, update, and copy. 
+  foreach my $Temp (@Template_Copy) {print FILE "$Temp";} 
+    ### Print out a vaccum command.
+  print FILE "vacuum;\n";
+  close FILE;
+
+    ### Before we execute, let us backup the table in case some novice 
+    ### executes this on a live server. 
+  my $Backup_File = "$Home/Backups/$TableName\_0.backup";
+  my $No = 0;
+  while (-e $Backup_File)
+    {$No++; $Backup_File = "$Home/Backups/$TableName\_$No\.backup";} 
+    ### Now we have the filename to store the backup, execute it. 
+  system ("pg_dump -t $TableName -f $Backup_File $Database");
+  
+  ### Uncomment this option if you want to see what is in the file. 
+##  system ("cat $Home/Output/Tables/$TableName\.table_functions");
+
+    ### Drop table and functions, create table and functions and backup table. 
+  system ("psql -d $Database -c '\\i $Home/Output/Tables/$TableName\.table_functions'");
+  print "Check the file\n $Home/Output/Tables/$TableName\.table_functions.\n";
+
+    ## Now, add a custom made file for perl.
+  open(FILE,">$Home/Output/Perl/$TableName\.pl"); 
+  my @Temp_Perl = @Perl_S_T;
+
+  grep($_ =~ s/TABLENAME/$TableName/g, @Temp_Perl);
+  grep($_ =~ s/BACKUPCOLUMNS/$Backup_Columns/g, @Temp_Perl);
+  grep($_ =~ s/BACKUPVALUES/$Backup_Values/g, @Temp_Perl);
+  grep($_ =~ s/UPDATEFIELDS/$Update_Fields/g, @Temp_Perl);
+  grep($_ =~ s/COPYFIELDS/$Field_Copy_Values/g, @Temp_Perl);
+  grep($_ =~ s/FIELDS/$FieldTypes/g, @Temp_Perl);
+  grep($_ =~ s/HOME/$Home/g, @Temp_Perl);
+  grep($_ =~ s/CLEANVARIABLES/$CleanVariables/g, @Temp_Perl);
+  grep($_ =~ s/REMAKEVARIABLES/$RemakeVariables/g, @Temp_Perl);
+
+  grep($_ =~ s/LISTCOLUMNS/$Fields/g, @Temp_Perl);
+
+  print FILE @Temp_Perl;
+  close FILE;
+
+  } 
+
+#---------------------------------------------------------------------------
+#### Perl modules and Perl webpages.  
+
+  ## Load the Perl module header;
+open(FILE3,$Perl_Module_Set_Header); my @File = <FILE3>; close FILE3;
+  ## Gather all the perl scripts we have made. 
+my @Files = <$Home/Output/Perl/*.pl>;
+  ## Open up the new perl module
+open(FILE,">$Perl_Module_Set_Output");
+  ## Print the header to the module
+grep($_ =~ s/PACKAGE/$Package/g, @File);
+print FILE @File;
+  ## One by one, print the subroutines to the module. 
+  ## Also, store the tablenames into an array
+my @Get_Info_Array = ();
+foreach my $File (@Files)
+  {
+  open(FILE2,$File); my @File2 = <FILE2>; close FILE2;
+  print FILE @File2;
+
+  my (@Temp) = split(/\//, $File);
+  my $Last = pop @Temp;
+  my ($Name,$Junk) = split(/\./,$Last,2);
+  push (@Get_Info_Array,$Name); 
+  }
+  ### Get the custom stuff and append it. 
+open(FILE3,$Perl_Module_Set_Custom); my @File = <FILE3>; close FILE3;
+print FILE @File;
+  ## Return true for the module. 
+print FILE "\n1;\n";
+close FILE;
+
+  ### Now create the Get_Info.pm module
+my $Valid_Tables = "";
+
+foreach my $Table (@Get_Info_Array) 
+  {$Valid_Tables .= " '$Table',";}
+chop $Valid_Tables;
+  ## Load the Perl module header;
+open(FILE3,$Perl_Module_Get_Header); my @File = <FILE3>; close FILE3;
+  ## Open up the new perl module
+open(FILE,">$Perl_Module_Get_Output");
+  ## Print the header to the module
+grep($_ =~ s/PACKAGE/$Package/g, @File);
+grep($_ =~ s/VALIDTABLES/$Valid_Tables/g, @File);
+print FILE @File;
+  ## Get the custom made stuff and append it. 
+open(FILE3,$Perl_Module_Get_Custom); my @File = <FILE3>; close FILE3;
+print FILE @File;
+  ## Return true for the module.
+print FILE "\n1;\n";
+close FILE;
+
+  ## Get the Misc.pm module
+open(FILE3,"$Main_Templates/Misc.pm"); my @File = <FILE3>; close FILE3;
+open(FILE,">$Home/Output/Perl/Misc.pm");
+  ## Print the module out. 
+grep($_ =~ s/PACKAGE/$Package/g, @File);
+grep($_ =~ s/BLOWFISH_KEY/$Blowfish_Key/g, @File);
+print FILE @File;
+
+  ## Get the Constants.pm module
+open(FILE3,"$Main_Templates/Constants.pm"); my @File = <FILE3>; close FILE3;
+open(FILE,">$Home/Output/Perl/Constants.pm");
+  ## Print the module out.
+grep($_ =~ s/PACKAGE/$Package/g, @File);
+grep($_ =~ s/DATABASE/$Database/g, @File);
+grep($_ =~ s/TEMPDIR/$TempDir/g, @File);
+grep($_ =~ s/WEB_ROOT/$Web_Root/g, @File);
+print FILE @File;
+
+  ## Get the Misc.pm module
+open(FILE3,"$Main_Templates/Email.pm_header"); my @File = <FILE3>; close FILE3;
+open(FILE,">$Home/Output/Perl/Email.pm");
+  ## Print the module out.
+grep($_ =~ s/PACKAGE/$Package/g, @File);
+print FILE @File;
+open(FILE3,"$Perl_Module_Email_Custom"); my @File = <FILE3>; close FILE3;
+grep($_ =~ s/PACKAGE/$Package/g, @File);
+print FILE @File;
+print FILE "\n1;\n";
+close FILE;
+
+ ### Now copy the modules to their correct destination.
+system "cp $Home/Output/Perl/*.pm $Destination_Modules/";
+print "Copying: cp $Home/Output/Perl/*.pm $Destination_Modules/\n";
+
+#--------------------------------------------------------------------------
+  ### Now copy over the .htaccess and password file to the sample directory.
+open(FILE3,"$Main_Templates/htaccess"); my @File3 = <FILE3>; close FILE3;
+open(FILE,">$Destination_Html/.htaccess");
+grep($_ =~ s/DIR/$Destination_Html/g, @File3);
+print FILE @File3;
+close FILE;
+system "cp $Main_Templates/Password $Destination_Html/";
+system "cp $Main_Templates/Error_No_User.pl $Destination_Html/";
+system "chmod 755  $Destination_Html/Error_No_User.pl";
+
+
+#--------------------------------------------------------------------------
+  ### Now create the sample Perl webpages/scripts. 
+
+my @Tables = (sort keys %$Table_Fields);
+open(INDEX,">$Destination_Html/index.html");
+print INDEX "<h1> Sample webpages for $Database</h1>\n<ol>\n";
+foreach my $TableName (sort keys %$Table_Fields) 
+  {
+  print INDEX "<li> <a href='$TableName\.pl'>$TableName\.pl</a>\n";
+  print "Creating sample webpage for '$TableName' at '$Destination_Html/$TableName\.pl'\n";
+  open(FILE3,"$Main_Templates/Custom_Html1.html");
+  my @Html = <FILE3>; close FILE3;
+  open(FILE3,"$Main_Templates/Custom_Html1.html");
+  my @Html2 = <FILE3>; close FILE3;
+
+  open(FILE,">$Destination_Html/$TableName\.pl");
+  grep($_ =~ s/PACKAGE/$Package/g, @Html);
+  grep($_ =~ s/TABLENAME/$TableName/g, @Html);
+
+  my $Ref = $Table_Fields->{$TableName};
+  my @Columns = (sort keys %$Ref);
+   ## Create a list of columsn that do not end if "_id".
+  my @Columns_No_Ids = grep(!($_ =~ /_id$/), @Columns);
+   ## Create a list of columsn that do end if "_id".
+   ## Remember, as a standard, all fields that end in "_id" must have
+   ## a table.
+  my @Columns_Ids = grep($_ =~ /_id$/, @Columns);
+   ## Remove the current TABLENAME_id from that array
+  @Columns_Ids = grep(!($_ eq "$TableName\_id"), @Columns_Ids);
+
+  ### Define the fields for updating and inserts.
+  my $DefineFields = "";
+  foreach my $Column (@Columns_No_Ids) 
+    {$DefineFields .= "    \$Fields->{'$Column'} = \$query->param('$Column');\n";}
+  foreach my $Column (@Columns_Ids)
+    {
+    my $Comment = "";
+     ### We should uncomment this if we don't want them to change the users_id.
+#    if ($Column eq "users_id") 
+#      {$Comment = "     # We should turn off changing users_id.\n#";}
+    $DefineFields .= "$Comment    \$Fields->{'$Column'} = \$Ids->{'$Column'};\n";
+    }
+  grep($_ =~ s/DEFINEFIELDS/$DefineFields/g, @Html);
+
+   ### These few lines take care of the html rows for the table we are editing.
+  my $Html_Fields = "";
+  foreach my $Column (@Columns_No_Ids)
+    {
+    $Html_Fields .= qq(<tr><td>$Column</td>
+   <td><input size=40 name=$Column value="\$$TableName\_Info->{'$Column'}"></td></tr>\n);
+    }
+
+   ### Now, add the commands for updating and inserting. 
+  my $OtherIds = "    ## Get the ids of the foriegn tables.\n ";
+  my $Html_List = "";
+  my $Other_Lists = "";
+  my $OtherIds_Set = ""; 
+  foreach my $Column (@Columns_Ids) 
+    {
+    my $Column_No_Id = $Column; $Column_No_Id =~ s/_id$//g; 
+       ### First, do the hardest part, generating lists for the other tables.
+
+    my $Temp = $Column; $Temp =~ s/_id$//g;
+
+    open(FILE3,"$Main_Templates/Custom_Lists.html");
+    my @File3 = <FILE3>; close FILE3;   
+    my $Temp = $Column; $Temp =~ s/_id$//g;
+    grep($_ =~ s/TABLENAME/$Temp/g, @File3);
+    grep($_ =~ s/PACKAGE/$Package/g, @File3);
+#    grep($_ =~ s///, @File3);
+    my $Warning = "    ## We did not detect a table for this id, disabling.\n";
+    if (exists $Table_Fields->{$Temp}) {$Warning = "";}
+    else {  grep($_ = "#$_", @File3); unshift(@File3,$Warning);}
+      ### Add template for column to other_lists.
+    $Other_Lists .= "@File3";
+      ### This sets up decrypting the id for the column.  
+    $OtherIds .= qq(\$Ids_Encrypted->{'$Column'} = \$query->param('$Column');
+\$Ids->{'$Column'} = 0;
+if (\$Ids_Encrypted->{'$Column'} ne "") 
+  {\$Ids->{'$Column'} = PACKAGE::Misc->Decrypt(\$Ids_Encrypted->{'$Column'});}
+);
+    $OtherIds_Set .= qq(  \$Ids->{'$Column'} = \$$TableName\_Info->{'$Column'};
+  if (\$Ids->{'$Column'} < 0) {\$Ids->{'$Column'} = 0}
+  \$Ids_Encrypted->{'$Column'} = PACKAGE::Misc->Encrypt(\$Ids->{'$Column'});
+\n);
+
+      ### Get the column name from the column id, and other stuff. 
+    my $Temp = $Column; $Temp =~ s/_id$//g;
+    my $Ref2 = $Table_Fields->{$Temp};
+    my @Columns2 = (sort keys %$Ref2);
+
+   $Html_Fields .= qq(<tr><td>$Column</td>
+  <td><select name=$Column> \$Other_Lists->{'$Column'} </select>
+   <a href="$Temp\.pl?id=\$Ids_Encrypted->{'$Column'}"
+    target="$Temp">Edit This Item</a> 
+   </td></tr>
+      );
+    }
+
+  grep($_ =~ s/OTHERIDS/$OtherIds/g, @Html);
+  grep($_ =~ s/SETIDSOTHER/$OtherIds_Set/g, @Html);
+  grep($_ =~ s/OTHER_LISTS/$Other_Lists/g, @Html);
+  grep($_ =~ s/TABLENAME/$TableName/g, @Html);
+  grep($_ =~ s/PACKAGE/$Package/g, @Html);
+  grep($_ =~ s/HTML_FIELDS/$Html_Fields/g, @Html);
+
+#  grep($_ =~ s/DATABASE/$Database/, @Html);
+
+  print FILE @Html;
+  close FILE;
+
+  system "chmod 755 $Destination_Html/$TableName\.pl";
+
+  }
+print INDEX "</ol>\n";
+close INDEX;
+
+#-------------------------------------------------------------------------
+  ### Now create the java modules and java webpages
+### TO DO
+
+  ### Now create the php modules and php webpages
+### TO DO
+
+  ### Now create the python modules and python webpages
+### TO DO
+
+
